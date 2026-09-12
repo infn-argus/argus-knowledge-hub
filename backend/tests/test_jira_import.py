@@ -14,10 +14,48 @@ from app.db import Base, SessionLocal, engine
 from app.models.schema import Schema
 from app.models.workspace import Workspace
 from app.services.jira_import import (
+    JIRA_REQUEST_TIMEOUT,
     _author_display_name,
     _resolve_reference_schema_uid,
+    _TimeoutSession,
     resolve_reference_attributes,
 )
+
+
+def test_session_applies_default_timeout_when_caller_omits_it(monkeypatch):
+    """A real import hung forever on a call with no timeout — killed
+    manually, no error, job stuck at "running" indefinitely. Guards the
+    fix at the one place it can silently regress: a future call site (or a
+    library upgrade) that forgets to pass timeout=."""
+    captured = {}
+
+    def fake_send(self, request, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop before actually sending")
+
+    monkeypatch.setattr("requests.Session.send", fake_send)
+    session = _TimeoutSession()
+    try:
+        session.get("http://example.invalid/")
+    except RuntimeError:
+        pass
+    assert captured.get("timeout") == JIRA_REQUEST_TIMEOUT
+
+
+def test_session_respects_an_explicit_timeout(monkeypatch):
+    captured = {}
+
+    def fake_send(self, request, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop before actually sending")
+
+    monkeypatch.setattr("requests.Session.send", fake_send)
+    session = _TimeoutSession()
+    try:
+        session.get("http://example.invalid/", timeout=5)
+    except RuntimeError:
+        pass
+    assert captured.get("timeout") == 5
 
 
 def test_dict_with_display_name():

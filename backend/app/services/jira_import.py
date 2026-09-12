@@ -27,6 +27,21 @@ from app.services.import_merge import should_write
 
 ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
 
+# (connect, read) timeout applied to every request this service makes.
+# Without one, `requests` blocks forever on an unresponsive server — this
+# hung a real production import for good (killed manually, no error, job
+# stuck at "running" indefinitely) until the next hang would do the same.
+JIRA_REQUEST_TIMEOUT = (10, 60)
+
+
+class _TimeoutSession(requests.Session):
+    """A requests.Session that defaults every request to JIRA_REQUEST_TIMEOUT
+    so a bounded timeout can't be forgotten at a future new call site."""
+
+    def request(self, *args, **kwargs):
+        kwargs.setdefault("timeout", JIRA_REQUEST_TIMEOUT)
+        return super().request(*args, **kwargs)
+
 DEFAULT_TYPE_MAP = {
     "text": "string",
     "textarea": "text",
@@ -496,7 +511,7 @@ def run_jira_import(
             db.commit()
             _set_progress(db, job, f"Removed {wiped} previously-imported type(s) before reimporting")
 
-        jira = requests.Session()
+        jira = _TimeoutSession()
         jira.headers.update({"Authorization": f"Bearer {pat}"})
 
         types_resp = jira.get(
