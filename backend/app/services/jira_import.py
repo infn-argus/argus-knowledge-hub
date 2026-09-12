@@ -717,6 +717,17 @@ def run_jira_import(
                 for relation_type, ref_key in relation_links:
                     pending_relations.append((key, ref_key, relation_type))
 
+                if own_objects % 25 == 0:
+                    # A type's own_objects total only becomes visible once
+                    # its whole loop finishes — for a type with hundreds of
+                    # objects and per-object enrichment (avatar/attachments/
+                    # comments/history: up to 4 extra requests each), that
+                    # can be many minutes with zero visible progress,
+                    # indistinguishable from a genuine hang. This is what
+                    # made a real, merely-slow "Inventory" (950 objects)
+                    # import look stuck and get killed twice in a row.
+                    _set_progress(db, job, f"{t['name']}: {own_objects} object(s) so far")
+
             db.commit()
             _set_progress(
                 db, job, f"Imported {own_objects} objects for {t['name']}",
