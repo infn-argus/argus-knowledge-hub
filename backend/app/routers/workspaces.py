@@ -122,7 +122,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
         if ws is None:
             return []
         return [MyWorkspaceOut(
-            id=ws.id, name=ws.name, created_at=ws.created_at,
+            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
             can_read=True, can_create=True, can_modify=True, can_delete=True,
             can_read_tickets=True, can_create_tickets=True,
             can_modify_tickets=True, can_delete_tickets=True,
@@ -134,7 +134,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     if user.is_admin:
         return [
             MyWorkspaceOut(
-                id=ws.id, name=ws.name, created_at=ws.created_at,
+                id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
                 can_read=True, can_create=True, can_modify=True, can_delete=True,
                 can_read_tickets=True, can_create_tickets=True,
                 can_modify_tickets=True, can_delete_tickets=True,
@@ -151,7 +151,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     ).all()
     result = [
         MyWorkspaceOut(
-            id=ws.id, name=ws.name, created_at=ws.created_at,
+            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
             can_read=m.can_read, can_create=m.can_create,
             can_modify=m.can_modify, can_delete=m.can_delete,
             can_read_tickets=m.can_read_tickets, can_create_tickets=m.can_create_tickets,
@@ -184,7 +184,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     ).all()
     result.extend(
         MyWorkspaceOut(
-            id=ws.id, name=ws.name, created_at=ws.created_at,
+            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
             can_read=ws.default_can_read, can_create=ws.default_can_create,
             can_modify=ws.default_can_modify, can_delete=ws.default_can_delete,
             can_read_tickets=ws.default_can_read_tickets,
