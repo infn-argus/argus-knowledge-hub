@@ -1,0 +1,648 @@
+export interface SchemaAttribute {
+  id?: string;
+  name: string;
+  key?: string;
+  type: string;
+  required?: boolean;
+  unique?: boolean;
+  indexed?: boolean;
+  default?: unknown;
+  description?: string;
+  options?: { id: string; value: string }[];
+  referenceType?: string;
+  referenceSchemaUid?: string;
+  includeChildren?: boolean;
+  multiValue?: boolean;
+  minCardinality?: number;
+  maxCardinality?: number;
+  regex?: string;
+  readOnly?: boolean;
+  visible?: boolean;
+  order?: number;
+  global?: boolean;
+}
+
+export const ATTRIBUTE_TYPES = [
+  "string",
+  "text",
+  "integer",
+  "float",
+  "boolean",
+  "date",
+  "datetime",
+  "enumeration",
+  "reference",
+  "attachment",
+  "user",
+  "current_user",
+] as const;
+
+export interface AppSchema {
+  uid: string;
+  workspace_id: string;
+  name: string;
+  description: string | null;
+  is_concrete: boolean;
+  parent_schema_uid: string | null;
+  attributes: SchemaAttribute[];
+  metadata: Record<string, unknown>;
+  version: number;
+  icon_attachment_uid: string | null;
+  is_global: boolean;
+  applies_to: "objects" | "tickets" | "documents";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SchemaInput {
+  uid?: string;
+  name: string;
+  description?: string | null;
+  is_concrete: boolean;
+  parent_schema_uid?: string | null;
+  attributes: SchemaAttribute[];
+  metadata?: Record<string, unknown>;
+  is_global?: boolean;
+  applies_to?: "objects" | "tickets" | "documents";
+}
+
+export interface Asset {
+  uid: string;
+  workspace_id: string;
+  schema_uid: string;
+  key: string;
+  name: string;
+  type: string;
+  avatar_icon_uid: string | null;
+  attributes: Record<string, unknown>;
+  inbound_relations: string[];
+  outbound_relations: string[];
+  is_global: boolean;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface AssetInput {
+  uid?: string;
+  schema_uid: string;
+  key: string;
+  name: string;
+  type: string;
+  avatar_icon_uid?: string | null;
+  attributes: Record<string, unknown>;
+  inbound_relations?: string[];
+  outbound_relations?: string[];
+  is_global?: boolean;
+}
+
+export interface Relation {
+  id: number;
+  workspace_id: string;
+  from_asset_uid: string;
+  to_asset_uid: string;
+  relation_type: string;
+  created_at: string;
+}
+
+export interface Issue {
+  uid: string;
+  workspace_id: string;
+  asset_uid: string | null;
+  schema_uid: string | null;
+  attributes: Record<string, unknown>;
+  title: string;
+  description: string | null;
+  state: string;
+  priority: string | null;
+  assignee: string | null;
+  labels: string[];
+  due_date: string | null;
+  closed_at: string | null;
+  created_by: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface IssueInput {
+  uid?: string;
+  asset_uid?: string | null;
+  schema_uid?: string | null;
+  attributes?: Record<string, unknown>;
+  title: string;
+  description?: string | null;
+  state?: string;
+  priority?: string | null;
+  assignee?: string | null;
+  labels?: string[];
+  due_date?: string | null;
+  created_by?: string | null;
+}
+
+export interface IssueComment {
+  uid: string;
+  issue_uid: string;
+  author: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetComment {
+  uid: string;
+  asset_uid: string;
+  author: string;
+  text: string;
+  created: string;
+  updated: string;
+  backend_id: string | null;
+  backend_url: string | null;
+}
+
+export interface AssetHistory {
+  uid: string;
+  asset_uid: string;
+  type: string;
+  author: string;
+  details: string;
+  timestamp: string;
+  backend_id: string | null;
+}
+
+export interface AssetTicket {
+  uid: string;
+  asset_uid: string;
+  ticket_key: string;
+  summary: string;
+  type: string;
+  status: string;
+  created: string;
+  updated: string;
+  backend_id: string | null;
+  backend_url: string | null;
+}
+
+export const LABEL_TYPES = ["qrcode", "barcode", "serial", "rfid"] as const;
+export const LABEL_ISSUERS = ["user", "vendor", "system"] as const;
+
+export interface AssetLabel {
+  uid: string;
+  asset_uid: string;
+  type: string;
+  value: string;
+  namespace: string | null;
+  issuer: string;
+  verified: boolean;
+  confidence: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetLabelInput {
+  uid?: string;
+  type: string;
+  value: string;
+  namespace?: string | null;
+  issuer: string;
+  verified?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AssetLabelSearchResult {
+  uid: string;
+  type: string;
+  value: string;
+  namespace: string | null;
+  issuer: string;
+  verified: boolean;
+  asset_uid: string;
+  asset_name: string;
+  asset_key: string;
+}
+
+export interface Attachment {
+  uid: string;
+  workspace_id: string;
+  asset_uid: string;
+  filename: string;
+  mime_type: string | null;
+  file_size: number | null;
+  author: string | null;
+  created_at: string;
+}
+
+export interface GlobalValueOption {
+  id: string;
+  value: string;
+  responsible?: string;
+  meaning?: string;
+}
+
+export interface GlobalValue {
+  uid: string;
+  workspace_id: string;
+  name: string;
+  key: string;
+  type: string;
+  applies_to: "objects" | "tickets" | "documents";
+  options: GlobalValueOption[] | null;
+  default_value: string | null;
+  constraints: Record<string, unknown> | null;
+  required: boolean;
+  unique: boolean;
+  indexed: boolean;
+  multi_value: boolean;
+  min_cardinality: number | null;
+  max_cardinality: number | null;
+  reference_type: string | null;
+  egu: string | null;
+  allowed_egu_list: string[] | null;
+  read_only: boolean;
+  visible: boolean;
+  enabled: boolean;
+  is_system_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GlobalValueInput {
+  uid?: string;
+  name: string;
+  key: string;
+  type: string;
+  applies_to?: "objects" | "tickets" | "documents";
+  options?: GlobalValueOption[] | null;
+  default_value?: string | null;
+  required?: boolean;
+  unique?: boolean;
+  indexed?: boolean;
+  multi_value?: boolean;
+  read_only?: boolean;
+  visible?: boolean;
+  enabled?: boolean;
+}
+
+export interface ImportJob {
+  uid: string;
+  workspace_id: string;
+  source: "jira" | "git";
+  status: "pending" | "running" | "succeeded" | "failed";
+  progress: string | null;
+  counts: Record<string, number>;
+  warnings: string[];
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export type MergeStrategy = "override" | "no_override" | "update_if_newer" | "remove_all_before";
+
+export const MERGE_STRATEGIES: { value: MergeStrategy; label: string; description: string }[] = [
+  {
+    value: "override",
+    label: "Override",
+    description: "Always overwrite matched objects with the source's current values.",
+  },
+  {
+    value: "no_override",
+    label: "Don't override",
+    description: "Only create new objects; leave already-imported ones untouched.",
+  },
+  {
+    value: "update_if_newer",
+    label: "Update if source is more recent",
+    description: "Overwrite a matched object only if the source's version is newer.",
+  },
+  {
+    value: "remove_all_before",
+    label: "Remove all before importing",
+    description: "Delete everything previously imported from this source first, then import fresh.",
+  },
+];
+
+export interface JiraImportInput {
+  source: "jira";
+  base_url: string;
+  pat: string;
+  jira_schema_id: string;
+  merge_strategy?: MergeStrategy;
+}
+
+export interface GitImportInput {
+  source: "git";
+  provider: "github" | "gitlab";
+  repo_url: string;
+  pat: string;
+  branch: string;
+  merge_strategy?: MergeStrategy;
+}
+
+export type ImportInput = JiraImportInput | GitImportInput;
+
+export interface ImportConfig {
+  uid: string;
+  workspace_id: string;
+  name: string;
+  source: "jira" | "git";
+  merge_strategy: MergeStrategy;
+  params: Record<string, string>;
+  last_run_at: string | null;
+  last_import_job_uid: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JiraImportConfigParams {
+  source: "jira";
+  base_url: string;
+  jira_schema_id: string;
+  pat?: string;
+}
+
+export interface GitImportConfigParams {
+  source: "git";
+  provider: "github" | "gitlab";
+  repo_url: string;
+  branch: string;
+  pat?: string;
+}
+
+export type ImportConfigParams = JiraImportConfigParams | GitImportConfigParams;
+
+export interface ImportConfigInput {
+  name: string;
+  merge_strategy: MergeStrategy;
+  config: ImportConfigParams;
+}
+
+export interface ImportConfigUpdateInput {
+  name?: string;
+  merge_strategy?: MergeStrategy;
+  config?: ImportConfigParams;
+}
+
+export interface Me {
+  auth_type: "pat" | "oidc";
+  workspace_id: string | null;
+  user_id: string | null;
+  email: string | null;
+  name: string | null;
+  is_admin: boolean;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  is_global: boolean;
+  created_at: string;
+}
+
+export interface WorkspaceUpdateInput {
+  name?: string;
+  is_global?: boolean;
+}
+
+export interface MyWorkspace {
+  id: string;
+  name: string;
+  is_global: boolean;
+  created_at: string;
+  can_read: boolean;
+  can_create: boolean;
+  can_modify: boolean;
+  can_delete: boolean;
+  can_read_tickets: boolean;
+  can_create_tickets: boolean;
+  can_modify_tickets: boolean;
+  can_delete_tickets: boolean;
+  can_read_documents: boolean;
+  can_create_documents: boolean;
+  can_modify_documents: boolean;
+  can_delete_documents: boolean;
+  can_approve_documents: boolean;
+}
+
+export interface MissingReferenceIssue {
+  asset_uid: string;
+  asset_name: string;
+  asset_key: string;
+  attribute_key: string;
+  attribute_name: string;
+  attribute_type: string;
+  value: string;
+}
+
+export interface DanglingObjectIssue {
+  relation_id: number;
+  from_asset_uid: string;
+  to_asset_uid: string;
+  relation_type: string;
+  reason: string;
+}
+
+export interface OrphanedObjectIssue {
+  asset_uid: string;
+  name: string;
+  key: string;
+}
+
+export interface IntegrityReport {
+  missing_references: MissingReferenceIssue[];
+  dangling_objects: DanglingObjectIssue[];
+  orphaned_objects: OrphanedObjectIssue[];
+  counts: {
+    assets_scanned: number;
+    missing_references: number;
+    dangling_objects: number;
+    orphaned_objects: number;
+  };
+}
+
+export interface RelinkResult {
+  assets_scanned: number;
+  assets_updated: number;
+  values_relinked: number;
+}
+
+export interface CleanupOptions {
+  clear_missing_references?: boolean;
+  delete_orphaned_objects?: boolean;
+  remove_dangling_relations?: boolean;
+}
+
+export interface CleanupResult {
+  cleared_references: number;
+  deleted_orphaned_objects: number;
+  removed_dangling_relations: number;
+}
+
+export interface MemberDirectoryEntry {
+  user_id: string;
+  email: string;
+  name: string | null;
+}
+
+export interface Member {
+  user_id: string;
+  email: string;
+  name: string | null;
+  can_read: boolean;
+  can_create: boolean;
+  can_modify: boolean;
+  can_delete: boolean;
+  can_read_tickets: boolean;
+  can_create_tickets: boolean;
+  can_modify_tickets: boolean;
+  can_delete_tickets: boolean;
+  can_read_documents: boolean;
+  can_create_documents: boolean;
+  can_modify_documents: boolean;
+  can_delete_documents: boolean;
+  can_approve_documents: boolean;
+}
+
+export interface MemberInput {
+  email: string;
+  can_read: boolean;
+  can_create: boolean;
+  can_modify: boolean;
+  can_delete: boolean;
+  can_read_tickets: boolean;
+  can_create_tickets: boolean;
+  can_modify_tickets: boolean;
+  can_delete_tickets: boolean;
+  can_read_documents: boolean;
+  can_create_documents: boolean;
+  can_modify_documents: boolean;
+  can_delete_documents: boolean;
+  can_approve_documents: boolean;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string | null;
+  is_admin: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface DefaultAccess {
+  default_can_read: boolean;
+  default_can_create: boolean;
+  default_can_modify: boolean;
+  default_can_delete: boolean;
+  default_can_read_tickets: boolean;
+  default_can_create_tickets: boolean;
+  default_can_modify_tickets: boolean;
+  default_can_delete_tickets: boolean;
+  default_can_read_documents: boolean;
+  default_can_create_documents: boolean;
+  default_can_modify_documents: boolean;
+  default_can_delete_documents: boolean;
+  default_can_approve_documents: boolean;
+}
+
+export interface WorkspaceDetail extends DefaultAccess {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export type DocumentState = "draft" | "in_review" | "approved" | "published" | "superseded" | "retired";
+export type AuthorityLevel = "ufficiale" | "informativo" | "bozza_interna";
+export type Confidentiality = "pubblico" | "interno" | "riservato";
+
+export interface DocumentStep {
+  ordine?: number;
+  testo: string;
+  checklist?: boolean;
+  voce_critica?: boolean;
+}
+
+export interface AppDocument {
+  uid: string;
+  workspace_id: string;
+  code: string;
+  title: string;
+  document_type_uid: string | null;
+  owner_user_id: string | null;
+  responsible_service_asset_uid: string | null;
+  authority_level: AuthorityLevel;
+  confidentiality: Confidentiality;
+  source: string;
+  current_revision_uid: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentInput {
+  uid?: string;
+  code: string;
+  title: string;
+  document_type_uid?: string | null;
+  owner_user_id?: string | null;
+  responsible_service_asset_uid?: string | null;
+  authority_level?: AuthorityLevel;
+  confidentiality?: Confidentiality;
+  source?: string;
+  body_markdown?: string | null;
+  steps?: DocumentStep[];
+  attributes?: Record<string, unknown>;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  next_review_due?: string | null;
+}
+
+export interface DocumentUpdateInput {
+  title?: string;
+  document_type_uid?: string | null;
+  owner_user_id?: string | null;
+  responsible_service_asset_uid?: string | null;
+  authority_level?: AuthorityLevel;
+  confidentiality?: Confidentiality;
+}
+
+export interface DocumentRevision {
+  uid: string;
+  document_uid: string;
+  revision_number: number;
+  state: DocumentState;
+  body_markdown: string | null;
+  steps: DocumentStep[];
+  attributes: Record<string, unknown>;
+  valid_from: string | null;
+  valid_until: string | null;
+  next_review_due: string | null;
+  authored_by: string | null;
+  approved_by: string | null;
+  submitted_at: string | null;
+  approved_at: string | null;
+  published_at: string | null;
+  review_comment: string | null;
+  superseded_by_uid: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentRevisionInput {
+  body_markdown?: string | null;
+  steps?: DocumentStep[];
+  attributes?: Record<string, unknown>;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  next_review_due?: string | null;
+}
+
+export interface DocumentRelation {
+  id: number;
+  from_document_uid: string;
+  to_type: "asset" | "schema" | "document" | "issue";
+  to_uid: string;
+  relation_type: string;
+  created_at: string;
+}

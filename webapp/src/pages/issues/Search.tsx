@@ -1,0 +1,189 @@
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { globalValuesApi, issuesApi, schemasApi } from "../../api/client";
+import { AttributeFilterInput } from "../../components/AttributeFilterInput";
+import { activeFilterCount, defaultFilterFor, FilterState, matchesFilters } from "../../components/AttributeFilters";
+import { effectiveAttributes } from "../../lib/schemaAttributes";
+
+const STATE_STYLES: Record<string, string> = {
+  new: "bg-slate-100 text-slate-600",
+  in_progress: "bg-blue-100 text-blue-700",
+  pending: "bg-amber-100 text-amber-700",
+  resolved: "bg-green-100 text-green-700",
+  closed: "bg-slate-200 text-slate-500",
+};
+
+export function IssueSearch() {
+  const [q, setQ] = useState("");
+  const [schemaUid, setSchemaUid] = useState("");
+  const [stateFilter, setStateFilter] = useState("");
+  const [filters, setFilters] = useState<FilterState>({});
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const schemas = useQuery({ queryKey: ["schemas"], queryFn: schemasApi.list });
+  const issues = useQuery({ queryKey: ["issues"], queryFn: () => issuesApi.list() });
+  const globalValues = useQuery({ queryKey: ["global-values"], queryFn: globalValuesApi.list });
+  const statusOptions =
+    globalValues.data?.find((gv) => gv.applies_to === "tickets" && gv.key === "status")?.options ?? [];
+  const priorityOptions =
+    globalValues.data?.find((gv) => gv.applies_to === "tickets" && gv.key === "priority")?.options ?? [];
+
+  const ticketSchemas = useMemo(
+    () => (schemas.data ?? []).filter((s) => s.applies_to === "tickets"),
+    [schemas.data],
+  );
+  const schema = ticketSchemas.find((s) => s.uid === schemaUid);
+  const attrDefs = effectiveAttributes(schema, schemas.data);
+
+  const results = useMemo(() => {
+    if (!issues.data) return [];
+    const needle = q.trim().toLowerCase();
+    return issues.data.filter((i) => {
+      if (needle && !i.title.toLowerCase().includes(needle)) return false;
+      if (stateFilter && i.state !== stateFilter) return false;
+      if (schemaUid && i.schema_uid !== schemaUid) return false;
+      if (schema && Object.keys(filters).length > 0 && !matchesFilters(i.attributes, filters)) {
+        return false;
+      }
+      return true;
+    });
+  }, [issues.data, q, stateFilter, schemaUid, schema, filters]);
+
+  return (
+    <div>
+      <h1 className="text-2xl font-semibold text-slate-900">Search tickets</h1>
+
+      <div className="mt-4 flex gap-3">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search by title…"
+          className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm"
+        />
+        <select
+          value={stateFilter}
+          onChange={(e) => setStateFilter(e.target.value)}
+          className="rounded border border-slate-300 px-3 py-2 text-sm"
+        >
+          <option value="">Any state</option>
+          {statusOptions.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.value}
+            </option>
+          ))}
+        </select>
+        <select
+          value={schemaUid}
+          onChange={(e) => {
+            setSchemaUid(e.target.value);
+            setFilters({});
+          }}
+          className="rounded border border-slate-300 px-3 py-2 text-sm"
+        >
+          <option value="">All types</option>
+          {ticketSchemas.map((s) => (
+            <option key={s.uid} value={s.uid}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {schema && attrDefs.length > 0 && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            className="text-sm text-slate-600 hover:text-slate-900"
+          >
+            {advancedOpen ? "▾" : "▸"} Advanced filters
+            {activeFilterCount(filters) > 0 && (
+              <span className="ml-1 rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] text-white">
+                {activeFilterCount(filters)}
+              </span>
+            )}
+          </button>
+          {advancedOpen && (
+            <div className="mt-2 space-y-3 rounded border border-slate-200 bg-white p-3">
+              {attrDefs.map((attr) => {
+                const key = attr.key ?? attr.name;
+                const current = filters[key] ?? defaultFilterFor(attr);
+                return (
+                  <div key={key} className="flex items-center gap-3">
+                    <label className="w-32 shrink-0 text-xs font-medium text-slate-600">
+                      {attr.name}
+                    </label>
+                    <AttributeFilterInput
+                      attribute={attr}
+                      value={current}
+                      onChange={(v) => setFilters((prev) => ({ ...prev, [key]: v }))}
+                    />
+                  </div>
+                );
+              })}
+              {activeFilterCount(filters) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFilters({})}
+                  className="text-xs text-slate-500 hover:text-slate-800"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {issues.isLoading && <p className="mt-4 text-sm text-slate-500">Loading…</p>}
+
+      {issues.data && (
+        <>
+          <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-2">Title</th>
+                  <th className="px-4 py-2">State</th>
+                  <th className="px-4 py-2">Priority</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {results.map((i) => (
+                  <tr key={i.uid} className="hover:bg-slate-50">
+                    <td className="px-4 py-2 font-medium text-slate-900">
+                      <Link to={`/tickets/${i.uid}`} className="hover:underline">
+                        {i.title}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2">
+                      <span
+                        className={`rounded px-2 py-0.5 text-xs ${STATE_STYLES[i.state] ?? "bg-slate-100 text-slate-600"}`}
+                      >
+                        {statusOptions.find((o) => o.id === i.state)?.value ?? i.state}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-slate-500">
+                      {priorityOptions.find((o) => o.id === i.priority)?.value ?? i.priority ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+                {results.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-6 text-center text-slate-400">
+                      No tickets match.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Showing {results.length} of {issues.data.length}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}

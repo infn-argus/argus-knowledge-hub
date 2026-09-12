@@ -1,0 +1,30 @@
+# Node / webapp
+node_modules/
+dist/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python / backend
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Ambiente e segreti — mai committare
+.env
+.env.*
+*.pem
+*.key
+kubeconfig*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+tsconfig.tsbuildinfo

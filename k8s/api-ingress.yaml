@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: assetmanagement-api
+  namespace: assetmanagement
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod-issuer
+    nginx.ingress.kubernetes.io/proxy-body-size: 50m
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: assets-api.90.147.174.30.myip.cloud.infn.it
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: assetmanagement-api
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - assets-api.90.147.174.30.myip.cloud.infn.it
+      secretName: assetmanagement-api-tls

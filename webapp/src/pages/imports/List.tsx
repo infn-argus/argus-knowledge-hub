@@ -1,0 +1,179 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { importConfigsApi, importsApi } from "../../api/client";
+import { MERGE_STRATEGIES } from "../../api/types";
+
+const STATUS_STYLES: Record<string, string> = {
+  pending: "bg-slate-100 text-slate-600",
+  running: "bg-blue-100 text-blue-700",
+  succeeded: "bg-green-100 text-green-700",
+  failed: "bg-red-100 text-red-700",
+};
+
+function SavedConfigs() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [runningUid, setRunningUid] = useState<string | null>(null);
+
+  const configs = useQuery({ queryKey: ["import-configs"], queryFn: importConfigsApi.list });
+
+  const runMutation = useMutation({
+    mutationFn: (uid: string) => {
+      setRunningUid(uid);
+      return importConfigsApi.run(uid);
+    },
+    onSuccess: (config) => {
+      queryClient.invalidateQueries({ queryKey: ["import-configs"] });
+      navigate(`/imports/${config.last_import_job_uid}`);
+    },
+    onSettled: () => setRunningUid(null),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: importConfigsApi.delete,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["import-configs"] }),
+  });
+
+  if (configs.isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (!configs.data || configs.data.length === 0) {
+    return <p className="text-sm text-slate-500">No saved configurations yet.</p>;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+          <tr>
+            <th className="px-4 py-2">Name</th>
+            <th className="px-4 py-2">Source</th>
+            <th className="px-4 py-2">Merge strategy</th>
+            <th className="px-4 py-2">Last run</th>
+            <th className="px-4 py-2" />
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {configs.data.map((c) => (
+            <tr key={c.uid} className="hover:bg-slate-50">
+              <td className="px-4 py-2 font-medium text-slate-900">{c.name}</td>
+              <td className="px-4 py-2 text-slate-600">{c.source === "jira" ? "Jira" : "Git"}</td>
+              <td className="px-4 py-2 text-slate-600">
+                {MERGE_STRATEGIES.find((s) => s.value === c.merge_strategy)?.label ?? c.merge_strategy}
+              </td>
+              <td className="px-4 py-2 text-slate-500">
+                {c.last_run_at ? new Date(c.last_run_at).toLocaleString() : "Never"}
+              </td>
+              <td className="px-4 py-2 text-right">
+                <button
+                  onClick={() => runMutation.mutate(c.uid)}
+                  disabled={runningUid === c.uid}
+                  className="mr-3 rounded bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {runningUid === c.uid ? "Starting…" : "Run"}
+                </button>
+                <Link
+                  to={`/imports/configs/${c.uid}/edit`}
+                  className="mr-3 text-xs text-slate-500 hover:text-slate-900"
+                >
+                  Edit
+                </Link>
+                <button
+                  onClick={() => {
+                    if (confirm(`Delete configuration "${c.name}"?`)) deleteMutation.mutate(c.uid);
+                  }}
+                  className="text-xs text-red-500 hover:text-red-700"
+                >
+                  Delete
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function ImportList() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["imports"],
+    queryFn: () => importsApi.list(),
+    refetchInterval: (query) =>
+      query.state.data?.some((j) => j.status === "pending" || j.status === "running")
+        ? 2000
+        : false,
+  });
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Imports</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Bring schemas and assets in from a Jira Insight schema or a Git repository.
+          </p>
+        </div>
+        <Link
+          to="/imports/new"
+          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+        >
+          New configuration
+        </Link>
+      </div>
+
+      <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        Saved configurations
+      </h2>
+      <div className="mt-2">
+        <SavedConfigs />
+      </div>
+
+      <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        History
+      </h2>
+
+      {isLoading && <p className="mt-4 text-sm text-slate-500">Loading…</p>}
+
+      {data && data.length === 0 && (
+        <p className="mt-4 text-sm text-slate-500">No imports yet.</p>
+      )}
+
+      {data && data.length > 0 && (
+        <div className="mt-2 overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-2">Source</th>
+                <th className="px-4 py-2">Status</th>
+                <th className="px-4 py-2">Progress</th>
+                <th className="px-4 py-2">Created</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data.map((job) => (
+                <tr key={job.uid} className="hover:bg-slate-50">
+                  <td className="px-4 py-2">
+                    <Link to={`/imports/${job.uid}`} className="font-medium text-slate-900 hover:underline">
+                      {job.source === "jira" ? "Jira" : "Git"}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-2">
+                    <span
+                      className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[job.status] ?? ""}`}
+                    >
+                      {job.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-slate-600">{job.progress ?? "—"}</td>
+                  <td className="px-4 py-2 text-slate-500">
+                    {new Date(job.created_at).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: assetmanagement-api
+  namespace: assetmanagement
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: assetmanagement-api
+  template:
+    metadata:
+      labels:
+        app: assetmanagement-api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/amichelotti/assetmanagement-backend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-secret
+                  key: database-url
+            - name: TOKEN_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: api-secret
+                  key: token-pepper
+            - name: IMPORT_SECRETS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-secret
+                  key: import-secrets-key
+            - name: ATTACHMENTS_DIR
+              value: /data/attachments
+            # OIDC token verification (Firebase now, swappable to Keycloak later
+            # by changing just these three values — see backend/app/auth_oidc.py).
+            - name: OIDC_ISSUER
+              value: https://securetoken.google.com/seraphic-camera-479521-s5
+            - name: OIDC_JWKS_URI
+              value: https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com
+            - name: OIDC_AUDIENCE
+              value: seraphic-camera-479521-s5
+          volumeMounts:
+            - name: attachments-data
+              mountPath: /data/attachments
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: attachments-data
+          persistentVolumeClaim:
+            claimName: attachments-data

@@ -1,0 +1,190 @@
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
+
+from app.auth import get_current_user_id, require_permission
+from app.db import get_db
+from app.models.asset import Asset, Relation
+from app.models.schema import Schema
+from app.schemas.asset import AssetCreate, AssetOut, AssetUpdate, RelationCreate, RelationOut
+from app.services.attribute_validation import validate_attributes
+from app.services.current_user_attrs import stamp_current_user_attributes
+from app.services.relations import rebuild_asset_relations, rebuild_asset_relations_with_neighbors
+
+router = APIRouter(prefix="/v1/assets", tags=["assets"])
+
+
+@router.get("", response_model=list[AssetOut])
+def list_assets(
+    schema_uid: Optional[str] = None,
+    workspace_id: str = Depends(require_permission("read")),
+    db: Session = Depends(get_db),
+):
+    # Visible if the asset's own workspace matches, the asset itself is
+    # flagged global, or its type (schema) is global — a global schema makes
+    # every one of its instances referenceable from any workspace without
+    # needing each asset individually flagged too.
+    stmt = (
+        select(Asset)
+        .join(Schema, Schema.uid == Asset.schema_uid)
+        .where(
+            or_(
+                Asset.workspace_id == workspace_id,
+                Asset.is_global.is_(True),
+                Schema.is_global.is_(True),
+            )
+        )
+    )
+    if schema_uid:
+        stmt = stmt.where(Asset.schema_uid == schema_uid)
+    return db.scalars(stmt).all()
+
+
+@router.post("", response_model=AssetOut, status_code=201)
+def create_asset(
+    body: AssetCreate,
+    workspace_id: str = Depends(require_permission("create")),
+    current_user_id: Optional[str] = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    if db.get(Asset, body.uid) is not None:
+        raise HTTPException(status_code=409, detail="Asset uid already exists")
+    schema = db.get(Schema, body.schema_uid)
+    stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
+    validate_attributes(db, schema, body.attributes, workspace_id, Asset)
+    asset = Asset(workspace_id=workspace_id, **body.model_dump())
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    return asset
+
+
+def _get_owned_asset(uid: str, workspace_id: str, db: Session) -> Asset:
+    """Strict same-workspace lookup — used by every write endpoint. A global
+    asset owned by another workspace is visible (see _get_visible_asset) but
+    still can't be edited except by its owning workspace."""
+    asset = db.get(Asset, uid)
+    if asset is None or asset.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return asset
+
+
+def _get_visible_asset(uid: str, workspace_id: str, db: Session) -> Asset:
+    asset = db.get(Asset, uid)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if asset.workspace_id == workspace_id or asset.is_global:
+        return asset
+    schema = db.get(Schema, asset.schema_uid)
+    if schema is not None and schema.is_global:
+        return asset
+    raise HTTPException(status_code=404, detail="Asset not found")
+
+
+@router.get("/{uid}", response_model=AssetOut)
+def get_asset(
+    uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)
+):
+    asset = _get_visible_asset(uid, workspace_id, db)
+    # Keep the denormalized relation cache honest every time an object is
+    # actually looked at, independent of whatever else may have changed it
+    # (relations are also resynced at the point of change, but this catches
+    # anything that slips through, e.g. cross-workspace visibility shifts).
+    rebuild_asset_relations(db, uid)
+    db.commit()
+    db.refresh(asset)
+    return asset
+
+
+@router.put("/{uid}", response_model=AssetOut)
+def update_asset(
+    uid: str,
+    body: AssetUpdate,
+    workspace_id: str = Depends(require_permission("modify")),
+    current_user_id: Optional[str] = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    asset = _get_owned_asset(uid, workspace_id, db)
+    patch = body.model_dump(exclude_unset=True)
+    global_changed = "is_global" in patch and patch["is_global"] != asset.is_global
+    for field, value in patch.items():
+        setattr(asset, field, value)
+
+    schema = db.get(Schema, asset.schema_uid) if asset.schema_uid else None
+    stamp_current_user_attributes(db, schema, asset.attributes, current_user_id)
+    flag_modified(asset, "attributes")
+
+    if "attributes" in patch or "schema_uid" in patch:
+        validate_attributes(db, schema, asset.attributes, workspace_id, Asset, exclude_uid=uid)
+    db.commit()
+    if global_changed:
+        # Cross-workspace visibility just changed — this asset's neighbors
+        # may now (or no longer) be able to see it, so their cached relation
+        # lists need to reflect that too.
+        rebuild_asset_relations_with_neighbors(db, uid)
+        db.commit()
+    db.refresh(asset)
+    return asset
+
+
+@router.delete("/{uid}", status_code=204)
+def delete_asset(
+    uid: str, workspace_id: str = Depends(require_permission("delete")), db: Session = Depends(get_db)
+):
+    asset = _get_owned_asset(uid, workspace_id, db)
+    db.delete(asset)
+    db.commit()
+
+
+relations_router = APIRouter(prefix="/v1/relations", tags=["relations"])
+
+
+@relations_router.get("", response_model=list[RelationOut])
+def list_relations(
+    workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)
+):
+    return db.scalars(
+        select(Relation).where(Relation.workspace_id == workspace_id)
+    ).all()
+
+
+@relations_router.post("", response_model=RelationOut, status_code=201)
+def create_relation(
+    body: RelationCreate,
+    workspace_id: str = Depends(require_permission("create")),
+    db: Session = Depends(get_db),
+):
+    # from_asset_uid must belong to the acting workspace (it's what this relation
+    # is attached to); to_asset_uid may point at another workspace's asset only if
+    # that asset is global.
+    _get_owned_asset(body.from_asset_uid, workspace_id, db)
+    _get_visible_asset(body.to_asset_uid, workspace_id, db)
+
+    relation = Relation(workspace_id=workspace_id, **body.model_dump())
+    db.add(relation)
+    db.commit()
+    db.refresh(relation)
+    rebuild_asset_relations(db, body.from_asset_uid)
+    rebuild_asset_relations(db, body.to_asset_uid)
+    db.commit()
+    return relation
+
+
+@relations_router.delete("/{relation_id}", status_code=204)
+def delete_relation(
+    relation_id: int,
+    workspace_id: str = Depends(require_permission("delete")),
+    db: Session = Depends(get_db),
+):
+    relation = db.get(Relation, relation_id)
+    if relation is None or relation.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Relation not found")
+    from_uid, to_uid = relation.from_asset_uid, relation.to_asset_uid
+    db.delete(relation)
+    db.commit()
+    rebuild_asset_relations(db, from_uid)
+    rebuild_asset_relations(db, to_uid)
+    db.commit()
