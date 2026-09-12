@@ -10,7 +10,7 @@ cd ../backend
 ```
 
 Requires `docker login ghcr.io -u <your-github-username>` first, with a GitHub
-PAT that has `write:packages` scope. The `ghcr.io/amichelotti/assetmanagement-backend`
+PAT that has `write:packages` scope. The `ghcr.io/infn-argus/argus-knowledge-hub-backend`
 package should be public (Package settings → Change visibility) so the cluster
 needs no `imagePullSecret`. If you'd rather keep it private, create one:
 
@@ -74,7 +74,7 @@ with the same command if that happens).
 ```
 cd ../backend && ./deploy.sh <new-version>
 kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt -n assetmanagement \
-  set image deployment/assetmanagement-api api=ghcr.io/amichelotti/assetmanagement-backend:<new-version>
+  set image deployment/assetmanagement-api api=ghcr.io/infn-argus/argus-knowledge-hub-backend:<new-version>
 ```
 
 The container's startup command runs `alembic upgrade head` before serving,
@@ -90,7 +90,7 @@ cd ../webapp
 ```
 
 Same registry-visibility note as the API image applies — make
-`ghcr.io/amichelotti/assetmanagement-web` public, or wire up an
+`ghcr.io/infn-argus/argus-knowledge-hub-web` public, or wire up an
 `imagePullSecret` in `web-deployment.yaml`.
 
 ```
@@ -107,5 +107,5 @@ Redeploy the same way as the API:
 ```
 cd ../webapp && ./deploy.sh <new-version>
 kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt -n assetmanagement \
-  set image deployment/assetmanagement-web web=ghcr.io/amichelotti/assetmanagement-web:<new-version>
+  set image deployment/assetmanagement-web web=ghcr.io/infn-argus/argus-knowledge-hub-web:<new-version>
 ```

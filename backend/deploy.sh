@@ -6,7 +6,7 @@
 
 set -e
 
-IMAGE_NAME="ghcr.io/amichelotti/assetmanagement-backend"
+IMAGE_NAME="ghcr.io/infn-argus/argus-knowledge-hub-backend"
 VERSION="${1:?Usage: ./deploy.sh <version, e.g. 0.1.0>}"
 
 echo "======================================"

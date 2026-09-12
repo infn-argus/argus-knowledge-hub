@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ghcr.io/amichelotti/assetmanagement-web:latest
+          image: ghcr.io/infn-argus/argus-knowledge-hub-web:latest
           ports:
             - containerPort: 8080
           readinessProbe:

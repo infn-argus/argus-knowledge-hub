@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: ghcr.io/amichelotti/assetmanagement-backend:latest
+          image: ghcr.io/infn-argus/argus-knowledge-hub-backend:latest
           ports:
             - containerPort: 8080
           env:
