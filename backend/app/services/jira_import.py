@@ -22,6 +22,7 @@ from app.models.attachment import Attachment
 from app.models.global_value import GlobalValue
 from app.models.import_job import ImportJob
 from app.models.schema import Schema
+from app.models.workspace import Workspace
 from app.services.attribute_validation import _descendant_schema_uids, check_attributes
 from app.services.import_merge import should_write
 
@@ -548,6 +549,14 @@ def run_jira_import(
 
         os.makedirs(ATTACHMENTS_DIR, exist_ok=True)
 
+        # A globally-shared workspace shares everything in it — including
+        # types imported after the flag was set. Without this, a
+        # remove_all_before re-import silently drops the global flag from
+        # every recreated type (the workspace stays flagged, its types come
+        # back defaulting to False), and every cross-workspace reference
+        # into it stops resolving.
+        workspace_is_global = bool(getattr(db.get(Workspace, workspace_id), "is_global", False))
+
         for t in object_types:
             jid = t["id"]
             existing = (
@@ -561,6 +570,8 @@ def run_jira_import(
             schema = existing or Schema(uid=str(uuid.uuid4()), workspace_id=workspace_id)
             schema.name = t["name"]
             schema.is_concrete = True
+            if workspace_is_global:
+                schema.is_global = True
             schema.metadata_json = {"source": "jira", "jiraObjectTypeId": jid}
 
             attrs_resp = jira.get(f"{base_url}/rest/insight/1.0/objecttype/{jid}/attributes")

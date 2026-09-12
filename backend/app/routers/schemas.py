@@ -10,6 +10,7 @@ from app.auth import require_permission
 from app.db import get_db
 from app.models.attachment import Attachment
 from app.models.schema import Schema
+from app.models.workspace import Workspace
 from app.schemas.schema import SchemaCreate, SchemaOut, SchemaUpdate
 from app.services.relations import rebuild_relations_for_schemas
 
@@ -38,6 +39,12 @@ def create_schema(
     if db.get(Schema, body.uid) is not None:
         raise HTTPException(status_code=409, detail="Schema uid already exists")
     schema = Schema(workspace_id=workspace_id, **body.model_dump())
+    # A globally-shared workspace shares every type in it, including ones
+    # created after the flag was set — otherwise the workspace-level flag
+    # silently decays as new types appear.
+    workspace = db.get(Workspace, workspace_id)
+    if workspace is not None and workspace.is_global:
+        schema.is_global = True
     db.add(schema)
     db.commit()
     db.refresh(schema)
