@@ -214,6 +214,18 @@ def _get_json(jira: requests.Session, urls: list[str]):
     return None, last_error
 
 
+def _author_display_name(value) -> "str | None":
+    """The author/actor field on attachments/comments/history varies by
+    Jira version: sometimes a {"displayName": ...} object, sometimes a
+    plain username string. Handle both rather than assuming the shape and
+    crashing the whole enrichment step for that object."""
+    if isinstance(value, dict):
+        return value.get("displayName") or value.get("name") or value.get("key")
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
 def _record_diagnostic(job: ImportJob, seen: set, category: str, detail: str) -> None:
     """Records at most one warning per failure category per run — otherwise
     a systemically-wrong endpoint would add one warning per asset."""
@@ -292,7 +304,7 @@ def _import_object_attachments(
                 jira, workspace_id, f"{base_url}/rest/insight/1.0/attachments/{a['id']}",
                 filename=a.get("filename") or backend_id,
                 mime_type=a.get("mimeType"),
-                author=(a.get("author") or {}).get("displayName"),
+                author=_author_display_name(a.get("author")),
                 backend_id=backend_id,
             )
         except Exception as e:
@@ -327,7 +339,7 @@ def _import_object_history(
         )
         if existing:
             continue
-        actor = h.get("actor") or h.get("author") or h.get("updatedBy") or {}
+        actor = h.get("actor") or h.get("author") or h.get("updatedBy")
         timestamp = (
             _parse_jira_dt(h.get("created") or h.get("updated") or h.get("timestamp"))
             or datetime.now(timezone.utc)
@@ -337,7 +349,7 @@ def _import_object_history(
             uid=str(uuid.uuid4()),
             asset_uid=asset.uid,
             type=h.get("type") or h.get("action") or "update",
-            author=actor.get("displayName") or actor.get("name") or "Jira",
+            author=_author_display_name(actor) or "Jira",
             details=str(details),
             timestamp=timestamp,
             backend_id=backend_id,
@@ -373,7 +385,7 @@ def _import_object_comments(
         db.add(AssetComment(
             uid=str(uuid.uuid4()),
             asset_uid=asset.uid,
-            author=(c.get("author") or {}).get("displayName") or "Jira",
+            author=_author_display_name(c.get("author")) or "Jira",
             text=c.get("comment") or "",
             created=created,
             updated=updated,
