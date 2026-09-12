@@ -1,5 +1,10 @@
 FROM python:3.11-slim
 
+LABEL org.opencontainers.image.source="https://github.com/infn-argus/argus-knowledge-hub"
+LABEL org.opencontainers.image.description="ARGUS Knowledge Hub — REST API (assets, tickets, documentation)"
+LABEL org.opencontainers.image.licenses="INFN"
+
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \

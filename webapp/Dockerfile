@@ -1,4 +1,9 @@
 FROM node:20-slim AS build
+
+LABEL org.opencontainers.image.source="https://github.com/infn-argus/argus-knowledge-hub"
+LABEL org.opencontainers.image.description="ARGUS Knowledge Hub — operator and admin web UI"
+LABEL org.opencontainers.image.licenses="INFN"
+
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
