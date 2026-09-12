@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 import requests
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from sqlalchemy import select
 
@@ -61,6 +62,10 @@ def _map_attribute(jira_attr: dict) -> dict:
         out["type"] = "reference"
         ref = jira_attr.get("referenceType") or {}
         out["referenceType"] = ref.get("name") or str(jira_attr["referenceObjectTypeId"])
+        # Resolved to our own Schema.uid in a later pass, once every type
+        # from this run (and any earlier run) is available to look up —
+        # see _resolve_reference_schema_uid.
+        out["_jiraReferenceObjectTypeId"] = jira_attr["referenceObjectTypeId"]
         return out
 
     if jira_attr.get("type") == 7:  # Status: schema-scoped, shared options -> Global Value
@@ -224,6 +229,48 @@ def _author_display_name(value) -> "str | None":
     if isinstance(value, str) and value:
         return value
     return None
+
+
+def _resolve_reference_schema_uid(db: Session, jira_object_type_id, jira_id_to_uid: dict):
+    """A reference attribute's target type may have been imported in this
+    same run, or — for shared infrastructure imported once into its own
+    (often global) workspace and referenced from several others — in an
+    earlier, separate import. Check the in-memory map from this run first,
+    then fall back to any previously-imported schema tagged with this Jira
+    object type id, in any workspace."""
+    if jira_object_type_id in jira_id_to_uid:
+        return jira_id_to_uid[jira_object_type_id]
+    match = (
+        db.query(Schema)
+        .filter(Schema.metadata_json["jiraObjectTypeId"].as_integer() == jira_object_type_id)
+        .first()
+    )
+    return match.uid if match else None
+
+
+def resolve_reference_attributes(db: Session, jira_id_to_uid: dict) -> None:
+    """Reference attributes only carry the *Jira* target type id until now —
+    resolve each to our own Schema.uid once every type from this run (and
+    any earlier run) can be looked up. Does not commit; the caller decides
+    when."""
+    for schema_uid in jira_id_to_uid.values():
+        schema = db.get(Schema, schema_uid)
+        changed = False
+        for attr in schema.attributes or []:
+            if attr.get("type") != "reference" or attr.get("referenceSchemaUid"):
+                continue
+            raw_ref_id = attr.get("_jiraReferenceObjectTypeId")
+            if raw_ref_id is None:
+                continue
+            resolved = _resolve_reference_schema_uid(db, raw_ref_id, jira_id_to_uid)
+            if resolved:
+                attr["referenceSchemaUid"] = resolved
+                changed = True
+        if changed:
+            # In-place dict mutation above means old/new compare equal by
+            # value (same dict objects either side) — SQLAlchemy won't
+            # detect the JSONB column as dirty without this.
+            flag_modified(schema, "attributes")
 
 
 def _record_diagnostic(job: ImportJob, seen: set, category: str, detail: str) -> None:
@@ -535,6 +582,9 @@ def run_jira_import(
             if parent_jid is not None and parent_jid in jira_id_to_uid:
                 schema = db.get(Schema, jira_id_to_uid[jid])
                 schema.parent_schema_uid = jira_id_to_uid[parent_jid]
+        db.commit()
+
+        resolve_reference_attributes(db, jira_id_to_uid)
         db.commit()
 
         pending_relations: list[tuple[str, str, str]] = []  # (from_key, to_key, relation_type)
