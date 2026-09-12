@@ -22,7 +22,7 @@ from app.models.attachment import Attachment
 from app.models.global_value import GlobalValue
 from app.models.import_job import ImportJob
 from app.models.schema import Schema
-from app.services.attribute_validation import check_attributes
+from app.services.attribute_validation import _descendant_schema_uids, check_attributes
 from app.services.import_merge import should_write
 
 ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
@@ -265,6 +265,13 @@ def resolve_reference_attributes(db: Session, jira_id_to_uid: dict) -> None:
             resolved = _resolve_reference_schema_uid(db, raw_ref_id, jira_id_to_uid)
             if resolved:
                 attr["referenceSchemaUid"] = resolved
+                # Jira Insight commonly uses a shallow category/leaf
+                # hierarchy (e.g. "HW Model" with 19 concrete subtypes and
+                # no instances of its own) — a reference to the category
+                # only ever resolves if it can also match the category's
+                # descendants, exactly like our own reference-picker does.
+                if _descendant_schema_uids(db, resolved):
+                    attr["includeChildren"] = True
                 changed = True
         if changed:
             # In-place dict mutation above means old/new compare equal by

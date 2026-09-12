@@ -98,3 +98,45 @@ def test_resolve_reference_attributes_finds_type_from_an_earlier_import_and_pers
 
     reloaded = SessionLocal().get(Schema, detector_uid)
     assert reloaded.attributes[0]["referenceSchemaUid"] == magnet_uid
+
+
+def test_resolve_reference_attributes_sets_include_children_for_category_types():
+    """Real production data: Jira Insight commonly models a reference target
+    as a category with no instances of its own and all the real objects
+    under concrete subtypes (e.g. "HW Model" with 19 subtypes and 1 direct
+    asset vs. 126 across its subtree). Without includeChildren, relink can
+    only ever match that one direct asset and everything else stays
+    "missing" forever — this is what a large share of the EUAPS report
+    turned out to be, once the referenceSchemaUid fix above stopped masking
+    it entirely."""
+    suffix = secrets.token_hex(4)
+    ws = f"ws-{suffix}"
+    category_uid, leaf_uid, ticket_uid = f"cat-{suffix}", f"leaf-{suffix}", f"ticket-{suffix}"
+
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name="WS"))
+    db.flush()
+    db.add(Schema(uid=category_uid, workspace_id=ws, name="HW Model",
+                   metadata_json={"source": "jira", "jiraObjectTypeId": 30}))
+    db.flush()
+    db.add(Schema(uid=leaf_uid, workspace_id=ws, name="Motor Models",
+                   parent_schema_uid=category_uid,
+                   metadata_json={"source": "jira", "jiraObjectTypeId": 31}))
+    db.add(Schema(
+        uid=ticket_uid, workspace_id=ws, name="Asset",
+        metadata_json={"source": "jira", "jiraObjectTypeId": 40},
+        attributes=[{
+            "id": "300", "key": "hw_model", "name": "HW Model", "type": "reference",
+            "referenceType": "HW Model", "_jiraReferenceObjectTypeId": 30,
+        }],
+    ))
+    db.commit()
+
+    resolve_reference_attributes(db, {30: category_uid, 31: leaf_uid, 40: ticket_uid})
+    db.commit()
+    db.close()
+
+    reloaded = SessionLocal().get(Schema, ticket_uid)
+    attr = reloaded.attributes[0]
+    assert attr["referenceSchemaUid"] == category_uid
+    assert attr["includeChildren"] is True
