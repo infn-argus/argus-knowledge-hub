@@ -18,6 +18,7 @@ import { GlobalValueList } from "./pages/globalvalues/List";
 import { ImportList } from "./pages/imports/List";
 import { ImportConfigForm } from "./pages/imports/New";
 import { ImportStatus } from "./pages/imports/Status";
+import { IssueBoard } from "./pages/issues/Board";
 import { IssueDetail } from "./pages/issues/Detail";
 import { IssueForm } from "./pages/issues/Form";
 import { IssueList } from "./pages/issues/List";
@@ -46,6 +47,7 @@ export function App() {
           <Route path="/assets/:uid/edit" element={<AssetForm />} />
 
           <Route path="/tickets" element={<IssueList />} />
+          <Route path="/tickets/board" element={<IssueBoard />} />
           <Route path="/tickets/search" element={<IssueSearch />} />
           <Route path="/tickets/new" element={<IssueForm />} />
           <Route path="/tickets/:uid" element={<IssueDetail />} />

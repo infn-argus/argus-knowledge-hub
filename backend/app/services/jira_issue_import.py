@@ -19,6 +19,7 @@ from app.models.asset_subresources import AssetTicket
 from app.models.import_job import ImportJob
 from app.models.issue import Issue, IssueComment
 from app.services.import_merge import should_write
+from app.services.ticket_types import ensure_jira_ticket_types
 from app.services.jira_import import (
     _TimeoutSession,
     _author_display_name,
@@ -152,11 +153,88 @@ def _search_issues(jira, base_url: str, jql: str, start_at: int) -> dict:
                 "summary", "description", "status", "priority", "assignee",
                 "reporter", "labels", "duedate", "resolutiondate", "created",
                 "updated", "issuetype", "project", "components",
+                # The rest of what a standard issue view shows.
+                "resolution", "fixVersions", "versions", "votes", "watches",
+                "environment", "parent", "timeoriginalestimate", "timespent",
+                "attachment",
             ]),
         },
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def _names(values) -> list[str]:
+    return [v.get("name") for v in (values or []) if isinstance(v, dict) and v.get("name")]
+
+
+def _issue_attributes(base_url: str, jira_key: str, fields: dict) -> dict:
+    """Everything a standard Jira issue view shows that our own columns
+    don't. Keys match the seeded "Jira Issue" ticket type, so they render
+    through the ordinary attribute machinery rather than a special case."""
+    parent = fields.get("parent") or {}
+    return {
+        "jira_key": jira_key,
+        "jira_url": f"{base_url}/browse/{jira_key}",
+        "jira_project": (fields.get("project") or {}).get("key"),
+        "jira_status": (fields.get("status") or {}).get("name"),
+        "jira_issue_type": (fields.get("issuetype") or {}).get("name"),
+        # Jira reports an unresolved issue as a null resolution; saying so is
+        # more useful in a list than an empty cell.
+        "jira_resolution": (fields.get("resolution") or {}).get("name") or "Unresolved",
+        "jira_components": _names(fields.get("components")),
+        "jira_fix_versions": _names(fields.get("fixVersions")),
+        "jira_affects_versions": _names(fields.get("versions")),
+        "jira_reporter": _person(fields.get("reporter")),
+        "jira_votes": (fields.get("votes") or {}).get("votes"),
+        "jira_watchers": (fields.get("watches") or {}).get("watchCount"),
+        "jira_created": fields.get("created"),
+        "jira_updated": fields.get("updated"),
+        "jira_environment": fields.get("environment"),
+        "jira_parent": parent.get("key"),
+        "jira_time_spent": fields.get("timespent"),
+        "jira_time_estimate": fields.get("timeoriginalestimate"),
+    }
+
+
+def _import_attachments(jira, workspace_id: str, issue: Issue, fields: dict, db: Session,
+                        job: ImportJob, seen: set) -> int:
+    """Attachment metadata rides along in the search payload, so the files
+    are fetched without asking Jira what exists first."""
+    from app.models.attachment import Attachment
+    from app.services.jira_import import _download_attachment
+
+    added = 0
+    for att in fields.get("attachment") or []:
+        content_url = att.get("content")
+        if not content_url:
+            continue
+        backend_id = f"jira-issue:{att.get('id')}"
+        existing = db.scalar(
+            select(Attachment).where(
+                Attachment.workspace_id == workspace_id,
+                Attachment.backend_id == backend_id,
+            )
+        )
+        if existing is not None:
+            continue
+        try:
+            row = _download_attachment(
+                jira, workspace_id, content_url,
+                filename=att.get("filename") or backend_id,
+                mime_type=att.get("mimeType"),
+                backend_id=backend_id,
+            )
+        except Exception as e:
+            _record_diagnostic(job, seen, "issue_attachments", _describe_error(e, None))
+            continue
+        # Attachments hang off assets in this model; an issue's file is kept
+        # with the object the ticket is about when there is one, and
+        # otherwise stands alone in the workspace.
+        row.asset_uid = issue.asset_uid
+        db.add(row)
+        added += 1
+    return added
 
 
 def _import_comments(jira, base_url: str, issue: Issue, jira_key: str, db: Session,
@@ -209,7 +287,7 @@ def _link_mentioned_assets(
     """
     if not text:
         return 0
-    jira_key = (issue.attributes or {}).get("jiraKey") or issue.uid
+    jira_key = (issue.attributes or {}).get("jira_key") or issue.uid
     linked = 0
     for candidate in set(_KEY_PATTERN.findall(text)):
         asset_uid = key_to_asset.get(candidate)
@@ -228,11 +306,11 @@ def _link_mentioned_assets(
                 asset_uid=asset_uid,
                 ticket_key=jira_key,
                 summary=issue.title,
-                type=(issue.attributes or {}).get("jiraIssueType") or "Task",
+                type=(issue.attributes or {}).get("jira_issue_type") or "Task",
                 status=issue.state,
                 created=now,
                 updated=now,
-                backend_url=(issue.attributes or {}).get("jiraUrl"),
+                backend_url=(issue.attributes or {}).get("jira_url"),
             ))
             linked += 1
         # The ticket's own asset_uid points at the first object named; the
@@ -289,10 +367,12 @@ def run_jira_issue_import(
             ).all()
         ) if link_assets else {}
 
+        type_uids: dict[str, str] = {}
+
         _set_progress(db, job, "Searching Jira")
         start_at = 0
         total = None
-        imported = comments_imported = links = 0
+        imported = comments_imported = links = attachments_imported = 0
 
         while True:
             try:
@@ -303,6 +383,19 @@ def run_jira_issue_import(
             if total is None:
                 total = page.get("total", 0)
                 _set_progress(db, job, f"{total} issue(s) match")
+
+            # Seeded from what this page actually contains, so a project of
+            # only Tasks doesn't acquire empty Bug and Story types.
+            page_types = {
+                ((i.get("fields") or {}).get("issuetype") or {}).get("name")
+                for i in (page.get("issues") or [])
+            }
+            new_types = page_types - set(type_uids)
+            if new_types:
+                type_uids.update(
+                    ensure_jira_ticket_types(db, workspace_id, page_types | set(type_uids))
+                )
+                db.commit()
 
             issues = page.get("issues") or []
             if not issues:
@@ -336,24 +429,17 @@ def run_jira_issue_import(
                 issue.labels = list(fields.get("labels") or [])
                 issue.due_date = _parse_jira_dt(fields.get("duedate"))
                 issue.closed_at = _parse_jira_dt(fields.get("resolutiondate"))
-                if schema_uid:
-                    issue.schema_uid = schema_uid
-
                 # What Jira knows that our columns don't, kept rather than
                 # discarded: the key is what a person searches for, and the
                 # rest explains where the ticket came from.
                 attributes = dict(issue.attributes or {})
-                attributes.update({
-                    "jiraKey": jira_key,
-                    "jiraUrl": f"{base_url}/browse/{jira_key}",
-                    "jiraIssueType": ((fields.get("issuetype") or {}).get("name")),
-                    "jiraProject": ((fields.get("project") or {}).get("key")),
-                    "jiraStatus": ((fields.get("status") or {}).get("name")),
-                    "jiraComponents": [
-                        c.get("name") for c in (fields.get("components") or []) if c.get("name")
-                    ],
-                })
+                attributes.update(_issue_attributes(base_url, jira_key, fields))
                 issue.attributes = attributes
+                issue_type_name = (fields.get("issuetype") or {}).get("name")
+                if issue_type_name and issue_type_name in type_uids:
+                    issue.schema_uid = type_uids[issue_type_name]
+                elif schema_uid:
+                    issue.schema_uid = schema_uid
 
                 # One savepoint per issue: a bad row is skipped without
                 # discarding the rest of the page, which a bare rollback here
@@ -364,6 +450,9 @@ def run_jira_issue_import(
                         db.flush()
                         comments = _import_comments(
                             jira, base_url, issue, jira_key, db, job, seen_diagnostics
+                        )
+                        attachments = _import_attachments(
+                            jira, workspace_id, issue, fields, db, job, seen_diagnostics
                         )
                         asset_links = 0
                         if link_assets:
@@ -380,6 +469,7 @@ def run_jira_issue_import(
 
                 imported += 1
                 comments_imported += comments
+                attachments_imported += attachments
                 links += asset_links
 
                 if imported % 25 == 0:
@@ -394,6 +484,7 @@ def run_jira_issue_import(
         _set_progress(
             db, job, f"Imported {imported} ticket(s)",
             tickets=imported, comments=comments_imported, asset_links=links,
+            attachments=attachments_imported,
         )
 
         job.status = "succeeded"

@@ -45,6 +45,7 @@ const SECTION_CONFIG: Record<
   tickets: {
     links: [
       { to: "/tickets", label: "All tickets" },
+      { to: "/tickets/board", label: "Board" },
       { to: "/tickets/search", label: "Search" },
     ],
     treeLabel: "Ticket types",

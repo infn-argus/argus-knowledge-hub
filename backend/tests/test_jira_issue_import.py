@@ -185,9 +185,9 @@ def test_imports_issues_with_comments_and_is_idempotent(jira_stub):
     assert first.assignee == "Giulia Bianchi"
     assert first.created_by == "Marco Rossi"
     assert first.labels == ["vacuum"]
-    assert first.attributes["jiraKey"] == f"LNF-{suffix}-1"
-    assert first.attributes["jiraUrl"].endswith(f"/browse/LNF-{suffix}-1")
-    assert first.attributes["jiraComponents"] == ["Controls"]
+    assert first.attributes["jira_key"] == f"LNF-{suffix}-1"
+    assert first.attributes["jira_url"].endswith(f"/browse/LNF-{suffix}-1")
+    assert first.attributes["jira_components"] == ["Controls"]
     # The plain-string author shape, which crashed the asset importer once.
     authors = {c.author for c in db.scalars(
         select(IssueComment).where(IssueComment.issue_uid == first.uid)
@@ -363,7 +363,7 @@ def test_a_context_path_is_found_rather_than_404ing(context_path_stub):
     db = SessionLocal()
     issue = db.get(Issue, f"{ws}:LNF-{suffix}-1")
     # The stored link has to use the resolved base, or it points nowhere.
-    assert "/jira/browse/" in issue.attributes["jiraUrl"]
+    assert "/jira/browse/" in issue.attributes["jira_url"]
     db.close()
 
 
@@ -375,3 +375,112 @@ def test_an_unreachable_api_says_what_was_tried():
 
     with pytest.raises(RuntimeError, match="context path"):
         resolve_api_base(_TimeoutSession(), "http://127.0.0.1:1/nothing-here")
+
+
+def _rich_issue(key, suffix):
+    """An issue carrying everything the standard Jira view shows."""
+    base = _issue(key, "BTF template per olog nuova infrastruttura", "To Do", "new",
+                  priority={"name": "Major"}, issuetype="Task",
+                  reporter={"displayName": "Andrea Michelotti"},
+                  assignee={"displayName": "Giovanni Lorenzo Napoleoni"},
+                  labels=["BTF"], components=["Olog"],
+                  description="https://btf-olog.k8sda.lnf.infn.it/Olog")
+    base["fields"].update({
+        "resolution": None,
+        "fixVersions": [],
+        "versions": [{"name": "2026.1"}],
+        "votes": {"votes": 0},
+        "watches": {"watchCount": 1},
+        "environment": "BTF hall",
+        "parent": {"key": f"LNFDCS-{suffix}-epic"},
+        "timespent": 3600,
+        "timeoriginalestimate": 7200,
+        "created": "2026-01-08T11:41:00.000+0100",
+    })
+    return base
+
+
+def test_standard_jira_fields_are_captured(jira_stub):
+    """The mockup's issue view, field by field — anything not captured here
+    simply cannot be rendered later."""
+    _server, base_url = jira_stub
+    suffix = secrets.token_hex(4)
+    ws = f"ws-{suffix}"
+    key = f"LNFDCS-{suffix}"
+    _JiraStub.issues = [_rich_issue(key, suffix)]
+    _JiraStub.comments = {}
+
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name="WS"))
+    db.commit()
+    db.close()
+
+    status, error, _counts = _run(ws, base_url)
+    assert status == "succeeded", error
+
+    db = SessionLocal()
+    a = db.get(Issue, f"{ws}:{key}").attributes
+    assert a["jira_key"] == key
+    assert a["jira_url"].endswith(f"/browse/{key}")
+    assert a["jira_project"] == "LNF"
+    assert a["jira_status"] == "To Do"
+    assert a["jira_issue_type"] == "Task"
+    # Jira reports no resolution as null; a list cell saying "Unresolved" is
+    # more use than an empty one.
+    assert a["jira_resolution"] == "Unresolved"
+    assert a["jira_components"] == ["Olog"]
+    assert a["jira_affects_versions"] == ["2026.1"]
+    assert a["jira_fix_versions"] == []
+    assert a["jira_reporter"] == "Andrea Michelotti"
+    assert a["jira_votes"] == 0
+    assert a["jira_watchers"] == 1
+    assert a["jira_environment"] == "BTF hall"
+    assert a["jira_parent"] == f"LNFDCS-{suffix}-epic"
+    assert a["jira_time_spent"] == 3600
+    assert a["jira_time_estimate"] == 7200
+    assert a["jira_created"].startswith("2026-01-08")
+    db.close()
+
+
+def test_a_ticket_type_is_created_per_jira_issue_type(jira_stub):
+    """Imported issues get a real ticket type, so their fields render and
+    sort through the machinery every other type uses."""
+    _server, base_url = jira_stub
+    suffix = secrets.token_hex(4)
+    ws = f"ws-{suffix}"
+    _JiraStub.issues = [
+        _issue(f"LNF-{suffix}-1", "A task", "Open", "new", issuetype="Task"),
+        _issue(f"LNF-{suffix}-2", "A bug", "Open", "new", issuetype="Bug"),
+        _issue(f"LNF-{suffix}-3", "Another task", "Open", "new", issuetype="Task"),
+    ]
+    _JiraStub.comments = {}
+
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name="WS"))
+    db.commit()
+    db.close()
+
+    status, error, _counts = _run(ws, base_url)
+    assert status == "succeeded", error
+
+    db = SessionLocal()
+    base = db.get(Schema, f"{ws}:jira-issue")
+    assert base is not None and base.applies_to == "tickets"
+    assert base.is_concrete is False
+    assert {a["key"] for a in base.attributes} >= {
+        "jira_key", "jira_resolution", "jira_components", "jira_watchers",
+    }
+
+    children = db.scalars(
+        select(Schema).where(Schema.parent_schema_uid == base.uid)
+    ).all()
+    assert {c.name for c in children} == {"Task", "Bug"}, "only types actually present"
+    # Fields come from the parent, so a child adds none of its own.
+    assert all(c.attributes == [] for c in children)
+
+    task_uid = next(c.uid for c in children if c.name == "Task")
+    assert db.get(Issue, f"{ws}:LNF-{suffix}-1").schema_uid == task_uid
+    assert db.get(Issue, f"{ws}:LNF-{suffix}-3").schema_uid == task_uid
+    bug_uid = next(c.uid for c in children if c.name == "Bug")
+    assert db.get(Issue, f"{ws}:LNF-{suffix}-2").schema_uid == bug_uid
+    db.close()
