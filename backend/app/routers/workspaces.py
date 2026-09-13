@@ -17,6 +17,7 @@ from app.models.user import User
 from app.models.workspace import Workspace
 from app.services.integrity import cleanup_workspace, generate_integrity_report, relink_workspace
 from app.services.relations import rebuild_relations_for_schemas
+from app.services.document_types import ensure_document_types
 from app.services.ticket_types import DEFAULT_ISSUE_TYPES, ensure_ticket_types
 from app.schemas.workspace import (
     CleanupOptions,
@@ -244,6 +245,7 @@ def create_workspace(
     ))
     seed_default_global_values(db, workspace.id)
     seed_default_ticket_types(db, workspace.id)
+    ensure_document_types(db, workspace.id)
     db.commit()
     db.refresh(workspace)
     return workspace

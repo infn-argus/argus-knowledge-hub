@@ -5,6 +5,9 @@ import { importsApi } from "../../api/client";
 import { importSourceLabel } from "../../api/types";
 
 const ENRICHMENT_COUNTS: [string, string][] = [
+  ["documents", "Documents"],
+  ["documents_updated", "Documents updated"],
+  ["documents_unchanged", "Documents unchanged"],
   ["tickets", "Tickets"],
   ["asset_links", "Tickets linked to objects"],
   ["attachments", "Attachments"],

@@ -31,6 +31,17 @@ class JiraIssueImportRequest(BaseModel):
     merge_strategy: MergeStrategy = "override"
 
 
+class ConfluenceImportRequest(BaseModel):
+    source: Literal["confluence"]
+    base_url: str
+    pat: str
+    # One space, or any CQL the account can run. A space is the usual case.
+    space_key: Optional[str] = None
+    cql: Optional[str] = None
+    link_assets: bool = True
+    merge_strategy: MergeStrategy = "override"
+
+
 class GitImportRequest(BaseModel):
     source: Literal["git"]
     provider: Literal["github", "gitlab"]

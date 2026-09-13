@@ -14,15 +14,19 @@ from app.schemas.import_job import (
     ImportJobOut,
     JiraImportRequest,
     JiraIssueImportRequest,
+    ConfluenceImportRequest,
 )
 from app.services.git_import import run_git_import
 from app.services.jira_import import run_jira_import
 from app.services.jira_issue_import import run_jira_issue_import
+from app.services.confluence_import import run_confluence_import
 
 router = APIRouter(prefix="/v1/imports", tags=["imports"])
 
 ImportRequest = Annotated[
-    Union[JiraImportRequest, JiraIssueImportRequest, GitImportRequest],
+    Union[
+        JiraImportRequest, JiraIssueImportRequest, ConfluenceImportRequest, GitImportRequest
+    ],
     Field(discriminator="source"),
 ]
 
@@ -70,6 +74,12 @@ def create_import(
             run_jira_issue_import,
             job.uid, workspace_id, body.base_url, body.pat, body.jql, body.merge_strategy,
             body.schema_uid, body.link_assets,
+        )
+    elif isinstance(body, ConfluenceImportRequest):
+        background_tasks.add_task(
+            run_confluence_import,
+            job.uid, workspace_id, body.base_url, body.pat, body.space_key, body.cql,
+            body.merge_strategy, body.link_assets,
         )
     else:
         background_tasks.add_task(

@@ -12,3 +12,4 @@ cryptography==43.0.1
 ldap3==2.9.1
 # Kerberos (GSSAPI) binding for ldap3 — see LDAP_AUTH=gssapi.
 gssapi==1.8.3
+markdownify==1.2.3

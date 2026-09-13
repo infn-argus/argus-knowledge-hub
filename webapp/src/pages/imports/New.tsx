@@ -21,8 +21,12 @@ export function ImportConfigForm() {
   // Opened from a section's Import link, the form starts on that section's
   // source rather than making you pick it again.
   const requestedSource = searchParams.get("source");
-  const [source, setSource] = useState<"jira" | "jira-issues" | "git">(
-    requestedSource === "jira-issues" || requestedSource === "git" ? requestedSource : "jira",
+  const [source, setSource] = useState<"jira" | "jira-issues" | "confluence" | "git">(
+    requestedSource === "jira-issues" ||
+    requestedSource === "confluence" ||
+    requestedSource === "git"
+      ? requestedSource
+      : "jira",
   );
   const [mergeStrategy, setMergeStrategy] = useState<MergeStrategy>("override");
 
@@ -31,6 +35,8 @@ export function ImportConfigForm() {
   const [jiraSchemaId, setJiraSchemaId] = useState("");
 
   const [jql, setJql] = useState("");
+  const [spaceKey, setSpaceKey] = useState("");
+  const [cql, setCql] = useState("");
   const [linkAssets, setLinkAssets] = useState(true);
 
   const [provider, setProvider] = useState<"github" | "gitlab">("github");
@@ -52,6 +58,11 @@ export function ImportConfigForm() {
     if (existing.data.source === "jira") {
       setBaseUrl(param("base_url"));
       setJiraSchemaId(param("jira_schema_id"));
+    } else if (existing.data.source === "confluence") {
+      setBaseUrl(param("base_url"));
+      setSpaceKey(param("space_key"));
+      setCql(param("cql"));
+      setLinkAssets(existing.data.params.link_assets !== false);
     } else if (existing.data.source === "jira-issues") {
       setBaseUrl(param("base_url"));
       setJql(param("jql"));
@@ -71,6 +82,15 @@ export function ImportConfigForm() {
               source: "jira" as const,
               base_url: baseUrl.replace(/\/+$/, ""),
               jira_schema_id: jiraSchemaId,
+              ...(jiraPat ? { pat: jiraPat } : {}),
+            }
+          : source === "confluence"
+          ? {
+              source: "confluence" as const,
+              base_url: baseUrl.replace(/\/+$/, ""),
+              space_key: spaceKey || undefined,
+              cql: cql || undefined,
+              link_assets: linkAssets,
               ...(jiraPat ? { pat: jiraPat } : {}),
             }
           : source === "jira-issues"
@@ -126,7 +146,7 @@ export function ImportConfigForm() {
       </p>
 
       <div className="mt-6 flex gap-2">
-        {(["jira", "jira-issues", "git"] as const).map((s) => (
+        {(["jira", "jira-issues", "confluence", "git"] as const).map((s) => (
           <button
             key={s}
             type="button"
@@ -136,7 +156,13 @@ export function ImportConfigForm() {
               source === s ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
-            {s === "jira" ? "Jira objects" : s === "jira-issues" ? "Jira tickets" : "Git"}
+            {s === "jira"
+              ? "Jira objects"
+              : s === "jira-issues"
+                ? "Jira tickets"
+                : s === "confluence"
+                  ? "Confluence"
+                  : "Git"}
           </button>
         ))}
       </div>
@@ -153,7 +179,7 @@ export function ImportConfigForm() {
           />
         </div>
 
-        {source === "jira" || source === "jira-issues" ? (
+        {source === "jira" || source === "jira-issues" || source === "confluence" ? (
           <>
             <div>
               <label className="block text-sm font-medium text-slate-700">Jira server URL</label>
@@ -185,7 +211,48 @@ export function ImportConfigForm() {
                 className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
-            {source === "jira" ? (
+            {source === "confluence" ? (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Space key</label>
+                  <input
+                    value={spaceKey}
+                    onChange={(e) => setSpaceKey(e.target.value)}
+                    placeholder="LNF"
+                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Or a CQL query
+                  </label>
+                  <input
+                    value={cql}
+                    onChange={(e) => setCql(e.target.value)}
+                    placeholder='space = LNF AND label = "procedure"'
+                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Pages become documents, typed from their labels. Bodies are converted to
+                    Markdown; re-importing a page whose version hasn't changed adds no revision.
+                  </p>
+                </div>
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={linkAssets}
+                    onChange={(e) => setLinkAssets(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    Link documents to objects they mention
+                    <span className="block text-xs text-slate-500">
+                      A page whose text contains an object key (LNFT2-145356) is attached to it.
+                    </span>
+                  </span>
+                </label>
+              </>
+            ) : source === "jira" ? (
               <div>
                 <label className="block text-sm font-medium text-slate-700">Object schema ID</label>
                 <input

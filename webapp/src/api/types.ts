@@ -359,7 +359,7 @@ export interface ImportConfig {
   uid: string;
   workspace_id: string;
   name: string;
-  source: "jira" | "jira-issues" | "git";
+  source: "jira" | "jira-issues" | "confluence" | "git";
   merge_strategy: MergeStrategy;
   params: Record<string, string | boolean | null>;
   last_run_at: string | null;
@@ -392,8 +392,18 @@ export interface GitImportConfigParams {
   pat?: string;
 }
 
+export interface ConfluenceImportConfigParams {
+  source: "confluence";
+  base_url: string;
+  space_key?: string | null;
+  cql?: string | null;
+  link_assets?: boolean;
+  pat?: string;
+}
+
 export type ImportConfigParams =
   | JiraImportConfigParams
+  | ConfluenceImportConfigParams
   | JiraIssueImportConfigParams
   | GitImportConfigParams;
 
@@ -785,6 +795,7 @@ export interface EffectivePermissions {
 export function importSourceLabel(source: string): string {
   if (source === "jira") return "Jira objects";
   if (source === "jira-issues") return "Jira tickets";
+  if (source === "confluence") return "Confluence";
   if (source === "git") return "Git";
   return source;
 }

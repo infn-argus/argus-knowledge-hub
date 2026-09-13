@@ -23,6 +23,15 @@ class JiraIssueImportConfigParams(BaseModel):
     pat: Optional[str] = None  # omit on update to keep the stored secret
 
 
+class ConfluenceImportConfigParams(BaseModel):
+    source: Literal["confluence"]
+    base_url: str
+    space_key: Optional[str] = None
+    cql: Optional[str] = None
+    link_assets: bool = True
+    pat: Optional[str] = None  # omit on update to keep the stored secret
+
+
 class GitImportConfigParams(BaseModel):
     source: Literal["git"]
     provider: Literal["github", "gitlab"]
@@ -32,7 +41,10 @@ class GitImportConfigParams(BaseModel):
 
 
 ImportConfigParams = Union[
-    JiraImportConfigParams, JiraIssueImportConfigParams, GitImportConfigParams
+    JiraImportConfigParams,
+    JiraIssueImportConfigParams,
+    ConfluenceImportConfigParams,
+    GitImportConfigParams,
 ]
 
 
