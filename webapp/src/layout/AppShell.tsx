@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { workspacesApi } from "../api/client";
 import { firebaseSignOut } from "../api/firebase";
-import { clearSession, getActiveProfile } from "../api/session";
+import { clearSession } from "../api/session";
+import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
 import { SchemaTree } from "../components/SchemaTree";
 import { WorkspaceSwitcher } from "../components/WorkspaceSwitcher";
 
@@ -123,11 +124,9 @@ function SettingsLinks({ links }: { links: { to: string; label: string }[] }) {
 }
 
 export function AppShell() {
-  const profile = getActiveProfile();
   const me = useQuery({ queryKey: ["me"], queryFn: workspacesApi.me });
 
-  const currentWorkspaceId =
-    profile?.authType === "oidc" ? profile.activeWorkspaceId : me.data?.workspace_id;
+  const currentWorkspaceId = useCurrentWorkspaceId();
   const membersLink = currentWorkspaceId ? `/workspaces/${currentWorkspaceId}/members` : null;
   const adminLink = membersLink ?? (me.data?.is_admin ? "/admin/workspaces" : null);
 

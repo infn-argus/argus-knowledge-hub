@@ -52,6 +52,14 @@ export class ApiError extends Error {
     this.status = status;
     this.body = body;
   }
+
+  /** The message the API meant for a person — FastAPI puts it in `detail`.
+   * Null when the body carries no readable message, so callers can fall back
+   * to their own wording rather than showing a JSON dump. */
+  get detail(): string | null {
+    const detail = (this.body as { detail?: unknown } | null)?.detail;
+    return typeof detail === "string" ? detail : null;
+  }
 }
 
 async function request<T>(
@@ -125,6 +133,7 @@ export const schemasApi = {
     if (!resp.ok) throw new ApiError(resp.status, data);
     return data as AppSchema;
   },
+  clearIcon: (uid: string) => request<AppSchema>(`/v1/schemas/${uid}/icon`, { method: "DELETE" }),
 };
 
 export const assetsApi = {
@@ -136,6 +145,23 @@ export const assetsApi = {
   update: (uid: string, input: Partial<AssetInput>) =>
     request<Asset>(`/v1/assets/${uid}`, { method: "PUT", body: json(input) }),
   delete: (uid: string) => request<void>(`/v1/assets/${uid}`, { method: "DELETE" }),
+  uploadAvatar: async (uid: string, file: File): Promise<Asset> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch(`${session.baseUrl}/v1/assets/${uid}/avatar`, {
+      method: "POST",
+      headers: authHeaders(session),
+      body: form,
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new ApiError(resp.status, data);
+    return data as Asset;
+  },
+  setAvatarFromAttachment: (uid: string, attachmentUid: string) =>
+    request<Asset>(`/v1/assets/${uid}/avatar/${attachmentUid}`, { method: "PUT" }),
+  clearAvatar: (uid: string) => request<Asset>(`/v1/assets/${uid}/avatar`, { method: "DELETE" }),
 };
 
 export const relationsApi = {

@@ -1,6 +1,8 @@
+import os
+import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -8,6 +10,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.auth import get_current_user_id, require_permission
 from app.db import get_db
 from app.models.asset import Asset, Relation
+from app.models.attachment import Attachment
 from app.models.schema import Schema
 from app.schemas.asset import AssetCreate, AssetOut, AssetUpdate, RelationCreate, RelationOut
 from app.services.attribute_validation import validate_attributes
@@ -15,6 +18,8 @@ from app.services.current_user_attrs import stamp_current_user_attributes
 from app.services.relations import rebuild_asset_relations, rebuild_asset_relations_with_neighbors
 
 router = APIRouter(prefix="/v1/assets", tags=["assets"])
+
+ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
 
 
 @router.get("", response_model=list[AssetOut])
@@ -137,6 +142,75 @@ def delete_asset(
     asset = _get_owned_asset(uid, workspace_id, db)
     db.delete(asset)
     db.commit()
+
+
+@router.post("/{uid}/avatar", response_model=AssetOut)
+async def upload_asset_avatar(
+    uid: str,
+    file: UploadFile,
+    workspace_id: str = Depends(require_permission("modify")),
+    db: Session = Depends(get_db),
+):
+    """Upload a picture and make it this object's avatar. The file is stored
+    as a normal attachment of the object, so replacing the avatar doesn't
+    destroy the previous picture — it simply reappears among the
+    attachments, where it can be deleted or promoted back."""
+    asset = _get_owned_asset(uid, workspace_id, db)
+
+    attachment_uid = str(uuid.uuid4())
+    os.makedirs(ATTACHMENTS_DIR, exist_ok=True)
+    storage_path = os.path.join(ATTACHMENTS_DIR, attachment_uid)
+    contents = await file.read()
+    with open(storage_path, "wb") as f:
+        f.write(contents)
+
+    db.add(Attachment(
+        uid=attachment_uid,
+        workspace_id=workspace_id,
+        asset_uid=uid,
+        filename=file.filename or attachment_uid,
+        mime_type=file.content_type,
+        file_size=len(contents),
+        storage_path=storage_path,
+    ))
+    asset.avatar_icon_uid = attachment_uid
+    db.commit()
+    db.refresh(asset)
+    return asset
+
+
+@router.put("/{uid}/avatar/{attachment_uid}", response_model=AssetOut)
+def set_asset_avatar_from_attachment(
+    uid: str,
+    attachment_uid: str,
+    workspace_id: str = Depends(require_permission("modify")),
+    db: Session = Depends(get_db),
+):
+    """Promote a picture already attached to this object to be its avatar —
+    the common case for imported objects, whose pictures arrive as
+    attachments."""
+    asset = _get_owned_asset(uid, workspace_id, db)
+    attachment = db.get(Attachment, attachment_uid)
+    if attachment is None or attachment.asset_uid != uid:
+        raise HTTPException(status_code=404, detail="Attachment not found on this object")
+    asset.avatar_icon_uid = attachment_uid
+    db.commit()
+    db.refresh(asset)
+    return asset
+
+
+@router.delete("/{uid}/avatar", response_model=AssetOut)
+def clear_asset_avatar(
+    uid: str,
+    workspace_id: str = Depends(require_permission("modify")),
+    db: Session = Depends(get_db),
+):
+    """Clear the avatar. The picture itself stays as an attachment."""
+    asset = _get_owned_asset(uid, workspace_id, db)
+    asset.avatar_icon_uid = None
+    db.commit()
+    db.refresh(asset)
+    return asset
 
 
 relations_router = APIRouter(prefix="/v1/relations", tags=["relations"])

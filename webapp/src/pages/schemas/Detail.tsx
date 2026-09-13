@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Asset, AppDocument, Issue, MemberDirectoryEntry } from "../../api/types";
 import { assetsApi, documentsApi, globalValuesApi, issuesApi, membersApi, schemasApi } from "../../api/client";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage";
+import { ImageSlot } from "../../components/ImageSlot";
 import {
   ColumnDef,
   ColumnPickerButton,
@@ -71,6 +72,21 @@ export function SchemaDetail() {
     mutationFn: assetsApi.delete,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["assets"] }),
     onError: () => alert("Delete failed."),
+  });
+
+  // The icon shows up in the type tree and next to every object of the type,
+  // so both queries have to be refreshed, not just this page's.
+  const invalidateIcon = () => {
+    queryClient.invalidateQueries({ queryKey: ["schemas"] });
+    queryClient.invalidateQueries({ queryKey: ["schemas", uid] });
+  };
+  const uploadIconMutation = useMutation({
+    mutationFn: (file: File) => schemasApi.uploadIcon(uid!, file),
+    onSuccess: invalidateIcon,
+  });
+  const clearIconMutation = useMutation({
+    mutationFn: () => schemasApi.clearIcon(uid!),
+    onSuccess: invalidateIcon,
   });
 
   const deleteSchemaMutation = useMutation({
@@ -349,13 +365,15 @@ export function SchemaDetail() {
     <div>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {schema.icon_attachment_uid && (
-            <AuthenticatedImage
-              uid={schema.icon_attachment_uid}
-              alt=""
-              className="h-10 w-10 rounded object-contain"
-            />
-          )}
+          <ImageSlot
+            attachmentUid={schema.icon_attachment_uid}
+            fallbackText={schema.name}
+            alt={`${schema.name} icon`}
+            size={40}
+            busy={uploadIconMutation.isPending}
+            onPick={(file) => uploadIconMutation.mutate(file)}
+            onClear={() => clearIconMutation.mutate()}
+          />
           <div>
             <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-900">
               {schema.name}

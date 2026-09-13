@@ -13,11 +13,11 @@ import requests
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.db import SessionLocal
 from app.models.asset import Asset, Relation
-from app.models.asset_subresources import AssetComment, AssetHistory
+from app.models.asset_subresources import AssetComment, AssetHistory, AssetLabel
 from app.models.attachment import Attachment
 from app.models.global_value import GlobalValue
 from app.models.import_job import ImportJob
@@ -25,6 +25,8 @@ from app.models.schema import Schema
 from app.models.workspace import Workspace
 from app.services.attribute_validation import _descendant_schema_uids, check_attributes
 from app.services.import_merge import should_write
+from app.services.integrity import relink_workspace
+from app.services.relations import rebuild_asset_relations
 
 ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
 
@@ -303,6 +305,47 @@ def _record_diagnostic(job: ImportJob, seen: set, category: str, detail: str) ->
         return
     seen.add(category)
     job.warnings = [*(job.warnings or []), f"{category}: {detail}"]
+
+
+def _import_object_qrcode(db: Session, asset: Asset, jo: dict) -> int:
+    """Every Jira Insight object carries a QR code encoding its own object
+    URL, and that URL already rides along in the navlist payload as
+    _links.self — so this costs no extra request. Imported as a system
+    label, which is what a scan in the mobile app resolves against.
+
+    The value is re-checked on every import because a Jira base URL can
+    change (a migration, a new hostname); the label is updated in place
+    rather than duplicated."""
+    url = (jo.get("_links") or {}).get("self")
+    if not url:
+        return 0
+    existing = (
+        db.query(AssetLabel)
+        .filter(
+            AssetLabel.asset_uid == asset.uid,
+            AssetLabel.type == "qrcode",
+            AssetLabel.issuer == "system",
+        )
+        .first()
+    )
+    now = datetime.now(timezone.utc)
+    if existing is not None:
+        if existing.value != url:
+            existing.value = url
+            existing.updated_at = now
+        return 0
+    db.add(AssetLabel(
+        uid=str(uuid.uuid4()),
+        asset_uid=asset.uid,
+        type="qrcode",
+        value=url,
+        issuer="system",
+        verified=True,
+        created_at=now,
+        updated_at=now,
+        metadata_json={"source": "jira", "jiraObjectId": jo.get("id")},
+    ))
+    return 1
 
 
 def _import_object_avatar(
@@ -641,6 +684,7 @@ def run_jira_import(
             attachments_imported = 0
             comments_imported = 0
             history_imported = 0
+            labels_imported = 0
             for jo in jira_objects:
                 key = jo.get("objectKey")
                 if not key:
@@ -699,6 +743,10 @@ def run_jira_import(
                     _set_progress(db, job, f"Skipped {key}: constraint violation", errors=1)
                     continue
 
+                # Independent of obj_id and of every network call below:
+                # the object URL is already in the payload we have.
+                labels_imported += _import_object_qrcode(db, asset, jo)
+
                 obj_id = jo.get("id") or jo.get("objectId")
                 if obj_id is None:
                     _record_diagnostic(
@@ -743,16 +791,35 @@ def run_jira_import(
             _set_progress(
                 db, job, f"Imported {own_objects} objects for {t['name']}",
                 assets=own_objects, attachments=attachments_imported, comments=comments_imported,
-                history=history_imported,
+                history=history_imported, labels=labels_imported,
             )
 
         # Reference attributes can point across object types processed in any
         # order, so relations are resolved only now that every asset in the
         # schema has been created and has a known key -> uid mapping.
         if pending_relations:
+            # Reference targets routinely live in *another* workspace: a
+            # Jira schema like EUAPS points at shared types (Location,
+            # Facility, HW Model, Workgroup) owned by Divisione
+            # Acceleratori. Scoping this map to the importing workspace
+            # silently dropped every such relation — the value resolved
+            # and rendered fine in the attribute list, but the object
+            # showed "Inbound: none / Outbound: none". So the map spans
+            # everything visible from here, by the same rule references
+            # use: own workspace, or a global asset, or an asset of a
+            # global type. Asset.key is unique across workspaces, so
+            # widening the map can't shadow a local object.
             key_to_uid = dict(
                 db.execute(
-                    select(Asset.key, Asset.uid).where(Asset.workspace_id == workspace_id)
+                    select(Asset.key, Asset.uid)
+                    .join(Schema, Asset.schema_uid == Schema.uid, isouter=True)
+                    .where(
+                        or_(
+                            Asset.workspace_id == workspace_id,
+                            Asset.is_global.is_(True),
+                            Schema.is_global.is_(True),
+                        )
+                    )
                 ).all()
             )
             existing_relations = {
@@ -762,6 +829,7 @@ def run_jira_import(
                 )
             }
             relations_created = 0
+            foreign_endpoints: set[str] = set()
             for from_key, to_key, relation_type in pending_relations:
                 from_uid = key_to_uid.get(from_key)
                 to_uid = key_to_uid.get(to_key)
@@ -777,9 +845,33 @@ def run_jira_import(
                     to_asset_uid=to_uid,
                     relation_type=relation_type,
                 ))
+                foreign_endpoints.add(to_uid)
                 relations_created += 1
             db.commit()
             _set_progress(db, job, f"Created {relations_created} relations", relations=relations_created)
+
+            # The relink pass below refreshes the cache for this workspace's
+            # own assets only; a cross-workspace target now has a new
+            # inbound edge and would otherwise keep a stale cached list.
+            for uid in foreign_endpoints:
+                target = db.get(Asset, uid)
+                if target is not None and target.workspace_id != workspace_id:
+                    rebuild_asset_relations(db, uid)
+            db.commit()
+
+        # An import writes reference values as the source system's display
+        # labels ("Servizio Laser"), not our uids, so the data lands
+        # unresolved and every re-import silently reverted a previous manual
+        # relink. Resolving here makes the import self-consistent: it is the
+        # same pass the Integrity page runs, and it also resyncs every
+        # relation cache in the workspace.
+        _set_progress(db, job, "Resolving references")
+        relink_stats = relink_workspace(db, workspace_id)
+        _set_progress(
+            db, job,
+            f"Resolved {relink_stats['values_relinked']} reference value(s) "
+            f"across {relink_stats['assets_updated']} object(s)",
+        )
 
         job.status = "succeeded"
         job.progress = "Import complete"

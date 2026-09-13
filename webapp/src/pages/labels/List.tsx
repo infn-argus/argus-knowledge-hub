@@ -1,13 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { assetSubresourcesApi, labelsApi } from "../../api/client";
 import { LABEL_TYPES } from "../../api/types";
+import { LabelScanner } from "../../components/LabelScanner";
 
 export function LabelList() {
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const [scanMiss, setScanMiss] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const { data, isLoading } = useQuery({
     queryKey: ["labels", search, type],
@@ -20,8 +24,31 @@ export function LabelList() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["labels"] }),
   });
 
+  /** Scanning here is a lookup, not data entry: point the camera at a tag and
+   * land on the object it identifies. An exact value match wins; a code that
+   * matches nothing leaves the value in the search box rather than silently
+   * doing nothing. */
+  const resolveScan = async (value: string) => {
+    setScanning(false);
+    const matches = await labelsApi.search({ search: value });
+    const exact = matches.find((m) => m.value === value);
+    if (exact) {
+      navigate(`/assets/${exact.asset_uid}`);
+      return;
+    }
+    setSearch(value);
+    setScanMiss(value);
+  };
+
   return (
     <div>
+      {scanning && (
+        <LabelScanner
+          title="Scan to find an object"
+          onClose={() => setScanning(false)}
+          onScan={resolveScan}
+        />
+      )}
       <h1 className="text-2xl font-semibold text-slate-900">Labels</h1>
       <p className="mt-1 text-sm text-slate-500">
         QR codes, barcodes, serial numbers, and RFID tags attached to assets.
@@ -46,7 +73,24 @@ export function LabelList() {
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={() => {
+            setScanMiss(null);
+            setScanning(true);
+          }}
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+        >
+          Scan a code
+        </button>
       </div>
+
+      {scanMiss && (
+        <p className="mt-3 text-sm text-amber-700">
+          Nothing is labelled <span className="font-mono">{scanMiss}</span> in this workspace — the
+          search below is set to that value, so you can see what's close.
+        </p>
+      )}
 
       {isLoading && <p className="mt-4 text-sm text-slate-500">Loading…</p>}
 

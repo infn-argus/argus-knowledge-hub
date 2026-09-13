@@ -1,6 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
+import { Fragment } from "react";
 import { Link, useParams } from "react-router-dom";
 import { importsApi } from "../../api/client";
+
+const ENRICHMENT_COUNTS: [string, string][] = [
+  ["attachments", "Attachments"],
+  ["comments", "Comments"],
+  ["history", "History entries"],
+  ["labels", "QR codes"],
+];
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "bg-slate-100 text-slate-600",
@@ -55,6 +63,18 @@ export function ImportStatus() {
 
               <dt className="text-slate-500">Relations</dt>
               <dd className="text-slate-900">{data.counts.relations ?? 0}</dd>
+
+              {/* Enrichment counts, shown only once the import has produced
+                  any — "did it actually bring the attachments over?" was a
+                  question that previously needed a database query. */}
+              {ENRICHMENT_COUNTS.map(([key, label]) =>
+                data.counts[key] ? (
+                  <Fragment key={key}>
+                    <dt className="text-slate-500">{label}</dt>
+                    <dd className="text-slate-900">{data.counts[key]}</dd>
+                  </Fragment>
+                ) : null,
+              )}
 
               {data.counts.errors !== undefined && (
                 <>

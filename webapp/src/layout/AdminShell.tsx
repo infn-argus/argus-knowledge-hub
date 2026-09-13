@@ -1,14 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { workspacesApi } from "../api/client";
-import { getActiveProfile } from "../api/session";
+import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
 
 export function AdminShell() {
-  const profile = getActiveProfile();
   const me = useQuery({ queryKey: ["me"], queryFn: workspacesApi.me });
-
-  const currentWorkspaceId =
-    profile?.authType === "oidc" ? profile.activeWorkspaceId : me.data?.workspace_id;
+  const currentWorkspaceId = useCurrentWorkspaceId();
 
   const items = [];
   if (currentWorkspaceId) {

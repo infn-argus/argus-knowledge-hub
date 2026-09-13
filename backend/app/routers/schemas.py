@@ -1,5 +1,6 @@
 import os
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import or_, select
@@ -151,6 +152,7 @@ async def upload_schema_icon(
     db: Session = Depends(get_db),
 ):
     schema = _get_owned_schema(uid, workspace_id, db)
+    previous_uid = schema.icon_attachment_uid
 
     attachment_uid = str(uuid.uuid4())
     os.makedirs(ATTACHMENTS_DIR, exist_ok=True)
@@ -169,6 +171,39 @@ async def upload_schema_icon(
         storage_path=storage_path,
     ))
     schema.icon_attachment_uid = attachment_uid
+    _discard_icon_attachment(db, previous_uid, workspace_id)
+    db.commit()
+    db.refresh(schema)
+    return schema
+
+
+def _discard_icon_attachment(db: Session, attachment_uid: Optional[str], workspace_id: str) -> None:
+    """A type icon isn't attached to any object, so once a type stops
+    pointing at it nothing can reach it again — unlike an object's avatar,
+    which stays visible among that object's attachments. Drop the row and
+    the file instead of leaving an unreachable blob behind."""
+    if not attachment_uid:
+        return
+    attachment = db.get(Attachment, attachment_uid)
+    if attachment is None or attachment.workspace_id != workspace_id:
+        return
+    if attachment.asset_uid is not None:
+        return
+    if attachment.storage_path and os.path.exists(attachment.storage_path):
+        os.remove(attachment.storage_path)
+    db.delete(attachment)
+
+
+@router.delete("/{uid}/icon", response_model=SchemaOut)
+def clear_schema_icon(
+    uid: str,
+    workspace_id: str = Depends(require_permission("modify")),
+    db: Session = Depends(get_db),
+):
+    schema = _get_owned_schema(uid, workspace_id, db)
+    previous_uid = schema.icon_attachment_uid
+    schema.icon_attachment_uid = None
+    _discard_icon_attachment(db, previous_uid, workspace_id)
     db.commit()
     db.refresh(schema)
     return schema

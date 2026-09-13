@@ -47,11 +47,26 @@ def relink_workspace(db: Session, workspace_id: str) -> dict:
     doesn't currently point at a real target (matching by key/name for
     references, by email/name for users) — the common case being Jira
     imports whose values are the source system's display labels rather than
-    our uids. Also resyncs every asset's relation cache. Never deletes
-    anything; only rewrites values it can confidently match."""
+    our uids. Also materializes a Relation row for every resolved reference
+    and resyncs every asset's relation cache. Never deletes anything; only
+    rewrites values it can confidently match."""
     assets = db.scalars(select(Asset).where(Asset.workspace_id == workspace_id)).all()
     relinked_values = 0
     relinked_assets = 0
+
+    # A resolved reference and a Relation row are two separate facts, and
+    # only the second one feeds the Inbound/Outbound panel — an import that
+    # could not match a reference key (or matched it across workspaces)
+    # left the attribute looking fine while the object showed no relations
+    # at all. Materializing them here is add-only, so hand-made relations
+    # and ones whose attribute has since been cleared are left untouched.
+    existing_relations = {
+        (r.from_asset_uid, r.to_asset_uid, r.relation_type)
+        for r in db.scalars(select(Relation).where(Relation.workspace_id == workspace_id))
+    }
+    relations_created = 0
+    touched_uids: set[str] = set()
+
     for asset in assets:
         schema = db.get(Schema, asset.schema_uid) if asset.schema_uid else None
         asset_changed = False
@@ -101,15 +116,49 @@ def relink_workspace(db: Session, workspace_id: str) -> dict:
                 if row_changed:
                     attrs[key] = new_values if is_list else new_values[0]
                     asset_changed = True
+
+                if attr_type == "reference":
+                    relation_type = attr.get("name") or key
+                    for v in new_values:
+                        if not isinstance(v, str) or v == "":
+                            continue
+                        if not _resolve_reference(db, v, allowed_schema_uids, workspace_id):
+                            continue
+                        dedup_key = (asset.uid, v, relation_type)
+                        if dedup_key in existing_relations:
+                            continue
+                        existing_relations.add(dedup_key)
+                        db.add(Relation(
+                            workspace_id=workspace_id,
+                            from_asset_uid=asset.uid,
+                            to_asset_uid=v,
+                            relation_type=relation_type,
+                        ))
+                        relations_created += 1
+                        touched_uids.add(asset.uid)
+                        touched_uids.add(v)
             if asset_changed:
                 asset.attributes = attrs
                 relinked_assets += 1
+
+    # Caches are rebuilt only after every relation exists, otherwise an
+    # asset processed early would be cached before a later asset creates an
+    # inbound edge to it. Targets in another workspace are included: a
+    # cross-workspace reference gives them an inbound edge too.
+    db.flush()
+    for asset in assets:
         rebuild_asset_relations(db, asset.uid)
+    for uid in touched_uids:
+        target = db.get(Asset, uid)
+        if target is not None and target.workspace_id != workspace_id:
+            rebuild_asset_relations(db, uid)
+
     db.commit()
     return {
         "assets_scanned": len(assets),
         "assets_updated": relinked_assets,
         "values_relinked": relinked_values,
+        "relations_created": relations_created,
     }
 
 

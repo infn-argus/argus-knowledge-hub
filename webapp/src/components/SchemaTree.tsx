@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { assetsApi, documentsApi, issuesApi, schemasApi } from "../api/client";
 import { AppSchema } from "../api/types";
+import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
 import { AuthenticatedImage } from "./AuthenticatedImage";
 
 interface TreeNode {
@@ -123,6 +124,7 @@ export function SchemaTree({
   const navigate = useNavigate();
   const { uid: selectedUid } = useParams<{ uid?: string }>();
   const [query, setQuery] = useState("");
+  const currentWorkspaceId = useCurrentWorkspaceId();
 
   const schemas = useQuery({ queryKey: ["schemas"], queryFn: schemasApi.list });
   const assets = useQuery({
@@ -141,9 +143,20 @@ export function SchemaTree({
     enabled: appliesTo === "documents",
   });
 
+  // /v1/schemas also returns every *global* type owned by another workspace,
+  // because references have to resolve across workspaces. That belongs in the
+  // reference pickers, not here: a workspace with 24 types of its own was
+  // listing 105 once a neighbouring workspace shared its catalogue. The tree
+  // shows what this workspace owns; a type whose parent lives elsewhere simply
+  // surfaces as a root.
   const scopedSchemas = useMemo(
-    () => (schemas.data ?? []).filter((s) => (s.applies_to ?? "objects") === appliesTo),
-    [schemas.data, appliesTo],
+    () =>
+      (schemas.data ?? []).filter(
+        (s) =>
+          (s.applies_to ?? "objects") === appliesTo &&
+          (currentWorkspaceId === null || s.workspace_id === currentWorkspaceId),
+      ),
+    [schemas.data, appliesTo, currentWorkspaceId],
   );
   const tree = useMemo(() => buildTree(scopedSchemas), [scopedSchemas]);
   const visibleTree = useMemo(() => filterTree(tree, query), [tree, query]);

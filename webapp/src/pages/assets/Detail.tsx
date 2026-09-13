@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  ApiError,
   assetSubresourcesApi,
   assetsApi,
   attachmentsApi,
@@ -12,6 +13,9 @@ import {
 import { LABEL_ISSUERS, LABEL_TYPES } from "../../api/types";
 import { AttributeValue } from "../../components/AttributeValue";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage";
+import { ImageSlot } from "../../components/ImageSlot";
+import { isScannableType, LabelCode, printLabel } from "../../components/LabelCode";
+import { LabelScanner } from "../../components/LabelScanner";
 import { RelationGraph } from "../../components/RelationGraph";
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
 
@@ -50,6 +54,7 @@ export function AssetDetail() {
   const [labelType, setLabelType] = useState<string>(LABEL_TYPES[0]);
   const [labelValue, setLabelValue] = useState("");
   const [labelIssuer, setLabelIssuer] = useState<string>(LABEL_ISSUERS[0]);
+  const [scanning, setScanning] = useState(false);
 
   const asset = useQuery({
     queryKey: ["assets", uid],
@@ -98,6 +103,26 @@ export function AssetDetail() {
   const deleteAttachmentMutation = useMutation({
     mutationFn: attachmentsApi.delete,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["attachments", uid] }),
+  });
+  // Avatar changes touch both the object and its attachment list: an
+  // uploaded avatar is stored as an attachment, and clearing one puts that
+  // picture back among them.
+  const invalidateAvatar = () => {
+    queryClient.invalidateQueries({ queryKey: ["assets", uid] });
+    queryClient.invalidateQueries({ queryKey: ["attachments", uid] });
+    queryClient.invalidateQueries({ queryKey: ["assets"] });
+  };
+  const uploadAvatarMutation = useMutation({
+    mutationFn: (file: File) => assetsApi.uploadAvatar(uid!, file),
+    onSuccess: invalidateAvatar,
+  });
+  const setAvatarMutation = useMutation({
+    mutationFn: (attachmentUid: string) => assetsApi.setAvatarFromAttachment(uid!, attachmentUid),
+    onSuccess: invalidateAvatar,
+  });
+  const clearAvatarMutation = useMutation({
+    mutationFn: () => assetsApi.clearAvatar(uid!),
+    onSuccess: invalidateAvatar,
   });
   const addCommentMutation = useMutation({
     mutationFn: () => assetSubresourcesApi.addComment(uid!, commentAuthor, commentText),
@@ -149,16 +174,32 @@ export function AssetDetail() {
   return (
     <div>
       {showGraph && <RelationGraph assetUid={a.uid} onClose={() => setShowGraph(false)} />}
+      {scanning && (
+        <LabelScanner
+          title="Scan a code for this object"
+          onClose={() => setScanning(false)}
+          onScan={(value) => {
+            // Filling the field rather than saving straight away: the type
+            // and issuer still need picking, and a misread should be
+            // correctable before it becomes a label.
+            setLabelValue(value);
+            setLabelType(value.startsWith("http") ? "qrcode" : "barcode");
+            setScanning(false);
+          }}
+        />
+      )}
 
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-4">
-          {a.avatar_icon_uid && (
-            <AuthenticatedImage
-              uid={a.avatar_icon_uid}
-              alt={a.name}
-              className="h-16 w-16 rounded object-cover"
-            />
-          )}
+          <ImageSlot
+            attachmentUid={a.avatar_icon_uid}
+            fallbackText={a.name}
+            alt={a.name}
+            size={64}
+            busy={uploadAvatarMutation.isPending}
+            onPick={(file) => uploadAvatarMutation.mutate(file)}
+            onClear={() => clearAvatarMutation.mutate()}
+          />
           <div>
             <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-900">
               {a.name}
@@ -329,31 +370,53 @@ export function AssetDetail() {
               e.target.value = "";
             }}
           />
-          <ul className="space-y-1 text-sm">
-            {visibleAttachments.map((att) => (
-              <li key={att.uid} className="flex items-center justify-between">
-                <span className="truncate">
-                  {att.filename}{" "}
-                  <span className="text-xs text-slate-400">
-                    ({att.file_size ? `${Math.round(att.file_size / 1024)} KB` : "?"})
+          <ul className="space-y-2 text-sm">
+            {visibleAttachments.map((att) => {
+              const isImage = (att.mime_type ?? "").startsWith("image/");
+              return (
+                <li key={att.uid} className="flex items-center gap-3">
+                  {isImage ? (
+                    <AuthenticatedImage
+                      uid={att.uid}
+                      alt={att.filename}
+                      className="h-10 w-10 shrink-0 rounded border border-slate-200 bg-white object-contain"
+                    />
+                  ) : (
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 text-[10px] uppercase text-slate-400">
+                      {(att.filename.split(".").pop() ?? "file").slice(0, 4)}
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1 truncate">
+                    {att.filename}{" "}
+                    <span className="text-xs text-slate-400">
+                      ({att.file_size ? `${Math.round(att.file_size / 1024)} KB` : "?"})
+                    </span>
                   </span>
-                </span>
-                <span className="flex shrink-0 gap-3">
-                  <button
-                    onClick={() => downloadAttachment(att.uid, att.filename)}
-                    className="text-xs text-indigo-600 hover:text-indigo-800"
-                  >
-                    Download
-                  </button>
-                  <button
-                    onClick={() => deleteAttachmentMutation.mutate(att.uid)}
-                    className="text-xs text-red-500 hover:text-red-700"
-                  >
-                    Delete
-                  </button>
-                </span>
-              </li>
-            ))}
+                  <span className="flex shrink-0 gap-3">
+                    {isImage && (
+                      <button
+                        onClick={() => setAvatarMutation.mutate(att.uid)}
+                        className="text-xs text-slate-600 hover:text-slate-900"
+                      >
+                        Set as avatar
+                      </button>
+                    )}
+                    <button
+                      onClick={() => downloadAttachment(att.uid, att.filename)}
+                      className="text-xs text-indigo-600 hover:text-indigo-800"
+                    >
+                      Download
+                    </button>
+                    <button
+                      onClick={() => deleteAttachmentMutation.mutate(att.uid)}
+                      className="text-xs text-red-500 hover:text-red-700"
+                    >
+                      Delete
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
             {visibleAttachments.length === 0 && (
               <p className="text-slate-400">No attachments.</p>
             )}
@@ -377,28 +440,45 @@ export function AssetDetail() {
         </SectionCard>
 
         <SectionCard title="Labels">
-          <ul className="space-y-1 text-sm">
+          <ul className="space-y-3 text-sm">
             {labels.data?.map((l) => (
-              <li key={l.uid} className="flex items-center justify-between">
-                <span>
+              <li key={l.uid} className="flex items-start gap-3">
+                {isScannableType(l.type) && (
+                  <LabelCode type={l.type} value={l.value} size={64} />
+                )}
+                <div className="min-w-0 flex-1">
                   <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
                     {l.type}
                   </span>{" "}
-                  {l.value}
-                  {l.verified && (
-                    <span className="ml-1 text-xs text-green-600">verified</span>
-                  )}
+                  <span className="break-all">{l.value}</span>
+                  <div className="mt-0.5 text-xs text-slate-400">
+                    issued by {l.issuer}
+                    {l.verified && <span className="ml-1 text-green-600">· verified</span>}
+                  </div>
+                </div>
+                <span className="flex shrink-0 flex-col items-end gap-1">
+                  <button
+                    onClick={() => printLabel(l, { name: a.name, key: a.key })}
+                    className="text-xs text-indigo-600 hover:text-indigo-800"
+                  >
+                    Print
+                  </button>
+                  <button
+                    onClick={() => deleteLabelMutation.mutate(l.uid)}
+                    className="text-xs text-red-500 hover:text-red-700"
+                  >
+                    Remove
+                  </button>
                 </span>
-                <button
-                  onClick={() => deleteLabelMutation.mutate(l.uid)}
-                  className="text-xs text-red-500 hover:text-red-700"
-                >
-                  Remove
-                </button>
               </li>
             ))}
             {labels.data?.length === 0 && <p className="text-slate-400">No labels yet.</p>}
           </ul>
+          {addLabelMutation.isError && (
+            <p className="mt-2 text-xs text-red-600">
+              {(addLabelMutation.error as ApiError)?.detail ?? "Could not add this label."}
+            </p>
+          )}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -423,6 +503,14 @@ export function AssetDetail() {
               placeholder="Value"
               className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
             />
+            <button
+              type="button"
+              onClick={() => setScanning(true)}
+              className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+              title="Scan a code with the camera"
+            >
+              Scan
+            </button>
             <select
               value={labelIssuer}
               onChange={(e) => setLabelIssuer(e.target.value)}

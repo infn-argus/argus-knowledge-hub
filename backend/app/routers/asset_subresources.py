@@ -31,8 +31,32 @@ def _check_asset(asset_uid: str, workspace_id: str, db: Session) -> None:
         raise HTTPException(status_code=404, detail="Asset not found")
 
 
+def _reject_duplicate_label(db: Session, workspace_id: str, body) -> None:
+    """The Flutter model declares (type, value) unique and the mobile app
+    relies on a scan resolving to exactly one object; Postgres never got the
+    matching constraint, so a second object could quietly claim the same
+    code. Enforced here (per workspace, the boundary the rest of the API
+    uses) rather than as a migration, which would fail on any duplicate
+    already imported."""
+    clash = db.scalars(
+        select(AssetLabel)
+        .join(Asset, AssetLabel.asset_uid == Asset.uid)
+        .where(
+            Asset.workspace_id == workspace_id,
+            AssetLabel.type == body.type,
+            AssetLabel.value == body.value,
+        )
+    ).first()
+    if clash is not None:
+        owner = db.get(Asset, clash.asset_uid)
+        raise HTTPException(
+            status_code=409,
+            detail=f"This {body.type} is already used by {owner.name if owner else clash.asset_uid}",
+        )
+
+
 def _make_subresource_routes(
-    path: str, model, create_schema, out_schema, id_field: str = "uid"
+    path: str, model, create_schema, out_schema, id_field: str = "uid", on_create=None
 ):
     @router.get(f"/{path}", response_model=list[out_schema], name=f"list_{path}")
     def list_items(
@@ -51,6 +75,8 @@ def _make_subresource_routes(
         db: Session = Depends(get_db),
     ):
         _check_asset(asset_uid, workspace_id, db)
+        if on_create is not None:
+            on_create(db, workspace_id, body)
         item = model(asset_uid=asset_uid, **body.model_dump())
         db.add(item)
         db.commit()
@@ -61,4 +87,6 @@ def _make_subresource_routes(
 _make_subresource_routes("tickets", AssetTicket, AssetTicketCreate, AssetTicketOut)
 _make_subresource_routes("comments", AssetComment, AssetCommentCreate, AssetCommentOut)
 _make_subresource_routes("history", AssetHistory, AssetHistoryCreate, AssetHistoryOut)
-_make_subresource_routes("labels", AssetLabel, AssetLabelCreate, AssetLabelOut)
+_make_subresource_routes(
+    "labels", AssetLabel, AssetLabelCreate, AssetLabelOut, on_create=_reject_duplicate_label
+)

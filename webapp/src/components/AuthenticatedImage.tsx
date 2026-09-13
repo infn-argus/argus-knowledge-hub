@@ -5,10 +5,12 @@ export function AuthenticatedImage({
   uid,
   alt,
   className,
+  style,
 }: {
   uid: string;
   alt: string;
   className?: string;
+  style?: React.CSSProperties;
 }) {
   const [src, setSrc] = useState<string | null>(null);
 
@@ -36,10 +38,11 @@ export function AuthenticatedImage({
     return (
       <div
         className={`flex items-center justify-center bg-slate-100 text-slate-400 ${className ?? ""}`}
+        style={style}
       >
         …
       </div>
     );
   }
-  return <img src={src} alt={alt} className={className} />;
+  return <img src={src} alt={alt} className={className} style={style} />;
 }
