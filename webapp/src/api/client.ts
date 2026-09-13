@@ -38,6 +38,7 @@ import type {
   MyWorkspace,
   RelinkResult,
   Relation,
+  RetypeResult,
   Workspace,
   WorkspaceUpdateInput,
   SchemaInput,
@@ -447,6 +448,33 @@ export const documentsApi = {
   ) => request<DocumentRelation>(`/v1/documents/${uid}/relations`, { method: "POST", body: json(input) }),
   removeRelation: (uid: string, relationId: number) =>
     request<void>(`/v1/documents/${uid}/relations/${relationId}`, { method: "DELETE" }),
+
+  /** Move a batch of documents onto one type. */
+  retype: (uids: string[], documentTypeUid: string | null) =>
+    request<RetypeResult>("/v1/documents/retype", {
+      method: "POST",
+      body: json({ uids, document_type_uid: documentTypeUid }),
+    }),
+
+  listRevisionAttachments: (uid: string, revUid: string) =>
+    request<Attachment[]>(`/v1/documents/${uid}/revisions/${revUid}/attachments`),
+  uploadRevisionAttachment: async (
+    uid: string,
+    revUid: string,
+    file: File,
+  ): Promise<Attachment> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch(
+      `${session.baseUrl}/v1/documents/${uid}/revisions/${revUid}/attachments`,
+      { method: "POST", headers: authHeaders(session), body: form },
+    );
+    const data = await resp.json();
+    if (!resp.ok) throw new ApiError(resp.status, data);
+    return data as Attachment;
+  },
 };
 
 export const rolesApi = {

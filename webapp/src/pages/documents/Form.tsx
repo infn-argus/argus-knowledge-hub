@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, documentsApi, schemasApi } from "../../api/client";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 import { AttributeInput } from "../../components/AttributeInput";
+import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { StepsEditor } from "../../components/StepsEditor";
 import { AuthorityLevel, Confidentiality, DocumentStep } from "../../api/types";
 
@@ -46,7 +47,7 @@ export function DocumentForm() {
   });
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-4xl">
       <h1 className="text-2xl font-semibold text-slate-900">New document</h1>
 
       <form
@@ -125,13 +126,12 @@ export function DocumentForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700">Body (Markdown)</label>
-          <textarea
-            value={bodyMarkdown}
-            onChange={(e) => setBodyMarkdown(e.target.value)}
-            rows={8}
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
-          />
+          <label className="block text-sm font-medium text-slate-700">Body</label>
+          <div className="mt-1">
+            {/* No files here yet: they attach to a revision, and this
+                document doesn't have one until it is created. */}
+            <MarkdownEditor value={bodyMarkdown} onChange={setBodyMarkdown} rows={12} />
+          </div>
         </div>
 
         <div>

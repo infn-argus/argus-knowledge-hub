@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from app.db import Base, SessionLocal, engine
 from app.models.asset import Asset
+from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation, DocumentRevision
 from app.models.import_job import ImportJob
 from app.models.schema import Schema
@@ -31,6 +32,15 @@ from app.services.confluence_import import (
 def _schema():
     Base.metadata.create_all(engine)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _attachments_dir(tmp_path_factory, monkeypatch):
+    """Imported files land on disk; keep them out of the real volume."""
+    directory = tmp_path_factory.mktemp("conf-attachments")
+    monkeypatch.setattr(
+        "app.services.confluence_import.ATTACHMENTS_DIR", str(directory)
+    )
 
 
 def test_headings_lists_and_links_become_markdown():
@@ -93,6 +103,24 @@ def test_unconvertible_macro_says_so_rather_than_leaving_a_hole():
     assert "original" in markdown.lower()
 
 
+def test_images_point_at_the_copied_file():
+    """An image the reader cannot open is not an imported image. Once the
+    file has been copied in, the body has to point at that copy."""
+    markdown = storage_to_markdown(
+        '<ac:image><ri:attachment ri:filename="layout.png" /></ac:image>',
+        {"layout.png": "/v1/attachments/abc-123"},
+    )
+    assert "![layout.png](/v1/attachments/abc-123)" in markdown
+
+
+def test_attachment_link_points_at_the_copied_file():
+    markdown = storage_to_markdown(
+        '<ac:link><ri:attachment ri:filename="wiring.pdf" /></ac:link>',
+        {"wiring.pdf": "/v1/attachments/def-456"},
+    )
+    assert "[wiring.pdf](/v1/attachments/def-456)" in markdown
+
+
 def test_page_and_attachment_links_keep_their_names():
     markdown = storage_to_markdown(
         '<ac:link><ri:page ri:content-title="Beam interlock" /></ac:link>'
@@ -100,6 +128,40 @@ def test_page_and_attachment_links_keep_their_names():
     )
     assert "Beam interlock" in markdown
     assert "layout.pdf" in markdown
+
+
+def test_two_links_in_a_row_both_survive():
+    """A converter whose match reaches across tags eats everything between
+    the first link and the second — the first link vanishes and the two
+    paragraphs merge into one sentence that was never written."""
+    markdown = storage_to_markdown(
+        '<p>The drawing is attached: '
+        '<ac:link><ri:attachment ri:filename="chamber.pdf" /></ac:link></p>'
+        '<p>See also <ac:link><ri:page ri:content-title="Beam interlock" /></ac:link>.</p>',
+        {"chamber.pdf": "/v1/attachments/xyz"},
+    )
+    assert "[chamber.pdf](/v1/attachments/xyz)" in markdown
+    assert "Beam interlock" in markdown
+    # Two paragraphs, still two.
+    assert "attached:" in markdown and "See also" in markdown
+    assert "\n\n" in markdown
+
+
+def test_a_panel_wrapping_a_code_block_keeps_the_code():
+    """Runbooks routinely put the command to run inside a warning panel.
+    Matching the outer macro up to the inner macro's closing tag threw the
+    command away and left the panel empty."""
+    markdown = storage_to_markdown(
+        '<ac:structured-macro ac:name="warning"><ac:rich-text-body>'
+        "<p>Only with the interlock armed:</p>"
+        '<ac:structured-macro ac:name="code">'
+        '<ac:parameter ac:name="language">bash</ac:parameter>'
+        "<ac:plain-text-body><![CDATA[caput BTF:VAC:VALVE:CMD 0]]></ac:plain-text-body>"
+        "</ac:structured-macro>"
+        "</ac:rich-text-body></ac:structured-macro>"
+    )
+    assert "caput BTF:VAC:VALVE:CMD 0" in markdown
+    assert "Only with the interlock armed:" in markdown
 
 
 def test_no_raw_confluence_markup_survives():
@@ -143,8 +205,19 @@ PAGES = [
 ]
 
 
+ATTACHMENTS: dict[str, list] = {}
+FILES: dict[str, bytes] = {}
+
+PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
 class _ConfluenceStub(BaseHTTPRequestHandler):
     pages = PAGES
+    blogposts: list = []
 
     def log_message(self, *a):
         pass
@@ -157,17 +230,48 @@ class _ConfluenceStub(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _binary(self, payload: bytes):
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_GET(self):
         parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+        start = int(query.get("start", ["0"])[0])
+
         if parsed.path == "/rest/api/space":
             self._json({"results": [{"key": "LNF"}]})
-        elif parsed.path in ("/rest/api/content", "/rest/api/content/search"):
-            start = int(parse_qs(parsed.query).get("start", ["0"])[0])
-            self._json({
-                "results": self.pages[start:start + 50],
-                "size": len(self.pages),
-                "totalSize": len(self.pages),
-            })
+        elif parsed.path == "/rest/api/content":
+            # Confluence Server's own shape: `size` counts the results in
+            # THIS response — there is no total here — and another page is
+            # advertised by a `next` link. A stub that invents a `totalSize`
+            # hides the pagination bug this endpoint is prone to.
+            rows = self.blogposts if query.get("type") == ["blogpost"] else self.pages
+            window = rows[start:start + 50]
+            body = {"results": window, "size": len(window), "start": start, "limit": 50,
+                    "_links": {"base": f"http://127.0.0.1:{self.server.server_port}"}}
+            if start + len(window) < len(rows):
+                body["_links"]["next"] = f"/rest/api/content?start={start + len(window)}"
+            self._json(body)
+        elif parsed.path == "/rest/api/content/search":
+            window = self.pages[start:start + 50]
+            self._json({"results": window, "size": len(window),
+                        "totalSize": len(self.pages)})
+        elif parsed.path.endswith("/child/attachment"):
+            page_id = parsed.path.split("/")[-3]
+            results = ATTACHMENTS.get(page_id, [])
+            self._json({"results": results, "size": len(results),
+                        "_links": {"base": f"http://127.0.0.1:{self.server.server_port}"}})
+        elif parsed.path.startswith("/download/"):
+            payload = FILES.get(parsed.path)
+            if payload is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self._binary(payload)
         else:
             self.send_response(404)
             self.end_headers()
@@ -179,6 +283,10 @@ def confluence_stub():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}"
     server.shutdown()
+    _ConfluenceStub.pages = PAGES
+    _ConfluenceStub.blogposts = []
+    ATTACHMENTS.clear()
+    FILES.clear()
 
 
 def _document(db, workspace_id: str, page_id: str) -> Document:
@@ -335,3 +443,159 @@ def test_a_wrong_base_url_names_the_context_path(confluence_stub):
     status, error, _counts = _run(ws, confluence_stub + "/nope")
     assert status == "failed"
     assert "context path" in (error or "")
+
+
+def _page(page_id: str, title: str, *, label: str = "procedure", body: str = "<p>x</p>",
+          parent: str | None = None, version: int = 1) -> dict:
+    page = {
+        "id": page_id,
+        "title": title,
+        "space": {"key": "LNF"},
+        "version": {"number": version, "when": "2026-09-01T10:00:00.000Z",
+                    "by": {"displayName": "Marco Rossi"}},
+        "metadata": {"labels": {"results": [{"name": label}]}},
+        "body": {"storage": {"value": body}},
+    }
+    if parent:
+        page["ancestors"] = [{"id": parent}]
+    return page
+
+
+def _workspace() -> str:
+    suffix = secrets.token_hex(4)
+    ws = f"ws-{suffix}"
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name="WS"))
+    db.commit()
+    db.close()
+    return ws
+
+
+def test_every_page_is_imported_not_just_the_first_batch(confluence_stub):
+    """The first response is one batch, not the library. Reading its `size`
+    as a total stopped every import dead at fifty pages — which looks like
+    a successful import of a wiki that is mostly missing."""
+    _ConfluenceStub.pages = [_page(str(1000 + i), f"Page {i}") for i in range(127)]
+    ws = _workspace()
+
+    status, error, counts = _run(ws, confluence_stub)
+    assert status == "succeeded", error
+    assert counts["documents"] == 127
+
+
+def test_blogposts_are_imported_too(confluence_stub):
+    """A wiki keeps shift reports and announcements as blogposts; asking
+    only for pages leaves out an entire category of operational record."""
+    _ConfluenceStub.pages = [_page("2001", "A page")]
+    _ConfluenceStub.blogposts = [_page("3001", "Shift report 2026-09-10", label="logbook")]
+    ws = _workspace()
+
+    status, error, counts = _run(ws, confluence_stub)
+    assert status == "succeeded", error
+    assert counts["documents"] == 2
+
+    db = SessionLocal()
+    blog = _document(db, ws, "3001")
+    assert blog is not None, "the blogpost should have become a document"
+    assert blog.document_type_uid.endswith(":logbook-entry")
+    db.close()
+
+
+def test_attachments_are_copied_and_the_body_points_at_them(confluence_stub):
+    _ConfluenceStub.pages = [
+        _page("4001", "Vacuum layout",
+              body='<p>See below.</p><ac:image><ri:attachment ri:filename="layout.png" /></ac:image>')
+    ]
+    ATTACHMENTS["4001"] = [{
+        "id": "att-1",
+        "title": "layout.png",
+        "version": {"number": 1, "by": {"displayName": "Marco Rossi"}},
+        "metadata": {"mediaType": "image/png"},
+        "_links": {"download": "/download/attachments/4001/layout.png"},
+    }]
+    FILES["/download/attachments/4001/layout.png"] = PNG
+    ws = _workspace()
+
+    status, error, counts = _run(ws, confluence_stub)
+    assert status == "succeeded", error
+    assert counts["attachments"] == 1
+
+    db = SessionLocal()
+    document = _document(db, ws, "4001")
+    revision = db.get(DocumentRevision, document.current_revision_uid)
+    attachment = db.scalar(
+        select(Attachment).where(Attachment.document_revision_uid == revision.uid)
+    )
+    assert attachment.filename == "layout.png"
+    assert attachment.file_size == len(PNG)
+    assert open(attachment.storage_path, "rb").read() == PNG
+    # The body must point at the copy, not name a file on another server.
+    assert f"![layout.png](/v1/attachments/{attachment.uid})" in revision.body_markdown
+    db.close()
+
+
+def test_an_unchanged_file_is_not_downloaded_again(confluence_stub):
+    """A new revision of a page doesn't mean new images; re-fetching every
+    file on every edit is bytes nobody needs to move twice."""
+    _ConfluenceStub.pages = [
+        _page("5001", "Layout",
+              body='<ac:image><ri:attachment ri:filename="layout.png" /></ac:image>')
+    ]
+    ATTACHMENTS["5001"] = [{
+        "id": "att-9", "title": "layout.png",
+        "version": {"number": 1},
+        "_links": {"download": "/download/attachments/5001/layout.png"},
+    }]
+    FILES["/download/attachments/5001/layout.png"] = PNG
+    ws = _workspace()
+    _run(ws, confluence_stub)
+
+    # The page is edited; the image is not.
+    _ConfluenceStub.pages = [
+        _page("5001", "Layout", version=2,
+              body='<p>Revised.</p><ac:image><ri:attachment ri:filename="layout.png" /></ac:image>')
+    ]
+    status, error, counts = _run(ws, confluence_stub)
+    assert status == "succeeded", error
+    assert counts["documents_updated"] == 1
+    assert counts.get("attachments", 0) == 0, "the file was already here"
+
+    db = SessionLocal()
+    document = _document(db, ws, "5001")
+    attachments = db.scalars(
+        select(Attachment)
+        .join(DocumentRevision, DocumentRevision.uid == Attachment.document_revision_uid)
+        .where(DocumentRevision.document_uid == document.uid)
+    ).all()
+    assert len(attachments) == 1
+    # The new revision still shows the image, pointing at the same copy.
+    revision = db.get(DocumentRevision, document.current_revision_uid)
+    assert f"/v1/attachments/{attachments[0].uid}" in revision.body_markdown
+    db.close()
+
+
+def test_the_page_tree_becomes_document_relations(confluence_stub):
+    """A wiki's shape carries meaning — a page under "Vacuum system" is
+    about the vacuum system — and it is the cheapest structure the graph
+    can get from an import."""
+    _ConfluenceStub.pages = [
+        _page("6001", "Vacuum system"),
+        _page("6002", "Vacuum recovery", parent="6001"),
+    ]
+    ws = _workspace()
+    status, error, counts = _run(ws, confluence_stub)
+    assert status == "succeeded", error
+    assert counts["page_tree_links"] == 1
+
+    db = SessionLocal()
+    parent = _document(db, ws, "6001")
+    child = _document(db, ws, "6002")
+    relation = db.scalar(
+        select(DocumentRelation).where(
+            DocumentRelation.from_document_uid == child.uid,
+            DocumentRelation.relation_type == "child_of",
+        )
+    )
+    assert relation.to_uid == parent.uid
+    assert relation.to_type == "document"
+    db.close()

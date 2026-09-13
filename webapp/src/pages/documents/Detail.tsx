@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { assetsApi, documentsApi, schemasApi } from "../../api/client";
+import { assetsApi, attachmentsApi, documentsApi, schemasApi } from "../../api/client";
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
 import { AttributeInput } from "../../components/AttributeInput";
 import { AttributeValue } from "../../components/AttributeValue";
+import { MarkdownEditor } from "../../components/MarkdownEditor";
+import { MarkdownView } from "../../components/MarkdownView";
 import { StepsEditor } from "../../components/StepsEditor";
 import { DocumentStep } from "../../api/types";
 
@@ -41,6 +43,7 @@ export function DocumentDetail() {
     enabled: !!document.data?.document_type_uid,
   });
   const allSchemas = useQuery({ queryKey: ["schemas"], queryFn: schemasApi.list });
+  const documentSchemas = (allSchemas.data ?? []).filter((s) => s.applies_to === "documents");
   const attrDefs = effectiveAttributes(schema.data, allSchemas.data);
   const inherited = inheritedKeys(schema.data, attrDefs);
   const allAssets = useQuery({
@@ -58,6 +61,12 @@ export function DocumentDetail() {
     currentRevision ||
     latestRevision;
 
+  const attachments = useQuery({
+    queryKey: ["document-attachments", uid, viewedRevisionUid],
+    queryFn: () => documentsApi.listRevisionAttachments(uid!, viewed!.uid),
+    enabled: !!uid && !!viewed?.uid,
+  });
+
   const [bodyMarkdown, setBodyMarkdown] = useState("");
   const [steps, setSteps] = useState<DocumentStep[]>([]);
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
@@ -69,6 +78,29 @@ export function DocumentDetail() {
       setAttributes(viewed.attributes);
     }
   }, [viewed?.uid, viewed?.state]);
+
+  /** A file pasted or dropped into the editor: stored against this
+   * revision, and handed back as the URL the body should point at. */
+  const uploadIntoBody = async (file: File) => {
+    const saved = await documentsApi.uploadRevisionAttachment(uid!, viewed!.uid, file);
+    queryClient.invalidateQueries({ queryKey: ["document-attachments", uid] });
+    return {
+      url: `/v1/attachments/${saved.uid}`,
+      filename: saved.filename,
+      isImage: (saved.mime_type ?? "").startsWith("image/"),
+    };
+  };
+
+  /** The download endpoint needs the Bearer header, so a plain link can't
+   * reach it — fetch it as a blob and hand the browser that. */
+  const downloadAttachment = async (attachmentUid: string, filename: string) => {
+    const url = await attachmentsApi.fetchBlobUrl(attachmentUid);
+    const anchor = window.document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["documents", uid] });
@@ -123,26 +155,63 @@ export function DocumentDetail() {
     onSuccess: invalidate,
     onError: () => alert("Retire failed."),
   });
+  const retypeMutation = useMutation({
+    mutationFn: (typeUid: string | null) => documentsApi.retype([uid!], typeUid),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["documents", uid] });
+    },
+    onError: () => alert("Could not change the type."),
+  });
   const deleteMutation = useMutation({
     mutationFn: () => documentsApi.delete(uid!),
     onSuccess: () => navigate("/documents"),
     onError: () => alert("Delete failed."),
   });
 
+  const sourceUrl = (viewed?.attributes?.argus_source_url as string | undefined) ?? null;
+
   if (document.isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
   if (!document.data) return <p className="text-sm text-red-600">Document not found.</p>;
   const doc = document.data;
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl">
       <div className="flex items-start justify-between">
         <div>
           <p className="font-mono text-xs text-slate-400">{doc.code}</p>
           <h1 className="text-2xl font-semibold text-slate-900">{doc.title}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            {/* An import has to guess the type from a label or a title, so
+                correcting it is routine — it belongs here, not behind an
+                edit form. */}
+            <select
+              value={doc.document_type_uid ?? ""}
+              onChange={(e) => retypeMutation.mutate(e.target.value || null)}
+              disabled={retypeMutation.isPending}
+              className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700"
+              title="Document type"
+            >
+              <option value="">No type</option>
+              {documentSchemas.map((s) => (
+                <option key={s.uid} value={s.uid}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
             <span className="rounded bg-slate-100 px-2 py-0.5">{doc.authority_level}</span>
             <span className="rounded bg-slate-100 px-2 py-0.5">{doc.confidentiality}</span>
             <span className="rounded bg-slate-100 px-2 py-0.5">source: {doc.source}</span>
+            {sourceUrl && (
+              <a
+                href={sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded bg-slate-100 px-2 py-0.5 text-indigo-600 hover:underline"
+              >
+                original page ↗
+              </a>
+            )}
           </p>
         </div>
         <div className="flex gap-2">
@@ -280,16 +349,18 @@ export function DocumentDetail() {
               Body
             </label>
             {viewed.state === "draft" ? (
-              <textarea
-                value={bodyMarkdown}
-                onChange={(e) => setBodyMarkdown(e.target.value)}
-                rows={10}
-                className="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
-              />
+              <div className="mt-1">
+                <MarkdownEditor
+                  value={bodyMarkdown}
+                  onChange={setBodyMarkdown}
+                  onUpload={uploadIntoBody}
+                  placeholder="Write the document in Markdown…"
+                />
+              </div>
             ) : (
-              <p className="mt-1 whitespace-pre-wrap rounded border border-slate-100 bg-slate-50 p-3 text-sm text-slate-700">
-                {viewed.body_markdown || "—"}
-              </p>
+              <div className="mt-1 rounded border border-slate-100 bg-white p-3">
+                <MarkdownView markdown={viewed.body_markdown ?? ""} />
+              </div>
             )}
           </div>
 
@@ -320,6 +391,40 @@ export function DocumentDetail() {
                 {viewed.steps.length === 0 && <p className="text-slate-400">No steps.</p>}
               </ol>
             )}
+          </div>
+
+          {/* Files */}
+          <div className="mt-4">
+            <label className="block text-xs font-medium uppercase tracking-wide text-slate-400">
+              Files
+            </label>
+            <div className="mt-1 space-y-1">
+              {(attachments.data ?? []).map((a) => (
+                <div
+                  key={a.uid}
+                  className="flex items-center justify-between rounded border border-slate-100 px-2 py-1 text-sm"
+                >
+                  <span className="truncate text-slate-700">{a.filename}</span>
+                  <span className="ml-3 flex shrink-0 items-center gap-3 text-xs text-slate-400">
+                    {a.file_size != null && <span>{Math.ceil(a.file_size / 1024)} KB</span>}
+                    <button
+                      type="button"
+                      onClick={() => downloadAttachment(a.uid, a.filename)}
+                      className="text-slate-500 hover:text-slate-900 hover:underline"
+                    >
+                      Download
+                    </button>
+                  </span>
+                </div>
+              ))}
+              {(attachments.data ?? []).length === 0 && (
+                <p className="text-sm text-slate-400">
+                  {viewed.state === "draft"
+                    ? "None yet — drop a file into the editor above."
+                    : "None."}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Type attributes */}

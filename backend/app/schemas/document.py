@@ -123,3 +123,17 @@ class DocumentRelationOut(BaseModel):
     to_uid: str
     relation_type: str
     created_at: datetime
+
+
+class RetypeRequest(BaseModel):
+    """Move several documents onto one type in a single go."""
+
+    uids: list[str]
+    document_type_uid: Optional[str] = None
+
+
+class RetypeResult(BaseModel):
+    moved: int
+    # Documents named in the request that aren't in this workspace, or that
+    # the caller can't see. Reported rather than silently dropped.
+    not_found: list[str]

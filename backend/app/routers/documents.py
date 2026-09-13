@@ -1,7 +1,9 @@
+import os
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -9,8 +11,10 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.auth import Identity, OidcIdentity, PatIdentity, get_identity, require_permission
 from app.db import get_db
 from app.services.permissions import has_permission
+from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation, DocumentRevision
 from app.models.schema import Schema
+from app.schemas.attachment import AttachmentOut
 from app.schemas.document import (
     ApproveAction,
     DocumentCreate,
@@ -23,11 +27,15 @@ from app.schemas.document import (
     DocumentUpdate,
     RejectAction,
     RetireAction,
+    RetypeRequest,
+    RetypeResult,
 )
 from app.services.attribute_validation import check_attributes
 from app.services.current_user_attrs import stamp_current_user_attributes
 
 router = APIRouter(prefix="/v1/documents", tags=["documents"])
+
+ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
 
 
 def _get_owned_document(uid: str, workspace_id: str, db: Session) -> Document:
@@ -137,6 +145,41 @@ def create_document(
     db.commit()
     db.refresh(doc)
     return doc
+
+
+@router.post("/retype", response_model=RetypeResult)
+def retype_documents(
+    body: RetypeRequest,
+    workspace_id: str = Depends(require_permission("modify", resource="documents")),
+    db: Session = Depends(get_db),
+):
+    """Move a batch of documents onto another type.
+
+    Typing a library correctly is done in hindsight, after an import has
+    guessed: it is a sorting job over dozens of documents at a time, and
+    doing it one document at a time through the edit form is the reason it
+    doesn't get done.
+    """
+    if body.document_type_uid:
+        schema = db.get(Schema, body.document_type_uid)
+        if schema is None or schema.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="Document type not found")
+        if schema.applies_to != "documents":
+            raise HTTPException(
+                status_code=422, detail="That type doesn't apply to documents"
+            )
+
+    moved = 0
+    missing: list[str] = []
+    for uid in body.uids:
+        doc = db.get(Document, uid)
+        if doc is None or doc.workspace_id != workspace_id:
+            missing.append(uid)
+            continue
+        doc.document_type_uid = body.document_type_uid
+        moved += 1
+    db.commit()
+    return RetypeResult(moved=moved, not_found=missing)
 
 
 @router.get("/{uid}", response_model=DocumentOut)
@@ -433,3 +476,65 @@ def delete_relation(
         raise HTTPException(status_code=404, detail="Relation not found")
     db.delete(relation)
     db.commit()
+
+
+@router.get("/{uid}/revisions/{rev_uid}/attachments", response_model=list[AttachmentOut])
+def list_revision_attachments(
+    uid: str,
+    rev_uid: str,
+    workspace_id: str = Depends(require_permission("read", resource="documents")),
+    identity: Identity = Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    doc = _get_visible_document(uid, workspace_id, identity, db)
+    _get_revision(doc.uid, rev_uid, db)
+    return db.scalars(
+        select(Attachment).where(Attachment.document_revision_uid == rev_uid)
+    ).all()
+
+
+@router.post("/{uid}/revisions/{rev_uid}/attachments", response_model=AttachmentOut,
+             status_code=201)
+async def upload_revision_attachment(
+    uid: str,
+    rev_uid: str,
+    file: UploadFile,
+    workspace_id: str = Depends(require_permission("modify", resource="documents")),
+    identity: Identity = Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    """A file belonging to one revision of a document.
+
+    Revision-scoped rather than document-scoped because a published revision
+    is immutable: the figure a procedure was approved with has to stay the
+    figure that revision shows, whatever a later one replaces it with.
+    """
+    doc = _get_visible_document(uid, workspace_id, identity, db)
+    revision = _get_revision(doc.uid, rev_uid, db)
+    if revision.state in ("published", "superseded", "retired"):
+        raise HTTPException(
+            status_code=409,
+            detail="That revision is closed — start a new revision to add files.",
+        )
+
+    attachment_uid = str(uuid.uuid4())
+    os.makedirs(ATTACHMENTS_DIR, exist_ok=True)
+    storage_path = os.path.join(ATTACHMENTS_DIR, attachment_uid)
+    contents = await file.read()
+    with open(storage_path, "wb") as f:
+        f.write(contents)
+
+    attachment = Attachment(
+        uid=attachment_uid,
+        workspace_id=workspace_id,
+        document_revision_uid=rev_uid,
+        filename=file.filename or attachment_uid,
+        mime_type=file.content_type,
+        file_size=len(contents),
+        author=_actor_user_id(identity),
+        storage_path=storage_path,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    return attachment

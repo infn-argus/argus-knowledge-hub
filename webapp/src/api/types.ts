@@ -228,7 +228,8 @@ export interface AssetLabelSearchResult {
 export interface Attachment {
   uid: string;
   workspace_id: string;
-  asset_uid: string;
+  asset_uid: string | null;
+  document_revision_uid?: string | null;
   filename: string;
   mime_type: string | null;
   file_size: number | null;
@@ -788,6 +789,11 @@ export interface EffectivePermissions {
   tickets: string[];
   documents: string[];
   workspace: string[];
+}
+
+export interface RetypeResult {
+  moved: number;
+  not_found: string[];
 }
 
 /** A node in the knowledge graph. `kind` is what the thing *is*, which is

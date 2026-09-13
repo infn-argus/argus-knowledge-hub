@@ -11,6 +11,7 @@ a page's *version* is the thing that changes: re-importing a page whose
 version hasn't moved must not manufacture a new revision, or a document's
 history fills with identical entries.
 """
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
+from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation, DocumentRevision
 from app.models.import_job import ImportJob
 from app.services.document_types import ensure_document_types, type_uid
@@ -33,6 +35,8 @@ from app.services.jira_import import (
 )
 
 PAGE_SIZE = 50
+
+ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
 
 # A Confluence label, or a page title prefix, mapped onto one of our
 # document types. Checked against labels first, then the title, and
@@ -116,11 +120,24 @@ def _convert_macro(match: re.Match) -> str:
     return f"<p><em>[{name} — see the original page]</em></p>"
 
 
-def _confluence_macros_to_html(storage: str) -> str:
-    html = re.sub(
-        r'<ac:structured-macro[^>]*ac:name="([^"]+)".*?</ac:structured-macro>',
-        _convert_macro, storage, flags=re.S,
-    )
+# A macro that contains no other macro — so the substitution can work
+# innermost-first. A panel wrapping a code block is ordinary in a runbook,
+# and matching the outer macro up to the *inner* macro's closing tag threw
+# away the code it was wrapping.
+_INNERMOST_MACRO = re.compile(
+    r'<ac:structured-macro[^>]*ac:name="([^"]+)"'
+    r'(?:(?!<ac:structured-macro).)*?</ac:structured-macro>',
+    re.S,
+)
+
+
+def _confluence_macros_to_html(storage: str, files: Optional[dict] = None) -> str:
+    html = storage
+    for _ in range(10):  # nesting this deep is already pathological
+        converted = _INNERMOST_MACRO.sub(_convert_macro, html)
+        if converted == html:
+            break
+        html = converted
     html = re.sub(
         r'<ac:structured-macro[^>]*ac:name="([^"]+)"[^>]*/>',
         lambda m: "", html,
@@ -128,17 +145,47 @@ def _confluence_macros_to_html(storage: str) -> str:
 
     # A link to another page keeps its title; the URL is resolved by
     # whoever reads it, since page ids aren't portable.
+    # `.*?` reaches across tags, so a page link would swallow everything
+    # from an earlier attachment link up to itself — losing the attachment
+    # and merging the two paragraphs. Each span must stop at its own
+    # closing tag.
+    inside_link = r"(?:(?!</ac:link>).)*?"
     html = re.sub(
-        r'<ac:link[^>]*>.*?<ri:page[^>]*ri:content-title="([^"]+)"[^>]*/>.*?</ac:link>',
+        rf'<ac:link[^>]*>{inside_link}<ri:page[^>]*ri:content-title="([^"]+)"[^>]*/>'
+        rf'{inside_link}</ac:link>',
         r"<a>\1</a>", html, flags=re.S,
     )
+    # Attachments and images. `files` maps a Confluence filename to the URL
+    # the file now lives at here; without it the names are kept as text,
+    # which is all the converter can honestly do on its own.
+    def _attachment_link(match: re.Match) -> str:
+        filename = unescape(match.group(1))
+        url = (files or {}).get(filename)
+        return f'<a href="{url}">{filename}</a>' if url else f"<em>attachment: {filename}</em>"
+
+    def _attachment_image(match: re.Match) -> str:
+        filename = unescape(match.group(1))
+        url = (files or {}).get(filename)
+        if not url:
+            return f"<p><em>image: {filename}</em></p>"
+        return f'<p><img src="{url}" alt="{filename}" /></p>'
+
+    inside_image = r"(?:(?!</ac:image>).)*?"
     html = re.sub(
-        r'<ac:link[^>]*>.*?<ri:attachment[^>]*ri:filename="([^"]+)"[^>]*/>.*?</ac:link>',
-        r"<em>attachment: \1</em>", html, flags=re.S,
+        rf'<ac:link[^>]*>{inside_link}<ri:attachment[^>]*ri:filename="([^"]+)"[^>]*/>'
+        rf'{inside_link}</ac:link>',
+        _attachment_link, html, flags=re.S,
     )
     html = re.sub(
-        r'<ac:image[^>]*>.*?<ri:attachment[^>]*ri:filename="([^"]+)"[^>]*/>.*?</ac:image>',
-        r"<p><em>image: \1</em></p>", html, flags=re.S,
+        rf'<ac:image[^>]*>{inside_image}<ri:attachment[^>]*ri:filename="([^"]+)"[^>]*/?>'
+        rf'{inside_image}</ac:image>',
+        _attachment_image, html, flags=re.S,
+    )
+    # An image hosted elsewhere keeps its own URL.
+    html = re.sub(
+        rf'<ac:image[^>]*>{inside_image}<ri:url[^>]*ri:value="([^"]+)"[^>]*/?>'
+        rf'{inside_image}</ac:image>',
+        lambda m: f'<p><img src="{unescape(m.group(1))}" alt="" /></p>', html, flags=re.S,
     )
     html = re.sub(r"<ac:image[^>]*>.*?</ac:image>", "<p><em>image</em></p>", html, flags=re.S)
     # Whatever ac:/ri: markup is left would otherwise reach the reader raw.
@@ -155,18 +202,22 @@ def _code_language(pre_element) -> str:
     return ""
 
 
-def storage_to_markdown(storage: str) -> str:
+def storage_to_markdown(storage: str, files: Optional[dict] = None) -> str:
     """A Confluence page as Markdown.
 
     Macros become ordinary HTML first (above), then markdownify does the
     conversion — tables, nested lists and inline formatting are exactly the
     parts that are tedious and easy to get subtly wrong by hand.
+
+    `files` maps each attached filename to the URL it now has here, so
+    images and file links point at something real instead of naming a file
+    the reader has no way to open.
     """
     if not storage:
         return ""
     from markdownify import markdownify
 
-    html = _confluence_macros_to_html(storage)
+    html = _confluence_macros_to_html(storage, files)
     text = markdownify(
         html,
         heading_style="ATX",       # "## Heading", matching everything else here
@@ -203,8 +254,14 @@ def _person(value) -> Optional[str]:
     return value.get("displayName") or value.get("publicName") or value.get("username")
 
 
+# Confluence keeps shift reports and news as blogposts, not pages. A wiki
+# import that only asks for "page" silently leaves out an entire category
+# of operational record.
+CONTENT_TYPES = ("page", "blogpost")
+
+
 def _fetch_pages(session, base_url: str, space_key: Optional[str], cql: Optional[str],
-                 start: int) -> dict:
+                 start: int, content_type: str = "page") -> dict:
     params = {
         "limit": PAGE_SIZE,
         "start": start,
@@ -216,13 +273,155 @@ def _fetch_pages(session, base_url: str, space_key: Optional[str], cql: Optional
         params["cql"] = cql
         url = f"{base_url}/rest/api/content/search"
     else:
-        params["type"] = "page"
+        params["type"] = content_type
         if space_key:
             params["spaceKey"] = space_key
         url = f"{base_url}/rest/api/content"
     resp = session.get(url, params=params)
     resp.raise_for_status()
     return resp.json()
+
+
+def _has_more(payload: dict, received: int) -> bool:
+    """Whether another page of results exists.
+
+    `size` on /rest/api/content is the number of results *in this response*,
+    not the total — only the CQL search endpoint returns `totalSize`. Reading
+    `size` as a total makes the first response look like the whole library,
+    which is why an import used to stop dead at the first 50 pages. The
+    authority is the `next` link, and the result count as a fallback.
+    """
+    if (payload.get("_links") or {}).get("next"):
+        return True
+    total = payload.get("totalSize")
+    if isinstance(total, int):
+        return received < total
+    return len(payload.get("results") or []) == PAGE_SIZE
+
+
+def _fetch_attachments(session, base_url: str, page_id: str) -> tuple[list[dict], Optional[str]]:
+    """Every file attached to a page, and the host the download links hang
+    off. Paginated like everything else — a page with more than fifty images
+    is unusual but not impossible."""
+    out: list[dict] = []
+    link_base: Optional[str] = None
+    start = 0
+    while True:
+        resp = session.get(
+            f"{base_url}/rest/api/content/{page_id}/child/attachment",
+            params={"limit": PAGE_SIZE, "start": start, "expand": "version"},
+        )
+        if resp.status_code == 404:
+            return out, link_base
+        resp.raise_for_status()
+        payload = resp.json()
+        link_base = link_base or (payload.get("_links") or {}).get("base")
+        results = payload.get("results") or []
+        out.extend(results)
+        start += len(results)
+        if not results or not _has_more(payload, start):
+            return out, link_base
+
+
+# Files this large are almost always a video or a disk image someone parked
+# on a wiki page; copying them into the hub costs more than it returns.
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
+
+def _existing_attachments(db: Session, document_uid: str) -> dict[str, Attachment]:
+    """Files already copied for this document, by their source identity.
+
+    A new revision of a page must not re-download every image on it — the
+    files are unchanged, and only the ones Confluence says have a new
+    version need fetching again.
+    """
+    rows = db.scalars(
+        select(Attachment)
+        .join(DocumentRevision, DocumentRevision.uid == Attachment.document_revision_uid)
+        .where(DocumentRevision.document_uid == document_uid,
+               Attachment.backend_id.is_not(None))
+    ).all()
+    return {row.backend_id: row for row in rows}
+
+
+def _import_attachments(db: Session, session, base_url: str, workspace_id: str,
+                        document_uid: str, revision_uid: str, page_id: str,
+                        job=None) -> tuple[dict[str, str], int]:
+    """Copy a page's files in, and say where each one now lives.
+
+    Returns filename -> URL, which is what turns `<ac:image>` into an image
+    the reader can actually see rather than the name of a file they cannot
+    open.
+    """
+    try:
+        results, link_base = _fetch_attachments(session, base_url, page_id)
+    except Exception as e:
+        if job is not None:
+            _record_diagnostic(db, job, f"Could not list attachments of page {page_id}: {e}")
+        return {}, 0
+
+    already = _existing_attachments(db, document_uid)
+    files: dict[str, str] = {}
+    copied = 0
+
+    for item in results:
+        filename = item.get("title") or item.get("id")
+        source_id = str(item.get("id") or "")
+        version = ((item.get("version") or {}).get("number")) or 1
+        if not filename or not source_id:
+            continue
+        identity = f"confluence:{source_id}:v{version}"
+
+        existing = already.get(identity)
+        if existing is not None:
+            files[filename] = f"/v1/attachments/{existing.uid}"
+            continue
+
+        download = ((item.get("_links") or {}).get("download")) or ""
+        if not download:
+            continue
+        url = download if download.startswith("http") else f"{link_base or base_url}{download}"
+        try:
+            resp = session.get(url)
+            resp.raise_for_status()
+            content = resp.content
+        except Exception as e:
+            if job is not None:
+                _record_diagnostic(db, job, f"Could not download {filename}: {e}")
+            continue
+
+        if len(content) > MAX_ATTACHMENT_BYTES:
+            if job is not None:
+                _record_diagnostic(
+                    db, job,
+                    f"Skipped {filename} ({len(content) // (1024 * 1024)} MB) — over the "
+                    f"{MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB limit; it stays on Confluence."
+                )
+            continue
+
+        attachment_uid = str(uuid.uuid4())
+        os.makedirs(ATTACHMENTS_DIR, exist_ok=True)
+        storage_path = os.path.join(ATTACHMENTS_DIR, attachment_uid)
+        with open(storage_path, "wb") as f:
+            f.write(content)
+
+        db.add(Attachment(
+            uid=attachment_uid,
+            workspace_id=workspace_id,
+            document_revision_uid=revision_uid,
+            filename=filename,
+            mime_type=((item.get("metadata") or {}).get("mediaType"))
+            or resp.headers.get("Content-Type"),
+            file_size=len(content),
+            author=_person(((item.get("version") or {}).get("by"))),
+            storage_path=storage_path,
+            backend_id=identity,
+            backend_url=url,
+        ))
+        files[filename] = f"/v1/attachments/{attachment_uid}"
+        copied += 1
+
+    return files, copied
 
 
 def resolve_api_base(session, base_url: str) -> str:
@@ -339,136 +538,198 @@ def run_confluence_import(
             db.commit()
             _set_progress(db, job, f"Removed {removed} previously imported document(s)")
 
-        start = 0
-        total = None
         imported = updated = skipped = links = 0
+        attachments_copied = 0
+        # Page ids seen this run, so the wiki's own tree can be rebuilt at
+        # the end: a child page is imported before or after its parent
+        # depending only on result order, so the links can't be made inline.
+        document_by_page: dict[str, str] = {}
+        parent_of_page: dict[str, str] = {}
 
-        while True:
-            try:
-                payload = _fetch_pages(session, base_url, space_key, cql, start)
-            except Exception as e:
-                raise RuntimeError(f"Confluence search failed: {_describe_error(e, None)}") from e
+        # With CQL the query itself decides what is returned; otherwise both
+        # kinds of content are fetched, since a wiki keeps shift reports and
+        # announcements as blogposts rather than pages.
+        passes = ("page",) if cql else CONTENT_TYPES
 
-            results = payload.get("results") or []
-            if total is None:
-                total = payload.get("totalSize", payload.get("size", len(results)))
-                _set_progress(db, job, f"{total} page(s) to import")
-            if not results:
-                break
+        for content_type in passes:
+            start = 0
+            announced = False
 
-            for page in results:
-                page_id = str(page.get("id") or "")
-                title = page.get("title") or f"Untitled {page_id}"
-                if not page_id:
-                    continue
+            while True:
+                try:
+                    payload = _fetch_pages(session, base_url, space_key, cql, start, content_type)
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Confluence search failed: {_describe_error(e, None)}"
+                    ) from e
 
-                version = ((page.get("version") or {}).get("number")) or 1
-                labels = [
-                    label.get("name")
-                    for label in (((page.get("metadata") or {}).get("labels") or {}).get("results") or [])
-                    if label.get("name")
-                ]
-                space = ((page.get("space") or {}).get("key"))
-                body = ((page.get("body") or {}).get("storage") or {}).get("value") or ""
-                markdown = storage_to_markdown(body)
-                web_url = f"{base_url}/pages/viewpage.action?pageId={page_id}"
+                results = payload.get("results") or []
+                if not announced:
+                    announced = True
+                    reported = payload.get("totalSize")
+                    label = "result" if cql else content_type
+                    _set_progress(
+                        db, job,
+                        f"{reported} {label}(s) to import" if isinstance(reported, int)
+                        else f"Importing {label}s",
+                    )
+                if not results:
+                    break
 
-                document, code = _find_or_create_document(
-                    db, workspace_id, space, page_id, title
-                )
-                is_new = document.current_revision_uid is None
+                for page in results:
+                    page_id = str(page.get("id") or "")
+                    title = page.get("title") or f"Untitled {page_id}"
+                    if not page_id:
+                        continue
 
-                document.title = title
-                kind = choose_document_type(labels, title)
-                document.document_type_uid = type_uids.get(kind) or type_uid(workspace_id, kind)
+                    version = ((page.get("version") or {}).get("number")) or 1
+                    labels = [
+                        label.get("name")
+                        for label in (((page.get("metadata") or {}).get("labels") or {}).get("results") or [])
+                        if label.get("name")
+                    ]
+                    space = ((page.get("space") or {}).get("key"))
+                    body = ((page.get("body") or {}).get("storage") or {}).get("value") or ""
+                    web_url = f"{base_url}/pages/viewpage.action?pageId={page_id}"
+                    ancestors = page.get("ancestors") or []
+                    parent_id = str(ancestors[-1].get("id")) if ancestors else None
 
-                attributes = {
-                    "argus_source": "confluence",
-                    "argus_source_id": page_id,
-                    "argus_source_url": web_url,
-                    "argus_source_space": space,
-                    "argus_source_version": version,
-                    "argus_source_updated": ((page.get("version") or {}).get("when")),
-                    "argus_source_author": _person((page.get("version") or {}).get("by")),
-                    "argus_keywords": labels,
-                }
+                    document, code = _find_or_create_document(
+                        db, workspace_id, space, page_id, title
+                    )
+                    is_new = document.current_revision_uid is None
+                    document_by_page[page_id] = document.uid
+                    if parent_id:
+                        parent_of_page[page_id] = parent_id
 
-                current = (
-                    db.get(DocumentRevision, document.current_revision_uid)
-                    if document.current_revision_uid else None
-                )
-                # The page's version is what says whether anything changed.
-                # Without this check every re-import would add a revision
-                # identical to the last one.
-                if current is not None and (current.attributes or {}).get(
-                    "argus_source_version"
-                ) == version:
-                    skipped += 1
-                    continue
+                    document.title = title
+                    kind = choose_document_type(labels, title)
+                    document.document_type_uid = type_uids.get(kind) or type_uid(workspace_id, kind)
 
-                revision = DocumentRevision(
-                    uid=str(uuid.uuid4()),
-                    document_uid=document.uid,
-                    revision_number=(current.revision_number + 1) if current else 1,
-                    # Imported pages arrive published: they are already in
-                    # use at the source, and parking them in "draft" would
-                    # hide the entire library behind a review that nobody
-                    # asked for.
-                    state="published",
-                    body_markdown=markdown,
-                    attributes=attributes,
-                    published_at=_parse_jira_dt((page.get("version") or {}).get("when")),
-                )
-                db.add(revision)
-                db.flush()
-                if current is not None:
-                    current.state = "superseded"
-                    current.superseded_by_uid = revision.uid
-                document.current_revision_uid = revision.uid
+                    attributes = {
+                        "argus_source": "confluence",
+                        "argus_source_id": page_id,
+                        "argus_source_url": web_url,
+                        "argus_source_space": space,
+                        "argus_source_version": version,
+                        "argus_source_updated": ((page.get("version") or {}).get("when")),
+                        "argus_source_author": _person((page.get("version") or {}).get("by")),
+                        "argus_keywords": labels,
+                    }
 
-                if is_new:
-                    imported += 1
-                else:
-                    updated += 1
+                    current = (
+                        db.get(DocumentRevision, document.current_revision_uid)
+                        if document.current_revision_uid else None
+                    )
+                    # The page's version is what says whether anything changed.
+                    # Without this check every re-import would add a revision
+                    # identical to the last one.
+                    if current is not None and (current.attributes or {}).get(
+                        "argus_source_version"
+                    ) == version:
+                        skipped += 1
+                        continue
 
-                if link_assets and markdown:
-                    for candidate in set(key_pattern.findall(f"{title}\n{markdown}")):
-                        asset_uid = key_to_asset.get(candidate)
-                        if not asset_uid:
-                            continue
-                        exists = db.scalar(
-                            select(DocumentRelation).where(
-                                DocumentRelation.from_document_uid == document.uid,
-                                DocumentRelation.to_type == "asset",
-                                DocumentRelation.to_uid == asset_uid,
+                    revision = DocumentRevision(
+                        uid=str(uuid.uuid4()),
+                        document_uid=document.uid,
+                        revision_number=(current.revision_number + 1) if current else 1,
+                        # Imported pages arrive published: they are already in
+                        # use at the source, and parking them in "draft" would
+                        # hide the entire library behind a review that nobody
+                        # asked for.
+                        state="published",
+                        body_markdown="",
+                        attributes=attributes,
+                        published_at=_parse_jira_dt((page.get("version") or {}).get("when")),
+                    )
+                    db.add(revision)
+                    db.flush()
+
+                    # The files have to exist before the body is converted:
+                    # an image is only worth importing if the text can point
+                    # at the copy that now lives here.
+                    files, copied = _import_attachments(
+                        db, session, base_url, workspace_id,
+                        document.uid, revision.uid, page_id, job,
+                    )
+                    attachments_copied += copied
+                    markdown = storage_to_markdown(body, files)
+                    revision.body_markdown = markdown
+
+                    if current is not None:
+                        current.state = "superseded"
+                        current.superseded_by_uid = revision.uid
+                    document.current_revision_uid = revision.uid
+
+                    if is_new:
+                        imported += 1
+                    else:
+                        updated += 1
+
+                    if link_assets and markdown:
+                        for candidate in set(key_pattern.findall(f"{title}\n{markdown}")):
+                            asset_uid = key_to_asset.get(candidate)
+                            if not asset_uid:
+                                continue
+                            exists = db.scalar(
+                                select(DocumentRelation).where(
+                                    DocumentRelation.from_document_uid == document.uid,
+                                    DocumentRelation.to_type == "asset",
+                                    DocumentRelation.to_uid == asset_uid,
+                                )
                             )
-                        )
-                        if exists is None:
-                            db.add(DocumentRelation(
-                                workspace_id=workspace_id,
-                                from_document_uid=document.uid,
-                                to_type="asset",
-                                to_uid=asset_uid,
-                                relation_type="describes",
-                            ))
-                            links += 1
+                            if exists is None:
+                                db.add(DocumentRelation(
+                                    workspace_id=workspace_id,
+                                    from_document_uid=document.uid,
+                                    to_type="asset",
+                                    to_uid=asset_uid,
+                                    relation_type="describes",
+                                ))
+                                links += 1
 
-                if (imported + updated) % 25 == 0:
-                    db.commit()
-                    _set_progress(db, job, f"{imported + updated} of {total} page(s)")
+                    if (imported + updated) % 25 == 0:
+                        db.commit()
+                        _set_progress(db, job, f"{imported + updated} document(s) so far")
 
-            db.commit()
-            start += len(results)
-            if total is not None and start >= total:
-                break
-            if len(results) < PAGE_SIZE:
-                break
+                db.commit()
+                start += len(results)
+                if not _has_more(payload, start):
+                    break
+
+        # The wiki's own hierarchy, rebuilt once every page has a document.
+        tree_links = 0
+        for page_id, parent_id in parent_of_page.items():
+            child_uid = document_by_page.get(page_id)
+            parent_uid = document_by_page.get(parent_id)
+            if not child_uid or not parent_uid or child_uid == parent_uid:
+                continue
+            exists = db.scalar(
+                select(DocumentRelation).where(
+                    DocumentRelation.from_document_uid == child_uid,
+                    DocumentRelation.to_type == "document",
+                    DocumentRelation.to_uid == parent_uid,
+                    DocumentRelation.relation_type == "child_of",
+                )
+            )
+            if exists is None:
+                db.add(DocumentRelation(
+                    workspace_id=workspace_id,
+                    from_document_uid=child_uid,
+                    to_type="document",
+                    to_uid=parent_uid,
+                    relation_type="child_of",
+                ))
+                tree_links += 1
+        db.commit()
 
         _set_progress(
             db, job,
             f"Imported {imported} new and updated {updated} document(s)",
             documents=imported, documents_updated=updated,
             documents_unchanged=skipped, asset_links=links,
+            attachments=attachments_copied, page_tree_links=tree_links,
         )
 
         job.status = "succeeded"

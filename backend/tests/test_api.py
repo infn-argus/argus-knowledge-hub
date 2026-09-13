@@ -110,3 +110,65 @@ def test_workspace_isolation(token):
 
     resp = client.get("/v1/schemas/s-3", headers=auth(other_raw))
     assert resp.status_code == 404
+
+
+def _document(token: str, code: str, title: str, type_uid: str | None = None) -> str:
+    uid = f"doc-{secrets.token_hex(4)}"
+    resp = client.post(
+        "/v1/documents",
+        json={"uid": uid, "code": code, "title": title, "document_type_uid": type_uid},
+        headers=auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    return uid
+
+
+def test_documents_move_between_types_in_one_call(token):
+    """Typing a library is a sorting job done in hindsight, over dozens of
+    documents at a time — one at a time through the edit form is the reason
+    an import's guesses never get corrected."""
+    suffix = secrets.token_hex(4)
+    for name in ("Note", "Procedure"):
+        client.post(
+            "/v1/schemas",
+            json={"uid": f"{name.lower()}-{suffix}", "name": name, "applies_to": "documents"},
+            headers=auth(token),
+        )
+    note_uid, procedure_uid = f"note-{suffix}", f"procedure-{suffix}"
+
+    docs = [
+        _document(token, f"D1-{suffix}", "Vacuum recovery", note_uid),
+        _document(token, f"D2-{suffix}", "Camera replacement", note_uid),
+    ]
+
+    resp = client.post(
+        "/v1/documents/retype",
+        json={"uids": docs + ["not-a-document"], "document_type_uid": procedure_uid},
+        headers=auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["moved"] == 2
+    # A uid that isn't here is reported, not silently counted as moved.
+    assert body["not_found"] == ["not-a-document"]
+
+    for uid in docs:
+        got = client.get(f"/v1/documents/{uid}", headers=auth(token)).json()
+        assert got["document_type_uid"] == procedure_uid
+
+
+def test_documents_cannot_be_moved_onto_an_object_type(token):
+    suffix = secrets.token_hex(4)
+    client.post(
+        "/v1/schemas",
+        json={"uid": f"cam-{suffix}", "name": "Cameras"},
+        headers=auth(token),
+    )
+    uid = _document(token, f"D3-{suffix}", "A note")
+
+    resp = client.post(
+        "/v1/documents/retype",
+        json={"uids": [uid], "document_type_uid": f"cam-{suffix}"},
+        headers=auth(token),
+    )
+    assert resp.status_code == 422
