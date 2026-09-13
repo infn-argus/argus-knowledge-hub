@@ -85,7 +85,9 @@ class _JiraStub(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/rest/api/2/search":
+        if parsed.path == "/rest/api/2/serverInfo":
+            self._json({"baseUrl": "http://stub", "deploymentType": "Server"})
+        elif parsed.path == "/rest/api/2/search":
             query = parse_qs(parsed.query)
             start = int(query.get("startAt", ["0"])[0])
             size = int(query.get("maxResults", ["100"])[0])
@@ -311,4 +313,65 @@ def test_a_failing_search_marks_the_job_failed(jira_stub):
 
     status, error, _counts = _run(ws, base_url + "/wrong-prefix")
     assert status == "failed"
-    assert "Jira search failed" in (error or "")
+    # Resolution happens before any search, so the address is blamed by name
+    # rather than surfacing a bare 404 from the first query.
+    assert "No Jira REST API found" in (error or "")
+    assert "context path" in (error or "")
+
+
+class _ContextPathStub(_JiraStub):
+    """Jira Server published under /jira, like issues.infn.it: the site root
+    answers, but its REST API is only under the context path."""
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith("/jira/"):
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.path = self.path[len("/jira"):]
+        super().do_GET()
+
+
+@pytest.fixture()
+def context_path_stub():
+    server = HTTPServer(("127.0.0.1", 0), _ContextPathStub)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+def test_a_context_path_is_found_rather_than_404ing(context_path_stub):
+    """The first real import failed exactly this way: the server URL was the
+    site root, the REST API lives under /jira, and Jira answered 404 without
+    saying why."""
+    suffix = secrets.token_hex(4)
+    ws = f"ws-{suffix}"
+    _ContextPathStub.issues = [_issue(f"LNF-{suffix}-1", "Works anyway", "Open", "new")]
+    _ContextPathStub.comments = {}
+
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name="WS"))
+    db.commit()
+    db.close()
+
+    status, error, counts = _run(ws, context_path_stub)
+    assert status == "succeeded", error
+    assert counts["tickets"] == 1
+
+    db = SessionLocal()
+    issue = db.get(Issue, f"{ws}:LNF-{suffix}-1")
+    # The stored link has to use the resolved base, or it points nowhere.
+    assert "/jira/browse/" in issue.attributes["jiraUrl"]
+    db.close()
+
+
+def test_an_unreachable_api_says_what_was_tried():
+    """Better than "404 Not Found for url ..." — name the addresses tried and
+    the usual cause."""
+    from app.services.jira_issue_import import resolve_api_base
+    from app.services.jira_import import _TimeoutSession
+
+    with pytest.raises(RuntimeError, match="context path"):
+        resolve_api_base(_TimeoutSession(), "http://127.0.0.1:1/nothing-here")

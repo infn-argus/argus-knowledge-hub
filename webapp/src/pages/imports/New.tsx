@@ -160,10 +160,18 @@ export function ImportConfigForm() {
               <input
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://servicedesk.example.org"
+                placeholder={
+                  source === "jira-issues"
+                    ? "https://issues.example.org/jira"
+                    : "https://servicedesk.example.org"
+                }
                 required
                 className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
               />
+              <p className="mt-1 text-xs text-slate-500">
+                Include the context path if the server has one — many Jira installations live
+                under /jira rather than at the site root. The import checks both.
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700">

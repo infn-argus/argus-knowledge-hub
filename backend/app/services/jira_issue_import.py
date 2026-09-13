@@ -103,6 +103,42 @@ def _person(value) -> Optional[str]:
     return _author_display_name(value)
 
 
+# Jira Server is commonly published under a context path rather than at the
+# host root — INFN's is at https://issues.infn.it/jira — and the site root
+# still serves a normal web page, so the mistake looks like a working URL
+# right up until the API returns 404 for a reason it doesn't explain.
+_CONTEXT_PATH_CANDIDATES = ("", "/jira")
+
+
+def resolve_api_base(jira, base_url: str) -> str:
+    """The base URL whose REST API actually answers.
+
+    serverInfo needs no authentication, so this also distinguishes "wrong
+    URL" from "wrong token" before the first real request: a 404 here is the
+    address, a 401 later is the credential.
+    """
+    tried = []
+    for suffix in _CONTEXT_PATH_CANDIDATES:
+        candidate = f"{base_url}{suffix}"
+        url = f"{candidate}/rest/api/2/serverInfo"
+        tried.append(url)
+        try:
+            resp = jira.get(url)
+        except Exception:
+            continue
+        if resp.status_code == 404:
+            continue
+        # Anything else means something is listening on the API: 200, or a
+        # 401 from an instance that doesn't expose serverInfo anonymously.
+        if resp.status_code < 500:
+            return candidate
+    raise RuntimeError(
+        "No Jira REST API found. Tried: " + ", ".join(tried) +
+        ". Check the server URL — Jira is often published under a context "
+        "path such as https://issues.infn.it/jira rather than the site root."
+    )
+
+
 def _search_issues(jira, base_url: str, jql: str, start_at: int) -> dict:
     resp = jira.get(
         f"{base_url}/rest/api/2/search",
@@ -229,6 +265,11 @@ def run_jira_issue_import(
     try:
         jira = _TimeoutSession()
         jira.headers.update({"Authorization": f"Bearer {pat}", "Accept": "application/json"})
+
+        resolved_base = resolve_api_base(jira, base_url)
+        if resolved_base != base_url:
+            _set_progress(db, job, f"Jira API found at {resolved_base}")
+        base_url = resolved_base
 
         if merge_strategy == "remove_all_before":
             removed = 0
