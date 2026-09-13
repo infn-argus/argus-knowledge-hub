@@ -17,7 +17,7 @@ from app.models.user import User
 from app.models.workspace import Workspace
 from app.services.integrity import cleanup_workspace, generate_integrity_report, relink_workspace
 from app.services.relations import rebuild_relations_for_schemas
-from app.services.ticket_types import DEFAULT_ISSUE_TYPES, ensure_jira_ticket_types
+from app.services.ticket_types import DEFAULT_ISSUE_TYPES, ensure_ticket_types
 from app.schemas.workspace import (
     CleanupOptions,
     DefaultAccess,
@@ -94,7 +94,7 @@ def seed_default_ticket_types(db: Session, workspace_id: str) -> None:
     """The issue types Jira ships with, so an Epic or a Story can be raised
     by hand before anything has been imported. Idempotent — a later import
     reuses these same types rather than creating a second set."""
-    ensure_jira_ticket_types(db, workspace_id, set(DEFAULT_ISSUE_TYPES))
+    ensure_ticket_types(db, workspace_id, set(DEFAULT_ISSUE_TYPES))
 
 
 def _require_owner_or_admin(workspace_id: str, identity: Identity, db: Session) -> None:

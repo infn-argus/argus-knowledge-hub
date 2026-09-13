@@ -185,9 +185,9 @@ def test_imports_issues_with_comments_and_is_idempotent(jira_stub):
     assert first.assignee == "Giulia Bianchi"
     assert first.created_by == "Marco Rossi"
     assert first.labels == ["vacuum"]
-    assert first.attributes["jira_key"] == f"LNF-{suffix}-1"
-    assert first.attributes["jira_url"].endswith(f"/browse/LNF-{suffix}-1")
-    assert first.attributes["jira_components"] == ["Controls"]
+    assert first.attributes["argus_source_key"] == f"LNF-{suffix}-1"
+    assert first.attributes["argus_source_url"].endswith(f"/browse/LNF-{suffix}-1")
+    assert first.attributes["argus_components"] == ["Controls"]
     # The plain-string author shape, which crashed the asset importer once.
     authors = {c.author for c in db.scalars(
         select(IssueComment).where(IssueComment.issue_uid == first.uid)
@@ -363,7 +363,7 @@ def test_a_context_path_is_found_rather_than_404ing(context_path_stub):
     db = SessionLocal()
     issue = db.get(Issue, f"{ws}:LNF-{suffix}-1")
     # The stored link has to use the resolved base, or it points nowhere.
-    assert "/jira/browse/" in issue.attributes["jira_url"]
+    assert "/jira/browse/" in issue.attributes["argus_source_url"]
     db.close()
 
 
@@ -420,25 +420,25 @@ def test_standard_jira_fields_are_captured(jira_stub):
 
     db = SessionLocal()
     a = db.get(Issue, f"{ws}:{key}").attributes
-    assert a["jira_key"] == key
-    assert a["jira_url"].endswith(f"/browse/{key}")
-    assert a["jira_project"] == "LNF"
-    assert a["jira_status"] == "To Do"
-    assert a["jira_issue_type"] == "Task"
+    assert a["argus_source_key"] == key
+    assert a["argus_source_url"].endswith(f"/browse/{key}")
+    assert a["argus_project"] == "LNF"
+    assert a["argus_source_status"] == "To Do"
+    assert a["argus_source_type"] == "Task"
     # Jira reports no resolution as null; a list cell saying "Unresolved" is
     # more use than an empty one.
-    assert a["jira_resolution"] == "Unresolved"
-    assert a["jira_components"] == ["Olog"]
-    assert a["jira_affects_versions"] == ["2026.1"]
-    assert a["jira_fix_versions"] == []
-    assert a["jira_reporter"] == "Andrea Michelotti"
-    assert a["jira_votes"] == 0
-    assert a["jira_watchers"] == 1
-    assert a["jira_environment"] == "BTF hall"
-    assert a["jira_parent"] == f"LNFDCS-{suffix}-epic"
-    assert a["jira_time_spent"] == 3600
-    assert a["jira_time_estimate"] == 7200
-    assert a["jira_created"].startswith("2026-01-08")
+    assert a["argus_resolution"] == "Unresolved"
+    assert a["argus_components"] == ["Olog"]
+    assert a["argus_affects_versions"] == ["2026.1"]
+    assert a["argus_fix_versions"] == []
+    assert a["argus_reporter"] == "Andrea Michelotti"
+    assert a["argus_votes"] == 0
+    assert a["argus_watchers"] == 1
+    assert a["argus_environment"] == "BTF hall"
+    assert a["argus_parent"] == f"LNFDCS-{suffix}-epic"
+    assert a["argus_time_spent"] == 3600
+    assert a["argus_time_estimate"] == 7200
+    assert a["argus_source_created"].startswith("2026-01-08")
     db.close()
 
 
@@ -464,11 +464,11 @@ def test_a_ticket_type_is_created_per_jira_issue_type(jira_stub):
     assert status == "succeeded", error
 
     db = SessionLocal()
-    base = db.get(Schema, f"{ws}:jira-issue")
+    base = db.get(Schema, f"{ws}:argus-ticket")
     assert base is not None and base.applies_to == "tickets"
     assert base.is_concrete is False
     assert {a["key"] for a in base.attributes} >= {
-        "jira_key", "jira_resolution", "jira_components", "jira_watchers",
+        "argus_source_key", "argus_resolution", "argus_components", "argus_watchers",
     }
 
     children = db.scalars(
@@ -486,10 +486,10 @@ def test_a_ticket_type_is_created_per_jira_issue_type(jira_stub):
     db.close()
 
 
-def test_a_reimport_clears_the_superseded_attribute_keys(jira_stub):
-    """524 tickets were imported before the field set became a ticket type,
-    under camelCase keys. A re-run has to replace them, not leave both
-    spellings side by side holding different values."""
+def test_a_reimport_moves_legacy_keys_onto_the_argus_ones(jira_stub):
+    """Tickets imported before the model became ARGUS's own hold their
+    values under Jira-era keys. A re-run has to move them, not leave two
+    spellings of the same field side by side."""
     _server, base_url = jira_stub
     suffix = secrets.token_hex(4)
     ws = f"ws-{suffix}"
@@ -518,9 +518,8 @@ def test_a_reimport_clears_the_superseded_attribute_keys(jira_stub):
 
     db = SessionLocal()
     a = db.get(Issue, f"{ws}:{key}").attributes
-    assert not any(k in a for k in
-                   ("jiraKey", "jiraUrl", "jiraProject", "jiraStatus",
-                    "jiraIssueType", "jiraComponents"))
-    assert a["jira_key"] == key
+    assert not any(k.startswith("jira") for k in a)
+    assert a["argus_source_key"] == key
+    assert a["argus_source"] == "jira"
     assert a["local_note"] == "keep me"
     db.close()

@@ -19,7 +19,10 @@ from app.models.asset_subresources import AssetTicket
 from app.models.import_job import ImportJob
 from app.models.issue import Issue, IssueComment, IssueHistory
 from app.services.import_merge import should_write
-from app.services.ticket_types import ensure_jira_ticket_types
+from app.services.ticket_types import (
+    ensure_ticket_types,
+    migrate_legacy_attributes,
+)
 from app.services.jira_import import (
     _TimeoutSession,
     _author_display_name,
@@ -143,11 +146,11 @@ def resolve_api_base(jira, base_url: str) -> str:
 # Agile fields have no fixed id: "Sprint" is customfield_10007 on one Jira
 # and customfield_10112 on the next, so they're found by name.
 _AGILE_FIELD_NAMES = {
-    "epic link": "jira_epic",
-    "epic name": "jira_epic_name",
-    "sprint": "jira_sprint",
-    "story points": "jira_story_points",
-    "story point estimate": "jira_story_points",
+    "epic link": "argus_epic",
+    "epic name": "argus_epic_name",
+    "sprint": "argus_sprint",
+    "story points": "argus_story_points",
+    "story point estimate": "argus_story_points",
 }
 
 
@@ -190,9 +193,9 @@ def _agile_attributes(fields: dict, agile_fields: dict[str, str]) -> dict:
         value = fields.get(field_id)
         if value in (None, "", []):
             continue
-        if key == "jira_sprint":
+        if key == "argus_sprint":
             out[key] = _sprint_names(value)
-        elif key == "jira_story_points":
+        elif key == "argus_story_points":
             out[key] = value
         else:
             out[key] = value.get("name") if isinstance(value, dict) else value
@@ -224,46 +227,66 @@ def _search_issues(jira, base_url: str, jql: str, start_at: int, extra_fields: t
     return resp.json()
 
 
-# Keys written by the first version of this importer, before the field set
-# became a ticket type and the names had to match its attribute keys. Left
-# in place they would sit alongside the current ones as stale duplicates
-# holding older values.
-SUPERSEDED_KEYS = (
-    "jiraKey", "jiraUrl", "jiraProject", "jiraStatus", "jiraIssueType", "jiraComponents",
-)
-
-
 def _names(values) -> list[str]:
     return [v.get("name") for v in (values or []) if isinstance(v, dict) and v.get("name")]
 
 
+# Jira issue type -> the ARGUS category it means. Only the unambiguous
+# ones: a "Task" says nothing about whether it was a fault or an upgrade,
+# so it is left for a person to classify rather than guessed at.
+_TYPE_TO_CATEGORY = {
+    "bug": "fault",
+    "fault": "fault",
+    "guasto": "fault",
+    "incident": "fault",
+    "maintenance": "maintenance",
+    "manutenzione": "maintenance",
+    "improvement": "upgrade",
+    "new feature": "upgrade",
+    "service request": "request",
+    "support": "request",
+    "richiesta": "request",
+}
+
+
 def _issue_attributes(base_url: str, jira_key: str, fields: dict) -> dict:
-    """Everything a standard Jira issue view shows that our own columns
-    don't. Keys match the seeded "Jira Issue" ticket type, so they render
-    through the ordinary attribute machinery rather than a special case."""
+    """One Jira issue mapped onto the ARGUS ticket fields.
+
+    Jira is a source, not the model: what it called a field is recorded as
+    provenance (argus_source_*), and its values land on the ARGUS keys that
+    mean the same thing. Fields ARGUS has and Jira doesn't — impact, root
+    cause, downtime — are left empty for a person to fill rather than
+    invented here.
+    """
     parent = fields.get("parent") or {}
-    return {
-        "jira_key": jira_key,
-        "jira_url": f"{base_url}/browse/{jira_key}",
-        "jira_project": (fields.get("project") or {}).get("key"),
-        "jira_status": (fields.get("status") or {}).get("name"),
-        "jira_issue_type": (fields.get("issuetype") or {}).get("name"),
+    issue_type = (fields.get("issuetype") or {}).get("name")
+    out = {
+        "argus_source": "jira",
+        "argus_source_key": jira_key,
+        "argus_source_url": f"{base_url}/browse/{jira_key}",
+        "argus_project": (fields.get("project") or {}).get("key"),
+        "argus_source_status": (fields.get("status") or {}).get("name"),
+        "argus_source_type": issue_type,
+        "argus_source_created": fields.get("created"),
+        "argus_source_updated": fields.get("updated"),
         # Jira reports an unresolved issue as a null resolution; saying so is
         # more useful in a list than an empty cell.
-        "jira_resolution": (fields.get("resolution") or {}).get("name") or "Unresolved",
-        "jira_components": _names(fields.get("components")),
-        "jira_fix_versions": _names(fields.get("fixVersions")),
-        "jira_affects_versions": _names(fields.get("versions")),
-        "jira_reporter": _person(fields.get("reporter")),
-        "jira_votes": (fields.get("votes") or {}).get("votes"),
-        "jira_watchers": (fields.get("watches") or {}).get("watchCount"),
-        "jira_created": fields.get("created"),
-        "jira_updated": fields.get("updated"),
-        "jira_environment": fields.get("environment"),
-        "jira_parent": parent.get("key"),
-        "jira_time_spent": fields.get("timespent"),
-        "jira_time_estimate": fields.get("timeoriginalestimate"),
+        "argus_resolution": (fields.get("resolution") or {}).get("name") or "Unresolved",
+        "argus_components": _names(fields.get("components")),
+        "argus_fix_versions": _names(fields.get("fixVersions")),
+        "argus_affects_versions": _names(fields.get("versions")),
+        "argus_reporter": _person(fields.get("reporter")),
+        "argus_votes": (fields.get("votes") or {}).get("votes"),
+        "argus_watchers": (fields.get("watches") or {}).get("watchCount"),
+        "argus_environment": fields.get("environment"),
+        "argus_parent": parent.get("key"),
+        "argus_time_spent": fields.get("timespent"),
+        "argus_time_estimate": fields.get("timeoriginalestimate"),
     }
+    category = _TYPE_TO_CATEGORY.get((issue_type or "").strip().lower())
+    if category:
+        out["argus_category"] = category
+    return out
 
 
 def _import_attachments(jira, workspace_id: str, issue: Issue, fields: dict, db: Session,
@@ -402,7 +425,7 @@ def _link_mentioned_assets(
     """
     if not text:
         return 0
-    jira_key = (issue.attributes or {}).get("jira_key") or issue.uid
+    jira_key = (issue.attributes or {}).get("argus_source_key") or issue.uid
     linked = 0
     for candidate in set(_KEY_PATTERN.findall(text)):
         asset_uid = key_to_asset.get(candidate)
@@ -421,11 +444,11 @@ def _link_mentioned_assets(
                 asset_uid=asset_uid,
                 ticket_key=jira_key,
                 summary=issue.title,
-                type=(issue.attributes or {}).get("jira_issue_type") or "Task",
+                type=(issue.attributes or {}).get("argus_source_type") or "Task",
                 status=issue.state,
                 created=now,
                 updated=now,
-                backend_url=(issue.attributes or {}).get("jira_url"),
+                backend_url=(issue.attributes or {}).get("argus_source_url"),
             ))
             linked += 1
         # The ticket's own asset_uid points at the first object named; the
@@ -514,7 +537,7 @@ def run_jira_issue_import(
             new_types = page_types - set(type_uids)
             if new_types:
                 type_uids.update(
-                    ensure_jira_ticket_types(db, workspace_id, page_types | set(type_uids))
+                    ensure_ticket_types(db, workspace_id, page_types | set(type_uids))
                 )
                 db.commit()
 
@@ -553,10 +576,10 @@ def run_jira_issue_import(
                 # What Jira knows that our columns don't, kept rather than
                 # discarded: the key is what a person searches for, and the
                 # rest explains where the ticket came from.
-                attributes = {
-                    k: v for k, v in (issue.attributes or {}).items()
-                    if k not in SUPERSEDED_KEYS
-                }
+                # Anything still under a Jira-era key is moved onto the
+                # ARGUS one first, so a re-import updates a ticket rather
+                # than leaving two spellings of the same field behind.
+                attributes = migrate_legacy_attributes(issue.attributes)
                 attributes.update(_issue_attributes(base_url, jira_key, fields))
                 attributes.update(_agile_attributes(fields, agile_fields))
                 issue.attributes = attributes

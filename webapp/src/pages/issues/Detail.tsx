@@ -5,11 +5,14 @@ import {
   assetsApi,
   attachmentsApi,
   globalValuesApi,
+  documentsApi,
+  issueLinksApi,
   issueSubresourcesApi,
   issuesApi,
   membersApi,
   schemasApi,
 } from "../../api/client";
+import { ApiError } from "../../api/client";
 import { AttributeValue } from "../../components/AttributeValue";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
@@ -34,18 +37,40 @@ const PRIORITY_STYLES: Record<string, string> = {
  * Jira issue view groups them — details on the left, people and dates on the
  * right — so a ticket imported from there reads the way it does at source. */
 const DETAIL_KEYS = [
-  "jira_issue_type",
-  "jira_resolution",
-  "jira_priority",
-  "jira_affects_versions",
-  "jira_fix_versions",
-  "jira_components",
-  "jira_environment",
-  "jira_parent",
+  "argus_category",
+  "argus_impact",
+  "argus_detected_by",
+  "argus_system",
+  "argus_subsystem",
+  "argus_source_type",
+  "argus_resolution",
+  "argus_root_cause",
+  "argus_corrective_action",
+  "argus_affects_versions",
+  "argus_fix_versions",
+  "argus_components",
+  "argus_environment",
+  "argus_parent",
+  "argus_epic",
+  "argus_epic_name",
+  "argus_sprint",
+  "argus_story_points",
 ];
-const PEOPLE_KEYS = ["jira_reporter", "jira_votes", "jira_watchers"];
-const DATE_KEYS = ["jira_created", "jira_updated"];
-const HIDDEN_KEYS = ["jira_key", "jira_url", "jira_project", "jira_status"];
+const PEOPLE_KEYS = ["argus_reporter", "argus_votes", "argus_watchers"];
+const DATE_KEYS = [
+  "argus_downtime_start",
+  "argus_downtime_end",
+  "argus_downtime_minutes",
+  "argus_source_created",
+  "argus_source_updated",
+];
+const HIDDEN_KEYS = [
+  "argus_source",
+  "argus_source_key",
+  "argus_source_url",
+  "argus_project",
+  "argus_source_status",
+];
 
 async function downloadAttachment(uid: string, filename: string) {
   const url = await attachmentsApi.fetchBlobUrl(uid);
@@ -121,7 +146,6 @@ export function IssueDetail() {
   const allAssets = useQuery({
     queryKey: ["assets"],
     queryFn: () => assetsApi.list(),
-    enabled: attrDefs.some((a) => a.type === "reference"),
   });
   const members = useQuery({ queryKey: ["members"], queryFn: membersApi.directory });
   const globalValues = useQuery({ queryKey: ["global-values"], queryFn: globalValuesApi.list });
@@ -155,6 +179,34 @@ export function IssueDetail() {
     enabled: !!uid,
   });
 
+  const links = useQuery({
+    queryKey: ["issue-links", uid],
+    queryFn: () => issueLinksApi.list(uid!),
+    enabled: !!uid,
+  });
+  const documents = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
+
+  const invalidateLinks = () => {
+    queryClient.invalidateQueries({ queryKey: ["issue-links", uid] });
+    queryClient.invalidateQueries({ queryKey: ["issue-history", uid] });
+  };
+  const linkAssetMutation = useMutation({
+    mutationFn: (assetUid: string) => issueLinksApi.linkAsset(uid!, assetUid),
+    onSuccess: invalidateLinks,
+  });
+  const unlinkAssetMutation = useMutation({
+    mutationFn: (assetUid: string) => issueLinksApi.unlinkAsset(uid!, assetUid),
+    onSuccess: invalidateLinks,
+  });
+  const linkDocumentMutation = useMutation({
+    mutationFn: (documentUid: string) => issueLinksApi.linkDocument(uid!, documentUid),
+    onSuccess: invalidateLinks,
+  });
+  const unlinkDocumentMutation = useMutation({
+    mutationFn: (relationId: number) => issueLinksApi.unlinkDocument(uid!, relationId),
+    onSuccess: invalidateLinks,
+  });
+
   const uploadMutation = useMutation({
     mutationFn: (file: File) => issueSubresourcesApi.uploadAttachment(uid!, file),
     onSuccess: () => {
@@ -184,10 +236,10 @@ export function IssueDetail() {
   const assignedMember = members.data?.find((m) => m.user_id === i.assignee);
   const priorityLabel = priorityOptions.find((o) => o.id === i.priority)?.value ?? i.priority;
   const attr = (key: string) => i.attributes?.[key];
-  const jiraKey = attr("jira_key") as string | undefined;
-  const jiraUrl = attr("jira_url") as string | undefined;
-  const jiraProject = attr("jira_project") as string | undefined;
-  const jiraStatus = attr("jira_status") as string | undefined;
+  const sourceKey = attr("argus_source_key") as string | undefined;
+  const sourceUrl = attr("argus_source_url") as string | undefined;
+  const sourceProject = attr("argus_project") as string | undefined;
+  const sourceStatus = attr("argus_source_status") as string | undefined;
 
   // The fields come from the parent type ("Jira Issue"), not from the
   // child the ticket is an instance of ("Task") — saying otherwise sends
@@ -221,18 +273,18 @@ export function IssueDetail() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs text-slate-500">
-            {jiraProject && <span>{jiraProject} / </span>}
-            {jiraUrl && jiraKey ? (
+            {sourceProject && <span>{sourceProject} / </span>}
+            {sourceUrl && sourceKey ? (
               <a
-                href={jiraUrl}
+                href={sourceUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="text-indigo-600 hover:underline"
               >
-                {jiraKey}
+                {sourceKey}
               </a>
             ) : (
-              jiraKey
+              sourceKey
             )}
           </p>
           <h1 className="mt-0.5 text-2xl font-semibold text-slate-900">{i.title}</h1>
@@ -276,9 +328,9 @@ export function IssueDetail() {
         </div>
       </div>
 
-      {jiraStatus && jiraStatus.toLowerCase() !== (currentStatus?.value ?? "").toLowerCase() && (
+      {sourceStatus && sourceStatus.toLowerCase() !== (currentStatus?.value ?? "").toLowerCase() && (
         <p className="mt-1 text-xs text-slate-400">
-          Status in Jira: <span className="font-medium text-slate-500">{jiraStatus}</span>
+          Status at source: <span className="font-medium text-slate-500">{sourceStatus}</span>
         </p>
       )}
       {currentStatus?.meaning && (
@@ -312,13 +364,6 @@ export function IssueDetail() {
                   </span>
                 </FieldRow>
               )}
-              {asset.data && (
-                <FieldRow label="Object">
-                  <Link to={`/assets/${asset.data.uid}`} className="text-indigo-600 hover:underline">
-                    {asset.data.name}
-                  </Link>
-                </FieldRow>
-              )}
               {otherAttrs.map((a) => renderAttr(a.key ?? a.name))}
               {parentType && (
                 <p className="pt-1 text-[10px] uppercase tracking-wide text-slate-400">
@@ -326,6 +371,95 @@ export function IssueDetail() {
                 </p>
               )}
             </dl>
+          </Panel>
+
+          <Panel title="Affected objects and documents">
+            <p className="mb-2 text-xs text-slate-500">
+              What this ticket is about. These are links, not fields — the same
+              connection is visible from the object and from the document.
+            </p>
+
+            <ul className="space-y-1 text-sm">
+              {links.data?.assets.map((a) => (
+                <li key={a.asset_uid} className="flex items-center gap-2">
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                    {a.relation}
+                  </span>
+                  <Link to={`/assets/${a.asset_uid}`} className="text-indigo-600 hover:underline">
+                    {a.name}
+                  </Link>
+                  <span className="text-xs text-slate-400">{a.key}</span>
+                  <button
+                    onClick={() => unlinkAssetMutation.mutate(a.asset_uid)}
+                    className="ml-auto text-xs text-red-500 hover:text-red-700"
+                  >
+                    Unlink
+                  </button>
+                </li>
+              ))}
+              {links.data?.documents.map((d) => (
+                <li key={d.relation_id} className="flex items-center gap-2">
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                    {d.relation}
+                  </span>
+                  <Link
+                    to={`/documents/${d.document_uid}`}
+                    className="text-indigo-600 hover:underline"
+                  >
+                    {d.title}
+                  </Link>
+                  <span className="text-xs text-slate-400">{d.code}</span>
+                  <button
+                    onClick={() => unlinkDocumentMutation.mutate(d.relation_id)}
+                    className="ml-auto text-xs text-red-500 hover:text-red-700"
+                  >
+                    Unlink
+                  </button>
+                </li>
+              ))}
+              {links.data && links.data.assets.length === 0 && links.data.documents.length === 0 && (
+                <p className="text-slate-400">Nothing linked yet.</p>
+              )}
+            </ul>
+
+            <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  if (e.target.value) linkAssetMutation.mutate(e.target.value);
+                  e.target.value = "";
+                }}
+                className="min-w-48 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+              >
+                <option value="">Link an object…</option>
+                {allAssets.data?.map((a) => (
+                  <option key={a.uid} value={a.uid}>
+                    {a.name} ({a.key})
+                  </option>
+                ))}
+              </select>
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  if (e.target.value) linkDocumentMutation.mutate(e.target.value);
+                  e.target.value = "";
+                }}
+                className="min-w-48 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+              >
+                <option value="">Link a document…</option>
+                {documents.data?.map((d) => (
+                  <option key={d.uid} value={d.uid}>
+                    {d.title} ({d.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+            {(linkAssetMutation.isError || linkDocumentMutation.isError) && (
+              <p className="mt-2 text-xs text-red-600">
+                {((linkAssetMutation.error ?? linkDocumentMutation.error) as ApiError)?.detail ??
+                  "Could not link that."}
+              </p>
+            )}
           </Panel>
 
           <Panel title="Description">
@@ -553,14 +687,14 @@ export function IssueDetail() {
             </ul>
           </Panel>
 
-          {jiraUrl && (
+          {sourceUrl && (
             <a
-              href={jiraUrl}
+              href={sourceUrl}
               target="_blank"
               rel="noreferrer"
               className="block rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-indigo-600 hover:bg-slate-50"
             >
-              Open in Jira ↗
+              Open at source ↗
             </a>
           )}
         </div>

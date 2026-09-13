@@ -152,3 +152,102 @@ def test_history_of_another_workspaces_ticket_is_not_readable(token):
 
     assert client.get(f"/v1/issues/{uid}/history", headers=auth(other_raw)).status_code == 404
     assert client.get(f"/v1/issues/{uid}/attachments", headers=auth(other_raw)).status_code == 404
+
+
+def _asset(db, workspace_id, suffix):
+    from app.models.asset import Asset
+    from app.models.schema import Schema
+
+    db.add(Schema(uid=f"sc-{suffix}", workspace_id=workspace_id, name="Cameras"))
+    db.flush()
+    db.add(Asset(uid=f"as-{suffix}", workspace_id=workspace_id, schema_uid=f"sc-{suffix}",
+                 key=f"LNFT2-{suffix}", name="FI4-B-CAM-VIS-001", type="Cameras"))
+    db.commit()
+    return f"as-{suffix}"
+
+
+def test_a_ticket_links_to_objects_and_documents(token):
+    """What a ticket is about lives in link tables, not attributes, so the
+    graph can be walked from the object or the document too."""
+    from app.models.document import Document
+
+    suffix = secrets.token_hex(4)
+    uid = _ticket(token, suffix)
+
+    db = SessionLocal()
+    workspace_id = db.scalar(
+        select(ApiToken.workspace_id).where(ApiToken.token_hash == hash_token(token))
+    )
+    asset_uid = _asset(db, workspace_id, suffix)
+    db.add(Document(uid=f"doc-{suffix}", workspace_id=workspace_id,
+                    code=f"PROC-{suffix}", title="Camera replacement procedure"))
+    db.commit()
+    db.close()
+
+    linked = client.post(
+        f"/v1/issues/{uid}/links/assets",
+        json={"asset_uid": asset_uid, "relation": "affects"},
+        headers=auth(token),
+    )
+    assert linked.status_code == 201, linked.text
+
+    doc_linked = client.post(
+        f"/v1/issues/{uid}/links/documents",
+        json={"document_uid": f"doc-{suffix}", "relation": "procedure"},
+        headers=auth(token),
+    )
+    assert doc_linked.status_code == 201, doc_linked.text
+
+    links = client.get(f"/v1/issues/{uid}/links", headers=auth(token)).json()
+    assert [a["name"] for a in links["assets"]] == ["FI4-B-CAM-VIS-001"]
+    assert links["assets"][0]["relation"] == "affects"
+    assert [d["code"] for d in links["documents"]] == [f"PROC-{suffix}"]
+    assert links["documents"][0]["relation"] == "procedure"
+
+    # Linking is a change worth seeing in the timeline.
+    entries = client.get(f"/v1/issues/{uid}/history", headers=auth(token)).json()
+    assert any(e["field"] == "Linked object" for e in entries)
+    assert any(e["field"] == "Linked document" for e in entries)
+
+    # Linking the same thing twice is a conflict, not a duplicate row.
+    again = client.post(
+        f"/v1/issues/{uid}/links/assets",
+        json={"asset_uid": asset_uid},
+        headers=auth(token),
+    )
+    assert again.status_code == 409
+
+    relation_id = links["documents"][0]["relation_id"]
+    assert client.delete(
+        f"/v1/issues/{uid}/links/documents/{relation_id}", headers=auth(token)
+    ).status_code == 204
+    assert client.delete(
+        f"/v1/issues/{uid}/links/assets/{asset_uid}", headers=auth(token)
+    ).status_code == 204
+
+    links = client.get(f"/v1/issues/{uid}/links", headers=auth(token)).json()
+    assert links["assets"] == [] and links["documents"] == []
+
+
+def test_legacy_ticket_attributes_map_onto_argus_keys():
+    """The mapping the migration and the importer share."""
+    from app.services.ticket_types import migrate_legacy_attributes
+
+    migrated = migrate_legacy_attributes({
+        "jiraKey": "LNFDCS-563",
+        "jira_status": "To Do",
+        "jira_components": ["Olog"],
+        "local_note": "keep me",
+    })
+    assert migrated["argus_source_key"] == "LNFDCS-563"
+    assert migrated["argus_source_status"] == "To Do"
+    assert migrated["argus_components"] == ["Olog"]
+    assert migrated["local_note"] == "keep me"
+    assert not any(k.startswith("jira") for k in migrated)
+
+    # Running it twice must not undo the first pass.
+    assert migrate_legacy_attributes(migrated) == migrated
+
+    # A value already under the ARGUS key wins over the legacy one.
+    both = migrate_legacy_attributes({"jiraKey": "OLD", "argus_source_key": "NEW"})
+    assert both["argus_source_key"] == "NEW"

@@ -43,6 +43,9 @@ import type {
   SchemaInput,
   WorkspaceDetail,
   IssueHistoryEntry,
+  IssueLinks,
+  IssueAssetLink,
+  IssueDocumentLink,
   Role,
   RoleBinding,
   RoleBindingInput,
@@ -364,6 +367,24 @@ export const issueSubresourcesApi = {
     if (!resp.ok) throw new ApiError(resp.status, data);
     return data as Attachment;
   },
+};
+
+export const issueLinksApi = {
+  list: (uid: string) => request<IssueLinks>(`/v1/issues/${uid}/links`),
+  linkAsset: (uid: string, assetUid: string, relation = "affects") =>
+    request<IssueAssetLink>(`/v1/issues/${uid}/links/assets`, {
+      method: "POST",
+      body: json({ asset_uid: assetUid, relation }),
+    }),
+  unlinkAsset: (uid: string, assetUid: string) =>
+    request<void>(`/v1/issues/${uid}/links/assets/${assetUid}`, { method: "DELETE" }),
+  linkDocument: (uid: string, documentUid: string, relation = "documents") =>
+    request<IssueDocumentLink>(`/v1/issues/${uid}/links/documents`, {
+      method: "POST",
+      body: json({ document_uid: documentUid, relation }),
+    }),
+  unlinkDocument: (uid: string, relationId: number) =>
+    request<void>(`/v1/issues/${uid}/links/documents/${relationId}`, { method: "DELETE" }),
 };
 
 export const membersApi = {

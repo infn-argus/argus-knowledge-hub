@@ -10,7 +10,10 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth import get_current_user_id, require_permission
 from app.db import get_db
+from app.models.asset import Asset
+from app.models.asset_subresources import AssetTicket
 from app.models.attachment import Attachment
+from app.models.document import Document, DocumentRelation
 from app.models.issue import Issue, IssueComment, IssueHistory
 from app.models.schema import Schema
 from app.schemas.attachment import AttachmentOut
@@ -18,7 +21,12 @@ from app.schemas.issue import (
     IssueCommentCreate,
     IssueCommentOut,
     IssueCreate,
+    IssueAssetLinkCreate,
+    IssueAssetLinkOut,
+    IssueDocumentLinkCreate,
+    IssueDocumentLinkOut,
     IssueHistoryOut,
+    IssueLinksOut,
     IssueOut,
     IssueUpdate,
 )
@@ -183,6 +191,187 @@ async def upload_issue_attachment(
     db.commit()
     db.refresh(attachment)
     return attachment
+
+
+@router.get("/{uid}/links", response_model=IssueLinksOut)
+def list_issue_links(
+    uid: str,
+    workspace_id: str = Depends(require_permission("read", resource="tickets")),
+    db: Session = Depends(get_db),
+):
+    """What this ticket is about: the objects it affects and the documents
+    that explain or record it.
+
+    Both come from link tables rather than attributes, because the
+    knowledge graph has to walk them from either end — "what broke this
+    magnet" is as much a question as "what does this ticket affect".
+    """
+    issue = _get_owned_issue(uid, workspace_id, db)
+    source_key = (issue.attributes or {}).get("argus_source_key") or uid
+
+    asset_rows = db.execute(
+        select(AssetTicket, Asset)
+        .join(Asset, Asset.uid == AssetTicket.asset_uid)
+        .where(AssetTicket.ticket_key == source_key, Asset.workspace_id == workspace_id)
+    ).all()
+    assets = [
+        IssueAssetLinkOut(asset_uid=a.uid, name=a.name, key=a.key, type=a.type,
+                          relation=t.type or "affects")
+        for t, a in asset_rows
+    ]
+    # The ticket's own subject, if it isn't already in the list.
+    if issue.asset_uid and not any(a.asset_uid == issue.asset_uid for a in assets):
+        primary = db.get(Asset, issue.asset_uid)
+        if primary is not None:
+            assets.insert(0, IssueAssetLinkOut(
+                asset_uid=primary.uid, name=primary.name, key=primary.key,
+                type=primary.type, relation="subject",
+            ))
+
+    doc_rows = db.execute(
+        select(DocumentRelation, Document)
+        .join(Document, Document.uid == DocumentRelation.from_document_uid)
+        .where(
+            DocumentRelation.to_type == "issue",
+            DocumentRelation.to_uid == uid,
+            DocumentRelation.workspace_id == workspace_id,
+        )
+    ).all()
+    documents = [
+        IssueDocumentLinkOut(
+            document_uid=d.uid, code=d.code, title=d.title,
+            relation=r.relation_type, relation_id=r.id,
+        )
+        for r, d in doc_rows
+    ]
+    return IssueLinksOut(assets=assets, documents=documents)
+
+
+@router.post("/{uid}/links/assets", response_model=IssueAssetLinkOut, status_code=201)
+def link_issue_asset(
+    uid: str,
+    body: IssueAssetLinkCreate,
+    workspace_id: str = Depends(require_permission("modify", resource="tickets")),
+    current_user_id: Optional[str] = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    issue = _get_owned_issue(uid, workspace_id, db)
+    asset = db.get(Asset, body.asset_uid)
+    if asset is None or asset.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Object not found")
+
+    source_key = (issue.attributes or {}).get("argus_source_key") or uid
+    existing = db.scalar(
+        select(AssetTicket).where(
+            AssetTicket.asset_uid == asset.uid, AssetTicket.ticket_key == source_key
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Already linked to that object")
+
+    now = datetime.now(timezone.utc)
+    db.add(AssetTicket(
+        uid=str(uuid.uuid4()),
+        asset_uid=asset.uid,
+        ticket_key=source_key,
+        summary=issue.title,
+        type=body.relation,
+        status=issue.state,
+        created=now,
+        updated=now,
+        backend_url=(issue.attributes or {}).get("argus_source_url"),
+    ))
+    db.add(IssueHistory(
+        uid=str(uuid.uuid4()), issue_uid=issue.uid, type="updated",
+        author=current_user_id or "api", field="Linked object",
+        to_value=asset.name, timestamp=now,
+    ))
+    db.commit()
+    return IssueAssetLinkOut(
+        asset_uid=asset.uid, name=asset.name, key=asset.key, type=asset.type,
+        relation=body.relation,
+    )
+
+
+@router.delete("/{uid}/links/assets/{asset_uid}", status_code=204)
+def unlink_issue_asset(
+    uid: str,
+    asset_uid: str,
+    workspace_id: str = Depends(require_permission("modify", resource="tickets")),
+    db: Session = Depends(get_db),
+):
+    issue = _get_owned_issue(uid, workspace_id, db)
+    source_key = (issue.attributes or {}).get("argus_source_key") or uid
+    link = db.scalar(
+        select(AssetTicket).where(
+            AssetTicket.asset_uid == asset_uid, AssetTicket.ticket_key == source_key
+        )
+    )
+    if link is not None:
+        db.delete(link)
+    # The subject is a column on the ticket, not a link row.
+    if issue.asset_uid == asset_uid:
+        issue.asset_uid = None
+    db.commit()
+
+
+@router.post("/{uid}/links/documents", response_model=IssueDocumentLinkOut, status_code=201)
+def link_issue_document(
+    uid: str,
+    body: IssueDocumentLinkCreate,
+    workspace_id: str = Depends(require_permission("modify", resource="tickets")),
+    current_user_id: Optional[str] = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    issue = _get_owned_issue(uid, workspace_id, db)
+    document = db.get(Document, body.document_uid)
+    if document is None or document.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    existing = db.scalar(
+        select(DocumentRelation).where(
+            DocumentRelation.from_document_uid == document.uid,
+            DocumentRelation.to_type == "issue",
+            DocumentRelation.to_uid == uid,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Already linked to that document")
+
+    relation = DocumentRelation(
+        workspace_id=workspace_id,
+        from_document_uid=document.uid,
+        to_type="issue",
+        to_uid=uid,
+        relation_type=body.relation,
+    )
+    db.add(relation)
+    db.add(IssueHistory(
+        uid=str(uuid.uuid4()), issue_uid=issue.uid, type="updated",
+        author=current_user_id or "api", field="Linked document",
+        to_value=document.code, timestamp=datetime.now(timezone.utc),
+    ))
+    db.commit()
+    db.refresh(relation)
+    return IssueDocumentLinkOut(
+        document_uid=document.uid, code=document.code, title=document.title,
+        relation=relation.relation_type, relation_id=relation.id,
+    )
+
+
+@router.delete("/{uid}/links/documents/{relation_id}", status_code=204)
+def unlink_issue_document(
+    uid: str,
+    relation_id: int,
+    workspace_id: str = Depends(require_permission("modify", resource="tickets")),
+    db: Session = Depends(get_db),
+):
+    _get_owned_issue(uid, workspace_id, db)
+    relation = db.get(DocumentRelation, relation_id)
+    if relation is None or relation.to_uid != uid or relation.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Link not found")
+    db.delete(relation)
+    db.commit()
 
 
 @router.delete("/{uid}", status_code=204)

@@ -69,6 +69,39 @@ class IssueHistoryOut(BaseModel):
     timestamp: datetime
 
 
+class IssueAssetLinkOut(BaseModel):
+    asset_uid: str
+    name: str
+    key: str
+    type: Optional[str] = None
+    relation: str
+
+
+class IssueAssetLinkCreate(BaseModel):
+    asset_uid: str
+    # What the ticket does to the object: affects it, was caused by it,
+    # replaced it. Free text so a workspace isn't boxed in by our guesses.
+    relation: str = "affects"
+
+
+class IssueDocumentLinkOut(BaseModel):
+    document_uid: str
+    code: str
+    title: str
+    relation: str
+    relation_id: int
+
+
+class IssueDocumentLinkCreate(BaseModel):
+    document_uid: str
+    relation: str = "documents"
+
+
+class IssueLinksOut(BaseModel):
+    assets: list[IssueAssetLinkOut]
+    documents: list[IssueDocumentLinkOut]
+
+
 class IssueCommentCreate(BaseModel):
     uid: str
     author: str

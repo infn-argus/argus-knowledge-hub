@@ -681,6 +681,27 @@ export interface IssueHistoryEntry {
   timestamp: string;
 }
 
+export interface IssueAssetLink {
+  asset_uid: string;
+  name: string;
+  key: string;
+  type: string | null;
+  relation: string;
+}
+
+export interface IssueDocumentLink {
+  document_uid: string;
+  code: string;
+  title: string;
+  relation: string;
+  relation_id: number;
+}
+
+export interface IssueLinks {
+  assets: IssueAssetLink[];
+  documents: IssueDocumentLink[];
+}
+
 export interface Role {
   id: string;
   name: string;
