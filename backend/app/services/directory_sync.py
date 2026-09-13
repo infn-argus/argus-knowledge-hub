@@ -95,6 +95,20 @@ def sync_directory(db: Session, provider: DirectoryProvider | None = None) -> di
     groups = provider.groups()
     seen_group_dns = {g.dn for g in groups}
 
+    # Membership can be published from either side, and some directories only
+    # answer usefully from one of them. INFN's organisational groups list no
+    # people at all — only role-qualified subgroups that hold them — while
+    # each person's memberOf resolves through that nesting and names the
+    # service directly. So both directions are collected and unioned.
+    from_person: dict[str, set[str]] = {}
+    for person in people:
+        user = dn_to_user.get(person.dn)
+        if user is None:
+            continue
+        for group_dn in person.member_of:
+            if group_dn in seen_group_dns:
+                from_person.setdefault(group_dn, set()).add(user.id)
+
     for entry in groups:
         group = db.scalar(select(Group).where(Group.dn == entry.dn))
         if group is None:
@@ -119,11 +133,14 @@ def sync_directory(db: Session, provider: DirectoryProvider | None = None) -> di
             group.synced_at = now
             stats["groups_updated"] += 1
 
+        # A member DN that isn't a person we imported is skipped rather than
+        # guessed at: in a nested tree it is usually another group, and the
+        # people inside it arrive through the memberOf direction instead.
         wanted_user_ids = {
             dn_to_user[member_dn].id
             for member_dn in entry.member_dns
             if member_dn in dn_to_user
-        }
+        } | from_person.get(entry.dn, set())
         existing = {
             m.user_id: m
             for m in db.scalars(select(GroupMember).where(GroupMember.group_uid == group.uid))

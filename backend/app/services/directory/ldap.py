@@ -34,7 +34,23 @@ class LdapDirectory:
         self.attr_group_name = os.environ.get("LDAP_ATTR_GROUP_NAME", "cn")
         self.attr_group_member = os.environ.get("LDAP_ATTR_GROUP_MEMBER", "member")
         self.attr_description = os.environ.get("LDAP_ATTR_DESCRIPTION", "description")
+        self.attr_member_of = os.environ.get("LDAP_ATTR_MEMBER_OF", "memberOf")
         self.page_size = int(os.environ.get("LDAP_PAGE_SIZE", "500"))
+        # INFN's tree names a group by an opaque code in cn ("1_352") and puts
+        # the meaning in description as a path:
+        #   Istituzioni->INFN->Laboratori Nazionali di Frascati->
+        #   Divisione Acceleratori->Servizio Laser
+        # With a separator configured, the last segment becomes the display
+        # name and the whole path is kept as the description — so a picker
+        # reads "Servizio Laser" instead of ninety characters of ancestry,
+        # and the full path is still there to disambiguate two services of
+        # the same name under different divisions.
+        self.group_path_separator = os.environ.get("LDAP_GROUP_PATH_SEPARATOR", "")
+        # Same tree carries role-qualified duplicates of each group
+        # ("...->Servizio Laser::Nomina:Responsabile"), which would otherwise
+        # show up as several groups with the same display name meaning
+        # member, head and guest.
+        self.group_exclude = os.environ.get("LDAP_GROUP_EXCLUDE_SUBSTRING", "")
 
     def _connection(self):
         # Imported lazily so an instance with no LDAP configured doesn't need
@@ -68,33 +84,76 @@ class LdapDirectory:
             generator=True,
         )
 
+    def person_from_entry(self, dn: str, attrs: dict) -> DirectoryPerson | None:
+        username = self._first(attrs, self.attr_username)
+        email = self._first(attrs, self.attr_email)
+        # Someone with neither a username nor an email can't be matched to a
+        # sign-in later, so importing them would only create an unreachable
+        # row.
+        if not username and not email:
+            return None
+        member_of = attrs.get(self.attr_member_of) or []
+        if not isinstance(member_of, (list, tuple)):
+            member_of = [member_of]
+        return DirectoryPerson(
+            dn=dn,
+            username=username or (email or "").split("@")[0],
+            email=email or "",
+            name=self._first(attrs, self.attr_name),
+            member_of=[str(g) for g in member_of],
+        )
+
     def people(self) -> list[DirectoryPerson]:
         conn = self._connection()
         try:
             out: list[DirectoryPerson] = []
             for entry in self._search(
                 conn, self.user_base_dn, self.user_filter,
-                [self.attr_username, self.attr_email, self.attr_name],
+                [self.attr_username, self.attr_email, self.attr_name, self.attr_member_of],
             ):
                 if entry.get("type") != "searchResEntry":
                     continue
-                attrs = entry.get("attributes", {})
-                username = self._first(attrs, self.attr_username)
-                email = self._first(attrs, self.attr_email)
-                # A person with neither a username nor an email can't be
-                # matched to a sign-in later, so importing them would only
-                # create an unreachable row.
-                if not username and not email:
-                    continue
-                out.append(DirectoryPerson(
-                    dn=entry["dn"],
-                    username=username or (email or "").split("@")[0],
-                    email=email or "",
-                    name=self._first(attrs, self.attr_name),
-                ))
+                person = self.person_from_entry(entry["dn"], entry.get("attributes", {}))
+                if person is not None:
+                    out.append(person)
             return out
         finally:
             conn.unbind()
+
+    def group_from_entry(self, dn: str, attrs: dict) -> DirectoryGroup | None:
+        """Turn one directory entry into a group, or None to skip it.
+
+        Kept separate from the search so it can be exercised against
+        captured real entries without a server.
+        """
+        name = self._first(attrs, self.attr_group_name)
+        if not name:
+            return None
+        description = self._first(attrs, self.attr_description)
+
+        if self.group_exclude and (
+            self.group_exclude in name or self.group_exclude in (description or "")
+        ):
+            return None
+
+        if self.group_path_separator and self.group_path_separator in name:
+            # The full path is the more useful description; whatever the
+            # description attribute held is usually the same string anyway.
+            description = name
+            name = name.rsplit(self.group_path_separator, 1)[-1].strip()
+            if not name:
+                return None
+
+        members = attrs.get(self.attr_group_member) or []
+        if not isinstance(members, (list, tuple)):
+            members = [members]
+        return DirectoryGroup(
+            dn=dn,
+            name=name,
+            description=description,
+            email=self._first(attrs, "mail"),
+            member_dns=[str(m) for m in members],
+        )
 
     def groups(self) -> list[DirectoryGroup]:
         conn = self._connection()
@@ -106,20 +165,9 @@ class LdapDirectory:
             ):
                 if entry.get("type") != "searchResEntry":
                     continue
-                attrs = entry.get("attributes", {})
-                name = self._first(attrs, self.attr_group_name)
-                if not name:
-                    continue
-                members = attrs.get(self.attr_group_member) or []
-                if not isinstance(members, (list, tuple)):
-                    members = [members]
-                out.append(DirectoryGroup(
-                    dn=entry["dn"],
-                    name=name,
-                    description=self._first(attrs, self.attr_description),
-                    email=self._first(attrs, "mail"),
-                    member_dns=[str(m) for m in members],
-                ))
+                group = self.group_from_entry(entry["dn"], entry.get("attributes", {}))
+                if group is not None:
+                    out.append(group)
             return out
         finally:
             conn.unbind()

@@ -9,6 +9,13 @@ class DirectoryPerson:
     email: str
     name: str | None = None
     active: bool = True
+    # Group DNs this person belongs to, when the directory publishes
+    # membership from the person's side. INFN's does, and there it is the
+    # only usable direction: an organisational group like "Servizio Laser"
+    # lists no people at all, only role-qualified subgroups which in turn
+    # hold the people — while memberOf resolves through that nesting and
+    # names the service directly.
+    member_of: list[str] = field(default_factory=list)
 
 
 @dataclass
