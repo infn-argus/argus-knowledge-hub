@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { importConfigsApi, importsApi } from "../../api/client";
 import { MERGE_STRATEGIES, importSourceLabel } from "../../api/types";
 
@@ -104,17 +104,25 @@ export function ImportList() {
         : false,
   });
 
+  // Carried through from whichever section the Import link was used in, so
+  // "New configuration" opens on the importer that section is about.
+  const [searchParams] = useSearchParams();
+  const source = searchParams.get("source");
+  const forTickets = source === "jira-issues";
+
   return (
     <div>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Imports</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Bring schemas and assets in from a Jira Insight schema or a Git repository.
+            {forTickets
+              ? "Bring tickets in from a Jira issue tracker. Tickets that name an object key are linked to it."
+              : "Bring schemas and objects in from a Jira Insight schema or a Git repository."}
           </p>
         </div>
         <Link
-          to="/imports/new"
+          to={`/imports/new${source ? `?source=${source}` : ""}`}
           className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
         >
           New configuration

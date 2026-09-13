@@ -24,7 +24,10 @@ const SECTION_CONFIG: Record<
     newTypeTo: string;
     newTypeTitle: string;
     appliesTo: "objects" | "tickets" | "documents";
-    withImportSetting: boolean;
+    // Which import source this section offers, if any — also pre-selects it
+    // on the form, so "Import" from Tickets doesn't land on the object
+    // importer.
+    importSource?: "jira" | "jira-issues";
   }
 > = {
   assets: {
@@ -37,7 +40,7 @@ const SECTION_CONFIG: Record<
     newTypeTo: "/schemas/new",
     newTypeTitle: "New object type",
     appliesTo: "objects",
-    withImportSetting: true,
+    importSource: "jira",
   },
   tickets: {
     links: [
@@ -48,7 +51,7 @@ const SECTION_CONFIG: Record<
     newTypeTo: "/schemas/new?applies_to=tickets",
     newTypeTitle: "New ticket type",
     appliesTo: "tickets",
-    withImportSetting: false,
+    importSource: "jira-issues",
   },
   documents: {
     links: [
@@ -59,7 +62,6 @@ const SECTION_CONFIG: Record<
     newTypeTo: "/schemas/new?applies_to=documents",
     newTypeTitle: "New document type",
     appliesTo: "documents",
-    withImportSetting: false,
   },
 };
 
@@ -152,7 +154,9 @@ export function AppShell() {
   const scopedMembersLink = membersLink ? `${membersLink}?section=${activeSection}` : null;
   const accessLink = currentWorkspaceId ? `/workspaces/${currentWorkspaceId}/access` : null;
   const settingsLinks = [
-    ...(config.withImportSetting ? [{ to: "/imports", label: "Import" }] : []),
+    ...(config.importSource
+      ? [{ to: `/imports?source=${config.importSource}`, label: "Import" }]
+      : []),
     ...(accessLink ? [{ to: accessLink, label: "Access" }] : []),
     ...(scopedMembersLink ? [{ to: scopedMembersLink, label: "Members" }] : []),
   ];

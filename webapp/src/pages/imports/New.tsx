@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, importConfigsApi } from "../../api/client";
 import { MergeStrategy, MERGE_STRATEGIES } from "../../api/types";
 
 export function ImportConfigForm() {
   const { uid } = useParams<{ uid: string }>();
+  const [searchParams] = useSearchParams();
   const isEdit = !!uid;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -17,7 +18,12 @@ export function ImportConfigForm() {
   });
 
   const [name, setName] = useState("");
-  const [source, setSource] = useState<"jira" | "jira-issues" | "git">("jira");
+  // Opened from a section's Import link, the form starts on that section's
+  // source rather than making you pick it again.
+  const requestedSource = searchParams.get("source");
+  const [source, setSource] = useState<"jira" | "jira-issues" | "git">(
+    requestedSource === "jira-issues" || requestedSource === "git" ? requestedSource : "jira",
+  );
   const [mergeStrategy, setMergeStrategy] = useState<MergeStrategy>("override");
 
   const [baseUrl, setBaseUrl] = useState("");
