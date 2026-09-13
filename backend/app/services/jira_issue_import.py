@@ -164,6 +164,15 @@ def _search_issues(jira, base_url: str, jql: str, start_at: int) -> dict:
     return resp.json()
 
 
+# Keys written by the first version of this importer, before the field set
+# became a ticket type and the names had to match its attribute keys. Left
+# in place they would sit alongside the current ones as stale duplicates
+# holding older values.
+SUPERSEDED_KEYS = (
+    "jiraKey", "jiraUrl", "jiraProject", "jiraStatus", "jiraIssueType", "jiraComponents",
+)
+
+
 def _names(values) -> list[str]:
     return [v.get("name") for v in (values or []) if isinstance(v, dict) and v.get("name")]
 
@@ -432,7 +441,10 @@ def run_jira_issue_import(
                 # What Jira knows that our columns don't, kept rather than
                 # discarded: the key is what a person searches for, and the
                 # rest explains where the ticket came from.
-                attributes = dict(issue.attributes or {})
+                attributes = {
+                    k: v for k, v in (issue.attributes or {}).items()
+                    if k not in SUPERSEDED_KEYS
+                }
                 attributes.update(_issue_attributes(base_url, jira_key, fields))
                 issue.attributes = attributes
                 issue_type_name = (fields.get("issuetype") or {}).get("name")

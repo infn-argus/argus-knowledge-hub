@@ -484,3 +484,43 @@ def test_a_ticket_type_is_created_per_jira_issue_type(jira_stub):
     bug_uid = next(c.uid for c in children if c.name == "Bug")
     assert db.get(Issue, f"{ws}:LNF-{suffix}-2").schema_uid == bug_uid
     db.close()
+
+
+def test_a_reimport_clears_the_superseded_attribute_keys(jira_stub):
+    """524 tickets were imported before the field set became a ticket type,
+    under camelCase keys. A re-run has to replace them, not leave both
+    spellings side by side holding different values."""
+    _server, base_url = jira_stub
+    suffix = secrets.token_hex(4)
+    ws = f"ws-{suffix}"
+    key = f"LNFDCS-{suffix}"
+    _JiraStub.issues = [_issue(key, "Camera offline", "Open", "new", issuetype="Task")]
+    _JiraStub.comments = {}
+
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name="WS"))
+    db.flush()
+    db.add(Issue(
+        uid=f"{ws}:{key}", workspace_id=ws, title="Camera offline", state="new",
+        attributes={
+            "jiraKey": key, "jiraUrl": "http://old/browse/" + key,
+            "jiraProject": "LNFDCS", "jiraStatus": "Open",
+            "jiraIssueType": "Task", "jiraComponents": ["Olog"],
+            # Something a person added by hand must survive.
+            "local_note": "keep me",
+        },
+    ))
+    db.commit()
+    db.close()
+
+    status, error, _counts = _run(ws, base_url)
+    assert status == "succeeded", error
+
+    db = SessionLocal()
+    a = db.get(Issue, f"{ws}:{key}").attributes
+    assert not any(k in a for k in
+                   ("jiraKey", "jiraUrl", "jiraProject", "jiraStatus",
+                    "jiraIssueType", "jiraComponents"))
+    assert a["jira_key"] == key
+    assert a["local_note"] == "keep me"
+    db.close()
