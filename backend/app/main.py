@@ -11,6 +11,7 @@ from app.routers import (
     attachments,
     documents,
     global_values,
+    graph,
     groups,
     import_configs,
     imports,
@@ -43,6 +44,7 @@ app.include_router(documents.router)
 app.include_router(asset_subresources.router)
 app.include_router(attachments.router)
 app.include_router(global_values.router)
+app.include_router(graph.router)
 app.include_router(groups.router)
 app.include_router(import_configs.router)
 app.include_router(imports.router)

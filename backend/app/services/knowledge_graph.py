@@ -1,0 +1,419 @@
+"""One graph over everything the hub knows.
+
+The pieces already are a graph — objects relate to objects, tickets
+affect objects and each other, documents describe objects and record
+work, people belong to services. What was missing is a way to walk it
+without knowing which table each edge lives in.
+
+That is what ARGUS needs. "This camera is down: what else does it depend
+on, what broke it before, which procedure covers it, who is responsible"
+is one traversal from one node, and answering it by querying five tables
+in the right order is the caller's problem only until it is written once
+here.
+
+Nodes are identified by (kind, uid) across the whole workspace. Edges are
+undirected for traversal — a question about a magnet must find the ticket
+that names it, not only the other way — but each edge remembers its own
+direction so the answer can still say which way round it is.
+"""
+from dataclasses import dataclass, field
+from typing import Iterable, Literal, Optional
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.models.asset import Asset, Relation
+from app.models.asset_subresources import AssetTicket
+from app.models.document import Document, DocumentRelation
+from app.models.group import Group, GroupMember
+from app.models.issue import Issue, IssueLink
+from app.models.schema import Schema
+from app.models.user import User
+
+NodeKind = Literal["asset", "ticket", "document", "group", "person", "type"]
+
+MAX_NODES = 400
+
+
+@dataclass(frozen=True)
+class NodeRef:
+    kind: str
+    uid: str
+
+
+@dataclass
+class Node:
+    kind: str
+    uid: str
+    label: str
+    sublabel: Optional[str] = None
+    type_name: Optional[str] = None
+    state: Optional[str] = None
+    # How many hops from the node the traversal started at.
+    depth: int = 0
+
+
+@dataclass
+class Edge:
+    from_kind: str
+    from_uid: str
+    to_kind: str
+    to_uid: str
+    relation: str
+    # What sort of connection this is, so a caller can weigh them: an
+    # object's own structure is not the same kind of fact as a ticket that
+    # happened to mention it.
+    via: str
+
+
+@dataclass
+class Graph:
+    nodes: list[Node] = field(default_factory=list)
+    edges: list[Edge] = field(default_factory=list)
+    truncated: bool = False
+
+
+def _ticket_key(issue: Issue) -> str:
+    return (issue.attributes or {}).get("argus_source_key") or issue.uid
+
+
+def _label_asset(asset: Asset) -> Node:
+    return Node(kind="asset", uid=asset.uid, label=asset.name, sublabel=asset.key,
+                type_name=asset.type)
+
+
+def _label_issue(issue: Issue) -> Node:
+    return Node(kind="ticket", uid=issue.uid, label=issue.title,
+                sublabel=(issue.attributes or {}).get("argus_source_key"),
+                state=issue.state)
+
+
+def _label_document(document: Document) -> Node:
+    return Node(kind="document", uid=document.uid, label=document.title,
+                sublabel=document.code)
+
+
+def _label_group(group: Group) -> Node:
+    return Node(kind="group", uid=group.uid, label=group.name, sublabel=group.dn)
+
+
+def _label_person(user: User) -> Node:
+    return Node(kind="person", uid=user.id, label=user.name or user.email,
+                sublabel=user.email)
+
+
+def ticket_uids_by_key(db: Session, workspace_id: str) -> dict[str, list[str]]:
+    """ticket key -> the tickets holding it. Built once per traversal: doing
+    it per node turned a walk over a few objects into a scan of every
+    ticket in the workspace, several hundred times over."""
+    out: dict[str, list[str]] = {}
+    for issue in db.scalars(select(Issue).where(Issue.workspace_id == workspace_id)):
+        out.setdefault(_ticket_key(issue), []).append(issue.uid)
+    return out
+
+
+def _neighbours_of_asset(db: Session, workspace_id: str, uid: str,
+                         ctx: Optional[dict] = None) -> list[tuple[Edge, NodeRef]]:
+    out: list[tuple[Edge, NodeRef]] = []
+
+    for relation in db.scalars(
+        select(Relation).where(
+            (Relation.from_asset_uid == uid) | (Relation.to_asset_uid == uid)
+        )
+    ):
+        outgoing = relation.from_asset_uid == uid
+        other = relation.to_asset_uid if outgoing else relation.from_asset_uid
+        out.append((
+            Edge(from_kind="asset", from_uid=relation.from_asset_uid,
+                 to_kind="asset", to_uid=relation.to_asset_uid,
+                 relation=relation.relation_type, via="structure"),
+            NodeRef("asset", other),
+        ))
+
+    # Tickets reach objects by key, not uid — the link table predates local
+    # tickets and still carries rows for keys imported from elsewhere.
+    by_key = (ctx or {}).get("ticket_uids_by_key")
+    if by_key is None:
+        by_key = ticket_uids_by_key(db, workspace_id)
+    ticket_uids: set[str] = set()
+    for row in db.scalars(select(AssetTicket).where(AssetTicket.asset_uid == uid)):
+        ticket_uids.update(by_key.get(row.ticket_key, ()))
+    for issue_uid in db.scalars(
+        select(Issue.uid).where(Issue.workspace_id == workspace_id, Issue.asset_uid == uid)
+    ):
+        ticket_uids.add(issue_uid)
+    for issue_uid in ticket_uids:
+        out.append((
+            Edge(from_kind="ticket", from_uid=issue_uid, to_kind="asset", to_uid=uid,
+                 relation="affects", via="work"),
+            NodeRef("ticket", issue_uid),
+        ))
+
+    for relation in db.scalars(
+        select(DocumentRelation).where(
+            DocumentRelation.workspace_id == workspace_id,
+            DocumentRelation.to_type == "asset",
+            DocumentRelation.to_uid == uid,
+        )
+    ):
+        out.append((
+            Edge(from_kind="document", from_uid=relation.from_document_uid,
+                 to_kind="asset", to_uid=uid,
+                 relation=relation.relation_type, via="documentation"),
+            NodeRef("document", relation.from_document_uid),
+        ))
+
+    return out
+
+
+def _neighbours_of_ticket(db: Session, workspace_id: str, uid: str,
+                          ctx: Optional[dict] = None) -> list[tuple[Edge, NodeRef]]:
+    out: list[tuple[Edge, NodeRef]] = []
+    issue = db.get(Issue, uid)
+    if issue is None:
+        return out
+
+    key = _ticket_key(issue)
+    asset_uids = {
+        row.asset_uid
+        for row in db.scalars(select(AssetTicket).where(AssetTicket.ticket_key == key))
+    }
+    if issue.asset_uid:
+        asset_uids.add(issue.asset_uid)
+    for asset_uid in asset_uids:
+        out.append((
+            Edge(from_kind="ticket", from_uid=uid, to_kind="asset", to_uid=asset_uid,
+                 relation="affects", via="work"),
+            NodeRef("asset", asset_uid),
+        ))
+
+    for link in db.scalars(
+        select(IssueLink).where(
+            (IssueLink.from_issue_uid == uid) | (IssueLink.to_issue_uid == uid)
+        )
+    ):
+        other = link.to_issue_uid if link.from_issue_uid == uid else link.from_issue_uid
+        out.append((
+            Edge(from_kind="ticket", from_uid=link.from_issue_uid,
+                 to_kind="ticket", to_uid=link.to_issue_uid,
+                 relation=link.relation_type, via="work"),
+            NodeRef("ticket", other),
+        ))
+
+    for relation in db.scalars(
+        select(DocumentRelation).where(
+            DocumentRelation.workspace_id == workspace_id,
+            DocumentRelation.to_type == "issue",
+            DocumentRelation.to_uid == uid,
+        )
+    ):
+        out.append((
+            Edge(from_kind="document", from_uid=relation.from_document_uid,
+                 to_kind="ticket", to_uid=uid,
+                 relation=relation.relation_type, via="documentation"),
+            NodeRef("document", relation.from_document_uid),
+        ))
+
+    return out
+
+
+def _neighbours_of_document(db: Session, workspace_id: str, uid: str,
+                            ctx: Optional[dict] = None) -> list[tuple[Edge, NodeRef]]:
+    out: list[tuple[Edge, NodeRef]] = []
+    kind_by_to_type = {"asset": "asset", "issue": "ticket", "document": "document"}
+
+    for relation in db.scalars(
+        select(DocumentRelation).where(
+            DocumentRelation.workspace_id == workspace_id,
+            DocumentRelation.from_document_uid == uid,
+        )
+    ):
+        kind = kind_by_to_type.get(relation.to_type)
+        if kind is None:
+            continue
+        out.append((
+            Edge(from_kind="document", from_uid=uid, to_kind=kind, to_uid=relation.to_uid,
+                 relation=relation.relation_type, via="documentation"),
+            NodeRef(kind, relation.to_uid),
+        ))
+
+    for relation in db.scalars(
+        select(DocumentRelation).where(
+            DocumentRelation.workspace_id == workspace_id,
+            DocumentRelation.to_type == "document",
+            DocumentRelation.to_uid == uid,
+        )
+    ):
+        out.append((
+            Edge(from_kind="document", from_uid=relation.from_document_uid,
+                 to_kind="document", to_uid=uid,
+                 relation=relation.relation_type, via="documentation"),
+            NodeRef("document", relation.from_document_uid),
+        ))
+
+    return out
+
+
+def _neighbours_of_group(db: Session, workspace_id: str, uid: str,
+                         ctx: Optional[dict] = None) -> list[tuple[Edge, NodeRef]]:
+    return [
+        (
+            Edge(from_kind="person", from_uid=member.user_id, to_kind="group", to_uid=uid,
+                 relation="member of", via="people"),
+            NodeRef("person", member.user_id),
+        )
+        for member in db.scalars(select(GroupMember).where(GroupMember.group_uid == uid))
+    ]
+
+
+def _neighbours_of_person(db: Session, workspace_id: str, uid: str,
+                          ctx: Optional[dict] = None) -> list[tuple[Edge, NodeRef]]:
+    return [
+        (
+            Edge(from_kind="person", from_uid=uid, to_kind="group", to_uid=member.group_uid,
+                 relation="member of", via="people"),
+            NodeRef("group", member.group_uid),
+        )
+        for member in db.scalars(select(GroupMember).where(GroupMember.user_id == uid))
+    ]
+
+
+_NEIGHBOURS = {
+    "asset": _neighbours_of_asset,
+    "ticket": _neighbours_of_ticket,
+    "document": _neighbours_of_document,
+    "group": _neighbours_of_group,
+    "person": _neighbours_of_person,
+}
+
+
+def load_node(db: Session, workspace_id: str, kind: str, uid: str) -> Optional[Node]:
+    """The node itself, or None when it doesn't exist or isn't this
+    workspace's to see."""
+    if kind == "asset":
+        asset = db.get(Asset, uid)
+        return _label_asset(asset) if asset and asset.workspace_id == workspace_id else None
+    if kind == "ticket":
+        issue = db.get(Issue, uid)
+        return _label_issue(issue) if issue and issue.workspace_id == workspace_id else None
+    if kind == "document":
+        document = db.get(Document, uid)
+        return (
+            _label_document(document)
+            if document and document.workspace_id == workspace_id else None
+        )
+    if kind == "group":
+        group = db.get(Group, uid)
+        return _label_group(group) if group else None
+    if kind == "person":
+        user = db.get(User, uid)
+        return _label_person(user) if user else None
+    return None
+
+
+def traverse(
+    db: Session,
+    workspace_id: str,
+    kind: str,
+    uid: str,
+    depth: int = 1,
+    kinds: Optional[Iterable[str]] = None,
+    max_nodes: int = MAX_NODES,
+) -> Graph:
+    """Everything within `depth` hops of one node.
+
+    Breadth-first and capped: a hub object in a real inventory reaches most
+    of the graph in three hops, and returning that is useless to a reader
+    and expensive for everyone. When the cap bites, the graph says so
+    rather than pretending it is complete.
+    """
+    start = load_node(db, workspace_id, kind, uid)
+    if start is None:
+        return Graph()
+
+    wanted = set(kinds) if kinds else None
+    graph = Graph(nodes=[start])
+    seen_nodes = {NodeRef(kind, uid)}
+    seen_edges: set[tuple] = set()
+
+    # Built once and shared by every node the walk touches.
+    ctx = {"ticket_uids_by_key": ticket_uids_by_key(db, workspace_id)}
+
+    frontier = [NodeRef(kind, uid)]
+    for hop in range(1, max(depth, 0) + 1):
+        next_frontier: list[NodeRef] = []
+        for ref in frontier:
+            expand = _NEIGHBOURS.get(ref.kind)
+            if expand is None:
+                continue
+            for edge, neighbour in expand(db, workspace_id, ref.uid, ctx):
+                if wanted is not None and neighbour.kind not in wanted:
+                    continue
+                signature = (
+                    edge.from_kind, edge.from_uid, edge.to_kind, edge.to_uid,
+                    edge.relation, edge.via,
+                )
+                if signature not in seen_edges:
+                    seen_edges.add(signature)
+                    graph.edges.append(edge)
+                if neighbour in seen_nodes:
+                    continue
+                if len(graph.nodes) >= max_nodes:
+                    graph.truncated = True
+                    return graph
+                node = load_node(db, workspace_id, neighbour.kind, neighbour.uid)
+                if node is None:
+                    continue
+                node.depth = hop
+                seen_nodes.add(neighbour)
+                graph.nodes.append(node)
+                next_frontier.append(neighbour)
+        frontier = next_frontier
+        if not frontier:
+            break
+
+    return graph
+
+
+def graph_summary(db: Session, workspace_id: str) -> dict:
+    """How much of a graph this workspace actually has.
+
+    Useful on its own — a knowledge graph with no edges between objects and
+    documentation is a filing cabinet, and the number says which it is.
+    """
+    def count(model, *where):
+        return db.scalar(select(func.count()).select_from(model).where(*where)) or 0
+
+    assets = count(Asset, Asset.workspace_id == workspace_id)
+    tickets = count(Issue, Issue.workspace_id == workspace_id)
+    documents = count(Document, Document.workspace_id == workspace_id)
+    types = count(Schema, Schema.workspace_id == workspace_id)
+    groups = count(Group)
+
+    asset_edges = count(Relation, Relation.workspace_id == workspace_id)
+    document_edges = count(DocumentRelation, DocumentRelation.workspace_id == workspace_id)
+    ticket_edges = db.scalar(
+        select(func.count())
+        .select_from(IssueLink)
+        .join(Issue, Issue.uid == IssueLink.from_issue_uid)
+        .where(Issue.workspace_id == workspace_id)
+    ) or 0
+    ticket_asset_edges = db.scalar(
+        select(func.count())
+        .select_from(AssetTicket)
+        .join(Asset, Asset.uid == AssetTicket.asset_uid)
+        .where(Asset.workspace_id == workspace_id)
+    ) or 0
+
+    return {
+        "nodes": {
+            "assets": assets, "tickets": tickets, "documents": documents,
+            "types": types, "groups": groups,
+        },
+        "edges": {
+            "asset_to_asset": asset_edges,
+            "ticket_to_asset": ticket_asset_edges,
+            "ticket_to_ticket": ticket_edges,
+            "document_to_anything": document_edges,
+        },
+    }
