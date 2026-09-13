@@ -17,17 +17,26 @@ export function ImportConfigForm() {
   });
 
   const [name, setName] = useState("");
-  const [source, setSource] = useState<"jira" | "git">("jira");
+  const [source, setSource] = useState<"jira" | "jira-issues" | "git">("jira");
   const [mergeStrategy, setMergeStrategy] = useState<MergeStrategy>("override");
 
   const [baseUrl, setBaseUrl] = useState("");
   const [jiraPat, setJiraPat] = useState("");
   const [jiraSchemaId, setJiraSchemaId] = useState("");
 
+  const [jql, setJql] = useState("");
+  const [linkAssets, setLinkAssets] = useState(true);
+
   const [provider, setProvider] = useState<"github" | "gitlab">("github");
   const [repoUrl, setRepoUrl] = useState("");
   const [gitPat, setGitPat] = useState("");
   const [branch, setBranch] = useState("main");
+
+  // params holds whatever the source needs, so values arrive loosely typed.
+  const param = (key: string) => {
+    const value = existing.data?.params[key];
+    return typeof value === "string" ? value : "";
+  };
 
   useEffect(() => {
     if (!existing.data) return;
@@ -35,12 +44,16 @@ export function ImportConfigForm() {
     setSource(existing.data.source);
     setMergeStrategy(existing.data.merge_strategy);
     if (existing.data.source === "jira") {
-      setBaseUrl(existing.data.params.base_url ?? "");
-      setJiraSchemaId(existing.data.params.jira_schema_id ?? "");
+      setBaseUrl(param("base_url"));
+      setJiraSchemaId(param("jira_schema_id"));
+    } else if (existing.data.source === "jira-issues") {
+      setBaseUrl(param("base_url"));
+      setJql(param("jql"));
+      setLinkAssets(existing.data.params.link_assets !== false);
     } else {
-      setProvider((existing.data.params.provider as "github" | "gitlab") ?? "github");
-      setRepoUrl(existing.data.params.repo_url ?? "");
-      setBranch(existing.data.params.branch ?? "main");
+      setProvider((param("provider") as "github" | "gitlab") || "github");
+      setRepoUrl(param("repo_url"));
+      setBranch(param("branch") || "main");
     }
   }, [existing.data]);
 
@@ -52,6 +65,14 @@ export function ImportConfigForm() {
               source: "jira" as const,
               base_url: baseUrl.replace(/\/+$/, ""),
               jira_schema_id: jiraSchemaId,
+              ...(jiraPat ? { pat: jiraPat } : {}),
+            }
+          : source === "jira-issues"
+          ? {
+              source: "jira-issues" as const,
+              base_url: baseUrl.replace(/\/+$/, ""),
+              jql,
+              link_assets: linkAssets,
               ...(jiraPat ? { pat: jiraPat } : {}),
             }
           : {
@@ -99,7 +120,7 @@ export function ImportConfigForm() {
       </p>
 
       <div className="mt-6 flex gap-2">
-        {(["jira", "git"] as const).map((s) => (
+        {(["jira", "jira-issues", "git"] as const).map((s) => (
           <button
             key={s}
             type="button"
@@ -109,7 +130,7 @@ export function ImportConfigForm() {
               source === s ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
-            {s === "jira" ? "Jira" : "Git"}
+            {s === "jira" ? "Jira objects" : s === "jira-issues" ? "Jira tickets" : "Git"}
           </button>
         ))}
       </div>
@@ -126,7 +147,7 @@ export function ImportConfigForm() {
           />
         </div>
 
-        {source === "jira" ? (
+        {source === "jira" || source === "jira-issues" ? (
           <>
             <div>
               <label className="block text-sm font-medium text-slate-700">Jira server URL</label>
@@ -150,16 +171,52 @@ export function ImportConfigForm() {
                 className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700">Object schema ID</label>
-              <input
-                value={jiraSchemaId}
-                onChange={(e) => setJiraSchemaId(e.target.value)}
-                placeholder="32"
-                required
-                className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
+            {source === "jira" ? (
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Object schema ID</label>
+                <input
+                  value={jiraSchemaId}
+                  onChange={(e) => setJiraSchemaId(e.target.value)}
+                  placeholder="32"
+                  required
+                  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Which issues (JQL)
+                  </label>
+                  <input
+                    value={jql}
+                    onChange={(e) => setJql(e.target.value)}
+                    placeholder='project = LNF AND updated >= -90d'
+                    required
+                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Any query the token's account can run in Jira. Start narrow — one project,
+                    recent issues — and widen once the result looks right.
+                  </p>
+                </div>
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={linkAssets}
+                    onChange={(e) => setLinkAssets(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    Link tickets to objects they mention
+                    <span className="block text-xs text-slate-500">
+                      A ticket whose text contains an object key (LNFT2-145356) is attached to
+                      that object.
+                    </span>
+                  </span>
+                </label>
+              </>
+            )}
           </>
         ) : (
           <>

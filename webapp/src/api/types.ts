@@ -341,19 +341,38 @@ export interface GitImportInput {
   merge_strategy?: MergeStrategy;
 }
 
-export type ImportInput = JiraImportInput | GitImportInput;
+export interface JiraIssueImportInput {
+  source: "jira-issues";
+  base_url: string;
+  pat: string;
+  jql: string;
+  schema_uid?: string | null;
+  link_assets?: boolean;
+  merge_strategy?: MergeStrategy;
+}
+
+export type ImportInput = JiraImportInput | JiraIssueImportInput | GitImportInput;
 
 export interface ImportConfig {
   uid: string;
   workspace_id: string;
   name: string;
-  source: "jira" | "git";
+  source: "jira" | "jira-issues" | "git";
   merge_strategy: MergeStrategy;
-  params: Record<string, string>;
+  params: Record<string, string | boolean | null>;
   last_run_at: string | null;
   last_import_job_uid: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface JiraIssueImportConfigParams {
+  source: "jira-issues";
+  base_url: string;
+  jql: string;
+  schema_uid?: string | null;
+  link_assets?: boolean;
+  pat?: string;
 }
 
 export interface JiraImportConfigParams {
@@ -371,7 +390,10 @@ export interface GitImportConfigParams {
   pat?: string;
 }
 
-export type ImportConfigParams = JiraImportConfigParams | GitImportConfigParams;
+export type ImportConfigParams =
+  | JiraImportConfigParams
+  | JiraIssueImportConfigParams
+  | GitImportConfigParams;
 
 export interface ImportConfigInput {
   name: string;
@@ -710,4 +732,13 @@ export interface EffectivePermissions {
   tickets: string[];
   documents: string[];
   workspace: string[];
+}
+
+/** Import sources read almost alike; spell them out so a ticket import
+ * isn't mistaken for an object import when reading a list of runs. */
+export function importSourceLabel(source: string): string {
+  if (source === "jira") return "Jira objects";
+  if (source === "jira-issues") return "Jira tickets";
+  if (source === "git") return "Git";
+  return source;
 }

@@ -2,8 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 import { Link, useParams } from "react-router-dom";
 import { importsApi } from "../../api/client";
+import { importSourceLabel } from "../../api/types";
 
 const ENRICHMENT_COUNTS: [string, string][] = [
+  ["tickets", "Tickets"],
+  ["asset_links", "Tickets linked to objects"],
   ["attachments", "Attachments"],
   ["comments", "Comments"],
   ["history", "History entries"],
@@ -41,7 +44,7 @@ export function ImportStatus() {
         <div className="mt-3">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold text-slate-900">
-              {data.source === "jira" ? "Jira import" : "Git import"}
+              {importSourceLabel(data.source)} import
             </h1>
             <span
               className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[data.status] ?? ""}`}

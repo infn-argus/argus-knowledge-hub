@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { importConfigsApi, importsApi } from "../../api/client";
-import { MERGE_STRATEGIES } from "../../api/types";
+import { MERGE_STRATEGIES, importSourceLabel } from "../../api/types";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "bg-slate-100 text-slate-600",
@@ -56,7 +56,7 @@ function SavedConfigs() {
           {configs.data.map((c) => (
             <tr key={c.uid} className="hover:bg-slate-50">
               <td className="px-4 py-2 font-medium text-slate-900">{c.name}</td>
-              <td className="px-4 py-2 text-slate-600">{c.source === "jira" ? "Jira" : "Git"}</td>
+              <td className="px-4 py-2 text-slate-600">{importSourceLabel(c.source)}</td>
               <td className="px-4 py-2 text-slate-600">
                 {MERGE_STRATEGIES.find((s) => s.value === c.merge_strategy)?.label ?? c.merge_strategy}
               </td>
@@ -154,7 +154,7 @@ export function ImportList() {
                 <tr key={job.uid} className="hover:bg-slate-50">
                   <td className="px-4 py-2">
                     <Link to={`/imports/${job.uid}`} className="font-medium text-slate-900 hover:underline">
-                      {job.source === "jira" ? "Jira" : "Git"}
+                      {importSourceLabel(job.source)}
                     </Link>
                   </td>
                   <td className="px-4 py-2">

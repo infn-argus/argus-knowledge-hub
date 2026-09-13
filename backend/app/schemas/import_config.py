@@ -14,6 +14,15 @@ class JiraImportConfigParams(BaseModel):
     pat: Optional[str] = None  # omit on update to keep the stored secret
 
 
+class JiraIssueImportConfigParams(BaseModel):
+    source: Literal["jira-issues"]
+    base_url: str
+    jql: str
+    schema_uid: Optional[str] = None
+    link_assets: bool = True
+    pat: Optional[str] = None  # omit on update to keep the stored secret
+
+
 class GitImportConfigParams(BaseModel):
     source: Literal["git"]
     provider: Literal["github", "gitlab"]
@@ -22,7 +31,9 @@ class GitImportConfigParams(BaseModel):
     pat: Optional[str] = None  # omit on update to keep the stored secret
 
 
-ImportConfigParams = Union[JiraImportConfigParams, GitImportConfigParams]
+ImportConfigParams = Union[
+    JiraImportConfigParams, JiraIssueImportConfigParams, GitImportConfigParams
+]
 
 
 class ImportConfigCreate(BaseModel):

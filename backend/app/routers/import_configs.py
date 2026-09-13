@@ -13,6 +13,7 @@ from app.schemas.import_config import ImportConfigCreate, ImportConfigOut, Impor
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.git_import import run_git_import
 from app.services.jira_import import run_jira_import
+from app.services.jira_issue_import import run_jira_issue_import
 
 router = APIRouter(prefix="/v1/import-configs", tags=["import-configs"])
 
@@ -123,6 +124,18 @@ def run_config(
             pat,
             config.params["jira_schema_id"],
             config.merge_strategy,
+        )
+    elif config.source == "jira-issues":
+        background_tasks.add_task(
+            run_jira_issue_import,
+            job.uid,
+            workspace_id,
+            config.params["base_url"],
+            pat,
+            config.params["jql"],
+            config.merge_strategy,
+            config.params.get("schema_uid"),
+            config.params.get("link_assets", True),
         )
     else:
         background_tasks.add_task(

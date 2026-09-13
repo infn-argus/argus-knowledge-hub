@@ -9,14 +9,21 @@ from sqlalchemy.orm import Session
 from app.auth import require_permission
 from app.db import get_db
 from app.models.import_job import ImportJob
-from app.schemas.import_job import GitImportRequest, ImportJobOut, JiraImportRequest
+from app.schemas.import_job import (
+    GitImportRequest,
+    ImportJobOut,
+    JiraImportRequest,
+    JiraIssueImportRequest,
+)
 from app.services.git_import import run_git_import
 from app.services.jira_import import run_jira_import
+from app.services.jira_issue_import import run_jira_issue_import
 
 router = APIRouter(prefix="/v1/imports", tags=["imports"])
 
 ImportRequest = Annotated[
-    Union[JiraImportRequest, GitImportRequest], Field(discriminator="source")
+    Union[JiraImportRequest, JiraIssueImportRequest, GitImportRequest],
+    Field(discriminator="source"),
 ]
 
 
@@ -57,6 +64,12 @@ def create_import(
         background_tasks.add_task(
             run_jira_import,
             job.uid, workspace_id, body.base_url, body.pat, body.jira_schema_id, body.merge_strategy,
+        )
+    elif isinstance(body, JiraIssueImportRequest):
+        background_tasks.add_task(
+            run_jira_issue_import,
+            job.uid, workspace_id, body.base_url, body.pat, body.jql, body.merge_strategy,
+            body.schema_uid, body.link_assets,
         )
     else:
         background_tasks.add_task(
