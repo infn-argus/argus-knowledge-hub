@@ -9,6 +9,7 @@ from app.models.asset_subresources import (
 from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation, DocumentRevision
 from app.models.global_value import GlobalValue
+from app.models.group import Group, GroupMember
 from app.models.import_config import ImportConfig
 from app.models.import_job import ImportJob
 from app.models.issue import Issue, IssueComment
@@ -30,6 +31,8 @@ __all__ = [
     "DocumentRelation",
     "DocumentRevision",
     "GlobalValue",
+    "Group",
+    "GroupMember",
     "ImportConfig",
     "ImportJob",
     "Issue",

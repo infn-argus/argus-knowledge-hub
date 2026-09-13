@@ -1,5 +1,6 @@
 import hashlib
 import os
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal, Optional, Union
@@ -48,6 +49,42 @@ class OidcIdentity:
 Identity = Union[PatIdentity, OidcIdentity]
 
 
+def _resolve_oidc_user(db: Session, claims: dict) -> User:
+    """Find the person behind a verified token, in the order that avoids
+    creating a second row for someone who already exists:
+
+    1. by the subject we recorded at their last sign-in;
+    2. by the id, for accounts created before subjects were stored
+       separately — their id *is* the subject, and every "user"-type
+       attribute value in the database already points at it;
+    3. by email, which is how someone the directory imported before they
+       ever signed in gets claimed rather than duplicated.
+    """
+    sub = claims["sub"]
+    email = claims.get("email", "")
+
+    user = db.scalar(select(User).where(User.oidc_sub == sub))
+    if user is None:
+        user = db.get(User, sub)
+    if user is None and email:
+        user = db.scalar(select(User).where(User.email == email))
+
+    if user is None:
+        user = User(id=str(uuid.uuid4()), oidc_sub=sub, email=email, name=claims.get("name"))
+        db.add(user)
+        db.flush()
+        return user
+
+    user.oidc_sub = sub
+    if email:
+        user.email = email
+    user.name = claims.get("name", user.name)
+    # Signing in is proof the account is live, whatever a stale directory
+    # sync may have concluded.
+    user.active = True
+    return user
+
+
 def get_identity(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
@@ -73,16 +110,8 @@ def get_identity(
         except jwt.PyJWTError:
             pass
         else:
-            sub = claims["sub"]
-            user = db.get(User, sub)
-            now = datetime.now(timezone.utc)
-            if user is None:
-                user = User(id=sub, email=claims.get("email", ""), name=claims.get("name"))
-                db.add(user)
-            else:
-                user.email = claims.get("email", user.email)
-                user.name = claims.get("name", user.name)
-            user.last_login_at = now
+            user = _resolve_oidc_user(db, claims)
+            user.last_login_at = datetime.now(timezone.utc)
             db.commit()
             return OidcIdentity(user=user)
 
