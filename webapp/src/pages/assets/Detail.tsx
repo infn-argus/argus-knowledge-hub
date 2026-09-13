@@ -423,14 +423,48 @@ export function AssetDetail() {
           </ul>
         </SectionCard>
 
-        <SectionCard title="Linked tickets">
+        <SectionCard
+          title="Linked tickets"
+          action={
+            <Link
+              to={`/tickets/new?asset_uid=${a.uid}`}
+              className="text-xs text-indigo-600 hover:text-indigo-800"
+            >
+              + Raise a ticket
+            </Link>
+          }
+        >
           <ul className="space-y-1 text-sm">
             {tickets.data?.map((t) => (
-              <li key={t.uid} className="flex justify-between">
-                <span>
-                  {t.ticket_key}: {t.summary}
+              <li key={t.uid} className="flex items-baseline justify-between gap-3">
+                <span className="min-w-0">
+                  {/* A ticket raised here has no source key, so ticket_key
+                      is its uid — a uuid tells nobody anything, so show it
+                      only when it's a real key from the source system. */}
+                  {t.ticket_key !== t.issue_uid && (
+                    <span className="font-mono text-xs text-slate-400">{t.ticket_key}</span>
+                  )}{" "}
+                  {/* A row from the asset import names a key that may since
+                      have been imported as a ticket here; link to it when so,
+                      and to the source system otherwise. */}
+                  {t.issue_uid ? (
+                    <Link to={`/tickets/${t.issue_uid}`} className="hover:underline">
+                      {t.summary}
+                    </Link>
+                  ) : t.backend_url ? (
+                    <a
+                      href={t.backend_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover:underline"
+                    >
+                      {t.summary} ↗
+                    </a>
+                  ) : (
+                    t.summary
+                  )}
                 </span>
-                <span className="text-xs text-slate-400">{t.status}</span>
+                <span className="shrink-0 text-xs text-slate-400">{t.status}</span>
               </li>
             ))}
             {tickets.data?.length === 0 && (

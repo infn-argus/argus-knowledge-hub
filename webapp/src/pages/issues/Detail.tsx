@@ -14,6 +14,7 @@ import {
 } from "../../api/client";
 import { ApiError } from "../../api/client";
 import { AttributeValue } from "../../components/AttributeValue";
+import { TicketGraph } from "../../components/TicketGraph";
 import { TicketPicker } from "../../components/TicketPicker";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
@@ -205,6 +206,7 @@ export function IssueDetail() {
   const documents = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
   const allIssues = useQuery({ queryKey: ["issues"], queryFn: () => issuesApi.list() });
   const [ticketRelation, setTicketRelation] = useState("relates");
+  const [showGraph, setShowGraph] = useState(false);
 
   const invalidateLinks = () => {
     queryClient.invalidateQueries({ queryKey: ["issue-links", uid] });
@@ -298,6 +300,9 @@ export function IssueDetail() {
 
   return (
     <div>
+      {showGraph && (
+        <TicketGraph issueUid={i.uid} title={i.title} onClose={() => setShowGraph(false)} />
+      )}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs text-slate-500">
@@ -401,7 +406,21 @@ export function IssueDetail() {
             </dl>
           </Panel>
 
-          <Panel title="Affected objects and documents">
+          <Panel
+            title="Affected objects and documents"
+            action={
+              (links.data?.assets.length ||
+                links.data?.documents.length ||
+                links.data?.tickets.length) ? (
+                <button
+                  onClick={() => setShowGraph(true)}
+                  className="text-xs text-indigo-600 hover:text-indigo-800"
+                >
+                  View graph
+                </button>
+              ) : undefined
+            }
+          >
             <p className="mb-2 text-xs text-slate-500">
               What this ticket is about. These are links, not fields — the same
               connection is visible from the object and from the document.

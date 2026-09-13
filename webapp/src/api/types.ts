@@ -172,6 +172,8 @@ export interface AssetHistory {
 }
 
 export interface AssetTicket {
+  /** The ticket in this application, when this row corresponds to one. */
+  issue_uid?: string | null;
   uid: string;
   asset_uid: string;
   ticket_key: string;

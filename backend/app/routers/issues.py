@@ -32,6 +32,7 @@ from app.schemas.issue import (
     IssueTicketLinkOut,
     IssueUpdate,
 )
+from app.services.asset_ticket_links import ensure_asset_link, sync_subject_link
 from app.services.issue_history import (
     TRACKED_FIELDS,
     record_issue_changes,
@@ -80,6 +81,10 @@ def create_issue(
     db.add(issue)
     db.flush()
     record_issue_created(db, issue, current_user_id)
+    # A ticket raised on an object has to appear on that object, or the
+    # link only exists in one direction.
+    if issue.asset_uid:
+        sync_subject_link(db, issue, None)
     db.commit()
     db.refresh(issue)
     return issue
@@ -127,6 +132,7 @@ def update_issue(
     # Captured before anything is written, so the entry says what actually
     # changed rather than comparing a value with itself.
     before = {field: getattr(issue, field, None) for field in TRACKED_FIELDS}
+    previous_asset_uid = issue.asset_uid
 
     if "state" in patch:
         _apply_state(issue, patch.pop("state"))
@@ -134,6 +140,7 @@ def update_issue(
         setattr(issue, field, value)
 
     record_issue_changes(db, issue, before, current_user_id)
+    sync_subject_link(db, issue, previous_asset_uid)
 
     schema = db.get(Schema, issue.schema_uid) if issue.schema_uid else None
     stamp_current_user_attributes(db, schema, issue.attributes, current_user_id)
@@ -371,17 +378,7 @@ def link_issue_asset(
         raise HTTPException(status_code=409, detail="Already linked to that object")
 
     now = datetime.now(timezone.utc)
-    db.add(AssetTicket(
-        uid=str(uuid.uuid4()),
-        asset_uid=asset.uid,
-        ticket_key=source_key,
-        summary=issue.title,
-        type=body.relation,
-        status=issue.state,
-        created=now,
-        updated=now,
-        backend_url=(issue.attributes or {}).get("argus_source_url"),
-    ))
+    ensure_asset_link(db, issue, asset.uid, relation=body.relation)
     db.add(IssueHistory(
         uid=str(uuid.uuid4()), issue_uid=issue.uid, type="updated",
         author=current_user_id or "api", field="Linked object",

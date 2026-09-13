@@ -11,6 +11,7 @@ from app.models.asset_subresources import (
     AssetLabel,
     AssetTicket,
 )
+from app.services.asset_ticket_links import issue_uid_by_ticket_key
 from app.schemas.asset_subresources import (
     AssetCommentCreate,
     AssetCommentOut,
@@ -56,16 +57,20 @@ def _reject_duplicate_label(db: Session, workspace_id: str, body) -> None:
 
 
 def _make_subresource_routes(
-    path: str, model, create_schema, out_schema, id_field: str = "uid", on_create=None
+    path: str, model, create_schema, out_schema, id_field: str = "uid", on_create=None,
+    with_list: bool = True,
 ):
-    @router.get(f"/{path}", response_model=list[out_schema], name=f"list_{path}")
-    def list_items(
-        asset_uid: str,
-        workspace_id: str = Depends(require_permission("read")),
-        db: Session = Depends(get_db),
-    ):
-        _check_asset(asset_uid, workspace_id, db)
-        return db.scalars(select(model).where(model.asset_uid == asset_uid)).all()
+    # Tickets have a hand-written listing (it resolves the local ticket for
+    # each row), so the generic one must not also claim the path.
+    if with_list:
+        @router.get(f"/{path}", response_model=list[out_schema], name=f"list_{path}")
+        def list_items(
+            asset_uid: str,
+            workspace_id: str = Depends(require_permission("read")),
+            db: Session = Depends(get_db),
+        ):
+            _check_asset(asset_uid, workspace_id, db)
+            return db.scalars(select(model).where(model.asset_uid == asset_uid)).all()
 
     @router.post(f"/{path}", response_model=out_schema, status_code=201, name=f"create_{path}")
     def create_item(
@@ -84,7 +89,30 @@ def _make_subresource_routes(
         return item
 
 
-_make_subresource_routes("tickets", AssetTicket, AssetTicketCreate, AssetTicketOut)
+@router.get("/tickets", response_model=list[AssetTicketOut], name="list_tickets")
+def list_asset_tickets(
+    asset_uid: str,
+    workspace_id: str = Depends(require_permission("read")),
+    db: Session = Depends(get_db),
+):
+    """The object's tickets, each carrying the local ticket it corresponds
+    to when there is one — rows created by the asset import name a key from
+    the source system, which may since have been imported as a ticket here."""
+    _check_asset(asset_uid, workspace_id, db)
+    rows = db.scalars(select(AssetTicket).where(AssetTicket.asset_uid == asset_uid)).all()
+    by_key = issue_uid_by_ticket_key(db, workspace_id)
+    return [
+        AssetTicketOut(
+            **{c.name: getattr(row, c.name) for c in AssetTicket.__table__.columns},
+            issue_uid=by_key.get(row.ticket_key),
+        )
+        for row in rows
+    ]
+
+
+_make_subresource_routes(
+    "tickets", AssetTicket, AssetTicketCreate, AssetTicketOut, with_list=False
+)
 _make_subresource_routes("comments", AssetComment, AssetCommentCreate, AssetCommentOut)
 _make_subresource_routes("history", AssetHistory, AssetHistoryCreate, AssetHistoryOut)
 _make_subresource_routes(

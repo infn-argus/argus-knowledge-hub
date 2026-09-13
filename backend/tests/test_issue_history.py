@@ -331,3 +331,87 @@ def test_labels_are_not_shared_between_workspaces(token):
     assert f"secret-{suffix}" not in client.get(
         "/v1/issues/labels", headers=auth(other_raw)
     ).json()
+
+
+def test_a_ticket_raised_on_an_object_appears_on_that_object(token):
+    """Raising a ticket from a camera has to put it on the camera. The
+    subject is a column on the ticket and the object's list is another
+    table; writing only the first leaves the link visible from one side."""
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    workspace_id = db.scalar(
+        select(ApiToken.workspace_id).where(ApiToken.token_hash == hash_token(token))
+    )
+    asset_uid = _asset(db, workspace_id, suffix)
+    db.close()
+
+    created = client.post(
+        "/v1/issues",
+        json={"uid": f"tk-{suffix}", "title": "Camera offline", "asset_uid": asset_uid,
+              "attributes": {}},
+        headers=auth(token),
+    )
+    assert created.status_code == 201, created.text
+
+    on_object = client.get(f"/v1/assets/{asset_uid}/tickets", headers=auth(token)).json()
+    assert [t["summary"] for t in on_object] == ["Camera offline"]
+    # And the row points back at the ticket, so the object's list is
+    # clickable rather than just naming a key.
+    assert on_object[0]["issue_uid"] == f"tk-{suffix}"
+
+    on_ticket = client.get(f"/v1/issues/tk-{suffix}/links", headers=auth(token)).json()
+    assert [a["asset_uid"] for a in on_ticket["assets"]] == [asset_uid]
+
+
+def test_moving_a_ticket_to_another_object_moves_the_link(token):
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    workspace_id = db.scalar(
+        select(ApiToken.workspace_id).where(ApiToken.token_hash == hash_token(token))
+    )
+    first = _asset(db, workspace_id, f"a-{suffix}")
+    second = _asset(db, workspace_id, f"b-{suffix}")
+    db.close()
+
+    client.post(
+        "/v1/issues",
+        json={"uid": f"tk-{suffix}", "title": "Wrong object", "asset_uid": first,
+              "attributes": {}},
+        headers=auth(token),
+    )
+    client.put(f"/v1/issues/tk-{suffix}", json={"asset_uid": second}, headers=auth(token))
+
+    assert client.get(f"/v1/assets/{first}/tickets", headers=auth(token)).json() == []
+    assert len(client.get(f"/v1/assets/{second}/tickets", headers=auth(token)).json()) == 1
+
+
+def test_a_deliberate_link_survives_a_change_of_subject(token):
+    """Only the row that exists *because* it is the subject is moved; a link
+    someone added on purpose stays where they put it."""
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    workspace_id = db.scalar(
+        select(ApiToken.workspace_id).where(ApiToken.token_hash == hash_token(token))
+    )
+    subject = _asset(db, workspace_id, f"s-{suffix}")
+    also = _asset(db, workspace_id, f"x-{suffix}")
+    other = _asset(db, workspace_id, f"o-{suffix}")
+    db.close()
+
+    client.post(
+        "/v1/issues",
+        json={"uid": f"tk-{suffix}", "title": "Affects two", "asset_uid": subject,
+              "attributes": {}},
+        headers=auth(token),
+    )
+    client.post(
+        f"/v1/issues/tk-{suffix}/links/assets",
+        json={"asset_uid": also, "relation": "affects"},
+        headers=auth(token),
+    )
+
+    client.put(f"/v1/issues/tk-{suffix}", json={"asset_uid": other}, headers=auth(token))
+
+    assert client.get(f"/v1/assets/{subject}/tickets", headers=auth(token)).json() == []
+    assert len(client.get(f"/v1/assets/{also}/tickets", headers=auth(token)).json()) == 1
+    assert len(client.get(f"/v1/assets/{other}/tickets", headers=auth(token)).json()) == 1

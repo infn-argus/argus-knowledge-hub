@@ -20,6 +20,10 @@ class AssetTicketOut(AssetTicketCreate):
     model_config = ConfigDict(from_attributes=True)
 
     asset_uid: str
+    # The ticket in this application, when one of these rows corresponds to
+    # it — so the object's list can be clicked through rather than only
+    # naming a key.
+    issue_uid: Optional[str] = None
 
 
 class AssetCommentCreate(BaseModel):

@@ -1,7 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { assetsApi, globalValuesApi, issuesApi, membersApi, schemasApi } from "../../api/client";
+import {
+  assetsApi,
+  globalValuesApi,
+  issueLinksApi,
+  issuesApi,
+  membersApi,
+  schemasApi,
+} from "../../api/client";
+import { AssetMultiPicker } from "../../components/AssetMultiPicker";
 import { AttributeInput } from "../../components/AttributeInput";
 import { LabelInput } from "../../components/LabelInput";
 import { UserPicker } from "../../components/UserPicker";
@@ -29,7 +37,11 @@ export function IssueForm() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [assetUid, setAssetUid] = useState("");
+  // A ticket usually concerns more than one object; the first is its
+  // subject and the rest are links.
+  const initialAssets = searchParams.get("asset_uid");
+  const [assetUids, setAssetUids] = useState<string[]>(initialAssets ? [initialAssets] : []);
+  const [linkedAtLoad, setLinkedAtLoad] = useState<string[]>([]);
   const [priority, setPriority] = useState("");
   const [assignee, setAssignee] = useState("");
   const [schemaUid, setSchemaUid] = useState(searchParams.get("schema_uid") ?? "");
@@ -44,7 +56,7 @@ export function IssueForm() {
     if (!t) return;
     setTitle(t.title);
     setDescription(t.description ?? "");
-    setAssetUid(t.asset_uid ?? "");
+
     setPriority(t.priority ?? "");
     setAssignee(t.assignee ?? "");
     setSchemaUid(t.schema_uid ?? "");
@@ -52,27 +64,57 @@ export function IssueForm() {
     setAttributes(t.attributes ?? {});
   }, [existing.data]);
 
+  const existingLinks = useQuery({
+    queryKey: ["issue-links", uid],
+    queryFn: () => issueLinksApi.list(uid!),
+    enabled: isEdit,
+  });
+
+  useEffect(() => {
+    if (!existingLinks.data) return;
+    const uids = existingLinks.data.assets.map((a) => a.asset_uid);
+    setAssetUids(uids);
+    setLinkedAtLoad(uids);
+  }, [existingLinks.data]);
+
   const schema = ticketSchemas.find((s) => s.uid === schemaUid);
   const attrDefs = effectiveAttributes(schema, schemas.data);
 
   const saveMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const payload = {
         title,
         description: description || undefined,
-        asset_uid: assetUid || undefined,
+        asset_uid: assetUids[0] || undefined,
         priority: priority || undefined,
         assignee: assignee || undefined,
         schema_uid: schemaUid || undefined,
         labels,
         attributes,
       };
-      if (isEdit) return issuesApi.update(uid!, payload);
-      return issuesApi.create({ uid: crypto.randomUUID(), ...payload });
+      const saved = isEdit
+        ? await issuesApi.update(uid!, payload)
+        : await issuesApi.create({ uid: crypto.randomUUID(), ...payload });
+
+      // The subject is a column on the ticket; the rest are links, and a
+      // removed one has to be unlinked rather than merely dropped here.
+      const keep = new Set(assetUids.slice(1));
+      for (const assetUid of keep) {
+        if (!linkedAtLoad.includes(assetUid)) {
+          await issueLinksApi.linkAsset(saved!.uid, assetUid).catch(() => undefined);
+        }
+      }
+      for (const assetUid of linkedAtLoad) {
+        if (!assetUids.includes(assetUid)) {
+          await issueLinksApi.unlinkAsset(saved!.uid, assetUid).catch(() => undefined);
+        }
+      }
+      return saved;
     },
     onSuccess: (issue) => {
       queryClient.invalidateQueries({ queryKey: ["issues"] });
       if (isEdit) queryClient.invalidateQueries({ queryKey: ["issues", uid] });
+      queryClient.invalidateQueries({ queryKey: ["issue-links", uid] });
       navigate(`/tickets/${issue!.uid}`);
     },
   });
@@ -141,19 +183,19 @@ export function IssueForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700">Linked asset</label>
-          <select
-            value={assetUid}
-            onChange={(e) => setAssetUid(e.target.value)}
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
-          >
-            <option value="">None</option>
-            {assets.data?.map((a) => (
-              <option key={a.uid} value={a.uid}>
-                {a.name} ({a.key})
-              </option>
-            ))}
-          </select>
+          <label className="block text-sm font-medium text-slate-700">Objects</label>
+          <div className="mt-1">
+            <AssetMultiPicker
+              options={assets.data ?? []}
+              value={assetUids}
+              onChange={setAssetUids}
+            />
+          </div>
+          {assetUids.length > 0 && !isEdit && (
+            <p className="mt-1 text-xs text-slate-500">
+              The ticket will appear on these objects, and they on the ticket.
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
