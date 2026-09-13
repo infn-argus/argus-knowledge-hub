@@ -12,7 +12,7 @@ from app.models.global_value import GlobalValue
 from app.models.group import Group, GroupMember
 from app.models.import_config import ImportConfig
 from app.models.import_job import ImportJob
-from app.models.issue import Issue, IssueComment
+from app.models.issue import Issue, IssueComment, IssueHistory
 from app.models.membership import Membership
 from app.models.role import Role, RoleBinding
 from app.models.schema import Schema
@@ -38,6 +38,7 @@ __all__ = [
     "ImportJob",
     "Issue",
     "IssueComment",
+    "IssueHistory",
     "Membership",
     "Role",
     "RoleBinding",

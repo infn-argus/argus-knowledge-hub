@@ -41,6 +41,32 @@ class Issue(Base, WorkspaceScopedMixin, TimestampMixin):
     deleted_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class IssueHistory(Base):
+    """What happened to a ticket and when.
+
+    Recorded for changes made here, and filled from Jira's changelog on
+    import, so a ticket's past doesn't stop at the moment it was imported.
+    """
+
+    __tablename__ = "issue_history"
+
+    uid: Mapped[str] = mapped_column(String, primary_key=True)
+    issue_uid: Mapped[str] = mapped_column(
+        String, ForeignKey("issues.uid", ondelete="CASCADE"), index=True
+    )
+    # "created" | "updated" | "imported" — coarse on purpose; the detail is
+    # in field/from/to.
+    type: Mapped[str] = mapped_column(String)
+    author: Mapped[str] = mapped_column(String)
+    field: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    from_value: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    to_value: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    details: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    timestamp: Mapped[object] = mapped_column(DateTime(timezone=True))
+    # Jira's changelog item id, so a re-import doesn't duplicate entries.
+    backend_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+
+
 class IssueComment(Base, TimestampMixin):
     __tablename__ = "issue_comments"
 

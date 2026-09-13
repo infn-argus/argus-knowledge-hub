@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { assetsApi, globalValuesApi, issuesApi, membersApi, schemasApi } from "../../api/client";
 import { AttributeInput } from "../../components/AttributeInput";
 import { UserPicker } from "../../components/UserPicker";
@@ -10,6 +10,14 @@ export function IssueForm() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const { uid } = useParams<{ uid: string }>();
+  const isEdit = !!uid;
+
+  const existing = useQuery({
+    queryKey: ["issues", uid],
+    queryFn: () => issuesApi.get(uid!),
+    enabled: isEdit,
+  });
   const assets = useQuery({ queryKey: ["assets"], queryFn: () => assetsApi.list() });
   const schemas = useQuery({ queryKey: ["schemas"], queryFn: schemasApi.list });
   const members = useQuery({ queryKey: ["members"], queryFn: membersApi.directory });
@@ -24,36 +32,61 @@ export function IssueForm() {
   const [priority, setPriority] = useState("");
   const [assignee, setAssignee] = useState("");
   const [schemaUid, setSchemaUid] = useState(searchParams.get("schema_uid") ?? "");
+  const [labels, setLabels] = useState("");
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
+
+  const labelList = labels
+    .split(",")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  useEffect(() => {
+    const t = existing.data;
+    if (!t) return;
+    setTitle(t.title);
+    setDescription(t.description ?? "");
+    setAssetUid(t.asset_uid ?? "");
+    setPriority(t.priority ?? "");
+    setAssignee(t.assignee ?? "");
+    setSchemaUid(t.schema_uid ?? "");
+    setLabels((t.labels ?? []).join(", "));
+    setAttributes(t.attributes ?? {});
+  }, [existing.data]);
 
   const schema = ticketSchemas.find((s) => s.uid === schemaUid);
   const attrDefs = effectiveAttributes(schema, schemas.data);
 
-  const createMutation = useMutation({
-    mutationFn: () =>
-      issuesApi.create({
-        uid: crypto.randomUUID(),
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const payload = {
         title,
         description: description || undefined,
         asset_uid: assetUid || undefined,
         priority: priority || undefined,
         assignee: assignee || undefined,
         schema_uid: schemaUid || undefined,
+        labels: labelList,
         attributes,
-      }),
+      };
+      if (isEdit) return issuesApi.update(uid!, payload);
+      return issuesApi.create({ uid: crypto.randomUUID(), ...payload });
+    },
     onSuccess: (issue) => {
       queryClient.invalidateQueries({ queryKey: ["issues"] });
+      if (isEdit) queryClient.invalidateQueries({ queryKey: ["issues", uid] });
       navigate(`/tickets/${issue!.uid}`);
     },
   });
 
   return (
     <div className="max-w-xl">
-      <h1 className="text-2xl font-semibold text-slate-900">New ticket</h1>
+      <h1 className="text-2xl font-semibold text-slate-900">
+        {isEdit ? "Edit ticket" : "New ticket"}
+      </h1>
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          createMutation.mutate();
+          saveMutation.mutate();
         }}
         className="mt-6 space-y-5"
       >
@@ -95,6 +128,17 @@ export function IssueForm() {
             rows={4}
             className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
           />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Labels</label>
+          <input
+            value={labels}
+            onChange={(e) => setLabels(e.target.value)}
+            placeholder="BTF, diagnostics"
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+          />
+          <p className="mt-1 text-xs text-slate-500">Comma separated.</p>
         </div>
 
         <div>
@@ -170,10 +214,10 @@ export function IssueForm() {
 
         <button
           type="submit"
-          disabled={createMutation.isPending}
+          disabled={saveMutation.isPending}
           className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
         >
-          {createMutation.isPending ? "Creating…" : "Create ticket"}
+          {saveMutation.isPending ? "Saving…" : isEdit ? "Save changes" : "Create ticket"}
         </button>
       </form>
     </div>

@@ -55,6 +55,20 @@ class IssueOut(BaseModel):
     deleted_at: Optional[datetime]
 
 
+class IssueHistoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    uid: str
+    issue_uid: str
+    type: str
+    author: str
+    field: Optional[str] = None
+    from_value: Optional[str] = None
+    to_value: Optional[str] = None
+    details: Optional[str] = None
+    timestamp: datetime
+
+
 class IssueCommentCreate(BaseModel):
     uid: str
     author: str

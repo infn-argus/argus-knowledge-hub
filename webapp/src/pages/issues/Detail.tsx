@@ -1,8 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { assetsApi, globalValuesApi, issuesApi, membersApi, schemasApi } from "../../api/client";
+import {
+  assetsApi,
+  attachmentsApi,
+  globalValuesApi,
+  issueSubresourcesApi,
+  issuesApi,
+  membersApi,
+  schemasApi,
+} from "../../api/client";
 import { AttributeValue } from "../../components/AttributeValue";
+import { AuthenticatedImage } from "../../components/AuthenticatedImage";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 
 const STATE_STYLES: Record<string, string> = {
@@ -37,6 +46,17 @@ const DETAIL_KEYS = [
 const PEOPLE_KEYS = ["jira_reporter", "jira_votes", "jira_watchers"];
 const DATE_KEYS = ["jira_created", "jira_updated"];
 const HIDDEN_KEYS = ["jira_key", "jira_url", "jira_project", "jira_status"];
+
+async function downloadAttachment(uid: string, filename: string) {
+  const url = await attachmentsApi.fetchBlobUrl(uid);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 function Panel({
   title,
@@ -73,6 +93,8 @@ export function IssueDetail() {
   const queryClient = useQueryClient();
   const [commentAuthor, setCommentAuthor] = useState("web-user");
   const [commentBody, setCommentBody] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pasteHint, setPasteHint] = useState<string | null>(null);
 
   const issue = useQuery({
     queryKey: ["issues", uid],
@@ -122,6 +144,30 @@ export function IssueDetail() {
       queryClient.invalidateQueries({ queryKey: ["issue-comments", uid] });
     },
   });
+  const attachments = useQuery({
+    queryKey: ["issue-attachments", uid],
+    queryFn: () => issueSubresourcesApi.attachments(uid!),
+    enabled: !!uid,
+  });
+  const history = useQuery({
+    queryKey: ["issue-history", uid],
+    queryFn: () => issueSubresourcesApi.history(uid!),
+    enabled: !!uid,
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => issueSubresourcesApi.uploadAttachment(uid!, file),
+    onSuccess: () => {
+      setPasteHint(null);
+      queryClient.invalidateQueries({ queryKey: ["issue-attachments", uid] });
+      queryClient.invalidateQueries({ queryKey: ["issue-history", uid] });
+    },
+  });
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: attachmentsApi.delete,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["issue-attachments", uid] }),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: () => issuesApi.delete(uid!),
     onSuccess: () => {
@@ -292,6 +338,100 @@ export function IssueDetail() {
             )}
           </Panel>
 
+          <Panel
+            title={`Attachments${attachments.data?.length ? ` (${attachments.data.length})` : ""}`}
+            action={
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="text-xs text-indigo-600 hover:text-indigo-800"
+              >
+                + Upload
+              </button>
+            }
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) uploadMutation.mutate(file);
+                e.target.value = "";
+              }}
+            />
+            {/* A fault is usually easiest to show rather than describe, and
+                the screenshot is already on the clipboard — so take it from
+                there instead of making someone save a file first. */}
+            <div
+              tabIndex={0}
+              onPaste={(e) => {
+                const item = [...e.clipboardData.items].find((i) =>
+                  i.type.startsWith("image/"),
+                );
+                const file = item?.getAsFile();
+                if (file) {
+                  const named = new File(
+                    [file],
+                    `screenshot-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.png`,
+                    { type: file.type },
+                  );
+                  uploadMutation.mutate(named);
+                } else {
+                  setPasteHint("That clipboard item isn't an image.");
+                }
+              }}
+              className="mb-3 rounded border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500 focus:border-indigo-400 focus:outline-none"
+            >
+              {uploadMutation.isPending
+                ? "Uploading…"
+                : (pasteHint ?? "Click here and press ⌘V to paste a screenshot.")}
+            </div>
+
+            <ul className="space-y-2 text-sm">
+              {attachments.data?.map((att) => {
+                const isImage = (att.mime_type ?? "").startsWith("image/");
+                return (
+                  <li key={att.uid} className="flex items-center gap-3">
+                    {isImage ? (
+                      <AuthenticatedImage
+                        uid={att.uid}
+                        alt={att.filename}
+                        className="h-10 w-10 shrink-0 rounded border border-slate-200 bg-white object-contain"
+                      />
+                    ) : (
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 text-[10px] uppercase text-slate-400">
+                        {(att.filename.split(".").pop() ?? "file").slice(0, 4)}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1 truncate">
+                      {att.filename}{" "}
+                      <span className="text-xs text-slate-400">
+                        ({att.file_size ? `${Math.round(att.file_size / 1024)} KB` : "?"})
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 gap-3">
+                      <button
+                        onClick={() => downloadAttachment(att.uid, att.filename)}
+                        className="text-xs text-indigo-600 hover:text-indigo-800"
+                      >
+                        Download
+                      </button>
+                      <button
+                        onClick={() => deleteAttachmentMutation.mutate(att.uid)}
+                        className="text-xs text-red-500 hover:text-red-700"
+                      >
+                        Delete
+                      </button>
+                    </span>
+                  </li>
+                );
+              })}
+              {attachments.data?.length === 0 && (
+                <p className="text-slate-400">No attachments.</p>
+              )}
+            </ul>
+          </Panel>
+
           <Panel title={`Activity${comments.data?.length ? ` (${comments.data.length})` : ""}`}>
             <ul className="space-y-3">
               {comments.data?.map((c) => (
@@ -378,6 +518,39 @@ export function IssueDetail() {
                 <FieldRow label="Resolved">{new Date(i.closed_at).toLocaleString()}</FieldRow>
               )}
             </dl>
+          </Panel>
+
+          <Panel title="History">
+            <ul className="space-y-2 text-sm">
+              {history.data?.slice(0, 40).map((h) => (
+                <li key={h.uid} className="border-l-2 border-slate-100 pl-2">
+                  <p className="text-slate-800">
+                    {h.field ? (
+                      <>
+                        <span className="text-slate-500">{h.field}</span>{" "}
+                        {h.from_value && (
+                          <span className="text-slate-400 line-through">{h.from_value}</span>
+                        )}{" "}
+                        {h.to_value && <span>{h.to_value}</span>}
+                      </>
+                    ) : (
+                      h.details
+                    )}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {h.author} · {new Date(h.timestamp).toLocaleString()}
+                  </p>
+                </li>
+              ))}
+              {history.data?.length === 0 && (
+                <p className="text-slate-400">Nothing recorded yet.</p>
+              )}
+              {(history.data?.length ?? 0) > 40 && (
+                <p className="text-xs text-slate-400">
+                  Showing the 40 most recent of {history.data!.length}.
+                </p>
+              )}
+            </ul>
           </Panel>
 
           {jiraUrl && (

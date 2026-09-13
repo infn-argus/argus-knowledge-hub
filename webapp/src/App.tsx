@@ -51,6 +51,7 @@ export function App() {
           <Route path="/tickets/search" element={<IssueSearch />} />
           <Route path="/tickets/new" element={<IssueForm />} />
           <Route path="/tickets/:uid" element={<IssueDetail />} />
+          <Route path="/tickets/:uid/edit" element={<IssueForm />} />
 
           <Route path="/documents" element={<DocumentList />} />
           <Route path="/documents/search" element={<DocumentSearch />} />

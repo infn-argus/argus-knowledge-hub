@@ -42,6 +42,7 @@ import type {
   WorkspaceUpdateInput,
   SchemaInput,
   WorkspaceDetail,
+  IssueHistoryEntry,
   Role,
   RoleBinding,
   RoleBindingInput,
@@ -344,6 +345,25 @@ export const workspacesApi = {
       method: "PUT",
       body: json({ is_admin: isAdmin }),
     }),
+};
+
+export const issueSubresourcesApi = {
+  history: (uid: string) => request<IssueHistoryEntry[]>(`/v1/issues/${uid}/history`),
+  attachments: (uid: string) => request<Attachment[]>(`/v1/issues/${uid}/attachments`),
+  uploadAttachment: async (uid: string, file: File): Promise<Attachment> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch(`${session.baseUrl}/v1/issues/${uid}/attachments`, {
+      method: "POST",
+      headers: authHeaders(session),
+      body: form,
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new ApiError(resp.status, data);
+    return data as Attachment;
+  },
 };
 
 export const membersApi = {

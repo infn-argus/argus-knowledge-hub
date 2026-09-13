@@ -38,7 +38,17 @@ BASE_ATTRIBUTES = [
     ("jira_parent", "Parent", "string", {}),
     ("jira_time_spent", "Time spent (s)", "integer", {}),
     ("jira_time_estimate", "Original estimate (s)", "integer", {}),
+    # Agile fields. Jira keeps these in per-instance custom fields rather
+    # than a fixed schema, so the importer discovers their ids by name.
+    ("jira_epic", "Epic", "string", {}),
+    ("jira_epic_name", "Epic name", "string", {}),
+    ("jira_sprint", "Sprint", "string", {"multiValue": True}),
+    ("jira_story_points", "Story points", "float", {}),
 ]
+
+# The types Jira ships with, so a workspace can raise an Epic or a Story by
+# hand before anything has been imported.
+DEFAULT_ISSUE_TYPES = ("Epic", "Story", "Task", "Bug", "Sub-task")
 
 
 def _attribute(key: str, name: str, type_: str, extra: dict) -> dict:

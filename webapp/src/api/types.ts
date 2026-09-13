@@ -669,6 +669,18 @@ export interface DocumentRelation {
   created_at: string;
 }
 
+export interface IssueHistoryEntry {
+  uid: string;
+  issue_uid: string;
+  type: string;
+  author: string;
+  field: string | null;
+  from_value: string | null;
+  to_value: string | null;
+  details: string | null;
+  timestamp: string;
+}
+
 export interface Role {
   id: string;
   name: string;

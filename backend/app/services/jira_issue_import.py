@@ -17,7 +17,7 @@ from app.db import SessionLocal
 from app.models.asset import Asset
 from app.models.asset_subresources import AssetTicket
 from app.models.import_job import ImportJob
-from app.models.issue import Issue, IssueComment
+from app.models.issue import Issue, IssueComment, IssueHistory
 from app.services.import_merge import should_write
 from app.services.ticket_types import ensure_jira_ticket_types
 from app.services.jira_import import (
@@ -140,7 +140,66 @@ def resolve_api_base(jira, base_url: str) -> str:
     )
 
 
-def _search_issues(jira, base_url: str, jql: str, start_at: int) -> dict:
+# Agile fields have no fixed id: "Sprint" is customfield_10007 on one Jira
+# and customfield_10112 on the next, so they're found by name.
+_AGILE_FIELD_NAMES = {
+    "epic link": "jira_epic",
+    "epic name": "jira_epic_name",
+    "sprint": "jira_sprint",
+    "story points": "jira_story_points",
+    "story point estimate": "jira_story_points",
+}
+
+
+def discover_agile_fields(jira, base_url: str) -> dict[str, str]:
+    """custom field id -> our attribute key, for the agile fields this Jira
+    happens to define. Missing ones simply don't appear."""
+    try:
+        resp = jira.get(f"{base_url}/rest/api/2/field")
+        resp.raise_for_status()
+        fields = resp.json()
+    except Exception:
+        # Not fatal: the import proceeds without epic/sprint/points.
+        return {}
+    out: dict[str, str] = {}
+    for field in fields:
+        name = (field.get("name") or "").strip().lower()
+        key = _AGILE_FIELD_NAMES.get(name)
+        if key and field.get("id"):
+            out[field["id"]] = key
+    return out
+
+
+def _sprint_names(value) -> list[str]:
+    """Jira Server returns sprints either as objects or as the toString of a
+    Java bean — "...,name=Sprint 4,startDate=..." — depending on version."""
+    out = []
+    for entry in value if isinstance(value, list) else [value]:
+        if isinstance(entry, dict):
+            if entry.get("name"):
+                out.append(entry["name"])
+        elif isinstance(entry, str):
+            match = re.search(r"name=([^,\]]+)", entry)
+            out.append(match.group(1) if match else entry)
+    return out
+
+
+def _agile_attributes(fields: dict, agile_fields: dict[str, str]) -> dict:
+    out: dict = {}
+    for field_id, key in agile_fields.items():
+        value = fields.get(field_id)
+        if value in (None, "", []):
+            continue
+        if key == "jira_sprint":
+            out[key] = _sprint_names(value)
+        elif key == "jira_story_points":
+            out[key] = value
+        else:
+            out[key] = value.get("name") if isinstance(value, dict) else value
+    return out
+
+
+def _search_issues(jira, base_url: str, jql: str, start_at: int, extra_fields: tuple = ()) -> dict:
     resp = jira.get(
         f"{base_url}/rest/api/2/search",
         params={
@@ -157,6 +216,7 @@ def _search_issues(jira, base_url: str, jql: str, start_at: int) -> dict:
                 "resolution", "fixVersions", "versions", "votes", "watches",
                 "environment", "parent", "timeoriginalestimate", "timespent",
                 "attachment",
+                *extra_fields,
             ]),
         },
     )
@@ -240,9 +300,55 @@ def _import_attachments(jira, workspace_id: str, issue: Issue, fields: dict, db:
         # Attachments hang off assets in this model; an issue's file is kept
         # with the object the ticket is about when there is one, and
         # otherwise stands alone in the workspace.
-        row.asset_uid = issue.asset_uid
+        # The ticket owns its files; linking to the object as well would
+        # scatter a fault screenshot into the equipment record.
+        row.issue_uid = issue.uid
         db.add(row)
         added += 1
+    return added
+
+
+def _import_history(jira, base_url: str, issue: Issue, jira_key: str, db: Session,
+                    job: ImportJob, seen: set) -> int:
+    """Jira's changelog, so an imported ticket doesn't look like it sprang
+    into being at import time."""
+    try:
+        resp = jira.get(
+            f"{base_url}/rest/api/2/issue/{jira_key}",
+            params={"expand": "changelog", "fields": "created"},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception as e:
+        _record_diagnostic(job, seen, "history", _describe_error(e, None))
+        return 0
+
+    existing = {
+        h.backend_id
+        for h in db.scalars(select(IssueHistory).where(IssueHistory.issue_uid == issue.uid))
+        if h.backend_id
+    }
+    added = 0
+    for entry in ((payload.get("changelog") or {}).get("histories") or []):
+        author = _person(entry.get("author")) or "unknown"
+        when = _parse_jira_dt(entry.get("created"))
+        for item in entry.get("items") or []:
+            backend_id = f"{entry.get('id')}:{item.get('field')}"
+            if backend_id in existing:
+                continue
+            existing.add(backend_id)
+            db.add(IssueHistory(
+                uid=f"{issue.uid}-h{backend_id}",
+                issue_uid=issue.uid,
+                type="updated",
+                author=author,
+                field=item.get("field"),
+                from_value=item.get("fromString"),
+                to_value=item.get("toString"),
+                timestamp=when or datetime.now(timezone.utc),
+                backend_id=backend_id,
+            ))
+            added += 1
     return added
 
 
@@ -377,15 +483,21 @@ def run_jira_issue_import(
         ) if link_assets else {}
 
         type_uids: dict[str, str] = {}
+        agile_fields = discover_agile_fields(jira, base_url)
+        if agile_fields:
+            _set_progress(db, job, f"Found {len(agile_fields)} agile field(s)")
 
         _set_progress(db, job, "Searching Jira")
         start_at = 0
         total = None
         imported = comments_imported = links = attachments_imported = 0
+        history_imported = 0
 
         while True:
             try:
-                page = _search_issues(jira, base_url, jql, start_at)
+                page = _search_issues(
+                    jira, base_url, jql, start_at, tuple(agile_fields)
+                )
             except Exception as e:
                 raise RuntimeError(f"Jira search failed: {_describe_error(e, None)}") from e
 
@@ -446,6 +558,7 @@ def run_jira_issue_import(
                     if k not in SUPERSEDED_KEYS
                 }
                 attributes.update(_issue_attributes(base_url, jira_key, fields))
+                attributes.update(_agile_attributes(fields, agile_fields))
                 issue.attributes = attributes
                 issue_type_name = (fields.get("issuetype") or {}).get("name")
                 if issue_type_name and issue_type_name in type_uids:
@@ -466,6 +579,9 @@ def run_jira_issue_import(
                         attachments = _import_attachments(
                             jira, workspace_id, issue, fields, db, job, seen_diagnostics
                         )
+                        history = _import_history(
+                            jira, base_url, issue, jira_key, db, job, seen_diagnostics
+                        )
                         asset_links = 0
                         if link_assets:
                             asset_links = _link_mentioned_assets(
@@ -482,6 +598,7 @@ def run_jira_issue_import(
                 imported += 1
                 comments_imported += comments
                 attachments_imported += attachments
+                history_imported += history
                 links += asset_links
 
                 if imported % 25 == 0:
@@ -496,7 +613,7 @@ def run_jira_issue_import(
         _set_progress(
             db, job, f"Imported {imported} ticket(s)",
             tickets=imported, comments=comments_imported, asset_links=links,
-            attachments=attachments_imported,
+            attachments=attachments_imported, history=history_imported,
         )
 
         job.status = "succeeded"

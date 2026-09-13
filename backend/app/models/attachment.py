@@ -19,6 +19,11 @@ class Attachment(Base, WorkspaceScopedMixin, TimestampMixin):
     document_revision_uid: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("document_revisions.uid", ondelete="CASCADE"), nullable=True, index=True
     )
+    # A ticket's own files — a screenshot of the fault, a log — which belong
+    # to the ticket rather than to whatever object it happens to mention.
+    issue_uid: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("issues.uid", ondelete="CASCADE"), nullable=True, index=True
+    )
     filename: Mapped[str] = mapped_column(String)
     mime_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
