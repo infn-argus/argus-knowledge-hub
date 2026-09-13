@@ -9,6 +9,7 @@ export function AdminShell() {
 
   const items = [];
   if (currentWorkspaceId) {
+    items.push({ to: `/workspaces/${currentWorkspaceId}/access`, label: "Access" });
     items.push({ to: `/workspaces/${currentWorkspaceId}/members`, label: "Members" });
   }
   if (me.data?.is_admin) {

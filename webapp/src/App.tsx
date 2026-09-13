@@ -25,6 +25,7 @@ import { IssueSearch } from "./pages/issues/Search";
 import { LabelList } from "./pages/labels/List";
 import { SchemaDetail } from "./pages/schemas/Detail";
 import { SchemaForm } from "./pages/schemas/Form";
+import { WorkspaceAccess } from "./pages/workspace/Access";
 import { WorkspaceMembers } from "./pages/workspace/Members";
 import { WorkspaceIntegrity } from "./pages/workspace/Integrity";
 
@@ -67,6 +68,7 @@ export function App() {
         </Route>
 
         <Route element={<AdminShell />}>
+          <Route path="/workspaces/:workspaceId/access" element={<WorkspaceAccess />} />
           <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembers />} />
           <Route path="/workspaces/:workspaceId/integrity" element={<WorkspaceIntegrity />} />
           <Route path="/admin/workspaces" element={<AdminWorkspaces />} />

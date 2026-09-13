@@ -646,3 +646,68 @@ export interface DocumentRelation {
   relation_type: string;
   created_at: string;
 }
+
+export interface Role {
+  id: string;
+  name: string;
+  description: string | null;
+  permissions: Record<string, string[]>;
+  is_system: boolean;
+  rank: number;
+}
+
+export interface RoleBinding {
+  id: number;
+  workspace_id: string;
+  subject_type: "user" | "group";
+  subject_id: string;
+  subject_label: string;
+  subject_active: boolean;
+  role_id: string;
+  role_name: string;
+  created_at: string | null;
+}
+
+export interface RoleBindingInput {
+  subject_type: "user" | "group";
+  subject_id: string;
+  role_id: string;
+}
+
+export interface DirectoryGroup {
+  uid: string;
+  dn: string | null;
+  name: string;
+  description: string | null;
+  email: string | null;
+  source: string;
+  active: boolean;
+  member_count: number;
+}
+
+export interface DirectoryGroupMember {
+  user_id: string;
+  email: string;
+  name: string | null;
+  username: string | null;
+  active: boolean;
+  source: string;
+}
+
+export interface DirectoryStatus {
+  provider: string;
+  is_test_data: boolean;
+  groups: number;
+  active_groups: number;
+  users: number;
+  last_synced_at: string | null;
+}
+
+export interface EffectivePermissions {
+  workspace_id: string;
+  is_admin: boolean;
+  objects: string[];
+  tickets: string[];
+  documents: string[];
+  workspace: string[];
+}

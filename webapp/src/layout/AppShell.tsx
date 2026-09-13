@@ -150,8 +150,10 @@ export function AppShell() {
 
   const config = SECTION_CONFIG[activeSection];
   const scopedMembersLink = membersLink ? `${membersLink}?section=${activeSection}` : null;
+  const accessLink = currentWorkspaceId ? `/workspaces/${currentWorkspaceId}/access` : null;
   const settingsLinks = [
     ...(config.withImportSetting ? [{ to: "/imports", label: "Import" }] : []),
+    ...(accessLink ? [{ to: accessLink, label: "Access" }] : []),
     ...(scopedMembersLink ? [{ to: scopedMembersLink, label: "Members" }] : []),
   ];
 

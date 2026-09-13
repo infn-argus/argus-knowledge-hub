@@ -42,6 +42,13 @@ import type {
   WorkspaceUpdateInput,
   SchemaInput,
   WorkspaceDetail,
+  Role,
+  RoleBinding,
+  RoleBindingInput,
+  DirectoryGroup,
+  DirectoryGroupMember,
+  DirectoryStatus,
+  EffectivePermissions,
 } from "./types";
 
 export class ApiError extends Error {
@@ -388,4 +395,27 @@ export const documentsApi = {
   ) => request<DocumentRelation>(`/v1/documents/${uid}/relations`, { method: "POST", body: json(input) }),
   removeRelation: (uid: string, relationId: number) =>
     request<void>(`/v1/documents/${uid}/relations/${relationId}`, { method: "DELETE" }),
+};
+
+export const rolesApi = {
+  list: () => request<Role[]>("/v1/roles"),
+  listBindings: (workspaceId: string) =>
+    request<RoleBinding[]>(`/v1/workspaces/${workspaceId}/bindings`),
+  createBinding: (workspaceId: string, input: RoleBindingInput) =>
+    request<RoleBinding>(`/v1/workspaces/${workspaceId}/bindings`, {
+      method: "POST",
+      body: json(input),
+    }),
+  deleteBinding: (workspaceId: string, bindingId: number) =>
+    request<void>(`/v1/workspaces/${workspaceId}/bindings/${bindingId}`, { method: "DELETE" }),
+  myPermissions: (workspaceId: string) =>
+    request<EffectivePermissions>(`/v1/workspaces/${workspaceId}/my-permissions`),
+};
+
+export const directoryApi = {
+  groups: (search?: string) =>
+    request<DirectoryGroup[]>(`/v1/groups${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  groupMembers: (uid: string) => request<DirectoryGroupMember[]>(`/v1/groups/${uid}/members`),
+  status: () => request<DirectoryStatus>("/v1/directory/status"),
+  sync: () => request<Record<string, unknown>>("/v1/directory/sync", { method: "POST" }),
 };
