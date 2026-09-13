@@ -179,6 +179,12 @@ export function AppShell() {
         </NavLink>
         <WorkspaceSwitcher />
 
+        <div className="border-t border-slate-200 px-2 py-1.5">
+          {/* The graph crosses all three sections, so it sits above the
+              section switcher rather than inside one of them. */}
+          <SectionLink to="/graph">Knowledge graph</SectionLink>
+        </div>
+
         <div className="flex flex-1 flex-col overflow-hidden border-t border-slate-200">
           {/* Collapsible drawer: section switcher + submenu + settings.
               Collapsed by default so the type tree below gets the space —

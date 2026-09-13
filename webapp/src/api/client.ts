@@ -54,6 +54,8 @@ import type {
   DirectoryGroupMember,
   DirectoryStatus,
   EffectivePermissions,
+  Graph,
+  GraphSummary,
 } from "./types";
 
 export class ApiError extends Error {
@@ -468,4 +470,24 @@ export const directoryApi = {
   groupMembers: (uid: string) => request<DirectoryGroupMember[]>(`/v1/groups/${uid}/members`),
   status: () => request<DirectoryStatus>("/v1/directory/status"),
   sync: () => request<Record<string, unknown>>("/v1/directory/sync", { method: "POST" }),
+};
+
+export const graphApi = {
+  summary: () => request<GraphSummary>("/v1/graph/summary"),
+  walk: (params: {
+    kind: string;
+    uid: string;
+    depth: number;
+    kinds?: string[];
+    maxNodes?: number;
+  }) => {
+    const query = new URLSearchParams({
+      kind: params.kind,
+      uid: params.uid,
+      depth: String(params.depth),
+    });
+    if (params.kinds?.length) query.set("kinds", params.kinds.join(","));
+    if (params.maxNodes) query.set("max_nodes", String(params.maxNodes));
+    return request<Graph>(`/v1/graph?${query.toString()}`);
+  },
 };

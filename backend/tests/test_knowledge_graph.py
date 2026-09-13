@@ -173,5 +173,30 @@ def test_summary_counts_nodes_and_edges(world):
     assert summary["nodes"]["documents"] == 1
     assert summary["edges"]["asset_to_asset"] == 1
     assert summary["edges"]["ticket_to_ticket"] == 1
+    # The fixture's ticket names the camera twice over — a subject field and
+    # a link row carrying its key — and that is one connection, not two.
     assert summary["edges"]["ticket_to_asset"] == 1
     assert summary["edges"]["document_to_anything"] == 1
+
+
+def test_a_ticket_naming_its_object_directly_still_counts(world):
+    """Tickets written here carry their object in the subject field and have
+    no link row at all; a summary that counted only link rows would report a
+    workspace full of work as having none."""
+    suffix = secrets.token_hex(4)
+    ws = f"only-subject-{suffix}"
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name="Subject only"))
+    db.flush()
+    db.add(Schema(uid=f"sc2-{suffix}", workspace_id=ws, name="Magnets"))
+    db.flush()
+    db.add(Asset(uid=f"mag-{suffix}", workspace_id=ws, schema_uid=f"sc2-{suffix}",
+                 key=f"LNFM-{suffix}", name="QUAD-BTF-03", type="Magnets"))
+    db.flush()
+    db.add(Issue(uid=f"tk2-{suffix}", workspace_id=ws, title="Trips at 180 A",
+                 state="new", asset_uid=f"mag-{suffix}"))
+    db.commit()
+
+    summary = graph_summary(db, ws)
+    db.close()
+    assert summary["edges"]["ticket_to_asset"] == 1

@@ -398,12 +398,28 @@ def graph_summary(db: Session, workspace_id: str) -> dict:
         .join(Issue, Issue.uid == IssueLink.from_issue_uid)
         .where(Issue.workspace_id == workspace_id)
     ) or 0
-    ticket_asset_edges = db.scalar(
-        select(func.count())
-        .select_from(AssetTicket)
+    # A ticket reaches an object two ways — the subject field on the ticket
+    # itself, and a link row carrying a ticket *key* — and the traversal
+    # walks both. Counting only one of them reports zero on a workspace
+    # where every ticket names its object directly, which is exactly the
+    # wrong answer to the question this number exists to answer.
+    ticket_asset_pairs: set[tuple[str, str]] = set()
+    for issue_uid, asset_uid in db.execute(
+        select(Issue.uid, Issue.asset_uid).where(
+            Issue.workspace_id == workspace_id, Issue.asset_uid.is_not(None)
+        )
+    ):
+        ticket_asset_pairs.add((issue_uid, asset_uid))
+
+    by_key = ticket_uids_by_key(db, workspace_id)
+    for asset_uid, ticket_key in db.execute(
+        select(AssetTicket.asset_uid, AssetTicket.ticket_key)
         .join(Asset, Asset.uid == AssetTicket.asset_uid)
         .where(Asset.workspace_id == workspace_id)
-    ) or 0
+    ):
+        for issue_uid in by_key.get(ticket_key, ()):
+            ticket_asset_pairs.add((issue_uid, asset_uid))
+    ticket_asset_edges = len(ticket_asset_pairs)
 
     return {
         "nodes": {

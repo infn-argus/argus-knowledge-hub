@@ -790,6 +790,41 @@ export interface EffectivePermissions {
   workspace: string[];
 }
 
+/** A node in the knowledge graph. `kind` is what the thing *is*, which is
+ * also what decides where clicking it goes. */
+export interface GraphNode {
+  kind: "asset" | "ticket" | "document" | "group" | "person";
+  uid: string;
+  label: string;
+  sublabel: string | null;
+  type_name: string | null;
+  state: string | null;
+  /** Hops from the node the walk started at. */
+  depth: number;
+}
+
+export interface GraphEdge {
+  from_kind: string;
+  from_uid: string;
+  to_kind: string;
+  to_uid: string;
+  relation: string;
+  /** structure | work | documentation | people */
+  via: string;
+}
+
+export interface Graph {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  /** The node cap stopped the walk: what you see is a subset. */
+  truncated: boolean;
+}
+
+export interface GraphSummary {
+  nodes: Record<string, number>;
+  edges: Record<string, number>;
+}
+
 /** Import sources read almost alike; spell them out so a ticket import
  * isn't mistaken for an object import when reading a list of runs. */
 export function importSourceLabel(source: string): string {

@@ -14,6 +14,7 @@ import { DocumentForm } from "./pages/documents/Form";
 import { DocumentList } from "./pages/documents/List";
 import { DocumentSearch } from "./pages/documents/Search";
 import { GlobalValueForm } from "./pages/globalvalues/Form";
+import { GraphExplorer } from "./pages/graph/Explorer";
 import { GlobalValueList } from "./pages/globalvalues/List";
 import { ImportList } from "./pages/imports/List";
 import { ImportConfigForm } from "./pages/imports/New";
@@ -57,6 +58,8 @@ export function App() {
           <Route path="/documents/search" element={<DocumentSearch />} />
           <Route path="/documents/new" element={<DocumentForm />} />
           <Route path="/documents/:uid" element={<DocumentDetail />} />
+
+          <Route path="/graph" element={<GraphExplorer />} />
 
           <Route path="/labels" element={<LabelList />} />
 
