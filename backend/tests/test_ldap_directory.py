@@ -173,3 +173,58 @@ def test_sync_populates_a_group_that_lists_no_people():
     emails = {db.get(User, m.user_id).email for m in members}
     assert emails == {f"p1-{suffix}@infn.it", f"p2-{suffix}@infn.it"}
     db.close()
+
+
+def test_gssapi_is_inferred_from_a_keytab(monkeypatch):
+    """A deployment that mounts a keytab shouldn't also have to remember a
+    flag saying it means it."""
+    monkeypatch.setenv("LDAP_URL", "ldaps://ds.infn.it")
+    monkeypatch.setenv("LDAP_USER_BASE_DN", f"ou=People,{BASE}")
+    monkeypatch.setenv("LDAP_GROUP_BASE_DN", f"ou=Groups,{BASE}")
+    monkeypatch.delenv("LDAP_AUTH", raising=False)
+
+    monkeypatch.setenv("LDAP_KEYTAB", "/etc/krb5/argus.keytab")
+    assert LdapDirectory().auth == "gssapi"
+
+    monkeypatch.delenv("LDAP_KEYTAB")
+    assert LdapDirectory().auth == "simple"
+
+
+def test_bad_sasl_settings_are_rejected_at_construction(monkeypatch):
+    """Better a clear error at startup than an opaque bind failure later."""
+    monkeypatch.setenv("LDAP_URL", "ldaps://ds.infn.it")
+    monkeypatch.setenv("LDAP_USER_BASE_DN", f"ou=People,{BASE}")
+    monkeypatch.setenv("LDAP_GROUP_BASE_DN", f"ou=Groups,{BASE}")
+
+    monkeypatch.setenv("LDAP_SASL_REVERSE_DNS", "sometimes")
+    with pytest.raises(RuntimeError, match="LDAP_SASL_REVERSE_DNS"):
+        LdapDirectory()
+    monkeypatch.delenv("LDAP_SASL_REVERSE_DNS")
+
+    monkeypatch.setenv("LDAP_SASL_CHANNEL_BINDING", "maybe")
+    with pytest.raises(RuntimeError, match="LDAP_SASL_CHANNEL_BINDING"):
+        LdapDirectory()
+
+
+def test_channel_binding_suppression_is_restored():
+    """389 Directory Server rejects the TLS channel-binding token ldap3
+    sends — verified against ds.infn.it, where the bind fails with a bare
+    "invalidCredentials" until it is suppressed. Suppression swaps a library
+    global, so it has to be put back whatever happens."""
+    import ldap3.protocol.sasl.kerberos as kerberos_sasl
+
+    from app.services.directory.ldap import _channel_bindings
+
+    original = kerberos_sasl.get_channel_bindings
+
+    with _channel_bindings(True):
+        assert kerberos_sasl.get_channel_bindings is original
+    with _channel_bindings(False):
+        assert kerberos_sasl.get_channel_bindings is not original
+        assert kerberos_sasl.get_channel_bindings(object()) is None
+    assert kerberos_sasl.get_channel_bindings is original
+
+    with pytest.raises(ValueError):
+        with _channel_bindings(False):
+            raise ValueError("boom")
+    assert kerberos_sasl.get_channel_bindings is original

@@ -7,8 +7,13 @@ LABEL org.opencontainers.image.licenses="INFN"
 
 WORKDIR /app
 
+# libkrb5-dev builds the gssapi wheel; libkrb5-3 and the GSSAPI module are
+# what it needs at run time, for binding to a Kerberos-backed LDAP with a
+# service keytab instead of a password.
 RUN apt-get update && apt-get install -y \
     gcc \
+    libkrb5-dev \
+    libgssapi-krb5-2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

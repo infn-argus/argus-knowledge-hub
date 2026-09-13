@@ -8,13 +8,44 @@ Every attribute name is configurable: INFN's tree is not guaranteed to
 use the same names as the defaults below, and a wrong guess is a config
 change rather than a release.
 """
+import logging
 import os
+from contextlib import contextmanager
 
 from app.services.directory.base import DirectoryGroup, DirectoryPerson
+
+logger = logging.getLogger(__name__)
 
 
 def ldap_configured() -> bool:
     return bool(os.environ.get("LDAP_URL"))
+
+
+REVERSE_DNS_MODES = ("off", "optional", "require", "ip-only")
+CHANNEL_BINDING_MODES = ("auto", "on", "off")
+
+
+@contextmanager
+def _channel_bindings(enabled: bool):
+    """Turn the TLS channel-binding token on or off for one bind.
+
+    ldap3 offers no per-connection setting, so the module function has to be
+    swapped and put back. Kept as narrow as possible: it is a process-wide
+    global for the duration of the bind, which matters only if two binds run
+    concurrently with different settings — the directory sync is a single
+    sequential job, so they don't.
+    """
+    import ldap3.protocol.sasl.kerberos as kerberos_sasl
+
+    if enabled:
+        yield
+        return
+    original = kerberos_sasl.get_channel_bindings
+    kerberos_sasl.get_channel_bindings = lambda _socket: None
+    try:
+        yield
+    finally:
+        kerberos_sasl.get_channel_bindings = original
 
 
 class LdapDirectory:
@@ -24,6 +55,30 @@ class LdapDirectory:
         self.url = os.environ["LDAP_URL"]
         self.bind_dn = os.environ.get("LDAP_BIND_DN") or None
         self.bind_password = os.environ.get("LDAP_BIND_PASSWORD") or None
+        # "gssapi" binds with a Kerberos service principal instead of a
+        # password — the idiomatic choice against a Kerberos-backed
+        # directory like INFN's, and it means no password exists to leak or
+        # rotate by hand. Inferred from the keytab so a deployment that
+        # mounts one doesn't also have to remember a flag.
+        self.keytab = os.environ.get("LDAP_KEYTAB") or None
+        self.auth = (os.environ.get("LDAP_AUTH") or ("gssapi" if self.keytab else "simple")).lower()
+        # Pin the host the service ticket is requested for, when reverse DNS
+        # can't be relied on.
+        self.sasl_hostname = os.environ.get("LDAP_SASL_HOSTNAME") or None
+        self.sasl_reverse_dns = (os.environ.get("LDAP_SASL_REVERSE_DNS") or "optional").lower()
+        if self.sasl_reverse_dns not in REVERSE_DNS_MODES:
+            raise RuntimeError(
+                f"LDAP_SASL_REVERSE_DNS must be one of {REVERSE_DNS_MODES}, "
+                f"got {self.sasl_reverse_dns!r}"
+            )
+        self.sasl_channel_binding = (
+            os.environ.get("LDAP_SASL_CHANNEL_BINDING") or "auto"
+        ).lower()
+        if self.sasl_channel_binding not in CHANNEL_BINDING_MODES:
+            raise RuntimeError(
+                f"LDAP_SASL_CHANNEL_BINDING must be one of {CHANNEL_BINDING_MODES}, "
+                f"got {self.sasl_channel_binding!r}"
+            )
         self.user_base_dn = os.environ["LDAP_USER_BASE_DN"]
         self.user_filter = os.environ.get("LDAP_USER_FILTER", "(objectClass=inetOrgPerson)")
         self.group_base_dn = os.environ["LDAP_GROUP_BASE_DN"]
@@ -58,6 +113,63 @@ class LdapDirectory:
         from ldap3 import ALL, Connection, Server
 
         server = Server(self.url, get_info=ALL)
+        if self.auth == "gssapi":
+            from ldap3 import KERBEROS, SASL
+            from ldap3.core.rdns import ReverseDnsSetting
+
+            if self.keytab:
+                # MIT Kerberos acquires initial credentials from this keytab
+                # on its own when none are cached, and re-acquires them once
+                # they expire — so a long-lived process needs no kinit and no
+                # ticket-renewal loop of our own.
+                os.environ.setdefault("KRB5_CLIENT_KTNAME", self.keytab)
+
+            # Which host the Kerberos service ticket is asked for. ds.infn.it
+            # is a round-robin alias and the ldap/... principal is registered
+            # under the real host, so asking for the alias fails with "Server
+            # not found in Kerberos database". ldapsearch succeeds because it
+            # canonicalises the peer address through reverse DNS by default;
+            # ldap3 does not, unless told to here.
+            if self.sasl_hostname:
+                sasl_credentials = (self.sasl_hostname,)
+            else:
+                sasl_credentials = ({
+                    "off": ReverseDnsSetting.OFF,
+                    "optional": ReverseDnsSetting.OPTIONAL_RESOLVE_ALL_ADDRESSES,
+                    "require": ReverseDnsSetting.REQUIRE_RESOLVE_ALL_ADDRESSES,
+                    "ip-only": ReverseDnsSetting.REQUIRE_RESOLVE_IP_ADDRESSES_ONLY,
+                }[self.sasl_reverse_dns],)
+
+            def connect(channel_binding: bool):
+                with _channel_bindings(channel_binding):
+                    return Connection(
+                        server,
+                        authentication=SASL,
+                        sasl_mechanism=KERBEROS,
+                        sasl_credentials=sasl_credentials,
+                        auto_bind=True,
+                        raise_exceptions=True,
+                    )
+
+            if self.sasl_channel_binding in ("on", "off"):
+                return connect(self.sasl_channel_binding == "on")
+
+            # "auto": ldap3 sends a TLS channel-binding token that 389
+            # Directory Server rejects, and the bind then fails with a bare
+            # "invalidCredentials" that says nothing about why. Rather than
+            # leave every deployment to discover that, try the strict way and
+            # fall back once. Both attempts use the same credentials, so a
+            # genuinely wrong one still fails.
+            from ldap3.core.exceptions import LDAPInvalidCredentialsResult
+
+            try:
+                return connect(True)
+            except LDAPInvalidCredentialsResult:
+                logger.info(
+                    "LDAP GSSAPI bind refused with channel binding; retrying without it. "
+                    "Set LDAP_SASL_CHANNEL_BINDING=off to skip the first attempt."
+                )
+                return connect(False)
         return Connection(
             server,
             user=self.bind_dn,
