@@ -697,9 +697,20 @@ export interface IssueDocumentLink {
   relation_id: number;
 }
 
+export interface IssueTicketLink {
+  link_id: number;
+  issue_uid: string;
+  title: string;
+  state: string;
+  source_key: string | null;
+  relation: string;
+  outgoing: boolean;
+}
+
 export interface IssueLinks {
   assets: IssueAssetLink[];
   documents: IssueDocumentLink[];
+  tickets: IssueTicketLink[];
 }
 
 export interface Role {

@@ -46,6 +46,7 @@ import type {
   IssueLinks,
   IssueAssetLink,
   IssueDocumentLink,
+  IssueTicketLink,
   Role,
   RoleBinding,
   RoleBindingInput,
@@ -198,6 +199,7 @@ export const issuesApi = {
   update: (uid: string, input: Partial<IssueInput>) =>
     request<Issue>(`/v1/issues/${uid}`, { method: "PUT", body: json(input) }),
   delete: (uid: string) => request<void>(`/v1/issues/${uid}`, { method: "DELETE" }),
+  labels: () => request<string[]>("/v1/issues/labels"),
   listComments: (uid: string) =>
     request<IssueComment[]>(`/v1/issues/${uid}/comments`),
   addComment: (uid: string, author: string, body: string) =>
@@ -378,6 +380,13 @@ export const issueLinksApi = {
     }),
   unlinkAsset: (uid: string, assetUid: string) =>
     request<void>(`/v1/issues/${uid}/links/assets/${assetUid}`, { method: "DELETE" }),
+  linkTicket: (uid: string, issueUid: string, relation = "relates") =>
+    request<IssueTicketLink>(`/v1/issues/${uid}/links/tickets`, {
+      method: "POST",
+      body: json({ issue_uid: issueUid, relation }),
+    }),
+  unlinkTicket: (uid: string, linkId: number) =>
+    request<void>(`/v1/issues/${uid}/links/tickets/${linkId}`, { method: "DELETE" }),
   linkDocument: (uid: string, documentUid: string, relation = "documents") =>
     request<IssueDocumentLink>(`/v1/issues/${uid}/links/documents`, {
       method: "POST",

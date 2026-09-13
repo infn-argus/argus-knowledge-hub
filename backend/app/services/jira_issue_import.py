@@ -17,7 +17,7 @@ from app.db import SessionLocal
 from app.models.asset import Asset
 from app.models.asset_subresources import AssetTicket
 from app.models.import_job import ImportJob
-from app.models.issue import Issue, IssueComment, IssueHistory
+from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
 from app.services.import_merge import should_write
 from app.services.ticket_types import (
     ensure_ticket_types,
@@ -459,6 +459,52 @@ def _link_mentioned_assets(
     return linked
 
 
+# Which attribute holds a key pointing at another ticket, and what the edge
+# between them means.
+_TICKET_KEY_RELATIONS = (("argus_epic", "epic"), ("argus_parent", "parent"))
+
+
+def _link_related_tickets(db: Session, workspace_id: str) -> int:
+    """Turn the epic/parent keys into edges.
+
+    Run after every page, because an epic is often imported after the
+    stories that name it — resolving as each ticket is written would miss
+    exactly the forward references that matter.
+    """
+    issues = db.scalars(select(Issue).where(Issue.workspace_id == workspace_id)).all()
+    by_source_key = {
+        (i.attributes or {}).get("argus_source_key"): i.uid
+        for i in issues
+        if (i.attributes or {}).get("argus_source_key")
+    }
+    existing = {
+        (link.from_issue_uid, link.to_issue_uid, link.relation_type)
+        for link in db.scalars(select(IssueLink))
+    }
+    now = datetime.now(timezone.utc)
+    created = 0
+    for issue in issues:
+        attributes = issue.attributes or {}
+        for key_attribute, relation in _TICKET_KEY_RELATIONS:
+            target_key = attributes.get(key_attribute)
+            target_uid = by_source_key.get(target_key) if target_key else None
+            # A key naming a ticket outside this import stays as the
+            # attribute value — a dangling edge would be worse than none.
+            if not target_uid or target_uid == issue.uid:
+                continue
+            triple = (issue.uid, target_uid, relation)
+            if triple in existing:
+                continue
+            existing.add(triple)
+            db.add(IssueLink(
+                from_issue_uid=issue.uid, to_issue_uid=target_uid,
+                relation_type=relation, created_at=now,
+            ))
+            created += 1
+    db.commit()
+    return created
+
+
 def run_jira_issue_import(
     job_uid: str,
     workspace_id: str,
@@ -633,10 +679,18 @@ def run_jira_issue_import(
             if start_at >= (total or 0):
                 break
 
+        # Epic and parent arrive as keys, and the ticket they name may not
+        # have existed yet when the row was written — so they become edges
+        # once every page is in.
+        ticket_links = _link_related_tickets(db, workspace_id)
+        if ticket_links:
+            _set_progress(db, job, f"Linked {ticket_links} ticket(s) to their epic or parent")
+
         _set_progress(
             db, job, f"Imported {imported} ticket(s)",
             tickets=imported, comments=comments_imported, asset_links=links,
             attachments=attachments_imported, history=history_imported,
+            ticket_links=ticket_links,
         )
 
         job.status = "succeeded"

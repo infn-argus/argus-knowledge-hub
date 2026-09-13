@@ -251,3 +251,83 @@ def test_legacy_ticket_attributes_map_onto_argus_keys():
     # A value already under the ARGUS key wins over the legacy one.
     both = migrate_legacy_attributes({"jiraKey": "OLD", "argus_source_key": "NEW"})
     assert both["argus_source_key"] == "NEW"
+
+
+def test_tickets_link_to_each_other_and_read_from_both_ends(token):
+    """An epic and its story are one row. Opening either has to show it,
+    which is the whole reason it isn't an attribute holding a key."""
+    suffix = secrets.token_hex(4)
+    epic = _ticket(token, f"epic-{suffix}")
+    story = _ticket(token, f"story-{suffix}")
+
+    created = client.post(
+        f"/v1/issues/{story}/links/tickets",
+        json={"issue_uid": epic, "relation": "epic"},
+        headers=auth(token),
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["outgoing"] is True
+
+    from_story = client.get(f"/v1/issues/{story}/links", headers=auth(token)).json()["tickets"]
+    assert [(t["issue_uid"], t["relation"], t["outgoing"]) for t in from_story] == [
+        (epic, "epic", True)
+    ]
+
+    # The same edge, seen from the epic, points the other way.
+    from_epic = client.get(f"/v1/issues/{epic}/links", headers=auth(token)).json()["tickets"]
+    assert [(t["issue_uid"], t["relation"], t["outgoing"]) for t in from_epic] == [
+        (story, "epic", False)
+    ]
+
+    assert client.post(
+        f"/v1/issues/{story}/links/tickets",
+        json={"issue_uid": epic, "relation": "epic"},
+        headers=auth(token),
+    ).status_code == 409
+
+    assert client.post(
+        f"/v1/issues/{story}/links/tickets",
+        json={"issue_uid": story},
+        headers=auth(token),
+    ).status_code == 422, "a ticket can't link to itself"
+
+    # Either end may remove it — it is one relationship, not two.
+    link_id = from_epic[0]["link_id"]
+    assert client.delete(
+        f"/v1/issues/{epic}/links/tickets/{link_id}", headers=auth(token)
+    ).status_code == 204
+    assert client.get(f"/v1/issues/{story}/links", headers=auth(token)).json()["tickets"] == []
+
+
+def test_labels_in_use_are_offered_back(token):
+    """So that typing a label reuses the one that exists rather than
+    creating "btf" beside "BTF"."""
+    suffix = secrets.token_hex(4)
+    uid = _ticket(token, suffix)
+    client.put(
+        f"/v1/issues/{uid}", json={"labels": ["BTF", f"vacuum-{suffix}"]}, headers=auth(token)
+    )
+
+    labels = client.get("/v1/issues/labels", headers=auth(token)).json()
+    assert "BTF" in labels and f"vacuum-{suffix}" in labels
+    # Sorted and distinct, so the list is usable as a vocabulary.
+    assert labels == sorted(set(labels))
+
+
+def test_labels_are_not_shared_between_workspaces(token):
+    suffix = secrets.token_hex(4)
+    uid = _ticket(token, suffix)
+    client.put(f"/v1/issues/{uid}", json={"labels": [f"secret-{suffix}"]}, headers=auth(token))
+
+    db = SessionLocal()
+    other_ws = f"other-{suffix}"
+    db.add(Workspace(id=other_ws, name="Other"))
+    db.flush()
+    other_raw = secrets.token_urlsafe(16)
+    db.add(ApiToken(workspace_id=other_ws, token_hash=hash_token(other_raw)))
+    db.commit()
+    db.close()
+
+    assert f"secret-{suffix}" not in client.get(
+        "/v1/issues/labels", headers=auth(other_raw)
+    ).json()

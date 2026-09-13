@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { assetsApi, globalValuesApi, issuesApi, membersApi, schemasApi } from "../../api/client";
 import { AttributeInput } from "../../components/AttributeInput";
+import { LabelInput } from "../../components/LabelInput";
 import { UserPicker } from "../../components/UserPicker";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 
@@ -32,13 +33,11 @@ export function IssueForm() {
   const [priority, setPriority] = useState("");
   const [assignee, setAssignee] = useState("");
   const [schemaUid, setSchemaUid] = useState(searchParams.get("schema_uid") ?? "");
-  const [labels, setLabels] = useState("");
+  const [labels, setLabels] = useState<string[]>([]);
+  const labelSuggestions = useQuery({ queryKey: ["issue-labels"], queryFn: issuesApi.labels });
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
 
-  const labelList = labels
-    .split(",")
-    .map((l) => l.trim())
-    .filter(Boolean);
+
 
   useEffect(() => {
     const t = existing.data;
@@ -49,7 +48,7 @@ export function IssueForm() {
     setPriority(t.priority ?? "");
     setAssignee(t.assignee ?? "");
     setSchemaUid(t.schema_uid ?? "");
-    setLabels((t.labels ?? []).join(", "));
+    setLabels(t.labels ?? []);
     setAttributes(t.attributes ?? {});
   }, [existing.data]);
 
@@ -65,7 +64,7 @@ export function IssueForm() {
         priority: priority || undefined,
         assignee: assignee || undefined,
         schema_uid: schemaUid || undefined,
-        labels: labelList,
+        labels,
         attributes,
       };
       if (isEdit) return issuesApi.update(uid!, payload);
@@ -132,13 +131,13 @@ export function IssueForm() {
 
         <div>
           <label className="block text-sm font-medium text-slate-700">Labels</label>
-          <input
-            value={labels}
-            onChange={(e) => setLabels(e.target.value)}
-            placeholder="BTF, diagnostics"
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
-          />
-          <p className="mt-1 text-xs text-slate-500">Comma separated.</p>
+          <div className="mt-1">
+            <LabelInput
+              value={labels}
+              onChange={setLabels}
+              suggestions={labelSuggestions.data ?? []}
+            />
+          </div>
         </div>
 
         <div>

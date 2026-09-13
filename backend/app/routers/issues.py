@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -14,7 +14,7 @@ from app.models.asset import Asset
 from app.models.asset_subresources import AssetTicket
 from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation
-from app.models.issue import Issue, IssueComment, IssueHistory
+from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
 from app.models.schema import Schema
 from app.schemas.attachment import AttachmentOut
 from app.schemas.issue import (
@@ -28,6 +28,8 @@ from app.schemas.issue import (
     IssueHistoryOut,
     IssueLinksOut,
     IssueOut,
+    IssueTicketLinkCreate,
+    IssueTicketLinkOut,
     IssueUpdate,
 )
 from app.services.issue_history import (
@@ -81,6 +83,23 @@ def create_issue(
     db.commit()
     db.refresh(issue)
     return issue
+
+
+@router.get("/labels", response_model=list[str])
+def list_issue_labels(
+    workspace_id: str = Depends(require_permission("read", resource="tickets")),
+    db: Session = Depends(get_db),
+):
+    """Every label already in use in this workspace, so typing one offers
+    what exists rather than inventing a near-duplicate ("BTF" vs "btf")."""
+    rows = db.execute(
+        text(
+            "SELECT DISTINCT jsonb_array_elements_text(labels) AS label "
+            "FROM issues WHERE workspace_id = :ws ORDER BY label"
+        ),
+        {"ws": workspace_id},
+    ).scalars().all()
+    return [r for r in rows if r]
 
 
 @router.get("/{uid}", response_model=IssueOut)
@@ -244,7 +263,89 @@ def list_issue_links(
         )
         for r, d in doc_rows
     ]
-    return IssueLinksOut(assets=assets, documents=documents)
+    tickets: list[IssueTicketLinkOut] = []
+    for link, other, outgoing in _ticket_links(db, uid):
+        tickets.append(IssueTicketLinkOut(
+            link_id=link.id, issue_uid=other.uid, title=other.title, state=other.state,
+            source_key=(other.attributes or {}).get("argus_source_key"),
+            relation=link.relation_type, outgoing=outgoing,
+        ))
+
+    return IssueLinksOut(assets=assets, documents=documents, tickets=tickets)
+
+
+def _ticket_links(db: Session, uid: str):
+    """Both directions of every edge this ticket is on."""
+    out = []
+    for link in db.scalars(select(IssueLink).where(IssueLink.from_issue_uid == uid)):
+        other = db.get(Issue, link.to_issue_uid)
+        if other is not None:
+            out.append((link, other, True))
+    for link in db.scalars(select(IssueLink).where(IssueLink.to_issue_uid == uid)):
+        other = db.get(Issue, link.from_issue_uid)
+        if other is not None:
+            out.append((link, other, False))
+    return out
+
+
+@router.post("/{uid}/links/tickets", response_model=IssueTicketLinkOut, status_code=201)
+def link_issue_ticket(
+    uid: str,
+    body: IssueTicketLinkCreate,
+    workspace_id: str = Depends(require_permission("modify", resource="tickets")),
+    current_user_id: Optional[str] = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    issue = _get_owned_issue(uid, workspace_id, db)
+    other = _get_owned_issue(body.issue_uid, workspace_id, db)
+    if other.uid == issue.uid:
+        raise HTTPException(status_code=422, detail="A ticket can't link to itself")
+
+    existing = db.scalar(
+        select(IssueLink).where(
+            IssueLink.from_issue_uid == issue.uid,
+            IssueLink.to_issue_uid == other.uid,
+            IssueLink.relation_type == body.relation,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Those tickets are already linked that way")
+
+    now = datetime.now(timezone.utc)
+    link = IssueLink(
+        from_issue_uid=issue.uid, to_issue_uid=other.uid,
+        relation_type=body.relation, created_at=now,
+    )
+    db.add(link)
+    db.add(IssueHistory(
+        uid=str(uuid.uuid4()), issue_uid=issue.uid, type="updated",
+        author=current_user_id or "api", field="Linked ticket",
+        to_value=f"{body.relation} {(other.attributes or {}).get('argus_source_key') or other.title}",
+        timestamp=now,
+    ))
+    db.commit()
+    db.refresh(link)
+    return IssueTicketLinkOut(
+        link_id=link.id, issue_uid=other.uid, title=other.title, state=other.state,
+        source_key=(other.attributes or {}).get("argus_source_key"),
+        relation=link.relation_type, outgoing=True,
+    )
+
+
+@router.delete("/{uid}/links/tickets/{link_id}", status_code=204)
+def unlink_issue_ticket(
+    uid: str,
+    link_id: int,
+    workspace_id: str = Depends(require_permission("modify", resource="tickets")),
+    db: Session = Depends(get_db),
+):
+    _get_owned_issue(uid, workspace_id, db)
+    link = db.get(IssueLink, link_id)
+    # Either end may remove the edge; it is one relationship, not two.
+    if link is None or uid not in (link.from_issue_uid, link.to_issue_uid):
+        raise HTTPException(status_code=404, detail="Link not found")
+    db.delete(link)
+    db.commit()
 
 
 @router.post("/{uid}/links/assets", response_model=IssueAssetLinkOut, status_code=201)

@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,6 +39,32 @@ class Issue(Base, WorkspaceScopedMixin, TimestampMixin):
     created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     deleted_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class IssueLink(Base):
+    """An edge between two tickets: an epic and its stories, a parent and
+    its sub-tasks, a fault that blocks another.
+
+    A link table rather than an attribute holding a key, for the same
+    reason objects and documents are linked this way — the graph is walked
+    from both ends. "What is in this epic" and "what epic is this in" are
+    the same row read in two directions.
+    """
+
+    __tablename__ = "issue_links"
+    __table_args__ = (UniqueConstraint("from_issue_uid", "to_issue_uid", "relation_type"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    from_issue_uid: Mapped[str] = mapped_column(
+        String, ForeignKey("issues.uid", ondelete="CASCADE"), index=True
+    )
+    to_issue_uid: Mapped[str] = mapped_column(
+        String, ForeignKey("issues.uid", ondelete="CASCADE"), index=True
+    )
+    # "epic" | "parent" | "blocks" | "relates" | "duplicates" — the direction
+    # is from -> to, so "epic" means: from is in the epic to.
+    relation_type: Mapped[str] = mapped_column(String)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True))
 
 
 class IssueHistory(Base):

@@ -14,6 +14,7 @@ import {
 } from "../../api/client";
 import { ApiError } from "../../api/client";
 import { AttributeValue } from "../../components/AttributeValue";
+import { TicketPicker } from "../../components/TicketPicker";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 
@@ -32,6 +33,23 @@ const PRIORITY_STYLES: Record<string, string> = {
   medium: "text-amber-600",
   low: "text-slate-500",
 };
+
+/** How a ticket-to-ticket edge reads from each end. "relates" and
+ * "duplicates" mean the same thing both ways; the rest invert, and saying
+ * "relates of" for a symmetric one is just wrong. */
+const TICKET_RELATION_LABELS: Record<string, [string, string]> = {
+  epic: ["in epic", "epic of"],
+  parent: ["child of", "parent of"],
+  blocks: ["blocks", "blocked by"],
+  relates: ["relates to", "relates to"],
+  duplicates: ["duplicates", "duplicated by"],
+};
+
+function ticketRelationLabel(relation: string, outgoing: boolean): string {
+  const pair = TICKET_RELATION_LABELS[relation];
+  if (!pair) return outgoing ? relation : `${relation} (inverse)`;
+  return outgoing ? pair[0] : pair[1];
+}
 
 /** Fields the imported "Jira Issue" ticket type carries, grouped the way a
  * Jira issue view groups them — details on the left, people and dates on the
@@ -185,6 +203,8 @@ export function IssueDetail() {
     enabled: !!uid,
   });
   const documents = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
+  const allIssues = useQuery({ queryKey: ["issues"], queryFn: () => issuesApi.list() });
+  const [ticketRelation, setTicketRelation] = useState("relates");
 
   const invalidateLinks = () => {
     queryClient.invalidateQueries({ queryKey: ["issue-links", uid] });
@@ -196,6 +216,14 @@ export function IssueDetail() {
   });
   const unlinkAssetMutation = useMutation({
     mutationFn: (assetUid: string) => issueLinksApi.unlinkAsset(uid!, assetUid),
+    onSuccess: invalidateLinks,
+  });
+  const linkTicketMutation = useMutation({
+    mutationFn: (issueUid: string) => issueLinksApi.linkTicket(uid!, issueUid, ticketRelation),
+    onSuccess: invalidateLinks,
+  });
+  const unlinkTicketMutation = useMutation({
+    mutationFn: (linkId: number) => issueLinksApi.unlinkTicket(uid!, linkId),
     onSuccess: invalidateLinks,
   });
   const linkDocumentMutation = useMutation({
@@ -417,9 +445,31 @@ export function IssueDetail() {
                   </button>
                 </li>
               ))}
-              {links.data && links.data.assets.length === 0 && links.data.documents.length === 0 && (
-                <p className="text-slate-400">Nothing linked yet.</p>
-              )}
+              {links.data?.tickets.map((t) => (
+                <li key={t.link_id} className="flex items-center gap-2">
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                    {ticketRelationLabel(t.relation, t.outgoing)}
+                  </span>
+                  <Link to={`/tickets/${t.issue_uid}`} className="text-indigo-600 hover:underline">
+                    {t.title}
+                  </Link>
+                  {t.source_key && (
+                    <span className="font-mono text-xs text-slate-400">{t.source_key}</span>
+                  )}
+                  <button
+                    onClick={() => unlinkTicketMutation.mutate(t.link_id)}
+                    className="ml-auto text-xs text-red-500 hover:text-red-700"
+                  >
+                    Unlink
+                  </button>
+                </li>
+              ))}
+              {links.data &&
+                links.data.assets.length === 0 &&
+                links.data.documents.length === 0 &&
+                links.data.tickets.length === 0 && (
+                  <p className="text-slate-400">Nothing linked yet.</p>
+                )}
             </ul>
 
             <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
@@ -454,10 +504,32 @@ export function IssueDetail() {
                 ))}
               </select>
             </div>
-            {(linkAssetMutation.isError || linkDocumentMutation.isError) && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                value={ticketRelation}
+                onChange={(e) => setTicketRelation(e.target.value)}
+                className="rounded border border-slate-300 px-2 py-1 text-xs"
+              >
+                <option value="relates">relates to</option>
+                <option value="epic">in epic</option>
+                <option value="parent">child of</option>
+                <option value="blocks">blocks</option>
+                <option value="duplicates">duplicates</option>
+              </select>
+              <TicketPicker
+                options={allIssues.data ?? []}
+                excludeUid={i.uid}
+                onPick={(issueUid) => linkTicketMutation.mutate(issueUid)}
+                placeholder="Link a ticket…"
+              />
+            </div>
+            {(linkAssetMutation.isError ||
+              linkDocumentMutation.isError ||
+              linkTicketMutation.isError) && (
               <p className="mt-2 text-xs text-red-600">
-                {((linkAssetMutation.error ?? linkDocumentMutation.error) as ApiError)?.detail ??
-                  "Could not link that."}
+                {((linkAssetMutation.error ??
+                  linkDocumentMutation.error ??
+                  linkTicketMutation.error) as ApiError)?.detail ?? "Could not link that."}
               </p>
             )}
           </Panel>

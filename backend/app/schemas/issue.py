@@ -97,9 +97,27 @@ class IssueDocumentLinkCreate(BaseModel):
     relation: str = "documents"
 
 
+class IssueTicketLinkOut(BaseModel):
+    link_id: int
+    issue_uid: str
+    title: str
+    state: str
+    source_key: Optional[str] = None
+    relation: str
+    # False when this ticket is the target rather than the origin, so the
+    # panel can say "epic of" rather than "in epic" for the same row.
+    outgoing: bool
+
+
+class IssueTicketLinkCreate(BaseModel):
+    issue_uid: str
+    relation: str = "relates"
+
+
 class IssueLinksOut(BaseModel):
     assets: list[IssueAssetLinkOut]
     documents: list[IssueDocumentLinkOut]
+    tickets: list[IssueTicketLinkOut]
 
 
 class IssueCommentCreate(BaseModel):
