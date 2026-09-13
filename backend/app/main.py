@@ -16,6 +16,7 @@ from app.routers import (
     imports,
     issues,
     labels,
+    roles,
     schemas,
     sync,
     workspaces,
@@ -46,6 +47,7 @@ app.include_router(groups.router)
 app.include_router(import_configs.router)
 app.include_router(imports.router)
 app.include_router(labels.router)
+app.include_router(roles.router)
 app.include_router(sync.router)
 app.include_router(workspaces.router)
 

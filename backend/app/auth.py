@@ -14,9 +14,9 @@ from sqlalchemy.orm import Session
 from app.auth_oidc import oidc_configured, verify_oidc_token
 from app.db import get_db
 from app.models.api_token import ApiToken
-from app.models.membership import Membership
 from app.models.user import User
 from app.models.workspace import Workspace
+from app.services.permissions import effective_permissions
 
 TOKEN_PEPPER = os.environ["TOKEN_PEPPER"]
 
@@ -141,17 +141,18 @@ def require_permission(action: Action, resource: Resource = "objects"):
         if user.is_admin:
             return x_workspace_id
 
-        membership = db.scalar(
-            select(Membership).where(
-                Membership.workspace_id == x_workspace_id, Membership.user_id == user.id
-            )
-        )
-        if membership is not None:
-            if not getattr(membership, flag_name):
-                raise HTTPException(status_code=403, detail="Not permitted")
+        # Roles held directly or through a group, unioned with any legacy
+        # membership row. This is the whole of the change roles brought:
+        # every call site above still asks the same question.
+        granted = effective_permissions(db, user, x_workspace_id)
+        if action in granted.get(resource, set()):
             return x_workspace_id
+        if granted[resource] or granted["workspace"]:
+            # Held something here, just not this — a definite "no", rather
+            # than falling through to the workspace's open-door defaults.
+            raise HTTPException(status_code=403, detail="Not permitted")
 
-        # No explicit membership — fall back to the workspace's default access
+        # Nothing granted at all — fall back to the workspace's default access
         # for any authenticated user (all unchecked unless an owner/admin opts in).
         workspace = db.get(Workspace, x_workspace_id)
         default_flag_name = f"default_{flag_name}"

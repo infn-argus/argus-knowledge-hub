@@ -8,8 +8,8 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth import Identity, OidcIdentity, PatIdentity, get_identity, require_permission
 from app.db import get_db
+from app.services.permissions import has_permission
 from app.models.document import Document, DocumentRelation, DocumentRevision
-from app.models.membership import Membership
 from app.models.schema import Schema
 from app.schemas.document import (
     ApproveAction,
@@ -42,16 +42,11 @@ def _actor_user_id(identity: Identity) -> Optional[str]:
 
 
 def _can_approve(workspace_id: str, identity: Identity, db: Session) -> bool:
+    """Approval authority, resolved the same way as everything else — so the
+    Approver role grants it, not only a legacy membership flag."""
     if isinstance(identity, PatIdentity):
         return True
-    if identity.user.is_admin:
-        return True
-    membership = db.scalar(
-        select(Membership).where(
-            Membership.workspace_id == workspace_id, Membership.user_id == identity.user.id
-        )
-    )
-    return bool(membership and membership.can_approve_documents)
+    return has_permission(db, identity.user, workspace_id, "approve", "documents")
 
 
 def _check_confidentiality(doc: Document, workspace_id: str, identity: Identity, db: Session) -> None:

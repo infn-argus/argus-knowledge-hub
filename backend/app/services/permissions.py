@@ -1,0 +1,69 @@
+"""What a person may do in a workspace.
+
+One function answers it, and require_permission() is the only caller that
+matters — every router keeps the call it already had. Grants come from
+three places and are unioned, never intersected:
+
+* role bindings on the user,
+* role bindings on any group the user belongs to,
+* a legacy Membership row, which still resolves so that access granted
+  before roles existed doesn't quietly disappear at deploy time.
+"""
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models.group import GroupMember
+from app.models.membership import Membership
+from app.models.role import Role, RoleBinding
+from app.models.user import User
+from app.services.roles import membership_permissions
+
+RESOURCES = ("objects", "tickets", "documents", "workspace")
+
+
+def user_group_uids(db: Session, user_id: str) -> list[str]:
+    return list(db.scalars(select(GroupMember.group_uid).where(GroupMember.user_id == user_id)))
+
+
+def _merge(into: dict[str, set[str]], permissions: dict) -> None:
+    for resource in RESOURCES:
+        for action in permissions.get(resource) or []:
+            into[resource].add(action)
+
+
+def effective_permissions(db: Session, user: User, workspace_id: str) -> dict[str, set[str]]:
+    granted: dict[str, set[str]] = {resource: set() for resource in RESOURCES}
+
+    group_uids = user_group_uids(db, user.id)
+    subject_clause = RoleBinding.subject_type == "user"
+    subject_clause = subject_clause & (RoleBinding.subject_id == user.id)
+    if group_uids:
+        subject_clause = subject_clause | (
+            (RoleBinding.subject_type == "group") & (RoleBinding.subject_id.in_(group_uids))
+        )
+
+    roles = db.scalars(
+        select(Role)
+        .join(RoleBinding, RoleBinding.role_id == Role.id)
+        .where(RoleBinding.workspace_id == workspace_id, subject_clause)
+    ).all()
+    for role in roles:
+        _merge(granted, role.permissions or {})
+
+    legacy = db.scalar(
+        select(Membership).where(
+            Membership.workspace_id == workspace_id, Membership.user_id == user.id
+        )
+    )
+    if legacy is not None:
+        # membership_permissions() owns the reading of those flags, including
+        # which combination counted as an owner before roles existed.
+        _merge(granted, membership_permissions(legacy))
+
+    return granted
+
+
+def has_permission(db: Session, user: User, workspace_id: str, action: str, resource: str) -> bool:
+    if user.is_admin:
+        return True
+    return action in effective_permissions(db, user, workspace_id).get(resource, set())

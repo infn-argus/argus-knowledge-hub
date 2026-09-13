@@ -14,6 +14,7 @@ from app.models.import_config import ImportConfig
 from app.models.import_job import ImportJob
 from app.models.issue import Issue, IssueComment
 from app.models.membership import Membership
+from app.models.role import Role, RoleBinding
 from app.models.schema import Schema
 from app.models.user import User
 from app.models.workspace import Workspace
@@ -38,6 +39,8 @@ __all__ = [
     "Issue",
     "IssueComment",
     "Membership",
+    "Role",
+    "RoleBinding",
     "Schema",
     "User",
     "Workspace",

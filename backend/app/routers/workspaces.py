@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import Identity, PatIdentity, get_identity, require_permission
 from app.db import get_db
+from app.models.group import GroupMember
+from app.models.role import RoleBinding
+from app.services.permissions import effective_permissions, has_permission, user_group_uids
 from app.models.global_value import GlobalValue
 from app.models.membership import Membership
 from app.models.schema import Schema
@@ -87,21 +90,16 @@ def seed_default_global_values(db: Session, workspace_id: str) -> None:
 
 
 def _require_owner_or_admin(workspace_id: str, identity: Identity, db: Session) -> None:
-    """Membership management requires full rights on the target workspace, or is_admin."""
+    """Granting access to others is its own authority — held by the Owner
+    role, by is_admin, or by a legacy membership with full rights (which is
+    what this check used to look for directly)."""
     if isinstance(identity, PatIdentity):
         if identity.workspace_id != workspace_id:
             raise HTTPException(status_code=403, detail="Not permitted")
         return
     if identity.user.is_admin:
         return
-    membership = db.scalar(
-        select(Membership).where(
-            Membership.workspace_id == workspace_id, Membership.user_id == identity.user.id
-        )
-    )
-    if membership is None or not (
-        membership.can_create and membership.can_modify and membership.can_delete
-    ):
+    if not has_permission(db, identity.user, workspace_id, "manage_members", "workspace"):
         raise HTTPException(status_code=403, detail="Not permitted")
 
 
@@ -144,30 +142,44 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
             for ws in db.scalars(select(Workspace)).all()
         ]
 
-    rows = db.execute(
-        select(Membership, Workspace)
-        .join(Workspace, Workspace.id == Membership.workspace_id)
-        .where(Membership.user_id == user.id)
-    ).all()
-    result = [
-        MyWorkspaceOut(
-            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
-            can_read=m.can_read, can_create=m.can_create,
-            can_modify=m.can_modify, can_delete=m.can_delete,
-            can_read_tickets=m.can_read_tickets, can_create_tickets=m.can_create_tickets,
-            can_modify_tickets=m.can_modify_tickets, can_delete_tickets=m.can_delete_tickets,
-            can_read_documents=m.can_read_documents, can_create_documents=m.can_create_documents,
-            can_modify_documents=m.can_modify_documents, can_delete_documents=m.can_delete_documents,
-            can_approve_documents=m.can_approve_documents,
+    # Reachability has to follow exactly what require_permission() enforces,
+    # or a workspace granted through a group role binding would be usable by
+    # URL but missing from the picker. Both a legacy membership and any role
+    # binding put a workspace in this list.
+    granted_ws_ids = set(
+        db.scalars(select(Membership.workspace_id).where(Membership.user_id == user.id))
+    )
+    group_uids = user_group_uids(db, user.id)
+    binding_clause = (RoleBinding.subject_type == "user") & (RoleBinding.subject_id == user.id)
+    if group_uids:
+        binding_clause = binding_clause | (
+            (RoleBinding.subject_type == "group") & (RoleBinding.subject_id.in_(group_uids))
         )
-        for m, ws in rows
-    ]
+    granted_ws_ids |= set(db.scalars(select(RoleBinding.workspace_id).where(binding_clause)))
 
-    # Also surface workspaces with no explicit membership but where the
+    result = []
+    for ws in db.scalars(select(Workspace).where(Workspace.id.in_(granted_ws_ids))) if granted_ws_ids else []:
+        granted = effective_permissions(db, user, ws.id)
+        result.append(MyWorkspaceOut(
+            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
+            can_read="read" in granted["objects"], can_create="create" in granted["objects"],
+            can_modify="modify" in granted["objects"], can_delete="delete" in granted["objects"],
+            can_read_tickets="read" in granted["tickets"],
+            can_create_tickets="create" in granted["tickets"],
+            can_modify_tickets="modify" in granted["tickets"],
+            can_delete_tickets="delete" in granted["tickets"],
+            can_read_documents="read" in granted["documents"],
+            can_create_documents="create" in granted["documents"],
+            can_modify_documents="modify" in granted["documents"],
+            can_delete_documents="delete" in granted["documents"],
+            can_approve_documents="approve" in granted["documents"],
+        ))
+
+    # Also surface workspaces with no explicit grant but where the
     # workspace's default access grants this authenticated user something —
     # otherwise that default access would be enforced but unreachable, since
     # the user would have no way to pick the workspace in the first place.
-    member_ws_ids = {ws.id for _, ws in rows}
+    member_ws_ids = granted_ws_ids
     default_accessible = db.scalars(
         select(Workspace).where(
             Workspace.id.not_in(member_ws_ids) if member_ws_ids else True,
@@ -355,13 +367,35 @@ def list_member_directory(
 ):
     """Lightweight member lookup for "user"-type attribute pickers (assignee,
     etc.) — available to anyone with read access, unlike the full permissions
-    listing below which is owner/admin-only."""
-    rows = db.execute(
-        select(Membership, User)
-        .join(User, User.id == Membership.user_id)
-        .where(Membership.workspace_id == workspace_id)
+    listing below which is owner/admin-only.
+
+    Everyone who can reach the workspace belongs here, however they got in:
+    by legacy membership, by a role binding of their own, or as a member of
+    a group that holds one. Otherwise a ticket couldn't be assigned to most
+    of the division the moment access moved to group bindings.
+    """
+    user_ids = set(
+        db.scalars(select(Membership.user_id).where(Membership.workspace_id == workspace_id))
+    )
+    bindings = db.execute(
+        select(RoleBinding.subject_type, RoleBinding.subject_id)
+        .where(RoleBinding.workspace_id == workspace_id)
     ).all()
-    return [MemberDirectoryOut(user_id=u.id, email=u.email, name=u.name) for _, u in rows]
+    bound_group_uids = [sid for stype, sid in bindings if stype == "group"]
+    user_ids |= {sid for stype, sid in bindings if stype == "user"}
+    if bound_group_uids:
+        user_ids |= set(
+            db.scalars(
+                select(GroupMember.user_id).where(GroupMember.group_uid.in_(bound_group_uids))
+            )
+        )
+    if not user_ids:
+        return []
+
+    # Someone who has left the directory stays selectable nowhere new, but
+    # their existing assignments still resolve through their user row.
+    users = db.scalars(select(User).where(User.id.in_(user_ids), User.active.is_(True)))
+    return [MemberDirectoryOut(user_id=u.id, email=u.email, name=u.name) for u in users]
 
 
 @router.get("/workspaces/{workspace_id}/members", response_model=list[MembershipOut])
