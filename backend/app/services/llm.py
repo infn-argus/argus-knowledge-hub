@@ -25,6 +25,7 @@ class Endpoint:
     base_url: str
     model: str
     embedding_model: Optional[str] = None
+    vision_model: Optional[str] = None
     api_key: Optional[str] = None
 
     @property
@@ -83,6 +84,12 @@ def check(endpoint: Endpoint) -> tuple[bool, Optional[str], list[str]]:
         return (
             False,
             f"This endpoint does not serve the embedding model “{endpoint.embedding_model}”.",
+            models,
+        )
+    if endpoint.vision_model and endpoint.vision_model not in models:
+        return (
+            False,
+            f"This endpoint does not serve the vision model “{endpoint.vision_model}”.",
             models,
         )
 
@@ -159,3 +166,51 @@ def embed(endpoint: Endpoint, texts: list[str]) -> list[list[float]]:
         return [row["embedding"] for row in data]
     except (ValueError, KeyError) as e:
         raise LLMError("The endpoint's embeddings reply was not in the expected shape.") from e
+
+
+def look(endpoint: Endpoint, image: bytes, mime_type: str, system: str, user: str,
+         max_tokens: int = 800) -> str:
+    """Ask the vision model about a picture.
+
+    A separate model from `complete`'s, because they usually are: the chat
+    model a workspace picks for text answers "not a multimodal model" when
+    shown an image, and finding that out at the point of use rather than at
+    configuration time is exactly what the check exists to prevent.
+    """
+    if not endpoint.vision_model:
+        raise LLMError("No vision model is configured for this endpoint.")
+    import base64
+
+    encoded = base64.b64encode(image).decode("ascii")
+    try:
+        resp = requests.post(
+            f"{endpoint.root}/chat/completions",
+            headers=endpoint.headers(),
+            json={
+                "model": endpoint.vision_model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime_type};base64,{encoded}"},
+                            },
+                        ],
+                    },
+                ],
+                "max_tokens": max_tokens,
+                "temperature": 0,
+            },
+            timeout=COMPLETION_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as e:
+        raise LLMError(f"Could not reach {endpoint.root}: {e}") from e
+    if resp.status_code >= 400:
+        raise LLMError(f"The endpoint answered {resp.status_code}: {(resp.text or '')[:200]}")
+    try:
+        return resp.json()["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError) as e:
+        raise LLMError("The endpoint's reply was not in the expected shape.") from e

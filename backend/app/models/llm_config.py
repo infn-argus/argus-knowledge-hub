@@ -29,6 +29,10 @@ class LLMConfig(Base, TimestampMixin):
     # Classification and linking work on embeddings rather than a chat call
     # per record; optional, since not every endpoint serves one.
     embedding_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Separate from `model` because they are usually different models: the
+    # chat model INFN serves by default answers "not a multimodal model"
+    # when shown a picture.
+    vision_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # Fernet-encrypted, never returned to the client — the same handling the
     # import configurations give a source PAT. Nullable: some endpoints on
     # the internal network take no key at all.

@@ -8,6 +8,7 @@ class LLMConfigIn(BaseModel):
     base_url: str
     model: str
     embedding_model: Optional[str] = None
+    vision_model: Optional[str] = None
     # Left out on an update, the stored key is kept. Sent empty, it is
     # cleared — for an endpoint that takes none.
     api_key: Optional[str] = None
@@ -25,6 +26,7 @@ class LLMConfigOut(BaseModel):
     base_url: str
     model: str
     embedding_model: Optional[str]
+    vision_model: Optional[str]
     has_api_key: bool
     enabled: bool
     allow_confidential: bool
@@ -50,6 +52,7 @@ class AIStatus(BaseModel):
     validated: bool
     model: Optional[str] = None
     has_embeddings: bool = False
+    has_vision: bool = False
     # Why it is unavailable, in words a person can act on.
     reason: Optional[str] = None
 
@@ -94,3 +97,30 @@ class SuggestionDecisionResult(BaseModel):
     applied: int = 0
     rejected: int = 0
     skipped: list[int] = []
+
+
+class AssetMatch(BaseModel):
+    uid: str
+    key: str
+    name: str
+
+
+class PhotoIdentification(BaseModel):
+    """A draft for the new-object form, not a record."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    type_uid: Optional[str]
+    type_name: Optional[str]
+    name: Optional[str]
+    manufacturer: Optional[str]
+    model: Optional[str]
+    serial: Optional[str]
+    description: Optional[str]
+    visible_text: list[str] = []
+    confidence: str = "low"
+    # Object keys read from the photo that exist in this inventory, so a
+    # link can be proposed rather than invented.
+    matches: list[AssetMatch] = []
+    unmatched_keys: list[str] = []
+    error: Optional[str] = None

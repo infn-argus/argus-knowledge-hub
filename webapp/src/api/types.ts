@@ -806,6 +806,7 @@ export interface LLMConfig {
   base_url: string;
   model: string;
   embedding_model: string | null;
+  vision_model: string | null;
   /** The key itself is never sent back — only whether one is stored. */
   has_api_key: boolean;
   enabled: boolean;
@@ -819,6 +820,7 @@ export interface LLMConfigInput {
   base_url: string;
   model: string;
   embedding_model?: string | null;
+  vision_model?: string | null;
   /** Omitted keeps the stored key; "" clears it. */
   api_key?: string;
   enabled: boolean;
@@ -837,7 +839,23 @@ export interface AIStatus {
   validated: boolean;
   model: string | null;
   has_embeddings: boolean;
+  has_vision: boolean;
   reason: string | null;
+}
+
+export interface PhotoIdentification {
+  type_uid: string | null;
+  type_name: string | null;
+  name: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  serial: string | null;
+  description: string | null;
+  visible_text: string[];
+  confidence: "high" | "medium" | "low";
+  matches: { uid: string; key: string; name: string }[];
+  unmatched_keys: string[];
+  error: string | null;
 }
 
 export interface AISuggestion {

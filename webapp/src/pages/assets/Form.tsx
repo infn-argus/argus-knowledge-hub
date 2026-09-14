@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { assetsApi, schemasApi } from "../../api/client";
 import { AttributeInput } from "../../components/AttributeInput";
+import { IdentifyFromPhoto } from "../../components/IdentifyFromPhoto";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 
 export function AssetForm() {
@@ -68,6 +69,35 @@ export function AssetForm() {
       <h1 className="text-2xl font-semibold text-slate-900">
         {isEditing ? "Edit asset" : "New asset"}
       </h1>
+
+      {!isEditing && (
+        <div className="mt-4">
+          <IdentifyFromPhoto
+            onUse={(result) => {
+              // Only what is missing: a photograph is a starting point, not
+              // an overwrite of something somebody already typed.
+              if (result.type_uid && !schemaUid) setSchemaUid(result.type_uid);
+              if (result.name && !name) setName(result.name);
+              const notes = [result.manufacturer, result.model, result.serial]
+                .filter(Boolean)
+                .join(" · ");
+              if (notes || result.description) {
+                setAttributes((prev) => ({
+                  ...prev,
+                  ...(prev.description || !result.description
+                    ? {}
+                    : { description: result.description }),
+                  ...(prev.manufacturer || !result.manufacturer
+                    ? {}
+                    : { manufacturer: result.manufacturer }),
+                  ...(prev.model || !result.model ? {} : { model: result.model }),
+                  ...(prev.serial || !result.serial ? {} : { serial: result.serial }),
+                }));
+              }
+            }}
+          />
+        </div>
+      )}
 
       <form
         onSubmit={(e) => {

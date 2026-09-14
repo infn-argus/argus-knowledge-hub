@@ -8,7 +8,7 @@ values file or a chat window to get there.
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -25,13 +25,15 @@ from app.schemas.ai import (
     LLMConfigOut,
     SuggestionDecision,
     SuggestionDecisionResult,
+    PhotoIdentification,
     SuggestionOut,
     SuggestRequest,
     SuggestRunResult,
 )
+from app.services.asset_vision import MAX_IMAGE_BYTES, identify
 from app.services.ai_suggestions import suggest_document_types
 from app.services.crypto import decrypt_secret, encrypt_secret
-from app.services.llm import Endpoint, check
+from app.services.llm import Endpoint, LLMError, check
 
 router = APIRouter(prefix="/v1/ai", tags=["ai"])
 
@@ -41,6 +43,7 @@ def endpoint_for(config: LLMConfig) -> Endpoint:
         base_url=config.base_url,
         model=config.model,
         embedding_model=config.embedding_model,
+        vision_model=config.vision_model,
         api_key=decrypt_secret(config.encrypted_secret) if config.encrypted_secret else None,
     )
 
@@ -51,6 +54,7 @@ def _out(config: LLMConfig) -> LLMConfigOut:
         base_url=config.base_url,
         model=config.model,
         embedding_model=config.embedding_model,
+        vision_model=config.vision_model,
         has_api_key=bool(config.encrypted_secret),
         enabled=config.enabled,
         allow_confidential=config.allow_confidential,
@@ -86,6 +90,7 @@ def put_config(
     config.base_url = body.base_url.strip()
     config.model = body.model.strip()
     config.embedding_model = (body.embedding_model or "").strip() or None
+    config.vision_model = (body.vision_model or "").strip() or None
     config.enabled = body.enabled
     config.allow_confidential = body.allow_confidential
 
@@ -155,6 +160,7 @@ def status(
             validated=bool(config.last_check_ok),
             model=config.model,
             has_embeddings=bool(config.embedding_model),
+            has_vision=bool(config.vision_model),
             reason="AI features are switched off for this workspace.",
         )
     if not config.last_check_ok:
@@ -164,6 +170,7 @@ def status(
             validated=False,
             model=config.model,
             has_embeddings=bool(config.embedding_model),
+            has_vision=bool(config.vision_model),
             reason=config.last_check_error
             or "The AI endpoint has not been checked since it was last changed.",
         )
@@ -173,6 +180,7 @@ def status(
         validated=True,
         model=config.model,
         has_embeddings=bool(config.embedding_model),
+        has_vision=bool(config.vision_model),
     )
 
 
@@ -294,3 +302,40 @@ def reject_suggestions(
         rejected += 1
     db.commit()
     return SuggestionDecisionResult(rejected=rejected, skipped=skipped)
+
+
+@router.post("/identify-object", response_model=PhotoIdentification)
+async def identify_object(
+    file: UploadFile = File(description="A photograph of the equipment"),
+    workspace_id: str = Depends(require_permission("create")),
+    db: Session = Depends(get_db),
+):
+    """What is in this photograph, as a draft for the new-object form.
+
+    Proposes; does not create. The object types offered are this
+    workspace's own, and any key read off a label is checked against the
+    inventory rather than believed.
+    """
+    config = _usable_config(db, workspace_id)
+    if not config.vision_model:
+        raise HTTPException(
+            status_code=409,
+            detail="No vision model is configured for this workspace's AI endpoint.",
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="The photograph was empty.")
+    if len(content) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"That photograph is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB.",
+        )
+
+    try:
+        return identify(
+            db, workspace_id, endpoint_for(config), content,
+            file.content_type or "image/jpeg",
+        )
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e

@@ -16,6 +16,7 @@ export function WorkspaceAI() {
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
   const [embeddingModel, setEmbeddingModel] = useState("");
+  const [visionModel, setVisionModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [enabled, setEnabled] = useState(false);
   const [allowConfidential, setAllowConfidential] = useState(false);
@@ -28,6 +29,7 @@ export function WorkspaceAI() {
       setBaseUrl(c.base_url);
       setModel(c.model);
       setEmbeddingModel(c.embedding_model ?? "");
+      setVisionModel(c.vision_model ?? "");
       setEnabled(c.enabled);
       setAllowConfidential(c.allow_confidential);
     }
@@ -40,6 +42,7 @@ export function WorkspaceAI() {
         base_url: baseUrl.trim(),
         model: model.trim(),
         embedding_model: embeddingModel.trim() || null,
+        vision_model: visionModel.trim() || null,
         // Left out entirely when untouched, so saving a model change does
         // not wipe the stored key.
         ...(apiKey ? { api_key: apiKey } : {}),
@@ -109,6 +112,21 @@ export function WorkspaceAI() {
               cheaper and steadier than a chat call per record.
             </p>
           </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Vision model</label>
+          <input
+            value={visionModel}
+            onChange={(e) => setVisionModel(e.target.value)}
+            placeholder="gemma-4-31b-it"
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Optional, and usually a different model from the one above: a chat model
+            answers “not a multimodal model” when shown a photograph. Needed to identify
+            equipment from a picture.
+          </p>
         </div>
 
         <div>

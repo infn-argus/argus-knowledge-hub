@@ -39,6 +39,7 @@ import type {
   RelinkResult,
   AISuggestion,
   AIStatus,
+  PhotoIdentification,
   SuggestRunResult,
   LLMCheckResult,
   LLMConfig,
@@ -595,6 +596,22 @@ export const aiApi = {
       method: "POST",
       body: json({ ids }),
     }),
+  /** What is in this photograph, as a draft for the new-object form. */
+  identifyObject: async (file: File): Promise<PhotoIdentification> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch(`${session.baseUrl}/v1/ai/identify-object`, {
+      method: "POST",
+      headers: authHeaders(session),
+      body: form,
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new ApiError(resp.status, data);
+    return data as PhotoIdentification;
+  },
+
   reject: (ids: number[]) =>
     request<{ rejected: number; skipped: number[] }>("/v1/ai/suggestions/reject", {
       method: "POST",
