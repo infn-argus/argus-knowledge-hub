@@ -46,7 +46,9 @@ class GitImportRequest(BaseModel):
     source: Literal["git"]
     provider: Literal["github", "gitlab"]
     repo_url: str
-    pat: str
+    # Omitted for a public repository: no token is sent at all, rather than
+    # an empty one, which these APIs reject outright.
+    pat: Optional[str] = None
     branch: str = "main"
     merge_strategy: MergeStrategy = "override"
 
@@ -62,7 +64,7 @@ class Epik8sImportRequest(BaseModel):
     source: Literal["epik8s"]
     provider: Literal["github", "gitlab"]
     repo_url: str
-    pat: str
+    pat: Optional[str] = None
     branch: str = "main"
     # Where the beamline's configuration sits in that repository.
     path: str = "deploy/values.yaml"

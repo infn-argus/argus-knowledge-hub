@@ -399,6 +399,8 @@ export interface GitImportConfigParams {
   provider: "github" | "gitlab";
   repo_url: string;
   branch: string;
+  /** Omitted for a public repository: no token is sent at all, rather than
+   * an empty one, which these APIs reject. */
   pat?: string;
 }
 

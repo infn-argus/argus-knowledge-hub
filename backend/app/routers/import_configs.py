@@ -59,7 +59,7 @@ def create_config(
         source=body.config.source,
         merge_strategy=body.merge_strategy,
         params=params,
-        encrypted_secret=encrypt_secret(body.config.pat),
+        encrypted_secret=encrypt_secret(body.config.pat) if body.config.pat else None,
     )
     db.add(config)
     db.commit()
@@ -108,7 +108,7 @@ def run_config(
     db: Session = Depends(get_db),
 ):
     config = _get_owned_config(uid, workspace_id, db)
-    pat = decrypt_secret(config.encrypted_secret)
+    pat = decrypt_secret(config.encrypted_secret) if config.encrypted_secret else None
 
     job = ImportJob(uid=str(uuid.uuid4()), workspace_id=workspace_id, source=config.source)
     db.add(job)

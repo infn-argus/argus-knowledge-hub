@@ -28,37 +28,77 @@ def _parse_repo(repo_url: str) -> tuple[str, str]:
     return parts[0], "/".join(parts[1:])
 
 
-def _list_files_github(session: requests.Session, owner: str, repo: str, branch: str):
-    resp = session.get(
-        f"https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}",
-        params={"recursive": "1"},
-    )
+def github_api(repo_url: str) -> str:
+    """Where this repository's API lives.
+
+    Self-hosted instances are the normal case here, not the exception:
+    these repositories are on baltig.infn.it, and an API address fixed at
+    github.com or gitlab.com can only ever read somebody else's.
+    """
+    host = (urlparse(repo_url).netloc or "github.com").lower()
+    if host in ("github.com", "www.github.com", "api.github.com"):
+        return "https://api.github.com"
+    return f"https://{host}/api/v3"
+
+
+def gitlab_api(repo_url: str) -> str:
+    host = (urlparse(repo_url).netloc or "gitlab.com").lower()
+    return f"https://{host}/api/v4"
+
+
+def _checked(resp: requests.Response, what: str, authenticated: bool) -> requests.Response:
+    """raise_for_status, with the sentence a person needs instead of a code.
+
+    404 and 401 mean the same thing from the outside when no token was
+    given — the repository is private, or it is not there — and "404 Client
+    Error" sends somebody to check their spelling when the answer is that
+    they need a token.
+    """
+    if resp.status_code in (401, 403, 404):
+        if not authenticated:
+            raise RuntimeError(
+                f"{what} could not be read ({resp.status_code}). If this repository is "
+                f"private, add a personal access token; public repositories need none."
+            )
+        raise RuntimeError(
+            f"{what} could not be read ({resp.status_code}). Check the repository path, "
+            f"the branch, and that the token has read access to it."
+        )
     resp.raise_for_status()
+    return resp
+
+
+def _list_files_github(session: requests.Session, owner: str, repo: str, branch: str,
+                       api: str = "https://api.github.com"):
+    resp = _checked(session.get(
+        f"{api}/repos/{owner}/{repo}/git/trees/{branch}",
+        params={"recursive": "1"},
+    ), f"{owner}/{repo}@{branch}", "Authorization" in session.headers)
     return [
         item["path"] for item in resp.json().get("tree", []) if item.get("type") == "blob"
     ]
 
 
-def _get_file_github(session: requests.Session, owner: str, repo: str, path: str, branch: str) -> str:
-    resp = session.get(
-        f"https://api.github.com/repos/{owner}/{repo}/contents/{quote(path)}",
+def _get_file_github(session: requests.Session, owner: str, repo: str, path: str, branch: str,
+                     api: str = "https://api.github.com") -> str:
+    resp = _checked(session.get(
+        f"{api}/repos/{owner}/{repo}/contents/{quote(path)}",
         params={"ref": branch},
         headers={"Accept": "application/vnd.github.v3.raw"},
-    )
-    resp.raise_for_status()
+    ), f"{path} in {owner}/{repo}@{branch}", "Authorization" in session.headers)
     return resp.text
 
 
-def _list_files_gitlab(session: requests.Session, project_path: str, branch: str):
+def _list_files_gitlab(session: requests.Session, project_path: str, branch: str,
+                       api: str = "https://gitlab.com/api/v4"):
     project_id = quote(project_path, safe="")
     files = []
     page = 1
     while True:
-        resp = session.get(
-            f"https://gitlab.com/api/v4/projects/{project_id}/repository/tree",
+        resp = _checked(session.get(
+            f"{api}/projects/{project_id}/repository/tree",
             params={"ref": branch, "recursive": "true", "per_page": 100, "page": page},
-        )
-        resp.raise_for_status()
+        ), f"{project_path}@{branch}", "PRIVATE-TOKEN" in session.headers)
         batch = resp.json()
         files.extend(item["path"] for item in batch if item.get("type") == "blob")
         if len(batch) < 100:
@@ -67,13 +107,13 @@ def _list_files_gitlab(session: requests.Session, project_path: str, branch: str
     return files
 
 
-def _get_file_gitlab(session: requests.Session, project_path: str, path: str, branch: str) -> str:
+def _get_file_gitlab(session: requests.Session, project_path: str, path: str, branch: str,
+                     api: str = "https://gitlab.com/api/v4") -> str:
     project_id = quote(project_path, safe="")
-    resp = session.get(
-        f"https://gitlab.com/api/v4/projects/{project_id}/repository/files/{quote(path, safe='')}/raw",
+    resp = _checked(session.get(
+        f"{api}/projects/{project_id}/repository/files/{quote(path, safe='')}/raw",
         params={"ref": branch},
-    )
-    resp.raise_for_status()
+    ), f"{path} in {project_path}@{branch}", "PRIVATE-TOKEN" in session.headers)
     return resp.text
 
 
@@ -125,14 +165,21 @@ def run_git_import(
         owner, repo = _parse_repo(repo_url)
 
         if provider == "github":
-            session.headers.update({"Authorization": f"Bearer {pat}"})
-            list_files = lambda: _list_files_github(session, owner, repo, branch)
-            get_file = lambda p: _get_file_github(session, owner, repo, p, branch)
+            api = github_api(repo_url)
+            # No token at all rather than an empty one: GitHub rejects
+            # "Bearer " outright, so sending it turns a readable public
+            # repository into a 401.
+            if pat:
+                session.headers.update({"Authorization": f"Bearer {pat}"})
+            list_files = lambda: _list_files_github(session, owner, repo, branch, api)
+            get_file = lambda p: _get_file_github(session, owner, repo, p, branch, api)
         else:
-            session.headers.update({"PRIVATE-TOKEN": pat})
+            api = gitlab_api(repo_url)
+            if pat:
+                session.headers.update({"PRIVATE-TOKEN": pat})
             project_path = f"{owner}/{repo}"
-            list_files = lambda: _list_files_gitlab(session, project_path, branch)
-            get_file = lambda p: _get_file_gitlab(session, project_path, p, branch)
+            list_files = lambda: _list_files_gitlab(session, project_path, branch, api)
+            get_file = lambda p: _get_file_gitlab(session, project_path, p, branch, api)
 
         all_paths = list_files()
         job.progress = f"Found {len(all_paths)} files in repo"

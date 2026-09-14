@@ -21,7 +21,8 @@ class ImportConfig(Base, WorkspaceScopedMixin, TimestampMixin):
     # Non-secret parameters (base_url/jira_schema_id, or provider/repo_url/branch).
     params: Mapped[dict] = mapped_column(JSONB, default=dict)
     # The source PAT, Fernet-encrypted — see app/services/crypto.py. Never
-    # returned to the client once set.
-    encrypted_secret: Mapped[str] = mapped_column(String)
+    # returned to the client once set. Null for a public repository, which
+    # needs no credential and must not be given an empty one.
+    encrypted_secret: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     last_run_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_import_job_uid: Mapped[Optional[str]] = mapped_column(String, nullable=True)

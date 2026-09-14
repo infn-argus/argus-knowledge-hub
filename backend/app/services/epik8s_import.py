@@ -40,6 +40,8 @@ from app.services.git_import import (
     _get_file_github,
     _get_file_gitlab,
     _parse_repo,
+    github_api,
+    gitlab_api,
 )
 from app.services.network_resolve import IPV4, NetworkIndex, short_host
 from app.services.relations import rebuild_asset_relations
@@ -530,14 +532,22 @@ class _Importer:
                     self.relate(asset, target, "enabled by")
 
 
-def _fetch(provider: str, repo_url: str, pat: str, branch: str, path: str) -> str:
+def _fetch(provider: str, repo_url: str, pat: Optional[str], branch: str, path: str) -> str:
+    """One file from the repository, with a token only if there is one.
+
+    These configurations live on baltig.infn.it, so the API address comes
+    from the repository URL; and several of them are readable without a
+    credential, so an absent token means no header rather than an empty one.
+    """
     session = requests.Session()
     owner, repo = _parse_repo(repo_url)
     if provider == "github":
-        session.headers.update({"Authorization": f"Bearer {pat}"})
-        return _get_file_github(session, owner, repo, path, branch)
-    session.headers.update({"PRIVATE-TOKEN": pat})
-    return _get_file_gitlab(session, f"{owner}/{repo}", path, branch)
+        if pat:
+            session.headers.update({"Authorization": f"Bearer {pat}"})
+        return _get_file_github(session, owner, repo, path, branch, github_api(repo_url))
+    if pat:
+        session.headers.update({"PRIVATE-TOKEN": pat})
+    return _get_file_gitlab(session, f"{owner}/{repo}", path, branch, gitlab_api(repo_url))
 
 
 def run_epik8s_import(

@@ -357,9 +357,13 @@ export function ImportConfigForm() {
                 type="password"
                 value={gitPat}
                 onChange={(e) => setGitPat(e.target.value)}
-                required={!isEdit}
                 className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
               />
+              <p className="mt-1 text-xs text-slate-500">
+                {isEdit
+                  ? "Leave blank to keep whatever is saved."
+                  : "Leave blank for a public repository — no token is sent at all, rather than an empty one."}
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700">Branch</label>
