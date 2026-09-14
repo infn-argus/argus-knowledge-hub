@@ -840,6 +840,28 @@ export interface AIStatus {
   reason: string | null;
 }
 
+export interface AISuggestion {
+  id: number;
+  target_type: string;
+  target_uid: string;
+  field: string;
+  suggested_value: string;
+  suggested_label: string | null;
+  previous_value: string | null;
+  previous_label: string | null;
+  target_label: string | null;
+  model: string;
+  status: string;
+  created_at: string;
+}
+
+export interface SuggestRunResult {
+  considered: number;
+  proposed: number;
+  unchanged: number;
+  failed_batches: number;
+}
+
 export interface MarkdownImportResult {
   documents: number;
   attachments: number;

@@ -37,7 +37,9 @@ import type {
   MemberInput,
   MyWorkspace,
   RelinkResult,
+  AISuggestion,
   AIStatus,
+  SuggestRunResult,
   LLMCheckResult,
   LLMConfig,
   LLMConfigInput,
@@ -580,4 +582,22 @@ export const aiApi = {
   check: () => request<LLMCheckResult>("/v1/ai/config/check", { method: "POST" }),
   /** What the application asks before offering an AI action. */
   status: () => request<AIStatus>("/v1/ai/status"),
+
+  suggestDocumentTypes: (onlyUntyped: boolean, limit: number) =>
+    request<SuggestRunResult>("/v1/ai/suggest/document-types", {
+      method: "POST",
+      body: json({ only_untyped: onlyUntyped, limit }),
+    }),
+  suggestions: (status = "proposed") =>
+    request<AISuggestion[]>(`/v1/ai/suggestions?status=${status}`),
+  accept: (ids: number[]) =>
+    request<{ applied: number; skipped: number[] }>("/v1/ai/suggestions/accept", {
+      method: "POST",
+      body: json({ ids }),
+    }),
+  reject: (ids: number[]) =>
+    request<{ rejected: number; skipped: number[] }>("/v1/ai/suggestions/reject", {
+      method: "POST",
+      body: json({ ids }),
+    }),
 };

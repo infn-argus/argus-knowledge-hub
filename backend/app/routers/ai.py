@@ -9,12 +9,27 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import require_permission
 from app.db import get_db
 from app.models.llm_config import LLMConfig
-from app.schemas.ai import AIStatus, LLMCheckResult, LLMConfigIn, LLMConfigOut
+from app.models.ai_suggestion import AISuggestion
+from app.models.document import Document
+from app.models.schema import Schema
+from app.schemas.ai import (
+    AIStatus,
+    LLMCheckResult,
+    LLMConfigIn,
+    LLMConfigOut,
+    SuggestionDecision,
+    SuggestionDecisionResult,
+    SuggestionOut,
+    SuggestRequest,
+    SuggestRunResult,
+)
+from app.services.ai_suggestions import suggest_document_types
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.llm import Endpoint, check
 
@@ -159,3 +174,123 @@ def status(
         model=config.model,
         has_embeddings=bool(config.embedding_model),
     )
+
+
+def _usable_config(db: Session, workspace_id: str) -> LLMConfig:
+    """The endpoint, if it is actually usable. The same gate the status
+    endpoint reports, enforced rather than trusted."""
+    config = _get(db, workspace_id)
+    if config is None:
+        raise HTTPException(status_code=409, detail="No AI endpoint is configured")
+    if not config.enabled:
+        raise HTTPException(status_code=409, detail="AI features are switched off for this workspace")
+    if not config.last_check_ok:
+        raise HTTPException(
+            status_code=409,
+            detail=config.last_check_error
+            or "The AI endpoint has not been checked since it was last changed.",
+        )
+    return config
+
+
+@router.post("/suggest/document-types", response_model=SuggestRunResult)
+def suggest_types(
+    body: SuggestRequest,
+    workspace_id: str = Depends(require_permission("modify", resource="documents")),
+    db: Session = Depends(get_db),
+):
+    """Propose a type for documents that have none worth the name.
+
+    Writes proposals, never a document. Applying one is a separate,
+    deliberate act.
+    """
+    config = _usable_config(db, workspace_id)
+    result = suggest_document_types(
+        db,
+        workspace_id,
+        endpoint_for(config),
+        config,
+        only_untyped=body.only_untyped,
+        # Bounded so one request stays well inside an ingress read timeout;
+        # a caller with a backlog asks repeatedly rather than waiting on one
+        # long request that a proxy will cut off at sixty seconds.
+        limit=max(1, min(body.limit, 40)),
+    )
+    return SuggestRunResult(**result)
+
+
+@router.get("/suggestions", response_model=list[SuggestionOut])
+def list_suggestions(
+    status: str = "proposed",
+    workspace_id: str = Depends(require_permission("read", resource="documents")),
+    db: Session = Depends(get_db),
+):
+    rows = list(db.scalars(
+        select(AISuggestion)
+        .where(AISuggestion.workspace_id == workspace_id, AISuggestion.status == status)
+        .order_by(AISuggestion.created_at.desc())
+    ))
+    # Names rather than uids, so the list reads without a second lookup.
+    titles = {
+        d.uid: d.title
+        for d in db.scalars(select(Document).where(Document.workspace_id == workspace_id))
+    }
+    schema_names = {
+        s.uid: s.name
+        for s in db.scalars(select(Schema).where(Schema.workspace_id == workspace_id))
+    }
+    out = []
+    for row in rows:
+        item = SuggestionOut.model_validate(row)
+        item.target_label = titles.get(row.target_uid)
+        item.previous_label = schema_names.get(row.previous_value or "")
+        out.append(item)
+    return out
+
+
+@router.post("/suggestions/accept", response_model=SuggestionDecisionResult)
+def accept_suggestions(
+    body: SuggestionDecision,
+    workspace_id: str = Depends(require_permission("modify", resource="documents")),
+    db: Session = Depends(get_db),
+):
+    """Apply proposals. This is the only path by which a model's answer
+    becomes a value on a record."""
+    applied, skipped = 0, []
+    for suggestion_id in body.ids:
+        row = db.get(AISuggestion, suggestion_id)
+        if row is None or row.workspace_id != workspace_id or row.status != "proposed":
+            skipped.append(suggestion_id)
+            continue
+        document = db.get(Document, row.target_uid)
+        if document is None or document.workspace_id != workspace_id:
+            skipped.append(suggestion_id)
+            continue
+        if row.field != "document_type_uid":
+            skipped.append(suggestion_id)
+            continue
+        document.document_type_uid = row.suggested_value
+        row.status = "accepted"
+        row.decided_at = datetime.now(timezone.utc)
+        applied += 1
+    db.commit()
+    return SuggestionDecisionResult(applied=applied, skipped=skipped)
+
+
+@router.post("/suggestions/reject", response_model=SuggestionDecisionResult)
+def reject_suggestions(
+    body: SuggestionDecision,
+    workspace_id: str = Depends(require_permission("modify", resource="documents")),
+    db: Session = Depends(get_db),
+):
+    rejected, skipped = 0, []
+    for suggestion_id in body.ids:
+        row = db.get(AISuggestion, suggestion_id)
+        if row is None or row.workspace_id != workspace_id or row.status != "proposed":
+            skipped.append(suggestion_id)
+            continue
+        row.status = "rejected"
+        row.decided_at = datetime.now(timezone.utc)
+        rejected += 1
+    db.commit()
+    return SuggestionDecisionResult(rejected=rejected, skipped=skipped)

@@ -9,6 +9,7 @@ from app.models.asset_subresources import (
 from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation, DocumentRevision
 from app.models.global_value import GlobalValue
+from app.models.ai_suggestion import AISuggestion
 from app.models.llm_config import LLMConfig
 from app.models.group import Group, GroupMember
 from app.models.import_config import ImportConfig
@@ -33,6 +34,7 @@ __all__ = [
     "DocumentRelation",
     "DocumentRevision",
     "GlobalValue",
+    "AISuggestion",
     "LLMConfig",
     "Group",
     "GroupMember",

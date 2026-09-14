@@ -52,6 +52,7 @@ const SECTION_CONFIG: Record<
     links: [
       { to: "/documents", label: "All documents" },
       { to: "/documents/search", label: "Search" },
+      { to: "/documents/suggestions", label: "Type suggestions" },
     ],
     treeLabel: "Document types",
     newTypeTo: "/schemas/new?applies_to=documents",

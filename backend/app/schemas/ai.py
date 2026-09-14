@@ -52,3 +52,45 @@ class AIStatus(BaseModel):
     has_embeddings: bool = False
     # Why it is unavailable, in words a person can act on.
     reason: Optional[str] = None
+
+
+class SuggestRequest(BaseModel):
+    # Only the ones an import had nothing to go on for, by default.
+    only_untyped: bool = True
+    limit: int = 25
+
+
+class SuggestRunResult(BaseModel):
+    considered: int
+    proposed: int
+    unchanged: int
+    failed_batches: int
+
+
+class SuggestionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    id: int
+    target_type: str
+    target_uid: str
+    field: str
+    suggested_value: str
+    suggested_label: Optional[str]
+    previous_value: Optional[str]
+    model: str
+    status: str
+    created_at: datetime
+    # Filled in for display so a list does not need a second round of
+    # lookups to be readable.
+    target_label: Optional[str] = None
+    previous_label: Optional[str] = None
+
+
+class SuggestionDecision(BaseModel):
+    ids: list[int]
+
+
+class SuggestionDecisionResult(BaseModel):
+    applied: int = 0
+    rejected: int = 0
+    skipped: list[int] = []
