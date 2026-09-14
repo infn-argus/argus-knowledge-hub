@@ -1,11 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { assetsApi, attachmentsApi, documentsApi, schemasApi } from "../../api/client";
+import {
+  ApiError,
+  assetsApi,
+  attachmentsApi,
+  documentsApi,
+  issuesApi,
+  schemasApi,
+} from "../../api/client";
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
 import { AttributeInput } from "../../components/AttributeInput";
 import { AttributeValue } from "../../components/AttributeValue";
 import { DrawingViewer } from "../../components/DrawingViewer";
+import { RecordPicker } from "../../components/RecordPicker";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { MarkdownView } from "../../components/MarkdownView";
 import { StepsEditor } from "../../components/StepsEditor";
@@ -70,6 +78,20 @@ export function DocumentDetail() {
     queryFn: () => documentsApi.listRevisionAttachments(uid!, viewed!.uid),
     enabled: !!uid && !!viewed?.uid,
   });
+
+  // Everything a document can point at. The relations are the references:
+  // they are what the knowledge graph walks, what the Confluence import
+  // creates, and until now the one thing a person could not add by hand.
+  const relations = useQuery({
+    queryKey: ["document-relations", uid],
+    queryFn: () => documentsApi.listRelations(uid!),
+    enabled: !!uid,
+  });
+  const allIssues = useQuery({ queryKey: ["issues"], queryFn: () => issuesApi.list() });
+  const allDocuments = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
+  const linkAssets = useQuery({ queryKey: ["assets"], queryFn: () => assetsApi.list() });
+
+  const [linkKind, setLinkKind] = useState<"asset" | "issue" | "document">("asset");
 
   const [bodyMarkdown, setBodyMarkdown] = useState("");
   const [steps, setSteps] = useState<DocumentStep[]>([]);
@@ -159,6 +181,31 @@ export function DocumentDetail() {
     onSuccess: invalidate,
     onError: () => alert("Retire failed."),
   });
+  const addRelationMutation = useMutation({
+    mutationFn: (input: { to_type: "asset" | "issue" | "document"; to_uid: string }) =>
+      documentsApi.addRelation(uid!, {
+        to_type: input.to_type,
+        to_uid: input.to_uid,
+        // What the link means, by what it points at: a document describes
+        // equipment, documents a piece of work, and references another
+        // document.
+        relation_type:
+          input.to_type === "asset"
+            ? "describes"
+            : input.to_type === "issue"
+              ? "documents"
+              : "references",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["document-relations", uid] });
+    },
+    onError: (e) => alert((e as ApiError).detail ?? "Could not add that link."),
+  });
+  const removeRelationMutation = useMutation({
+    mutationFn: (relationId: number) => documentsApi.removeRelation(uid!, relationId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["document-relations", uid] }),
+  });
+
   const retypeMutation = useMutation({
     mutationFn: (typeUid: string | null) => documentsApi.retype([uid!], typeUid),
     onSuccess: () => {
@@ -187,6 +234,38 @@ export function DocumentDetail() {
     (a) => !a.backend_id?.startsWith("dxf-of:"),
   );
   const isDrawing = (filename: string) => /\.(dwg|dxf|dwf|dwfx)$/i.test(filename);
+
+  const linkOptions = {
+    asset: (linkAssets.data ?? []).map((a) => ({ uid: a.uid, label: a.name, sub: a.key })),
+    issue: (allIssues.data ?? []).map((i) => ({
+      uid: i.uid,
+      label: i.title,
+      sub: (i.attributes?.argus_source_key as string) ?? "",
+    })),
+    document: (allDocuments.data ?? [])
+      .filter((d) => d.uid !== uid)
+      .map((d) => ({ uid: d.uid, label: d.title, sub: d.code })),
+  };
+  const LINK_KINDS = [
+    { kind: "asset" as const, label: "Object", href: "/assets" },
+    { kind: "issue" as const, label: "Ticket", href: "/tickets" },
+    { kind: "document" as const, label: "Document", href: "/documents" },
+  ];
+  const describeTarget = (toType: string, toUid: string) => {
+    const kind = toType === "issue" ? "issue" : toType === "document" ? "document" : "asset";
+    const found = linkOptions[kind as keyof typeof linkOptions].find((o) => o.uid === toUid);
+    const href =
+      kind === "issue" ? `/tickets/${toUid}` : kind === "document" ? `/documents/${toUid}` : `/assets/${toUid}`;
+    return {
+      label: found?.label ?? toUid,
+      sub: found?.sub,
+      href,
+      // A relation whose target is gone still shows, as its uid: silently
+      // hiding it would hide a broken edge the graph still walks.
+      known: !!found,
+      kindLabel: LINK_KINDS.find((k) => k.kind === kind)!.label,
+    };
+  };
   const previewFor = (a: { uid: string; filename: string }): string | null =>
     /\.dxf$/i.test(a.filename) ? a.uid : derivatives.get(a.uid) ?? null;
 
@@ -410,6 +489,76 @@ export function DocumentDetail() {
                 {viewed.steps.length === 0 && <p className="text-slate-400">No steps.</p>}
               </ol>
             )}
+          </div>
+
+          {/* Links — the references a document carries. */}
+          <div className="mt-4">
+            <label className="block text-xs font-medium uppercase tracking-wide text-slate-400">
+              Links
+            </label>
+            <div className="mt-1 space-y-1">
+              {(relations.data ?? []).map((r) => {
+                const target = describeTarget(r.to_type, r.to_uid);
+                return (
+                  <div
+                    key={r.id}
+                    className="flex items-center justify-between rounded border border-slate-100 px-2 py-1 text-sm"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-500">
+                        {target.kindLabel}
+                      </span>
+                      <span className="shrink-0 text-xs text-slate-400">{r.relation_type}</span>
+                      {target.known ? (
+                        <Link to={target.href} className="truncate text-slate-700 hover:underline">
+                          {target.label}
+                        </Link>
+                      ) : (
+                        <span className="truncate font-mono text-xs text-slate-400">
+                          {target.label}
+                        </span>
+                      )}
+                      {target.sub && (
+                        <span className="shrink-0 text-xs text-slate-400">{target.sub}</span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeRelationMutation.mutate(r.id)}
+                      className="ml-3 shrink-0 text-xs text-red-500 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                );
+              })}
+              {(relations.data ?? []).length === 0 && (
+                <p className="text-sm text-slate-400">
+                  Not linked to anything yet.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <select
+                value={linkKind}
+                onChange={(e) => setLinkKind(e.target.value as typeof linkKind)}
+                className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                {LINK_KINDS.map((k) => (
+                  <option key={k.kind} value={k.kind}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+              <RecordPicker
+                options={linkOptions[linkKind]}
+                excludeUid={uid}
+                onPick={(toUid) => addRelationMutation.mutate({ to_type: linkKind, to_uid: toUid })}
+                placeholder={`Search ${LINK_KINDS.find((k) => k.kind === linkKind)!.label.toLowerCase()}s…`}
+                disabled={addRelationMutation.isPending}
+              />
+            </div>
           </div>
 
           {/* Files */}

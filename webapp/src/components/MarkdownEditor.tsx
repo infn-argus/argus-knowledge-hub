@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { ApiError } from "../api/client";
 import { MarkdownView } from "./MarkdownView";
 
 type Mode = "write" | "split" | "preview";
@@ -79,6 +80,7 @@ export function MarkdownEditor({
   const area = useRef<HTMLTextAreaElement>(null);
   const [mode, setMode] = useState<Mode>("split");
   const [busy, setBusy] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
   const replaceSelection = (build: (selected: string) => { text: string; cursor?: number }) => {
@@ -124,13 +126,18 @@ export function MarkdownEditor({
 
   const insertUpload = async (file: File) => {
     if (!onUpload) return;
+    setFailure(null);
     setBusy(file.name);
     try {
       const { url, filename, isImage } = await onUpload(file);
       const snippet = isImage ? `\n![${filename}](${url})\n` : `\n[${filename}](${url})\n`;
       replaceSelection(() => ({ text: snippet }));
-    } catch {
-      alert(`Could not attach ${file.name}.`);
+    } catch (e) {
+      // The server's own words, not a shrug. "That revision is closed —
+      // start a new revision to add files" tells someone what to do;
+      // "could not attach" sends them looking for a fault that isn't there.
+      const detail = e instanceof ApiError ? e.detail : null;
+      setFailure(detail ?? (e instanceof Error ? e.message : `Could not attach ${file.name}.`));
     } finally {
       setBusy(null);
     }
@@ -236,7 +243,13 @@ export function MarkdownEditor({
         )}
       </div>
 
-      {onUpload && (
+      {failure && (
+        <p className="border-t border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {failure}
+        </p>
+      )}
+
+      {onUpload && !failure && (
         <p className="border-t border-slate-100 px-3 py-1 text-[11px] text-slate-400">
           Drop a file here, or paste a screenshot, to attach it.
         </p>
