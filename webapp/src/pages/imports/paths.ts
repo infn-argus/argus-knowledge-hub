@@ -39,6 +39,12 @@ export const IMPORT_SOURCES = [
     blurb: "Object types and objects defined as files in a repository.",
   },
   {
+    source: "epik8s",
+    label: "EPIK8s control configuration",
+    blurb:
+      "A beamline's values.yaml: IOCs, the devices they drive, the terminal servers they reach them through, and the control services. Addresses are matched to equipment already in the inventory.",
+  },
+  {
     source: "markdown",
     label: "Markdown files",
     blurb: "Upload .md files, or a zip of a folder, and the images they refer to come with them.",

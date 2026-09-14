@@ -22,10 +22,11 @@ export function ImportConfigForm() {
   // Opened from a section's Import link, the form starts on that section's
   // source rather than making you pick it again.
   const requestedSource = searchParams.get("source");
-  const [source, setSource] = useState<"jira" | "jira-issues" | "confluence" | "git">(
+  const [source, setSource] = useState<"jira" | "jira-issues" | "confluence" | "git" | "epik8s">(
     requestedSource === "jira-issues" ||
     requestedSource === "confluence" ||
-    requestedSource === "git"
+    requestedSource === "git" ||
+    requestedSource === "epik8s"
       ? requestedSource
       : "jira",
   );
@@ -44,6 +45,8 @@ export function ImportConfigForm() {
   const [repoUrl, setRepoUrl] = useState("");
   const [gitPat, setGitPat] = useState("");
   const [branch, setBranch] = useState("main");
+  const [valuesPath, setValuesPath] = useState("deploy/values.yaml");
+  const [createMissingNodes, setCreateMissingNodes] = useState(true);
 
   // params holds whatever the source needs, so values arrive loosely typed.
   const param = (key: string) => {
@@ -72,6 +75,8 @@ export function ImportConfigForm() {
       setProvider((param("provider") as "github" | "gitlab") || "github");
       setRepoUrl(param("repo_url"));
       setBranch(param("branch") || "main");
+      setValuesPath(param("path") || "deploy/values.yaml");
+      setCreateMissingNodes(existing.data.params.create_missing_nodes !== false);
     }
   }, [existing.data]);
 
@@ -101,6 +106,16 @@ export function ImportConfigForm() {
               jql,
               link_assets: linkAssets,
               ...(jiraPat ? { pat: jiraPat } : {}),
+            }
+          : source === "epik8s"
+          ? {
+              source: "epik8s" as const,
+              provider,
+              repo_url: repoUrl,
+              branch,
+              path: valuesPath,
+              create_missing_nodes: createMissingNodes,
+              ...(gitPat ? { pat: gitPat } : {}),
             }
           : {
               source: "git" as const,
@@ -151,7 +166,7 @@ export function ImportConfigForm() {
       </p>
 
       <div className="mt-6 flex gap-2">
-        {(["jira", "jira-issues", "confluence", "git"] as const).map((s) => (
+        {(["jira", "jira-issues", "confluence", "git", "epik8s"] as const).map((s) => (
           <button
             key={s}
             type="button"
@@ -167,7 +182,9 @@ export function ImportConfigForm() {
                 ? "Jira tickets"
                 : s === "confluence"
                   ? "Confluence"
-                  : "Git"}
+                  : s === "git"
+                    ? "Git"
+                    : "EPIK8s control"}
           </button>
         ))}
       </div>
@@ -352,6 +369,44 @@ export function ImportConfigForm() {
                 className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
+
+            {source === "epik8s" && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Path to the beamline configuration
+                  </label>
+                  <input
+                    value={valuesPath}
+                    onChange={(e) => setValuesPath(e.target.value)}
+                    placeholder="deploy/values.yaml"
+                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    One beamline per configuration. Read only — the file in git deploys
+                    the accelerator, and each imported object records the revision it
+                    came from.
+                  </p>
+                </div>
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={createMissingNodes}
+                    onChange={(e) => setCreateMissingNodes(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    Create an object for an address nothing in the inventory carries
+                    <span className="block text-xs text-slate-500">
+                      Addresses are matched to equipment you already hold — a terminal
+                      server is linked, not duplicated. The rest become Access Points
+                      marked as needing confirmation. Unchecked, they are only listed in
+                      the import's warnings.
+                    </span>
+                  </span>
+                </label>
+              </>
+            )}
           </>
         )}
 

@@ -15,6 +15,7 @@ from app.services.git_import import run_git_import
 from app.services.jira_import import run_jira_import
 from app.services.jira_issue_import import run_jira_issue_import
 from app.services.confluence_import import run_confluence_import
+from app.services.epik8s_import import run_epik8s_import
 
 router = APIRouter(prefix="/v1/import-configs", tags=["import-configs"])
 
@@ -149,6 +150,19 @@ def run_config(
             config.params.get("cql"),
             config.merge_strategy,
             config.params.get("link_assets", True),
+        )
+    elif config.source == "epik8s":
+        background_tasks.add_task(
+            run_epik8s_import,
+            job.uid,
+            workspace_id,
+            config.params["provider"],
+            config.params["repo_url"],
+            pat,
+            config.params.get("branch", "main"),
+            config.params.get("path", "deploy/values.yaml"),
+            config.merge_strategy,
+            config.params.get("create_missing_nodes", True),
         )
     else:
         background_tasks.add_task(

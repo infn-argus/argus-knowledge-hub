@@ -51,6 +51,27 @@ class GitImportRequest(BaseModel):
     merge_strategy: MergeStrategy = "override"
 
 
+class Epik8sImportRequest(BaseModel):
+    """EPIK8s control configuration: one beamline's values.yaml.
+
+    Read-only by design. The file in git deploys the accelerator; a setpoint
+    edited in the hub that never reaches the machine would be worse than not
+    holding it at all, so what is imported is stamped with where it came from.
+    """
+
+    source: Literal["epik8s"]
+    provider: Literal["github", "gitlab"]
+    repo_url: str
+    pat: str
+    branch: str = "main"
+    # Where the beamline's configuration sits in that repository.
+    path: str = "deploy/values.yaml"
+    # An address no object in the inventory carries becomes an Access Point
+    # marked as needing confirmation. Off, and it is only reported.
+    create_missing_nodes: bool = True
+    merge_strategy: MergeStrategy = "override"
+
+
 class ImportJobOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

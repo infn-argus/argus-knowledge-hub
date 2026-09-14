@@ -40,11 +40,24 @@ class GitImportConfigParams(BaseModel):
     pat: Optional[str] = None  # omit on update to keep the stored secret
 
 
+class Epik8sImportConfigParams(BaseModel):
+    """EPIK8s control configuration — one beamline's values.yaml."""
+
+    source: Literal["epik8s"]
+    provider: Literal["github", "gitlab"]
+    repo_url: str
+    branch: str = "main"
+    path: str = "deploy/values.yaml"
+    create_missing_nodes: bool = True
+    pat: Optional[str] = None  # omit on update to keep the stored secret
+
+
 ImportConfigParams = Union[
     JiraImportConfigParams,
     JiraIssueImportConfigParams,
     ConfluenceImportConfigParams,
     GitImportConfigParams,
+    Epik8sImportConfigParams,
 ]
 
 

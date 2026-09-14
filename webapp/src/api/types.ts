@@ -411,11 +411,26 @@ export interface ConfluenceImportConfigParams {
   pat?: string;
 }
 
+/** EPIK8s control configuration: one beamline's values.yaml. Read only —
+ * the file in git deploys the accelerator. */
+export interface Epik8sImportConfigParams {
+  source: "epik8s";
+  provider: "github" | "gitlab";
+  repo_url: string;
+  branch: string;
+  path: string;
+  /** Make an Access Point for an address no object in the inventory carries,
+   * marked as needing confirmation; otherwise only report it. */
+  create_missing_nodes?: boolean;
+  pat?: string;
+}
+
 export type ImportConfigParams =
   | JiraImportConfigParams
   | ConfluenceImportConfigParams
   | JiraIssueImportConfigParams
-  | GitImportConfigParams;
+  | GitImportConfigParams
+  | Epik8sImportConfigParams;
 
 export interface ImportConfigInput {
   name: string;
