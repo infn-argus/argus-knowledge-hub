@@ -66,15 +66,18 @@ BASE_ATTRIBUTES = [
     ("argus_category", "Category", "enumeration", {"options": CATEGORY_OPTIONS}),
     ("argus_impact", "Operational impact", "enumeration", {"options": IMPACT_OPTIONS}),
     ("argus_detected_by", "Detected by", "enumeration", {"options": DETECTED_BY_OPTIONS}),
-    ("argus_system", "System", "string", {}),
-    ("argus_subsystem", "Subsystem", "string", {}),
+    # Indexed, and deliberately the same keys documents use: "the vacuum
+    # system" has to be one term across tickets and documentation, or the
+    # graph cannot answer "everything about this system".
+    ("argus_system", "System", "string", {"indexed": True}),
+    ("argus_subsystem", "Subsystem", "string", {"indexed": True}),
 
     # Cause and cure, in the operators' own words. Free text on purpose:
     # forcing a taxonomy here yields "other" for everything interesting,
     # and retrieval reads prose perfectly well.
     ("argus_root_cause", "Root cause", "text", {}),
     ("argus_corrective_action", "Corrective action", "text", {}),
-    ("argus_resolution", "Resolution", "string", {}),
+    ("argus_resolution", "Resolution", "string", {"indexed": True}),
 
     # Downtime — the number anyone asks for first.
     ("argus_downtime_start", "Downtime start", "datetime", {}),
@@ -84,16 +87,20 @@ BASE_ATTRIBUTES = [
     # Planning.
     ("argus_epic", "Epic", "string", {}),
     ("argus_epic_name", "Epic name", "string", {}),
-    ("argus_sprint", "Sprint", "string", {"multiValue": True}),
+    ("argus_sprint", "Sprint", "string", {"multiValue": True, "indexed": True}),
     ("argus_story_points", "Story points", "float", {}),
-    ("argus_components", "Components", "string", {"multiValue": True}),
-    ("argus_fix_versions", "Fix version/s", "string", {"multiValue": True}),
-    ("argus_affects_versions", "Affects version/s", "string", {"multiValue": True}),
+    ("argus_components", "Components", "string", {"multiValue": True, "indexed": True}),
+    ("argus_fix_versions", "Fix version/s", "string", {"multiValue": True, "indexed": True}),
+    ("argus_affects_versions", "Affects version/s", "string",
+     {"multiValue": True, "indexed": True}),
     ("argus_environment", "Environment", "text", {}),
     ("argus_parent", "Parent ticket", "string", {}),
     ("argus_time_spent", "Time spent (s)", "integer", {}),
     ("argus_time_estimate", "Original estimate (s)", "integer", {}),
-    ("argus_reporter", "Reporter", "string", {}),
+    # Not a `user` yet: imported reporters are display names from Jira with
+    # no matching account here, and typing this as a user would fail every
+    # import until the directory holds those people.
+    ("argus_reporter", "Reporter", "string", {"indexed": True}),
     ("argus_votes", "Votes", "integer", {}),
     ("argus_watchers", "Watchers", "integer", {}),
 
@@ -155,6 +162,10 @@ def _attribute(key: str, name: str, type_: str, extra: dict) -> dict:
         "multiValue": extra.get("multiValue", False),
         "unique": extra.get("unique", False),
         "readOnly": extra.get("readOnly", False),
+        # An indexed attribute is a key rather than prose: the values it
+        # already holds are offered as you type, so the same term is reused
+        # instead of being spelled three ways.
+        "indexed": extra.get("indexed", False),
     }
     if extra.get("options"):
         out["options"] = extra["options"]

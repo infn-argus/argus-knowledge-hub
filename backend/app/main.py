@@ -9,6 +9,7 @@ from app.routers import (
     asset_subresources,
     assets,
     attachments,
+    attribute_values,
     documents,
     global_values,
     graph,
@@ -45,6 +46,7 @@ app.include_router(asset_subresources.router)
 app.include_router(attachments.router)
 app.include_router(global_values.router)
 app.include_router(graph.router)
+app.include_router(attribute_values.router)
 app.include_router(groups.router)
 app.include_router(import_configs.router)
 app.include_router(imports.router)

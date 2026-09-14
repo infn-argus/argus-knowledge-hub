@@ -12,11 +12,15 @@ export function LabelInput({
   onChange,
   suggestions = [],
   placeholder = "Add a label…",
+  /** What these values are called, for the hint under the field — this
+   * input holds components and sprints as well as labels. */
+  noun = "labels",
 }: {
   value: string[];
   onChange: (labels: string[]) => void;
   suggestions?: string[];
   placeholder?: string;
+  noun?: string;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -102,7 +106,7 @@ export function LabelInput({
         </div>
       </div>
       <p className="mt-1 text-xs text-slate-500">
-        Enter or comma to add. Existing labels are suggested as you type.
+        Enter or comma to add. Existing {noun} are suggested as you type.
       </p>
     </div>
   );

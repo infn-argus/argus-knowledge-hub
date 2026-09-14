@@ -1,8 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
-import { assetsApi, membersApi, schemasApi } from "../api/client";
+import { assetsApi, attributeValuesApi, membersApi, schemasApi } from "../api/client";
 import { SchemaAttribute } from "../api/types";
 import { AssetPicker } from "./AssetPicker";
+import { IndexedStringInput } from "./IndexedStringInput";
+import { LabelInput } from "./LabelInput";
 import { UserPicker } from "./UserPicker";
+
+/** Which kind of record the attribute is being edited on — the vocabulary
+ * of an indexed attribute is read per kind, since "Components" on a ticket
+ * and on an object are different lists. */
+export type AppliesTo = "objects" | "tickets" | "documents";
+
+function useVocabulary(appliesTo: AppliesTo, attribute: SchemaAttribute) {
+  const key = attribute.key ?? attribute.name;
+  return useQuery({
+    queryKey: ["attribute-values", appliesTo, key],
+    queryFn: () => attributeValuesApi.list(appliesTo, key),
+    enabled: !!attribute.indexed && !!key,
+    staleTime: 30_000,
+  });
+}
 
 function descendantSchemaUids(allSchemas: { uid: string; parent_schema_uid: string | null }[], rootUid: string): Set<string> {
   const children = new Map<string, string[]>();
@@ -126,19 +143,64 @@ function ReferenceInput({
   );
 }
 
+function IndexedInput({
+  attribute,
+  appliesTo,
+  value,
+  onChange,
+  disabled,
+  base,
+}: {
+  attribute: SchemaAttribute;
+  appliesTo: AppliesTo;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  disabled: boolean;
+  base: string;
+}) {
+  const vocabulary = useVocabulary(appliesTo, attribute);
+  return (
+    <IndexedStringInput
+      value={typeof value === "string" ? value : value == null ? "" : String(value)}
+      onChange={onChange}
+      suggestions={vocabulary.data ?? []}
+      disabled={disabled}
+      loading={vocabulary.isLoading}
+      className={base}
+    />
+  );
+}
+
 function SingleAttributeInput({
   attribute,
+  appliesTo,
   value,
   onChange,
   disabled,
 }: {
   attribute: SchemaAttribute;
+  appliesTo: AppliesTo;
   value: unknown;
   onChange: (value: unknown) => void;
   disabled: boolean;
 }) {
   const base =
     "w-full rounded border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100";
+
+  // An indexed string is a key: offer what the workspace already uses
+  // rather than an empty box that invites a fourth spelling.
+  if (attribute.indexed && (attribute.type === "string" || !attribute.type)) {
+    return (
+      <IndexedInput
+        attribute={attribute}
+        appliesTo={appliesTo}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        base={base}
+      />
+    );
+  }
 
   switch (attribute.type) {
     case "boolean":
@@ -241,10 +303,12 @@ export function AttributeInput({
   attribute,
   value,
   onChange,
+  appliesTo = "objects",
 }: {
   attribute: SchemaAttribute;
   value: unknown;
   onChange: (value: unknown) => void;
+  appliesTo?: AppliesTo;
 }) {
   const disabled = attribute.readOnly ?? false;
 
@@ -252,6 +316,22 @@ export function AttributeInput({
     return (
       <SingleAttributeInput
         attribute={attribute}
+        appliesTo={appliesTo}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+      />
+    );
+  }
+
+  // Several keys at once read as chips, not as a column of text boxes with
+  // an "+ Add value" button — components or keywords are a set, and adding
+  // the fifth one should cost one keystroke.
+  if (attribute.indexed && (attribute.type === "string" || !attribute.type)) {
+    return (
+      <IndexedMultiInput
+        attribute={attribute}
+        appliesTo={appliesTo}
         value={value}
         onChange={onChange}
         disabled={disabled}
@@ -270,6 +350,7 @@ export function AttributeInput({
           <div className="flex-1">
             <SingleAttributeInput
               attribute={attribute}
+              appliesTo={appliesTo}
               value={v}
               onChange={(nv) => {
                 const next = [...values];
@@ -307,5 +388,37 @@ export function AttributeInput({
         </p>
       )}
     </div>
+  );
+}
+
+function IndexedMultiInput({
+  attribute,
+  appliesTo,
+  value,
+  onChange,
+  disabled,
+}: {
+  attribute: SchemaAttribute;
+  appliesTo: AppliesTo;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  disabled: boolean;
+}) {
+  const vocabulary = useVocabulary(appliesTo, attribute);
+  const values = Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+
+  if (disabled) {
+    return (
+      <p className="text-sm text-slate-500">{values.length ? values.join(", ") : "—"}</p>
+    );
+  }
+  return (
+    <LabelInput
+      value={values}
+      onChange={onChange}
+      suggestions={vocabulary.data ?? []}
+      placeholder={vocabulary.isLoading ? "Loading…" : `Add ${attribute.name.toLowerCase()}…`}
+      noun="values"
+    />
   );
 }

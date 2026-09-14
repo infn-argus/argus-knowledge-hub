@@ -72,17 +72,26 @@ SOURCE_OPTIONS = [
 BASE_ATTRIBUTES = [
     # What the document is about operationally. These are what make a
     # document findable by someone with a problem rather than a filename.
-    ("argus_system", "System", "string", {}),
-    ("argus_subsystem", "Subsystem", "string", {}),
-    ("argus_facility", "Facility", "string", {}),
-    ("argus_keywords", "Keywords", "string", {"multiValue": True}),
+    # The same keys tickets carry, so a system names one thing across the
+    # whole hub rather than one thing per section.
+    ("argus_system", "System", "string", {"indexed": True}),
+    ("argus_subsystem", "Subsystem", "string", {"indexed": True}),
+    # Indexed rather than a fixed list: the facilities are a closed set in
+    # principle, but inventing that list here would be guessing, and the
+    # vocabulary fills itself from what the records actually say.
+    ("argus_facility", "Facility", "string", {"indexed": True}),
+    # The field the Confluence import fills. Free text here is what turns
+    # one keyword into "BTF", "btf" and "BTF " — three terms, no filter.
+    ("argus_keywords", "Keywords", "string", {"multiValue": True, "indexed": True}),
 
     # Document control. An accelerator's documentation is only worth
     # anything if you can tell which version is in force.
     ("argus_lifecycle", "Lifecycle", "enumeration", {"options": LIFECYCLE_OPTIONS}),
-    ("argus_document_number", "Document number", "string", {}),
+    ("argus_document_number", "Document number", "string", {"indexed": True}),
     ("argus_revision_label", "Revision label", "string", {}),
-    ("argus_approved_by", "Approved by", "string", {}),
+    # A person, so it picks from the directory. Controlled documentation
+    # that can't say who approved it isn't controlled.
+    ("argus_approved_by", "Approved by", "user", {}),
     ("argus_review_interval_months", "Review interval (months)", "integer", {}),
 
     # Where it came from, kept rather than being the model.
@@ -106,6 +115,10 @@ def _attribute(key: str, name: str, type_: str, extra: dict) -> dict:
         "multiValue": extra.get("multiValue", False),
         "unique": extra.get("unique", False),
         "readOnly": extra.get("readOnly", False),
+        # An indexed attribute is a key rather than prose: the values it
+        # already holds are offered as you type, so the same term is reused
+        # instead of being spelled three ways.
+        "indexed": extra.get("indexed", False),
     }
     if extra.get("options"):
         out["options"] = extra["options"]

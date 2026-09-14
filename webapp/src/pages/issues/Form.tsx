@@ -241,6 +241,7 @@ export function IssueForm() {
                   <div className="mt-1">
                     <AttributeInput
                       attribute={attr}
+                      appliesTo="tickets"
                       value={attributes[attr.key ?? attr.name]}
                       onChange={(v) =>
                         setAttributes((prev) => ({ ...prev, [attr.key ?? attr.name]: v }))

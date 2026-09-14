@@ -449,6 +449,7 @@ export function DocumentDetail() {
                       <div className="mt-1">
                         <AttributeInput
                           attribute={attr}
+                          appliesTo="documents"
                           value={attributes[attr.key ?? attr.name]}
                           onChange={(v) =>
                             setAttributes((prev) => ({ ...prev, [attr.key ?? attr.name]: v }))

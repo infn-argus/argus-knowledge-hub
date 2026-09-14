@@ -519,3 +519,12 @@ export const graphApi = {
     return request<Graph>(`/v1/graph?${query.toString()}`);
   },
 };
+
+export const attributeValuesApi = {
+  /** Every value an indexed attribute already holds in this workspace —
+   * the vocabulary offered as you type. */
+  list: (appliesTo: "objects" | "tickets" | "documents", key: string) =>
+    request<string[]>(
+      `/v1/attribute-values?applies_to=${appliesTo}&key=${encodeURIComponent(key)}&limit=200`,
+    ),
+};
