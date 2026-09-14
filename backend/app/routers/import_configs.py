@@ -17,6 +17,9 @@ from app.services.jira_issue_import import run_jira_issue_import
 from app.services.confluence_import import run_confluence_import
 from app.services.epik8s_import import run_epik8s_import
 
+# Sources that can read something without a credential.
+PUBLIC_CAPABLE_SOURCES = {"git", "epik8s"}
+
 router = APIRouter(prefix="/v1/import-configs", tags=["import-configs"])
 
 
@@ -49,8 +52,14 @@ def create_config(
     workspace_id: str = Depends(require_permission("create")),
     db: Session = Depends(get_db),
 ):
-    if not body.config.pat:
-        raise HTTPException(status_code=422, detail="pat is required")
+    # Jira and Confluence have nothing to read without a credential. A
+    # repository often does: these beamline configurations are public, and
+    # requiring a token for them means inventing one to get past a form.
+    if not body.config.pat and body.config.source not in PUBLIC_CAPABLE_SOURCES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"A personal access token is required for a {body.config.source} import.",
+        )
     params = body.config.model_dump(exclude={"pat", "source"})
     config = ImportConfig(
         uid=str(uuid.uuid4()),
