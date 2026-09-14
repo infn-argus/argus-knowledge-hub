@@ -172,3 +172,78 @@ def test_documents_cannot_be_moved_onto_an_object_type(token):
         headers=auth(token),
     )
     assert resp.status_code == 422
+
+
+def test_a_new_document_is_given_a_code(token):
+    """Inventing a code nobody has used is the database's job, and it is the
+    first field on the form — asking for it stops people before they start."""
+    suffix = secrets.token_hex(4)
+    client.post(
+        "/v1/schemas",
+        json={"uid": f"proc-{suffix}", "name": "Procedure", "applies_to": "documents"},
+        headers=auth(token),
+    )
+    resp = client.post(
+        "/v1/documents",
+        json={
+            "uid": f"d1-{suffix}",
+            "title": "Vacuum recovery",
+            "document_type_uid": f"proc-{suffix}",
+        },
+        headers=auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    first = resp.json()["code"]
+    assert first.startswith("PROC-"), first
+
+    # The next one does not collide with it.
+    resp = client.post(
+        "/v1/documents",
+        json={
+            "uid": f"d2-{suffix}",
+            "title": "Camera replacement",
+            "document_type_uid": f"proc-{suffix}",
+        },
+        headers=auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["code"] != first
+
+
+def test_a_typed_code_is_kept(token):
+    """A real controlled-document number is the one that matters."""
+    suffix = secrets.token_hex(4)
+    resp = client.post(
+        "/v1/documents",
+        json={"uid": f"d3-{suffix}", "code": f"LNF-VAC-{suffix}", "title": "Numbered"},
+        headers=auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["code"] == f"LNF-VAC-{suffix}"
+
+
+def test_an_untyped_document_still_gets_a_code(token):
+    suffix = secrets.token_hex(4)
+    resp = client.post(
+        "/v1/documents",
+        json={"uid": f"d4-{suffix}", "title": "No type at all"},
+        headers=auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["code"].startswith("DOC-")
+
+
+def test_a_code_already_in_use_is_refused_by_name(token):
+    suffix = secrets.token_hex(4)
+    client.post(
+        "/v1/documents",
+        json={"uid": f"d5-{suffix}", "code": f"DUP-{suffix}", "title": "First"},
+        headers=auth(token),
+    )
+    resp = client.post(
+        "/v1/documents",
+        json={"uid": f"d6-{suffix}", "code": f"DUP-{suffix}", "title": "Second"},
+        headers=auth(token),
+    )
+    assert resp.status_code == 409
+    assert f"DUP-{suffix}" in resp.json()["detail"]

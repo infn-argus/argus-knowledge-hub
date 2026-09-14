@@ -626,7 +626,8 @@ export interface AppDocument {
 
 export interface DocumentInput {
   uid?: string;
-  code: string;
+  /** Null lets the system assign one from the document's type. */
+  code: string | null;
   title: string;
   document_type_uid?: string | null;
   owner_user_id?: string | null;

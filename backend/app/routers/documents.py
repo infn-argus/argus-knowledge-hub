@@ -32,6 +32,7 @@ from app.schemas.document import (
     RetypeResult,
 )
 from app.services.attribute_validation import check_attributes
+from app.services.document_codes import next_code
 from app.services.drawings import (
     derivative_filename,
     derivative_marker,
@@ -127,11 +128,15 @@ def create_document(
 ):
     if db.get(Document, body.uid) is not None:
         raise HTTPException(status_code=409, detail="Document uid already exists")
-    if db.scalar(select(Document).where(Document.code == body.code)) is not None:
-        raise HTTPException(status_code=409, detail="Document code already exists")
+
+    code = (body.code or "").strip() or next_code(db, workspace_id, body.document_type_uid)
+    if db.scalar(select(Document).where(Document.code == code)) is not None:
+        raise HTTPException(
+            status_code=409, detail=f"A document with the code {code} already exists"
+        )
 
     doc = Document(
-        uid=body.uid, workspace_id=workspace_id, code=body.code, title=body.title,
+        uid=body.uid, workspace_id=workspace_id, code=code, title=body.title,
         document_type_uid=body.document_type_uid, owner_user_id=body.owner_user_id,
         responsible_service_asset_uid=body.responsible_service_asset_uid,
         authority_level=body.authority_level, confidentiality=body.confidentiality,

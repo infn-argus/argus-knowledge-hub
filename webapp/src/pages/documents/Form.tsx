@@ -20,6 +20,7 @@ export function DocumentForm() {
   // it will have. The backend names its first revision <uid>-r1.
   const [documentUid] = useState(() => crypto.randomUUID());
   const [createdUid, setCreatedUid] = useState<string | null>(null);
+  const [assignedCode, setAssignedCode] = useState<string | null>(null);
 
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
@@ -43,12 +44,12 @@ export function DocumentForm() {
    */
   const ensureCreated = async (): Promise<string> => {
     if (createdUid) return createdUid;
-    if (!code.trim() || !title.trim()) {
-      throw new Error("Give the document a code and a title before attaching files.");
+    if (!title.trim()) {
+      throw new Error("Give the document a title before attaching files.");
     }
-    await documentsApi.create({
+    const created = await documentsApi.create({
       uid: documentUid,
-      code: code.trim(),
+      code: code.trim() || null,
       title: title.trim(),
       document_type_uid: documentTypeUid || null,
       authority_level: authorityLevel,
@@ -58,6 +59,7 @@ export function DocumentForm() {
       attributes,
     });
     setCreatedUid(documentUid);
+    setAssignedCode(created!.code);
     queryClient.invalidateQueries({ queryKey: ["documents"] });
     return documentUid;
   };
@@ -93,7 +95,7 @@ export function DocumentForm() {
       }
       return documentsApi.create({
         uid: documentUid,
-        code: code.trim(),
+        code: code.trim() || null,
         title: title.trim(),
         document_type_uid: documentTypeUid || null,
         authority_level: authorityLevel,
@@ -126,13 +128,17 @@ export function DocumentForm() {
             <input
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              placeholder="e.g. PROC-VAC-0042"
-              required
-              // Once a file has been attached the document exists under this
-              // code, and the code is its identity.
+              placeholder={assignedCode ?? "Assigned automatically"}
+              // Once the document exists this is its identity, so it stops
+              // being editable here.
               disabled={!!createdUid}
               className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"
             />
+            <p className="mt-1 text-xs text-slate-500">
+              {assignedCode
+                ? `Assigned ${assignedCode}.`
+                : "Leave blank and one is assigned from the type. Type your own if the document already has a number."}
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700">Type</label>

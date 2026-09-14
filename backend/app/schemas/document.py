@@ -10,7 +10,10 @@ RelationToType = Literal["asset", "schema", "document", "issue"]
 
 class DocumentCreate(BaseModel):
     uid: str
-    code: str
+    # Left out, the system assigns one from the document's type. A real
+    # controlled-document number, where there is one, is given here and
+    # wins.
+    code: Optional[str] = None
     title: str
     document_type_uid: Optional[str] = None
     owner_user_id: Optional[str] = None
