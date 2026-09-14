@@ -207,6 +207,12 @@ export function DocumentForm() {
               onUpload={uploadIntoBody}
               rows={12}
             />
+            <DocumentAssistant
+              title={title}
+              documentTypeUid={documentTypeUid || null}
+              body={bodyMarkdown}
+              onDraft={setBodyMarkdown}
+            />
           </div>
           {createdUid && (
             <p className="mt-1 text-xs text-slate-500">

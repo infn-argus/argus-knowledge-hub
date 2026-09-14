@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, aiApi } from "../api/client";
+import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
 import type { MentionedObject, ReviewFinding } from "../api/types";
 
 const SEVERITY: Record<string, string> = {
@@ -59,10 +60,13 @@ export function DocumentAssistant({
   title: string;
   documentTypeUid?: string | null;
   body: string;
-  onDraft: (markdown: string) => void;
+  /** Absent on a published revision: there is nothing to draft into, but
+   * reviewing one is exactly when a review is worth having. */
+  onDraft?: (markdown: string) => void;
   onLinkObject?: (uid: string) => void;
 }) {
   const status = useQuery({ queryKey: ["ai-status"], queryFn: aiApi.status });
+  const workspaceId = useCurrentWorkspaceId();
   const [findings, setFindings] = useState<ReviewFinding[] | null>(null);
   const [mentions, setMentions] = useState<MentionedObject[]>([]);
 
@@ -74,7 +78,7 @@ export function DocumentAssistant({
         notes: body,
       }),
     onSuccess: (result) => {
-      onDraft(result.body_markdown);
+      onDraft?.(result.body_markdown);
       setMentions(result.mentioned_objects);
       setFindings(null);
     },
@@ -93,12 +97,29 @@ export function DocumentAssistant({
     },
   });
 
-  if (!status.data?.validated) return null;
+  // Rendering nothing when AI is unavailable is why "I don't see Draft
+  // with AI" is a mystery rather than a message. Say which of the two
+  // reasons it is.
+  const ai = status.data;
+  if (!ai?.validated) {
+    if (!ai?.configured) return null;
+    return (
+      <p className="mt-2 text-xs text-slate-500">
+        AI is configured but unavailable: {ai.reason}{" "}
+        {workspaceId && (
+          <Link to={`/workspaces/${workspaceId}/ai`} className="text-indigo-600 hover:underline">
+            Check the endpoint
+          </Link>
+        )}
+      </p>
+    );
+  }
   const error = (draft.error ?? review.error) as ApiError | Error | null;
 
   return (
     <div className="mt-2 rounded border border-dashed border-slate-300 bg-slate-50 p-2">
       <div className="flex flex-wrap items-center gap-2">
+        {onDraft && (
         <button
           type="button"
           onClick={() => draft.mutate()}
@@ -112,6 +133,7 @@ export function DocumentAssistant({
               ? "Redraft from these notes"
               : "Draft with AI"}
         </button>
+        )}
         <button
           type="button"
           onClick={() => review.mutate()}
@@ -121,7 +143,9 @@ export function DocumentAssistant({
           {review.isPending ? "Reading…" : "Review"}
         </button>
         <span className="text-[11px] text-slate-500">
-          A draft replaces what is in the editor; nothing is saved until you save it.
+          {onDraft
+            ? "A draft replaces what is in the editor; nothing is saved until you save it."
+            : "A published revision is read-only — a review changes nothing."}
         </span>
       </div>
 

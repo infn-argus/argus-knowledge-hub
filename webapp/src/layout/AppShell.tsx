@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { workspacesApi } from "../api/client";
 import { firebaseSignOut } from "../api/firebase";
 import { clearSession } from "../api/session";
@@ -20,6 +20,10 @@ const SECTION_CONFIG: Record<
   SectionKey,
   {
     links: { to: string; label: string }[];
+    /** Where switching to this section takes you. Changing the sidebar
+     * without changing the page leaves somebody looking at a document
+     * while the menu says Tickets. */
+    landing: string;
     treeLabel: string;
     newTypeTo: string;
     newTypeTitle: string;
@@ -27,6 +31,7 @@ const SECTION_CONFIG: Record<
   }
 > = {
   assets: {
+    landing: "/assets/search",
     links: [
       { to: "/assets/search", label: "Search" },
       { to: "/labels", label: "Labels" },
@@ -38,6 +43,7 @@ const SECTION_CONFIG: Record<
     appliesTo: "objects",
   },
   tickets: {
+    landing: "/tickets",
     links: [
       { to: "/tickets", label: "All tickets" },
       { to: "/tickets/board", label: "Board" },
@@ -49,6 +55,7 @@ const SECTION_CONFIG: Record<
     appliesTo: "tickets",
   },
   documents: {
+    landing: "/documents",
     links: [
       { to: "/documents", label: "All documents" },
       { to: "/documents/search", label: "Search" },
@@ -123,6 +130,7 @@ function SettingsLinks({ links }: { links: { to: string; label: string }[] }) {
 
 export function AppShell() {
   const me = useQuery({ queryKey: ["me"], queryFn: workspacesApi.me });
+  const navigate = useNavigate();
 
   const currentWorkspaceId = useCurrentWorkspaceId();
   const membersLink = currentWorkspaceId ? `/workspaces/${currentWorkspaceId}/members` : null;
@@ -201,7 +209,10 @@ export function AppShell() {
                   <button
                     key={s.key}
                     type="button"
-                    onClick={() => setActiveSection(s.key)}
+                    onClick={() => {
+                      setActiveSection(s.key);
+                      navigate(SECTION_CONFIG[s.key].landing);
+                    }}
                     className={`flex-1 rounded px-2 py-1 text-xs font-medium ${
                       activeSection === s.key
                         ? "bg-white text-slate-900 shadow-sm"

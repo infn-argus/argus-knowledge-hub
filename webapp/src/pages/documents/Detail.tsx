@@ -464,8 +464,18 @@ export function DocumentDetail() {
                 />
               </div>
             ) : (
-              <div className="mt-1 rounded border border-slate-100 bg-white p-3">
-                <MarkdownView markdown={viewed.body_markdown ?? ""} />
+              <div className="mt-1">
+                <div className="rounded border border-slate-100 bg-white p-3">
+                  <MarkdownView markdown={viewed.body_markdown ?? ""} />
+                </div>
+                <DocumentAssistant
+                  title={doc.title}
+                  documentTypeUid={doc.document_type_uid}
+                  body={viewed.body_markdown ?? ""}
+                  onLinkObject={(assetUid) =>
+                    addRelationMutation.mutate({ to_type: "asset", to_uid: assetUid })
+                  }
+                />
               </div>
             )}
           </div>

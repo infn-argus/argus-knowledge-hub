@@ -39,7 +39,18 @@ export function AssetSearch() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-slate-900">Search objects</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-slate-900">Search objects</h1>
+        {/* The same affordance tickets and documents have: this is where
+            the Assets section lands, so it is where somebody expects to be
+            able to add one. */}
+        <Link
+          to="/assets/new"
+          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+        >
+          New object
+        </Link>
+      </div>
 
       <div className="mt-4 flex gap-3">
         <input
