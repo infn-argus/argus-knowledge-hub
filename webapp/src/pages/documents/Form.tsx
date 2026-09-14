@@ -15,6 +15,12 @@ export function DocumentForm() {
   const schemas = useQuery({ queryKey: ["schemas"], queryFn: schemasApi.list });
   const documentSchemas = (schemas.data ?? []).filter((s) => s.applies_to === "documents");
 
+  // Fixed up front, because attaching a file needs a document to attach
+  // it to: the first attachment creates the document, and this is the uid
+  // it will have. The backend names its first revision <uid>-r1.
+  const [documentUid] = useState(() => crypto.randomUUID());
+  const [createdUid, setCreatedUid] = useState<string | null>(null);
+
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
   const [documentTypeUid, setDocumentTypeUid] = useState(searchParams.get("document_type_uid") ?? "");
@@ -27,10 +33,66 @@ export function DocumentForm() {
   const schema = documentSchemas.find((s) => s.uid === documentTypeUid);
   const attrDefs = effectiveAttributes(schema, schemas.data);
 
+  /** Create the document if it doesn't exist yet, and return its uid.
+   *
+   * Attaching a file is the thing that forces this: a file belongs to a
+   * revision, and there is no revision until the document exists. So the
+   * first attachment saves the document as a draft — the same move
+   * Confluence and Jira make — rather than refusing the file or making
+   * people create the document, come back, and start again.
+   */
+  const ensureCreated = async (): Promise<string> => {
+    if (createdUid) return createdUid;
+    if (!code.trim() || !title.trim()) {
+      throw new Error("Give the document a code and a title before attaching files.");
+    }
+    await documentsApi.create({
+      uid: documentUid,
+      code: code.trim(),
+      title: title.trim(),
+      document_type_uid: documentTypeUid || null,
+      authority_level: authorityLevel,
+      confidentiality: confidentiality,
+      body_markdown: bodyMarkdown || null,
+      steps,
+      attributes,
+    });
+    setCreatedUid(documentUid);
+    queryClient.invalidateQueries({ queryKey: ["documents"] });
+    return documentUid;
+  };
+
+  /** A file pasted or dropped into the editor. */
+  const uploadIntoBody = async (file: File) => {
+    const uid = await ensureCreated();
+    const saved = await documentsApi.uploadRevisionAttachment(uid, `${uid}-r1`, file);
+    return {
+      url: `/v1/attachments/${saved.uid}`,
+      filename: saved.filename,
+      isImage: (saved.mime_type ?? "").startsWith("image/"),
+    };
+  };
+
   const createMutation = useMutation({
-    mutationFn: () =>
-      documentsApi.create({
-        uid: crypto.randomUUID(),
+    mutationFn: async () => {
+      // Already created by an attachment: save the rest onto it rather
+      // than creating a second document with the same content.
+      if (createdUid) {
+        await documentsApi.update(createdUid, {
+          title: title.trim(),
+          document_type_uid: documentTypeUid || null,
+          authority_level: authorityLevel,
+          confidentiality: confidentiality,
+        });
+        await documentsApi.updateRevision(createdUid, `${createdUid}-r1`, {
+          body_markdown: bodyMarkdown,
+          steps,
+          attributes,
+        });
+        return { uid: createdUid };
+      }
+      return documentsApi.create({
+        uid: documentUid,
         code: code.trim(),
         title: title.trim(),
         document_type_uid: documentTypeUid || null,
@@ -39,7 +101,8 @@ export function DocumentForm() {
         body_markdown: bodyMarkdown || null,
         steps,
         attributes,
-      }),
+      });
+    },
     onSuccess: (doc) => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       navigate(`/documents/${doc!.uid}`);
@@ -65,7 +128,10 @@ export function DocumentForm() {
               onChange={(e) => setCode(e.target.value)}
               placeholder="e.g. PROC-VAC-0042"
               required
-              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+              // Once a file has been attached the document exists under this
+              // code, and the code is its identity.
+              disabled={!!createdUid}
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"
             />
           </div>
           <div>
@@ -128,10 +194,19 @@ export function DocumentForm() {
         <div>
           <label className="block text-sm font-medium text-slate-700">Body</label>
           <div className="mt-1">
-            {/* No files here yet: they attach to a revision, and this
-                document doesn't have one until it is created. */}
-            <MarkdownEditor value={bodyMarkdown} onChange={setBodyMarkdown} rows={12} />
+            <MarkdownEditor
+              value={bodyMarkdown}
+              onChange={setBodyMarkdown}
+              onUpload={uploadIntoBody}
+              rows={12}
+            />
           </div>
+          {createdUid && (
+            <p className="mt-1 text-xs text-slate-500">
+              Saved as a draft so the files had somewhere to go — it is in the documents list
+              already. Press “Save document” when you have finished the rest.
+            </p>
+          )}
         </div>
 
         <div>
@@ -182,7 +257,11 @@ export function DocumentForm() {
           disabled={createMutation.isPending}
           className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
         >
-          {createMutation.isPending ? "Creating…" : "Create document"}
+          {createMutation.isPending
+            ? "Saving…"
+            : createdUid
+              ? "Save document"
+              : "Create document"}
         </button>
       </form>
     </div>
