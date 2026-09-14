@@ -135,7 +135,11 @@ export function ImportList() {
         {IMPORT_SOURCES.map((s) => (
           <Link
             key={s.source}
-            to={importPaths.create(workspaceId, s.source)}
+            to={
+              "upload" in s && s.upload
+                ? importPaths.markdown(workspaceId)
+                : importPaths.create(workspaceId, s.source)
+            }
             className="rounded-lg border border-slate-200 bg-white p-3 hover:border-slate-400"
           >
             <p className="text-sm font-medium text-slate-900">{s.label}</p>

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -27,10 +27,12 @@ from app.schemas.document import (
     DocumentUpdate,
     RejectAction,
     RetireAction,
+    MarkdownImportResult,
     RetypeRequest,
     RetypeResult,
 )
 from app.services.attribute_validation import check_attributes
+from app.services.markdown_import import import_markdown
 from app.services.current_user_attrs import stamp_current_user_attributes
 
 router = APIRouter(prefix="/v1/documents", tags=["documents"])
@@ -180,6 +182,35 @@ def retype_documents(
         moved += 1
     db.commit()
     return RetypeResult(moved=moved, not_found=missing)
+
+
+@router.post("/import", response_model=MarkdownImportResult)
+async def import_markdown_documents(
+    files: list[UploadFile] = File(description="Markdown files, resources, or a zip of both"),
+    document_type_uid: Optional[str] = Form(None),
+    workspace_id: str = Depends(require_permission("create", resource="documents")),
+    db: Session = Depends(get_db),
+):
+    """Markdown files, and the images they refer to, as documents.
+
+    Accepts loose files or a zip, because the unit people actually have is
+    a folder: a few `.md` files with an `images/` beside them. Uploading
+    only the text would produce documents whose every figure is a broken
+    link.
+    """
+    if document_type_uid:
+        schema = db.get(Schema, document_type_uid)
+        if schema is None or schema.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="Document type not found")
+
+    payload = [(f.filename or "untitled.md", await f.read()) for f in files]
+    if not any(name.lower().endswith((".md", ".markdown", ".mdown", ".zip"))
+               for name, _ in payload):
+        raise HTTPException(
+            status_code=422,
+            detail="No Markdown file in the upload — add the .md files, or a zip containing them.",
+        )
+    return import_markdown(db, workspace_id, payload, document_type_uid)
 
 
 @router.get("/{uid}", response_model=DocumentOut)

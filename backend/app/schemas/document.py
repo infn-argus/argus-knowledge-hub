@@ -137,3 +137,12 @@ class RetypeResult(BaseModel):
     # Documents named in the request that aren't in this workspace, or that
     # the caller can't see. Reported rather than silently dropped.
     not_found: list[str]
+
+
+class MarkdownImportResult(BaseModel):
+    documents: int
+    attachments: int
+    relations: int
+    # Files that could not be read, named so a partial upload says which
+    # part was partial.
+    skipped: list[str]

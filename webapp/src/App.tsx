@@ -18,6 +18,7 @@ import { GlobalValueForm } from "./pages/globalvalues/Form";
 import { GraphExplorer } from "./pages/graph/Explorer";
 import { GlobalValueList } from "./pages/globalvalues/List";
 import { ImportList } from "./pages/imports/List";
+import { MarkdownImport } from "./pages/imports/Markdown";
 import { ImportConfigForm } from "./pages/imports/New";
 import { ImportStatus } from "./pages/imports/Status";
 import { IssueBoard } from "./pages/issues/Board";
@@ -91,6 +92,7 @@ export function App() {
         <Route element={<AdminShell />}>
           <Route path="/workspaces/:workspaceId/imports" element={<ImportList />} />
           <Route path="/workspaces/:workspaceId/imports/new" element={<ImportConfigForm />} />
+          <Route path="/workspaces/:workspaceId/imports/markdown" element={<MarkdownImport />} />
           <Route
             path="/workspaces/:workspaceId/imports/configs/:uid/edit"
             element={<ImportConfigForm />}

@@ -37,6 +37,7 @@ import type {
   MemberInput,
   MyWorkspace,
   RelinkResult,
+  MarkdownImportResult,
   Relation,
   RetypeResult,
   Workspace,
@@ -455,6 +456,32 @@ export const documentsApi = {
       method: "POST",
       body: json({ uids, document_type_uid: documentTypeUid }),
     }),
+
+  /** Markdown files (and the images they use) as documents. */
+  importMarkdown: async (
+    files: File[],
+    documentTypeUid: string | null,
+  ): Promise<MarkdownImportResult> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const form = new FormData();
+    for (const file of files) {
+      // A folder picker knows the path inside the folder; a plain multi-file
+      // input does not. Sending the path when there is one is what lets
+      // `images/layout.png` in a body find the file it names.
+      const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+      form.append("files", file, path || file.name);
+    }
+    if (documentTypeUid) form.append("document_type_uid", documentTypeUid);
+    const resp = await fetch(`${session.baseUrl}/v1/documents/import`, {
+      method: "POST",
+      headers: authHeaders(session),
+      body: form,
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new ApiError(resp.status, data);
+    return data as MarkdownImportResult;
+  },
 
   listRevisionAttachments: (uid: string, revUid: string) =>
     request<Attachment[]>(`/v1/documents/${uid}/revisions/${revUid}/attachments`),

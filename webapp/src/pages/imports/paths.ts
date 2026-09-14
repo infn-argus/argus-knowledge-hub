@@ -8,6 +8,7 @@ export const importPaths = {
   editConfig: (workspaceId: string, uid: string) =>
     `/workspaces/${workspaceId}/imports/configs/${uid}/edit`,
   job: (workspaceId: string, uid: string) => `/workspaces/${workspaceId}/imports/${uid}`,
+  markdown: (workspaceId: string) => `/workspaces/${workspaceId}/imports/markdown`,
 };
 
 /** What each importer brings in, so every source is visible in one place —
@@ -32,6 +33,15 @@ export const IMPORT_SOURCES = [
   {
     source: "git",
     label: "Git",
-    blurb: "Documents kept in a repository.",
+    // Deliberately narrow: the Git importer reads schemas/ and assets/ from
+    // a repository. It does not read Markdown — uploading documentation is
+    // what the Markdown importer is for.
+    blurb: "Object types and objects defined as files in a repository.",
+  },
+  {
+    source: "markdown",
+    label: "Markdown files",
+    blurb: "Upload .md files, or a zip of a folder, and the images they refer to come with them.",
+    upload: true,
   },
 ] as const;

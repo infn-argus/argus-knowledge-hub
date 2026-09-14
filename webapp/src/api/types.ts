@@ -796,6 +796,13 @@ export interface EffectivePermissions {
   workspace: string[];
 }
 
+export interface MarkdownImportResult {
+  documents: number;
+  attachments: number;
+  relations: number;
+  skipped: string[];
+}
+
 export interface RetypeResult {
   moved: number;
   not_found: string[];
