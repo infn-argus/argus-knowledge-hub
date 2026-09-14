@@ -1,15 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
 import { Link, useParams } from "react-router-dom";
+import { importPaths } from "./paths";
 import { importsApi } from "../../api/client";
 import { importSourceLabel } from "../../api/types";
 
-const ENRICHMENT_COUNTS: [string, string][] = [
+/** Every counter an importer can report, in the order they make sense to
+ * read. One status page serves all four sources, so it shows what the run
+ * actually produced rather than assuming an object import: a Confluence
+ * run reporting "Schemas 0, Assets 0, Relations 0" says nothing about
+ * whether the pages arrived. */
+const COUNTS: [string, string][] = [
+  ["schemas", "Types"],
+  ["assets", "Objects"],
+  ["relations", "Relations"],
   ["documents", "Documents"],
   ["documents_updated", "Documents updated"],
-  ["documents_unchanged", "Documents unchanged"],
+  ["documents_unchanged", "Documents unchanged (already current)"],
   ["tickets", "Tickets"],
-  ["asset_links", "Tickets linked to objects"],
+  ["asset_links", "Links to objects"],
+  ["page_tree_links", "Page hierarchy links"],
   ["attachments", "Attachments"],
   ["comments", "Comments"],
   ["history", "History entries"],
@@ -24,7 +34,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export function ImportStatus() {
-  const { uid } = useParams<{ uid: string }>();
+  const { uid, workspaceId } = useParams<{ uid: string; workspaceId: string }>();
 
   const { data, isLoading } = useQuery({
     queryKey: ["imports", uid],
@@ -37,7 +47,7 @@ export function ImportStatus() {
 
   return (
     <div className="max-w-2xl">
-      <Link to="/imports" className="text-sm text-slate-500 hover:underline">
+      <Link to={importPaths.list(workspaceId!)} className="text-sm text-slate-500 hover:underline">
         &larr; Imports
       </Link>
 
@@ -61,25 +71,22 @@ export function ImportStatus() {
               <dt className="text-slate-500">Progress</dt>
               <dd className="text-slate-900">{data.progress ?? "—"}</dd>
 
-              <dt className="text-slate-500">Schemas</dt>
-              <dd className="text-slate-900">{data.counts.schemas ?? 0}</dd>
-
-              <dt className="text-slate-500">Assets</dt>
-              <dd className="text-slate-900">{data.counts.assets ?? 0}</dd>
-
-              <dt className="text-slate-500">Relations</dt>
-              <dd className="text-slate-900">{data.counts.relations ?? 0}</dd>
-
-              {/* Enrichment counts, shown only once the import has produced
-                  any — "did it actually bring the attachments over?" was a
-                  question that previously needed a database query. */}
-              {ENRICHMENT_COUNTS.map(([key, label]) =>
-                data.counts[key] ? (
+              {/* Only the counters this run reported — "did it actually
+                  bring the attachments over?" was a question that
+                  previously needed a database query. */}
+              {COUNTS.map(([key, label]) =>
+                data.counts[key] !== undefined ? (
                   <Fragment key={key}>
                     <dt className="text-slate-500">{label}</dt>
                     <dd className="text-slate-900">{data.counts[key]}</dd>
                   </Fragment>
                 ) : null,
+              )}
+              {Object.keys(data.counts).length === 0 && data.status !== "failed" && (
+                <>
+                  <dt className="text-slate-500">Counts</dt>
+                  <dd className="text-slate-400">not reported yet</dd>
+                </>
               )}
 
               {data.counts.errors !== undefined && (
@@ -128,7 +135,11 @@ export function ImportStatus() {
 
           {data.status === "succeeded" && (
             <p className="mt-4 text-sm text-slate-500">
-              Imported types now appear in the Object types tree on the left.
+              {data.source === "confluence" || data.source === "git"
+                ? "Imported pages are now under Documentation, typed from their labels."
+                : data.source === "jira-issues"
+                  ? "Imported tickets are now under Tickets, on the list and the board."
+                  : "Imported types now appear in the Object types tree."}
             </p>
           )}
         </div>

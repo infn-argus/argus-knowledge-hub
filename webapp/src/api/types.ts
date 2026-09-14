@@ -288,10 +288,15 @@ export interface GlobalValueInput {
   enabled?: boolean;
 }
 
+/** The sources an import can run against. Kept in one place: the job type
+ * used to list only two of them, so any code branching on a Confluence or
+ * ticket job read as unreachable. */
+export type ImportSource = "jira" | "jira-issues" | "confluence" | "git";
+
 export interface ImportJob {
   uid: string;
   workspace_id: string;
-  source: "jira" | "git";
+  source: ImportSource;
   status: "pending" | "running" | "succeeded" | "failed";
   progress: string | null;
   counts: Record<string, number>;
@@ -360,7 +365,7 @@ export interface ImportConfig {
   uid: string;
   workspace_id: string;
   name: string;
-  source: "jira" | "jira-issues" | "confluence" | "git";
+  source: ImportSource;
   merge_strategy: MergeStrategy;
   params: Record<string, string | boolean | null>;
   last_run_at: string | null;

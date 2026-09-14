@@ -328,6 +328,19 @@ def _fetch_attachments(session, base_url: str, page_id: str) -> tuple[list[dict]
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 
+def _note(job, seen: Optional[set], category: str, detail: str) -> None:
+    """Record a warning against the run, and never let recording one become
+    the failure. A file that can't be fetched is a note on an otherwise
+    good import; raising here threw away the whole run over one attachment.
+    """
+    if job is None:
+        return
+    try:
+        _record_diagnostic(job, seen if seen is not None else set(), category, detail)
+    except Exception:
+        pass
+
+
 def _existing_attachments(db: Session, document_uid: str) -> dict[str, Attachment]:
     """Files already copied for this document, by their source identity.
 
@@ -346,7 +359,7 @@ def _existing_attachments(db: Session, document_uid: str) -> dict[str, Attachmen
 
 def _import_attachments(db: Session, session, base_url: str, workspace_id: str,
                         document_uid: str, revision_uid: str, page_id: str,
-                        job=None) -> tuple[dict[str, str], int]:
+                        job=None, seen: Optional[set] = None) -> tuple[dict[str, str], int]:
     """Copy a page's files in, and say where each one now lives.
 
     Returns filename -> URL, which is what turns `<ac:image>` into an image
@@ -356,8 +369,7 @@ def _import_attachments(db: Session, session, base_url: str, workspace_id: str,
     try:
         results, link_base = _fetch_attachments(session, base_url, page_id)
     except Exception as e:
-        if job is not None:
-            _record_diagnostic(db, job, f"Could not list attachments of page {page_id}: {e}")
+        _note(job, seen, "attachment_list", f"page {page_id}: {_describe_error(e, None)}")
         return {}, 0
 
     already = _existing_attachments(db, document_uid)
@@ -386,17 +398,14 @@ def _import_attachments(db: Session, session, base_url: str, workspace_id: str,
             resp.raise_for_status()
             content = resp.content
         except Exception as e:
-            if job is not None:
-                _record_diagnostic(db, job, f"Could not download {filename}: {e}")
+            _note(job, seen, "attachment_download",
+                  f"{filename} on page {page_id}: {_describe_error(e, None)}")
             continue
 
         if len(content) > MAX_ATTACHMENT_BYTES:
-            if job is not None:
-                _record_diagnostic(
-                    db, job,
-                    f"Skipped {filename} ({len(content) // (1024 * 1024)} MB) — over the "
-                    f"{MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB limit; it stays on Confluence."
-                )
+            _note(job, seen, "attachment_too_large",
+                  f"{filename} is {len(content) // (1024 * 1024)} MB, over the "
+                  f"{MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB limit; it stays on Confluence.")
             continue
 
         attachment_uid = str(uuid.uuid4())
@@ -651,7 +660,7 @@ def run_confluence_import(
                     # at the copy that now lives here.
                     files, copied = _import_attachments(
                         db, session, base_url, workspace_id,
-                        document.uid, revision.uid, page_id, job,
+                        document.uid, revision.uid, page_id, job, seen,
                     )
                     attachments_copied += copied
                     markdown = storage_to_markdown(body, files)

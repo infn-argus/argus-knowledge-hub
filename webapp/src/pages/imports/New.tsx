@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { importPaths } from "./paths";
 import { ApiError, importConfigsApi } from "../../api/client";
 import { MergeStrategy, MERGE_STRATEGIES } from "../../api/types";
 
 export function ImportConfigForm() {
-  const { uid } = useParams<{ uid: string }>();
+  const { uid, workspaceId } = useParams<{ uid: string; workspaceId: string }>();
   const [searchParams] = useSearchParams();
   const isEdit = !!uid;
   const navigate = useNavigate();
@@ -118,9 +119,13 @@ export function ImportConfigForm() {
       if (!isEdit) {
         // First save also runs it immediately — reuse it later via "Run" on the list.
         const running = await importConfigsApi.run(saved.uid);
-        navigate(`/imports/${running.last_import_job_uid}`);
+        navigate(
+          running.last_import_job_uid
+            ? importPaths.job(workspaceId!, running.last_import_job_uid)
+            : importPaths.list(workspaceId!),
+        );
       } else {
-        navigate("/imports");
+        navigate(importPaths.list(workspaceId!));
       }
     },
   });
@@ -182,21 +187,26 @@ export function ImportConfigForm() {
         {source === "jira" || source === "jira-issues" || source === "confluence" ? (
           <>
             <div>
-              <label className="block text-sm font-medium text-slate-700">Jira server URL</label>
+              <label className="block text-sm font-medium text-slate-700">
+                {source === "confluence" ? "Confluence server URL" : "Jira server URL"}
+              </label>
               <input
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
                 placeholder={
-                  source === "jira-issues"
-                    ? "https://issues.example.org/jira"
-                    : "https://servicedesk.example.org"
+                  source === "confluence"
+                    ? "https://wiki.example.org/confluence"
+                    : source === "jira-issues"
+                      ? "https://issues.example.org/jira"
+                      : "https://servicedesk.example.org"
                 }
                 required
                 className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Include the context path if the server has one — many Jira installations live
-                under /jira rather than at the site root. The import checks both.
+                {source === "confluence"
+                  ? "Include the context path if the server has one — Confluence is often published under /confluence or /wiki rather than at the site root. The import checks both."
+                  : "Include the context path if the server has one — many Jira installations live under /jira rather than at the site root. The import checks both."}
               </p>
             </div>
             <div>

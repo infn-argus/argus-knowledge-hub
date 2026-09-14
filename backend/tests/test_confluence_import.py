@@ -207,6 +207,9 @@ PAGES = [
 
 ATTACHMENTS: dict[str, list] = {}
 FILES: dict[str, bytes] = {}
+# Page ids whose attachment listing should fail, so the unhappy path gets
+# exercised — a wiki will always have a file the importer cannot fetch.
+BROKEN_LISTINGS: set = set()
 
 PNG = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -262,6 +265,10 @@ class _ConfluenceStub(BaseHTTPRequestHandler):
                         "totalSize": len(self.pages)})
         elif parsed.path.endswith("/child/attachment"):
             page_id = parsed.path.split("/")[-3]
+            if page_id in BROKEN_LISTINGS:
+                self.send_response(500)
+                self.end_headers()
+                return
             results = ATTACHMENTS.get(page_id, [])
             self._json({"results": results, "size": len(results),
                         "_links": {"base": f"http://127.0.0.1:{self.server.server_port}"}})
@@ -287,6 +294,7 @@ def confluence_stub():
     _ConfluenceStub.blogposts = []
     ATTACHMENTS.clear()
     FILES.clear()
+    BROKEN_LISTINGS.clear()
 
 
 def _document(db, workspace_id: str, page_id: str) -> Document:
@@ -598,4 +606,81 @@ def test_the_page_tree_becomes_document_relations(confluence_stub):
     )
     assert relation.to_uid == parent.uid
     assert relation.to_type == "document"
+    db.close()
+
+
+def test_an_unreachable_attachment_does_not_lose_the_import(confluence_stub):
+    """One file the server won't hand over is a note on an otherwise good
+    import — not a reason to throw away every page that came with it."""
+    _ConfluenceStub.pages = [
+        _page("7001", "Layout", body="<p>Body text.</p>"),
+        _page("7002", "Another page", body="<p>Also fine.</p>"),
+    ]
+    BROKEN_LISTINGS.add("7001")
+    ws = _workspace()
+
+    status, error, counts = _run(ws, confluence_stub)
+    assert status == "succeeded", error
+    assert counts["documents"] == 2, "both pages still arrive"
+
+    db = SessionLocal()
+    document = _document(db, ws, "7001")
+    revision = db.get(DocumentRevision, document.current_revision_uid)
+    assert "Body text." in revision.body_markdown
+    db.close()
+
+
+def test_a_failed_file_is_reported_as_a_warning(confluence_stub):
+    """Silently dropping it would leave a body referring to an image that
+    was never copied, with nothing anywhere saying so."""
+    _ConfluenceStub.pages = [_page("7101", "Layout", body="<p>x</p>")]
+    BROKEN_LISTINGS.add("7101")
+    ws = _workspace()
+
+    db = SessionLocal()
+    job = ImportJob(uid=str(uuid.uuid4()), workspace_id=ws, source="confluence")
+    db.add(job)
+    db.commit()
+    job_uid = job.uid
+    db.close()
+
+    run_confluence_import(job_uid, ws, confluence_stub, "pat", "LNF", None)
+
+    db = SessionLocal()
+    job = db.get(ImportJob, job_uid)
+    assert job.status == "succeeded"
+    assert any("attachment_list" in w for w in (job.warnings or [])), job.warnings
+    db.close()
+
+
+def test_a_file_that_will_not_download_leaves_the_rest_of_the_page(confluence_stub):
+    _ConfluenceStub.pages = [
+        _page("7201", "Layout",
+              body='<p>Text stays.</p>'
+                   '<ac:image><ri:attachment ri:filename="gone.png" /></ac:image>'
+                   '<ac:image><ri:attachment ri:filename="here.png" /></ac:image>')
+    ]
+    ATTACHMENTS["7201"] = [
+        {"id": "a-gone", "title": "gone.png", "version": {"number": 1},
+         "_links": {"download": "/download/attachments/7201/gone.png"}},
+        {"id": "a-here", "title": "here.png", "version": {"number": 1},
+         "_links": {"download": "/download/attachments/7201/here.png"}},
+    ]
+    # Only the second file is actually served.
+    FILES["/download/attachments/7201/here.png"] = PNG
+    ws = _workspace()
+
+    status, error, counts = _run(ws, confluence_stub)
+    assert status == "succeeded", error
+    assert counts["attachments"] == 1
+
+    db = SessionLocal()
+    document = _document(db, ws, "7201")
+    revision = db.get(DocumentRevision, document.current_revision_uid)
+    assert "Text stays." in revision.body_markdown
+    # The one that arrived is an image; the one that didn't is named in the
+    # text rather than linked to a file that was never copied.
+    assert "![here.png](/v1/attachments/" in revision.body_markdown
+    assert "image: gone.png" in revision.body_markdown
+    assert "![gone.png]" not in revision.body_markdown
     db.close()

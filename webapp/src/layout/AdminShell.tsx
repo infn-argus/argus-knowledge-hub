@@ -11,6 +11,7 @@ export function AdminShell() {
   if (currentWorkspaceId) {
     items.push({ to: `/workspaces/${currentWorkspaceId}/access`, label: "Access" });
     items.push({ to: `/workspaces/${currentWorkspaceId}/members`, label: "Members" });
+    items.push({ to: `/workspaces/${currentWorkspaceId}/imports`, label: "Imports" });
   }
   if (me.data?.is_admin) {
     items.push({ to: "/admin/workspaces", label: "Workspaces" });

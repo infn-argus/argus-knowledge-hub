@@ -24,10 +24,6 @@ const SECTION_CONFIG: Record<
     newTypeTo: string;
     newTypeTitle: string;
     appliesTo: "objects" | "tickets" | "documents";
-    // Which import source this section offers, if any — also pre-selects it
-    // on the form, so "Import" from Tickets doesn't land on the object
-    // importer.
-    importSource?: "jira" | "jira-issues";
   }
 > = {
   assets: {
@@ -40,7 +36,6 @@ const SECTION_CONFIG: Record<
     newTypeTo: "/schemas/new",
     newTypeTitle: "New object type",
     appliesTo: "objects",
-    importSource: "jira",
   },
   tickets: {
     links: [
@@ -52,7 +47,6 @@ const SECTION_CONFIG: Record<
     newTypeTo: "/schemas/new?applies_to=tickets",
     newTypeTitle: "New ticket type",
     appliesTo: "tickets",
-    importSource: "jira-issues",
   },
   documents: {
     links: [
@@ -154,10 +148,10 @@ export function AppShell() {
   const config = SECTION_CONFIG[activeSection];
   const scopedMembersLink = membersLink ? `${membersLink}?section=${activeSection}` : null;
   const accessLink = currentWorkspaceId ? `/workspaces/${currentWorkspaceId}/access` : null;
+  // Importing is not here: it configures a server and a credential for the
+  // whole workspace, so it lives once in Administration rather than three
+  // times, once per section that receives the content.
   const settingsLinks = [
-    ...(config.importSource
-      ? [{ to: `/imports?source=${config.importSource}`, label: "Import" }]
-      : []),
     ...(accessLink ? [{ to: accessLink, label: "Access" }] : []),
     ...(scopedMembersLink ? [{ to: scopedMembersLink, label: "Members" }] : []),
   ];

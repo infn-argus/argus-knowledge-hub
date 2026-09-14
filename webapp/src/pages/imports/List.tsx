@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { importConfigsApi, importsApi } from "../../api/client";
 import { MERGE_STRATEGIES, importSourceLabel } from "../../api/types";
+import { IMPORT_SOURCES, importPaths } from "./paths";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "bg-slate-100 text-slate-600",
@@ -11,7 +12,7 @@ const STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-100 text-red-700",
 };
 
-function SavedConfigs() {
+function SavedConfigs({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [runningUid, setRunningUid] = useState<string | null>(null);
@@ -25,7 +26,7 @@ function SavedConfigs() {
     },
     onSuccess: (config) => {
       queryClient.invalidateQueries({ queryKey: ["import-configs"] });
-      navigate(`/imports/${config.last_import_job_uid}`);
+      navigate(importPaths.job(workspaceId, config.last_import_job_uid!));
     },
     onSettled: () => setRunningUid(null),
   });
@@ -72,7 +73,7 @@ function SavedConfigs() {
                   {runningUid === c.uid ? "Starting…" : "Run"}
                 </button>
                 <Link
-                  to={`/imports/configs/${c.uid}/edit`}
+                  to={importPaths.editConfig(workspaceId, c.uid)}
                   className="mr-3 text-xs text-slate-500 hover:text-slate-900"
                 >
                   Edit
@@ -95,6 +96,7 @@ function SavedConfigs() {
 }
 
 export function ImportList() {
+  const { workspaceId } = useParams<{ workspaceId: string }>();
   const { data, isLoading } = useQuery({
     queryKey: ["imports"],
     queryFn: () => importsApi.list(),
@@ -104,36 +106,49 @@ export function ImportList() {
         : false,
   });
 
-  // Carried through from whichever section the Import link was used in, so
-  // "New configuration" opens on the importer that section is about.
-  const [searchParams] = useSearchParams();
-  const source = searchParams.get("source");
-  const forTickets = source === "jira-issues";
+  if (!workspaceId) return null;
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Imports</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {forTickets
-              ? "Bring tickets in from a Jira issue tracker. Tickets that name an object key are linked to it."
-              : "Bring schemas and objects in from a Jira Insight schema or a Git repository."}
+          <p className="mt-1 max-w-2xl text-sm text-slate-500">
+            Everything this workspace pulls in from elsewhere — objects, tickets and
+            documentation — with one history of what ran.
           </p>
         </div>
         <Link
-          to={`/imports/new${source ? `?source=${source}` : ""}`}
+          to={importPaths.create(workspaceId)}
           className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
         >
           New configuration
         </Link>
       </div>
 
+      {/* Every source in one place. Reaching this page only from the Assets
+          and Tickets sections left Confluence with no entry point at all. */}
+      <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        Sources
+      </h2>
+      <div className="mt-2 grid grid-cols-2 gap-3">
+        {IMPORT_SOURCES.map((s) => (
+          <Link
+            key={s.source}
+            to={importPaths.create(workspaceId, s.source)}
+            className="rounded-lg border border-slate-200 bg-white p-3 hover:border-slate-400"
+          >
+            <p className="text-sm font-medium text-slate-900">{s.label}</p>
+            <p className="mt-0.5 text-xs text-slate-500">{s.blurb}</p>
+          </Link>
+        ))}
+      </div>
+
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-slate-500">
         Saved configurations
       </h2>
       <div className="mt-2">
-        <SavedConfigs />
+        <SavedConfigs workspaceId={workspaceId} />
       </div>
 
       <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-slate-500">
@@ -161,7 +176,10 @@ export function ImportList() {
               {data.map((job) => (
                 <tr key={job.uid} className="hover:bg-slate-50">
                   <td className="px-4 py-2">
-                    <Link to={`/imports/${job.uid}`} className="font-medium text-slate-900 hover:underline">
+                    <Link
+                      to={importPaths.job(workspaceId, job.uid)}
+                      className="font-medium text-slate-900 hover:underline"
+                    >
                       {importSourceLabel(job.source)}
                     </Link>
                   </td>

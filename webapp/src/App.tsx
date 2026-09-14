@@ -1,4 +1,5 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useCurrentWorkspaceId } from "./api/useCurrentWorkspaceId";
 import { TokenGate } from "./auth/TokenGate";
 import { AdminShell } from "./layout/AdminShell";
 import { AppShell } from "./layout/AppShell";
@@ -30,6 +31,21 @@ import { SchemaForm } from "./pages/schemas/Form";
 import { WorkspaceAccess } from "./pages/workspace/Access";
 import { WorkspaceMembers } from "./pages/workspace/Members";
 import { WorkspaceIntegrity } from "./pages/workspace/Integrity";
+
+/** Sends /imports/... to the workspace-scoped equivalent, keeping whatever
+ * came after it. */
+function LegacyImportRedirect() {
+  const workspaceId = useCurrentWorkspaceId();
+  const location = useLocation();
+  if (!workspaceId) return null;
+  const rest = location.pathname.replace(/^\/imports/, "");
+  return (
+    <Navigate
+      to={`/workspaces/${workspaceId}/imports${rest}${location.search}`}
+      replace
+    />
+  );
+}
 
 export function App() {
   return (
@@ -67,13 +83,19 @@ export function App() {
           <Route path="/global-values/new" element={<GlobalValueForm />} />
           <Route path="/global-values/:uid/edit" element={<GlobalValueForm />} />
 
-          <Route path="/imports" element={<ImportList />} />
-          <Route path="/imports/new" element={<ImportConfigForm />} />
-          <Route path="/imports/configs/:uid/edit" element={<ImportConfigForm />} />
-          <Route path="/imports/:uid" element={<ImportStatus />} />
+          {/* Imports moved under the workspace's settings; old links and
+              bookmarks still land in the right place. */}
+          <Route path="/imports/*" element={<LegacyImportRedirect />} />
         </Route>
 
         <Route element={<AdminShell />}>
+          <Route path="/workspaces/:workspaceId/imports" element={<ImportList />} />
+          <Route path="/workspaces/:workspaceId/imports/new" element={<ImportConfigForm />} />
+          <Route
+            path="/workspaces/:workspaceId/imports/configs/:uid/edit"
+            element={<ImportConfigForm />}
+          />
+          <Route path="/workspaces/:workspaceId/imports/:uid" element={<ImportStatus />} />
           <Route path="/workspaces/:workspaceId/access" element={<WorkspaceAccess />} />
           <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembers />} />
           <Route path="/workspaces/:workspaceId/integrity" element={<WorkspaceIntegrity />} />
