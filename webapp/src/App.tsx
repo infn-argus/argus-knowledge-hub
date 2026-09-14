@@ -5,6 +5,7 @@ import { AdminShell } from "./layout/AdminShell";
 import { AppShell } from "./layout/AppShell";
 import { Dashboard } from "./pages/Dashboard";
 import { NewWorkspace } from "./pages/admin/NewWorkspace";
+import { AdminSettings } from "./pages/admin/Settings";
 import { AdminUsers } from "./pages/admin/Users";
 import { AdminWorkspaces } from "./pages/admin/Workspaces";
 import { AssetDetail } from "./pages/assets/Detail";
@@ -111,6 +112,7 @@ export function App() {
           <Route path="/admin/workspaces" element={<AdminWorkspaces />} />
           <Route path="/admin/new-workspace" element={<NewWorkspace />} />
           <Route path="/admin/users" element={<AdminUsers />} />
+          <Route path="/admin/settings" element={<AdminSettings />} />
         </Route>
       </Routes>
     </TokenGate>

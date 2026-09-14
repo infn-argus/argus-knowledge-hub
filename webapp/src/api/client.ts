@@ -69,6 +69,8 @@ import type {
   Graph,
   GraphSummary,
   AskResult,
+  WorkspaceIdRule,
+  WorkspaceIdSuggestion,
 } from "./types";
 
 export class ApiError extends Error {
@@ -341,8 +343,23 @@ export const importConfigsApi = {
 export const workspacesApi = {
   me: () => request<Me>("/v1/me"),
   listMine: () => request<MyWorkspace[]>("/v1/me/workspaces"),
-  create: (id: string, name: string) =>
-    request<MyWorkspace>("/v1/workspaces", { method: "POST", body: json({ id, name }) }),
+  /** `id` omitted: the server derives it from the name by the
+   * installation's rule, so a stale form cannot make one that breaks it. */
+  create: (name: string, id?: string) =>
+    request<MyWorkspace>("/v1/workspaces", {
+      method: "POST",
+      body: json(id ? { name, id } : { name }),
+    }),
+  suggestId: (name: string) =>
+    request<WorkspaceIdSuggestion>(
+      `/v1/workspaces/suggest-id?name=${encodeURIComponent(name)}`,
+    ),
+  idRule: () => request<WorkspaceIdRule>("/v1/workspaces/id-rule"),
+  saveIdRule: (input: WorkspaceIdRule) =>
+    request<WorkspaceIdRule>("/v1/workspaces/id-rule", {
+      method: "PUT",
+      body: json(input),
+    }),
   get: (workspaceId: string) => request<WorkspaceDetail>(`/v1/workspaces/${workspaceId}`),
   update: (workspaceId: string, input: WorkspaceUpdateInput) =>
     request<Workspace>(`/v1/workspaces/${workspaceId}`, { method: "PUT", body: json(input) }),

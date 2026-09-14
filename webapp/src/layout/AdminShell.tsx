@@ -17,6 +17,7 @@ export function AdminShell() {
   if (me.data?.is_admin) {
     items.push({ to: "/admin/workspaces", label: "Workspaces" });
     items.push({ to: "/admin/users", label: "Users" });
+    items.push({ to: "/admin/settings", label: "Settings" });
   }
 
   return (

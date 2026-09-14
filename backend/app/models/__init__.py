@@ -1,4 +1,5 @@
 from app.models.api_token import ApiToken
+from app.models.app_setting import AppSetting
 from app.models.asset import Asset, Relation
 from app.models.asset_subresources import (
     AssetComment,
@@ -23,6 +24,7 @@ from app.models.workspace import Workspace
 
 __all__ = [
     "ApiToken",
+    "AppSetting",
     "Asset",
     "Relation",
     "AssetComment",

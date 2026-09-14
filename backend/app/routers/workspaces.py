@@ -20,6 +20,7 @@ from app.services.integrity import cleanup_workspace, generate_integrity_report,
 from app.services.relations import rebuild_relations_for_schemas
 from app.services.document_types import ensure_document_types
 from app.services.ticket_types import DEFAULT_ISSUE_TYPES, ensure_ticket_types
+from app.services.workspace_ids import rule as id_rule, save_rule, slugify, unique_id
 from app.schemas.workspace import (
     CleanupOptions,
     DefaultAccess,
@@ -34,6 +35,8 @@ from app.schemas.workspace import (
     WorkspaceDetailOut,
     WorkspaceOut,
     WorkspaceUpdate,
+    WorkspaceIdRule,
+    WorkspaceIdSuggestion,
 )
 
 router = APIRouter(prefix="/v1", tags=["workspaces"])
@@ -230,10 +233,24 @@ def create_workspace(
 ):
     if isinstance(identity, PatIdentity) or not identity.user.is_admin:
         raise HTTPException(status_code=403, detail="Only admins can create workspaces")
-    if db.get(Workspace, body.id) is not None:
-        raise HTTPException(status_code=409, detail="Workspace id already exists")
 
-    workspace = Workspace(id=body.id, name=body.name)
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A workspace needs a name")
+
+    given = (body.id or "").strip()
+    if given:
+        workspace_id = given
+        if db.get(Workspace, workspace_id) is not None:
+            raise HTTPException(status_code=409, detail="Workspace id already exists")
+    else:
+        # Derived here rather than in the browser, so a form that has not
+        # been reloaded since the rule changed cannot create an identifier
+        # that does not follow it — and the identifier cannot be changed
+        # afterwards.
+        workspace_id = unique_id(db, name, id_rule(db))
+
+    workspace = Workspace(id=workspace_id, name=name)
     db.add(workspace)
     db.flush()
     db.add(Membership(
@@ -251,6 +268,42 @@ def create_workspace(
     db.refresh(workspace)
     return workspace
 
+
+@router.get("/workspaces/id-rule", response_model=WorkspaceIdRule)
+def get_workspace_id_rule(
+    identity: Identity = Depends(get_identity), db: Session = Depends(get_db)
+):
+    """How identifiers are derived from names, installation-wide."""
+    _require_admin(identity)
+    return WorkspaceIdRule(**id_rule(db))
+
+
+@router.put("/workspaces/id-rule", response_model=WorkspaceIdRule)
+def put_workspace_id_rule(
+    body: WorkspaceIdRule,
+    identity: Identity = Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    _require_admin(identity)
+    return WorkspaceIdRule(**save_rule(db, body.model_dump()))
+
+
+@router.get("/workspaces/suggest-id", response_model=WorkspaceIdSuggestion)
+def suggest_workspace_id(
+    name: str,
+    identity: Identity = Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    """What this name would become — so the form can show it before saving.
+
+    The same function the creation path uses, rather than a second
+    implementation in the browser that could disagree with it.
+    """
+    _require_admin(identity)
+    settings = id_rule(db)
+    base = slugify(name, settings) or "workspace"
+    chosen = unique_id(db, name, settings)
+    return WorkspaceIdSuggestion(id=chosen, base=base, taken=chosen != base)
 
 @router.get("/workspaces/{workspace_id}", response_model=WorkspaceDetailOut)
 def get_workspace(

@@ -1017,3 +1017,18 @@ export interface AskResult {
   error: string | null;
   seconds: number;
 }
+
+/** How a workspace's identifier is derived from its name, installation-wide. */
+export interface WorkspaceIdRule {
+  prefix: string;
+  separator: string;
+  case: "lower" | "upper" | "keep";
+  max_length: number;
+}
+
+export interface WorkspaceIdSuggestion {
+  id: string;
+  /** What the rule produced before a number was added to make it free. */
+  base: string;
+  taken: boolean;
+}

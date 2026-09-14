@@ -1,12 +1,16 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class WorkspaceCreate(BaseModel):
-    id: str
     name: str
+    # Left out, it is derived from the name by the installation's rule.
+    # Sent, it is used as-is: a convention should be the default, not a
+    # cage, and an admin importing an existing identifier needs the exact
+    # one they already have.
+    id: Optional[str] = None
 
 
 class WorkspaceUpdate(BaseModel):
@@ -129,3 +133,19 @@ class CleanupOptions(BaseModel):
     clear_missing_references: bool = False
     delete_orphaned_objects: bool = False
     remove_dangling_relations: bool = False
+
+
+class WorkspaceIdRule(BaseModel):
+    """How a workspace's identifier is derived from its name."""
+
+    prefix: str = ""
+    separator: str = "-"
+    case: Literal["lower", "upper", "keep"] = "lower"
+    max_length: int = Field(default=40, ge=4, le=120)
+
+
+class WorkspaceIdSuggestion(BaseModel):
+    id: str
+    # What the rule produced before a number was added to make it free.
+    base: str
+    taken: bool
