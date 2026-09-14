@@ -80,11 +80,15 @@ def search_objects(db: Session, workspace_id: str, query: str = "",
     stmt = select(Asset).where(Asset.workspace_id == workspace_id)
     if type:
         stmt = stmt.where(Asset.type == type)
+    # The type counts as a match. Equipment here is named FI4-B-CAM-VIS-001,
+    # so searching "camera" finds nothing by name — and an assistant asked
+    # about cameras concludes there are none.
     rows = [
         a for a in db.scalars(stmt)
         if not needle
         or needle in (a.name or "").lower()
         or needle in (a.key or "").lower()
+        or needle in (a.type or "").lower()
     ]
     return {
         "total": len(rows),
@@ -181,10 +185,29 @@ def search_documents(db: Session, workspace_id: str, query: str = "",
         type_name = names.get(document.document_type_uid or "")
         if type and (type_name or "").lower() != type.lower():
             continue
-        if needle and needle not in (document.title or "").lower() \
-                and needle not in (document.code or "").lower():
+        if not needle:
+            rows.append(_document_summary(document, type_name))
             continue
-        rows.append(_document_summary(document, type_name))
+        if needle in (document.title or "").lower() or needle in (document.code or "").lower():
+            rows.append({**_document_summary(document, type_name), "matched": "title"})
+            continue
+        # The body too. A documentation search that only reads titles
+        # answers "nothing about vacuum" for a library full of it.
+        revision = (
+            db.get(DocumentRevision, document.current_revision_uid)
+            if document.current_revision_uid else None
+        )
+        body = (revision.body_markdown or "").lower() if revision else ""
+        if needle in body:
+            where = body.find(needle)
+            excerpt = (revision.body_markdown or "")[max(0, where - 80): where + 160]
+            rows.append({
+                **_document_summary(document, type_name),
+                "matched": "text",
+                "excerpt": " ".join(excerpt.split()),
+            })
+    # Title matches first: they are what somebody meant.
+    rows.sort(key=lambda r: r.get("matched") != "title")
     return {"total": len(rows), "documents": rows[: min(limit, MAX_LIMIT)]}
 
 
@@ -259,8 +282,8 @@ def knowledge_summary(db: Session, workspace_id: str) -> dict:
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "search_objects",
-        "description": "Search equipment (objects) by name, key or type. Returns a list "
-                       "with uid, key, name and type.",
+        "description": "Search equipment (objects) by name, key or type name. Returns "
+                       "uid, key, name and type.",
         "handler": search_objects,
         "inputSchema": {
             "type": "object",
@@ -309,8 +332,10 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "search_documents",
-        "description": "Search documentation by title, code or document type "
-                       "(Procedure, Runbook, Specification, Logbook Entry, …).",
+        "description": "Search documentation by title, code, document type "
+                       "(Procedure, Runbook, Specification, Logbook Entry, …) or the "
+                       "text of the document itself. Text matches come back with the "
+                       "surrounding sentence.",
         "handler": search_documents,
         "inputSchema": {
             "type": "object",

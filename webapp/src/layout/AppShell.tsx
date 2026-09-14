@@ -186,6 +186,7 @@ export function AppShell() {
           {/* The graph crosses all three sections, so it sits above the
               section switcher rather than inside one of them. */}
           <SectionLink to="/graph">Knowledge graph</SectionLink>
+          <SectionLink to="/ask">Ask</SectionLink>
         </div>
 
         <div className="flex flex-1 flex-col overflow-hidden border-t border-slate-200">

@@ -243,3 +243,38 @@ def test_a_confidential_document_is_returned_where_the_workspace_allows_it(world
     db.close()
 
     assert tool(raw, "get_document", {"uid_or_code": ids["document"]})["found"] is True
+
+
+def test_objects_are_findable_by_their_type(world):
+    """Equipment here is named FI4-B-CAM-VIS-001. An assistant asked about
+    cameras and searching only names concludes there are none."""
+    ids, raw = world
+    found = tool(raw, "search_objects", {"query": "cameras"})
+    assert ids["camera"] in [o["uid"] for o in found["objects"]]
+
+
+def test_documents_are_findable_by_their_text(world):
+    """A documentation search that reads only titles answers "nothing about
+    vacuum" for a library full of it."""
+    ids, raw = world
+    db = SessionLocal()
+    revision = db.get(DocumentRevision, db.get(Document, ids["document"]).current_revision_uid)
+    revision.body_markdown = "# Camera replacement\n\nIsolate the vacuum chamber first."
+    db.commit()
+    db.close()
+
+    found = tool(raw, "search_documents", {"query": "vacuum chamber"})
+    assert [d["uid"] for d in found["documents"]] == [ids["document"]]
+    assert found["documents"][0]["matched"] == "text"
+    assert "vacuum chamber" in found["documents"][0]["excerpt"]
+
+
+def test_a_title_match_outranks_a_text_match(world):
+    ids, raw = world
+    db = SessionLocal()
+    document = db.get(Document, ids["document"])
+    document.title = "Vacuum recovery"
+    db.commit()
+    db.close()
+    found = tool(raw, "search_documents", {"query": "vacuum"})
+    assert found["documents"][0]["matched"] == "title"

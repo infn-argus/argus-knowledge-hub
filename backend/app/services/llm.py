@@ -144,6 +144,48 @@ def complete(endpoint: Endpoint, system: str, user: str, max_tokens: int = 512) 
         raise LLMError("The endpoint's reply was not in the expected shape.") from e
 
 
+def converse(endpoint: Endpoint, messages: list[dict], tools: Optional[list[dict]] = None,
+             max_tokens: int = 1200) -> dict:
+    """One turn of a tool-calling conversation; returns the assistant message.
+
+    Unlike `complete`, the caller owns the message list, because a tool
+    call and its result have to be appended in the exact shape the model
+    sent them or the next turn is rejected.
+    """
+    payload: dict = {
+        "model": endpoint.model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 0,
+    }
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+    try:
+        resp = requests.post(
+            f"{endpoint.root}/chat/completions",
+            headers=endpoint.headers(),
+            json=payload,
+            timeout=COMPLETION_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as e:
+        raise LLMError(f"Could not reach {endpoint.root}: {e}") from e
+    if resp.status_code >= 400:
+        detail = (resp.text or "")[:300]
+        # Worth naming: a model that does not do tool calling fails here,
+        # and "400 Bad Request" alone sends somebody looking at the network.
+        if "tool" in detail.lower():
+            raise LLMError(
+                f"The endpoint refused a tool-calling request — “{endpoint.model}” may not "
+                f"support tools. It answered {resp.status_code}: {detail}"
+            )
+        raise LLMError(f"The endpoint answered {resp.status_code}: {detail}")
+    try:
+        return resp.json()["choices"][0]["message"]
+    except (ValueError, KeyError, IndexError) as e:
+        raise LLMError("The endpoint's reply was not in the expected shape.") from e
+
+
 def embed(endpoint: Endpoint, texts: list[str]) -> list[list[float]]:
     """Vectors for a batch of texts, in the order given."""
     if not endpoint.embedding_model:

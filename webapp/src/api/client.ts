@@ -68,6 +68,7 @@ import type {
   EffectivePermissions,
   Graph,
   GraphSummary,
+  AskResult,
 } from "./types";
 
 export class ApiError extends Error {
@@ -636,6 +637,10 @@ export const aiApi = {
     if (!resp.ok) throw new ApiError(resp.status, data);
     return data as PhotoIdentification;
   },
+
+  /** A question answered from this workspace's records, with its working. */
+  ask: (question: string) =>
+    request<AskResult>("/v1/ai/ask", { method: "POST", body: json({ question }) }),
 
   reject: (ids: number[]) =>
     request<{ rejected: number; skipped: number[] }>("/v1/ai/suggestions/reject", {

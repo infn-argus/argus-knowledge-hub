@@ -16,6 +16,7 @@ import { DocumentList } from "./pages/documents/List";
 import { DocumentSearch } from "./pages/documents/Search";
 import { DocumentSuggestions } from "./pages/documents/Suggestions";
 import { GlobalValueForm } from "./pages/globalvalues/Form";
+import { Ask } from "./pages/ai/Ask";
 import { GraphExplorer } from "./pages/graph/Explorer";
 import { GlobalValueList } from "./pages/globalvalues/List";
 import { ImportList } from "./pages/imports/List";
@@ -56,6 +57,8 @@ export function App() {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<Dashboard />} />
+
+          <Route path="/ask" element={<Ask />} />
 
           <Route path="/schemas/new" element={<SchemaForm />} />
           <Route path="/schemas/:uid" element={<SchemaDetail />} />

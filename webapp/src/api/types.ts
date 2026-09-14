@@ -970,3 +970,23 @@ export function importSourceLabel(source: string): string {
   if (source === "git") return "Git";
   return source;
 }
+
+export interface AskStep {
+  tool: string;
+  arguments: Record<string, unknown>;
+  /** The tool's raw JSON result. Shown, not summarised: the point of the
+   * Ask page is seeing which records an answer came from. */
+  result: string;
+  error: string | null;
+  seconds: number;
+}
+
+export interface AskResult {
+  answer: string;
+  steps: AskStep[];
+  /** "answered" or "exhausted" — an answer given after the lookup limit
+   * was cut short and should be read as such. */
+  stopped: string;
+  error: string | null;
+  seconds: number;
+}

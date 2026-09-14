@@ -179,3 +179,31 @@ class DraftTicketOut(BaseModel):
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
     mentioned_objects: list[MentionedObject] = []
+
+
+class AskIn(BaseModel):
+    question: str
+
+
+class AskStep(BaseModel):
+    """One tool call, shown to whoever asked.
+
+    The point of the Ask page is to see which records an answer came from,
+    so the arguments and the raw result are returned rather than a tidy
+    summary of them.
+    """
+    tool: str
+    arguments: dict = {}
+    result: str = ""
+    error: Optional[str] = None
+    seconds: float = 0
+
+
+class AskOut(BaseModel):
+    answer: str = ""
+    steps: list[AskStep] = []
+    # "answered" or "exhausted" — an answer produced after the round limit
+    # was cut short, and should be read as such.
+    stopped: str = "answered"
+    error: Optional[str] = None
+    seconds: float = 0

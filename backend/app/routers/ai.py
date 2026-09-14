@@ -20,6 +20,8 @@ from app.models.document import Document
 from app.models.schema import Schema
 from app.schemas.ai import (
     AIStatus,
+    AskIn,
+    AskOut,
     LLMCheckResult,
     LLMConfigIn,
     LLMConfigOut,
@@ -37,6 +39,7 @@ from app.schemas.ai import (
     SuggestRunResult,
 )
 from app.services.ai_authoring import draft_document, draft_ticket_fields, review_document
+from app.services.ask import ask as run_ask
 from app.services.asset_vision import MAX_IMAGE_BYTES, identify
 from app.services.text_links import objects_mentioned
 from app.services.ai_suggestions import suggest_document_types
@@ -415,3 +418,24 @@ def draft_a_ticket(
         **fields,
         mentioned_objects=objects_mentioned(db, workspace_id, body.title, body.description),
     )
+
+
+@router.post("/ask", response_model=AskOut)
+def ask_the_knowledge(
+    body: AskIn,
+    workspace_id: str = Depends(require_permission("read")),
+    db: Session = Depends(get_db),
+):
+    """A question answered from this workspace's records, showing its working.
+
+    Read-only, and deliberately so: the tools behind it only retrieve. It
+    needs no more permission than reading the same records by hand would.
+    """
+    question = (body.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Ask something.")
+    config = _usable_config(db, workspace_id)
+    try:
+        return AskOut(**run_ask(db, workspace_id, endpoint_for(config), question))
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
