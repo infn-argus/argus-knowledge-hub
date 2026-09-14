@@ -15,6 +15,7 @@ The tools are the MCP ones, called in process. The same eight tools an
 external assistant gets, so what is learned here is true there too.
 """
 import json
+import re
 import time
 from typing import Any, Optional
 
@@ -29,6 +30,23 @@ MAX_ROUNDS = 8
 # What comes back from a tool can be long; the model does not need all of
 # it and the context window certainly does not.
 MAX_TOOL_CHARS = 12000
+
+# Reasoning models — minimax-m27, which is what LNF points at — narrate
+# their working in a <think> block and then answer. The narration is not
+# the answer and must not be shown as one.
+THINK_BLOCK = re.compile(r"<think>.*?</think>", re.S | re.I)
+UNCLOSED_THINK = re.compile(r"<think>.*$", re.S | re.I)
+
+
+def _answer_of(message: dict) -> str:
+    """The answer a model meant to give, without its thinking aloud."""
+    text = THINK_BLOCK.sub("", message.get("content") or "")
+    # An unclosed block means it ran out of budget mid-thought; what
+    # follows is nothing, and showing the monologue instead of saying so
+    # is how a page passes off working-out as an answer.
+    if UNCLOSED_THINK.search(text):
+        text = UNCLOSED_THINK.sub("", text)
+    return text.strip()
 
 SYSTEM = (
     "You answer questions about a particle accelerator's equipment, the work done on "
@@ -113,7 +131,7 @@ def ask(db: Session, workspace_id: str, endpoint: Endpoint, question: str) -> di
         calls = message.get("tool_calls") or []
         if not calls:
             return {
-                "answer": (message.get("content") or "").strip(),
+                "answer": _answer_of(message),
                 "steps": steps,
                 "stopped": "answered",
                 "seconds": round(time.monotonic() - started, 1),
@@ -162,7 +180,7 @@ def ask(db: Session, workspace_id: str, endpoint: Endpoint, question: str) -> di
             "seconds": round(time.monotonic() - started, 1),
         }
     return {
-        "answer": (final.get("content") or "").strip(),
+        "answer": _answer_of(final),
         "steps": steps,
         "stopped": "exhausted",
         "seconds": round(time.monotonic() - started, 1),

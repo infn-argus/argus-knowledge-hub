@@ -155,3 +155,24 @@ def test_malformed_arguments_do_not_crash_the_loop(workspace, monkeypatch):
     result = ask(SessionLocal(), workspace, Endpoint("https://x/v1", "m"), "q")
     assert result["steps"][0]["arguments"] == {}
     assert result["steps"][0]["error"] is None
+
+
+def test_a_reasoning_models_thinking_is_not_shown_as_the_answer(workspace, monkeypatch):
+    """minimax-m27, which LNF points at, narrates before it answers."""
+    scripted(monkeypatch, [
+        {"role": "assistant",
+         "content": "<think>The tool gave me the counts. Present them.</think>\n\n"
+                    "There are 3,561 objects."},
+    ])
+    result = ask(SessionLocal(), workspace, Endpoint("https://x/v1", "m"), "q")
+    assert result["answer"] == "There are 3,561 objects."
+
+
+def test_thinking_that_never_finished_is_not_passed_off_as_an_answer(workspace, monkeypatch):
+    """Out of budget mid-thought: there is no answer, and saying so beats
+    showing the working-out as one."""
+    scripted(monkeypatch, [
+        {"role": "assistant", "content": "<think>Let me consider the vacuum system and"},
+    ])
+    result = ask(SessionLocal(), workspace, Endpoint("https://x/v1", "m"), "q")
+    assert result["answer"] == ""
