@@ -201,9 +201,18 @@ class _Importer:
         self.index = NetworkIndex(db, workspace_id)
         self.counts = {
             "facilities": 0, "iocs": 0, "devices": 0, "services": 0,
-            "access_points_linked": 0, "access_points_created": 0,
-            "addresses_unresolved": 0, "relations": 0,
+            # Three different things, because conflating them makes the
+            # report say the opposite of the truth: an import that matched
+            # nothing at all read as "42 matched to existing equipment",
+            # which were its own Access Points being reached a second time.
+            "access_points_linked": 0,    # equipment the inventory already held
+            "access_points_created": 0,   # made here, awaiting confirmation
+            "access_points_reused": 0,    # created earlier in this same run
+            "addresses_unresolved": 0,
+            "relations": 0,
         }
+        # What this run created, so re-reaching one is not counted as a match.
+        self.created_access_points: set[str] = set()
         # key -> asset, for relating without re-querying.
         self.assets: dict[str, Asset] = {}
         self.pv_index: dict[str, Asset] = {}
@@ -309,7 +318,10 @@ class _Importer:
         """
         match = self.index.resolve(address)
         if match.found:
-            self.counts["access_points_linked"] += 1
+            if match.asset.uid in self.created_access_points:
+                self.counts["access_points_reused"] += 1
+            else:
+                self.counts["access_points_linked"] += 1
             return match.asset
 
         if match.ambiguous:
@@ -348,6 +360,7 @@ class _Importer:
         )
         asset = self.upsert("Access Point", key, short_host(address), attributes)
         self.index.add(asset, address)
+        self.created_access_points.add(asset.uid)
         self.counts["access_points_created"] += 1
         return asset
 
@@ -603,10 +616,17 @@ def run_epik8s_import(
 
         job.counts = {**(job.counts or {}), **importer.counts}
         job.status = "completed"
+        linked = importer.counts["access_points_linked"]
+        created = importer.counts["access_points_created"]
         job.progress = (
-            f"{importer.counts['iocs']} IOC(s), {importer.counts['devices']} device(s), "
-            f"{importer.counts['access_points_linked']} address(es) matched to existing "
-            f"equipment, {importer.counts['access_points_created']} created"
+            f"{importer.counts['iocs']} IOC(s) and {importer.counts['devices']} device(s) "
+            f"in workspace {workspace_id}. "
+            + (
+                f"{linked} address(es) matched equipment already in this workspace"
+                if linked
+                else "No address matched anything already in this workspace"
+            )
+            + f"; {created} Access Point(s) created and awaiting confirmation."
         )
         job.completed_at = datetime.now(timezone.utc)
         db.commit()

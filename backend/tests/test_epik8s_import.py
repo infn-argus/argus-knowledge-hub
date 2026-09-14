@@ -318,3 +318,42 @@ epicsConfiguration:
     assert "5" not in points, "a bus id is not a host"
     assert "192.168.189.79" in points
     db.close()
+
+
+def test_reaching_an_address_this_run_invented_is_not_counted_as_a_match(workspace, beamline):
+    """Two IOCs behind one unknown host: the first creates an Access Point,
+    the second finds it. Counting the second as "matched to existing
+    equipment" made an import that matched nothing report that it had."""
+    values = yaml.safe_load(f"""
+beamline: {beamline}
+epicsConfiguration:
+  iocs:
+    - name: a
+      iocprefix: X:A
+      iocparam:
+        - name: server
+          value: nowhere.lnf.infn.it
+      devices:
+        - name: D1
+    - name: b
+      iocprefix: X:B
+      iocparam:
+        - name: server
+          value: nowhere.lnf.infn.it
+      devices:
+        - name: D2
+""")
+    db = SessionLocal()
+    job = ImportJob(uid=f"job-{secrets.token_hex(4)}", workspace_id=workspace, source="epik8s")
+    db.add(job)
+    db.commit()
+    importer = _Importer(db, job, workspace, "test")
+    importer.ensure_types()
+    importer.run(values, True)
+    db.commit()
+
+    assert importer.counts["access_points_created"] == 1
+    assert importer.counts["access_points_reused"] == 1
+    assert importer.counts["access_points_linked"] == 0, \
+        "nothing in the inventory carried this address"
+    db.close()
