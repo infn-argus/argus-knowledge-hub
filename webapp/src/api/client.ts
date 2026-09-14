@@ -39,7 +39,10 @@ import type {
   RelinkResult,
   AISuggestion,
   AIStatus,
+  DraftDocumentResult,
+  DraftTicketResult,
   PhotoIdentification,
+  ReviewDocumentResult,
   SuggestRunResult,
   LLMCheckResult,
   LLMConfig,
@@ -596,6 +599,28 @@ export const aiApi = {
       method: "POST",
       body: json({ ids }),
     }),
+  draftDocument: (input: {
+    title: string;
+    document_type_uid?: string | null;
+    notes?: string;
+  }) => request<DraftDocumentResult>("/v1/ai/draft-document", {
+    method: "POST",
+    body: json(input),
+  }),
+  reviewDocument: (input: {
+    title: string;
+    document_type_uid?: string | null;
+    body_markdown: string;
+  }) => request<ReviewDocumentResult>("/v1/ai/review-document", {
+    method: "POST",
+    body: json(input),
+  }),
+  draftTicket: (input: { title: string; description: string }) =>
+    request<DraftTicketResult>("/v1/ai/draft-ticket", {
+      method: "POST",
+      body: json(input),
+    }),
+
   /** What is in this photograph, as a draft for the new-object form. */
   identifyObject: async (file: File): Promise<PhotoIdentification> => {
     const session = await loadSession();

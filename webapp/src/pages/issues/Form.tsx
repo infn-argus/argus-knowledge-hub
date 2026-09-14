@@ -10,6 +10,7 @@ import {
   schemasApi,
 } from "../../api/client";
 import { AssetMultiPicker } from "../../components/AssetMultiPicker";
+import { TicketAssistant } from "../../components/TicketAssistant";
 import { AttributeInput } from "../../components/AttributeInput";
 import { LabelInput } from "../../components/LabelInput";
 import { UserPicker } from "../../components/UserPicker";
@@ -197,6 +198,37 @@ export function IssueForm() {
             </p>
           )}
         </div>
+
+        <TicketAssistant
+          title={title}
+          description={description}
+          onFields={(result) => {
+            // Only what is empty: somebody who has already decided the
+            // impact should not have it overwritten by a reading of their
+            // own words.
+            setAttributes((prev) => {
+              const next = { ...prev };
+              const fill = (key: string, value: string | null) => {
+                if (value && !next[key]) next[key] = value;
+              };
+              fill("argus_category", result.category);
+              fill("argus_impact", result.impact);
+              fill("argus_detected_by", result.detected_by);
+              fill("argus_system", result.system);
+              fill("argus_subsystem", result.subsystem);
+              fill("argus_root_cause", result.root_cause);
+              fill("argus_corrective_action", result.corrective_action);
+              return next;
+            });
+            if (result.mentioned_objects.length > 0) {
+              setAssetUids((current) => {
+                const merged = new Set(current);
+                for (const o of result.mentioned_objects) merged.add(o.uid);
+                return [...merged];
+              });
+            }
+          }}
+        />
 
         <div className="grid grid-cols-2 gap-4">
           <div>

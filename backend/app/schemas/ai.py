@@ -124,3 +124,58 @@ class PhotoIdentification(BaseModel):
     matches: list[AssetMatch] = []
     unmatched_keys: list[str] = []
     error: Optional[str] = None
+
+
+class MentionedObject(BaseModel):
+    uid: str
+    key: Optional[str]
+    name: Optional[str]
+    # "key" or "name" — a key is something somebody wrote down, a name
+    # could be a coincidence of words, and the caller should be able to
+    # tell them apart.
+    matched_on: str
+
+
+class DraftDocumentIn(BaseModel):
+    title: str
+    document_type_uid: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class DraftDocumentOut(BaseModel):
+    body_markdown: str
+    mentioned_objects: list[MentionedObject] = []
+
+
+class ReviewDocumentIn(BaseModel):
+    title: str = ""
+    document_type_uid: Optional[str] = None
+    body_markdown: str
+
+
+class ReviewFinding(BaseModel):
+    severity: str
+    message: str
+
+
+class ReviewDocumentOut(BaseModel):
+    findings: list[ReviewFinding] = []
+    # Objects the text names that are not yet linked — the edges a
+    # knowledge graph is missing most often.
+    mentioned_objects: list[MentionedObject] = []
+
+
+class DraftTicketIn(BaseModel):
+    title: str
+    description: str = ""
+
+
+class DraftTicketOut(BaseModel):
+    category: Optional[str] = None
+    impact: Optional[str] = None
+    detected_by: Optional[str] = None
+    system: Optional[str] = None
+    subsystem: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    mentioned_objects: list[MentionedObject] = []

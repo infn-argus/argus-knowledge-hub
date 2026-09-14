@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, documentsApi, schemasApi } from "../../api/client";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 import { AttributeInput } from "../../components/AttributeInput";
+import { DocumentAssistant } from "../../components/DocumentAssistant";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { StepsEditor } from "../../components/StepsEditor";
 import { AuthorityLevel, Confidentiality, DocumentStep } from "../../api/types";

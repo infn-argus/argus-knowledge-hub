@@ -25,12 +25,20 @@ from app.schemas.ai import (
     LLMConfigOut,
     SuggestionDecision,
     SuggestionDecisionResult,
+    DraftDocumentIn,
+    DraftDocumentOut,
+    DraftTicketIn,
+    DraftTicketOut,
     PhotoIdentification,
+    ReviewDocumentIn,
+    ReviewDocumentOut,
     SuggestionOut,
     SuggestRequest,
     SuggestRunResult,
 )
+from app.services.ai_authoring import draft_document, draft_ticket_fields, review_document
 from app.services.asset_vision import MAX_IMAGE_BYTES, identify
+from app.services.text_links import objects_mentioned
 from app.services.ai_suggestions import suggest_document_types
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.llm import Endpoint, LLMError, check
@@ -339,3 +347,71 @@ async def identify_object(
         )
     except LLMError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.post("/draft-document", response_model=DraftDocumentOut)
+def draft_a_document(
+    body: DraftDocumentIn,
+    workspace_id: str = Depends(require_permission("create", resource="documents")),
+    db: Session = Depends(get_db),
+):
+    """A first draft for the editor. Saves nothing."""
+    config = _usable_config(db, workspace_id)
+    if not body.title.strip():
+        raise HTTPException(status_code=422, detail="Give the document a title first.")
+    try:
+        markdown = draft_document(
+            db, endpoint_for(config), body.title.strip(),
+            body.document_type_uid, body.notes,
+        )
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return DraftDocumentOut(
+        body_markdown=markdown,
+        mentioned_objects=objects_mentioned(db, workspace_id, body.title, markdown),
+    )
+
+
+@router.post("/review-document", response_model=ReviewDocumentOut)
+def review_a_document(
+    body: ReviewDocumentIn,
+    workspace_id: str = Depends(require_permission("read", resource="documents")),
+    db: Session = Depends(get_db),
+):
+    """Remarks about a draft, and the objects it names. Changes nothing."""
+    config = _usable_config(db, workspace_id)
+    if not body.body_markdown.strip():
+        raise HTTPException(status_code=422, detail="There is nothing written yet to review.")
+    try:
+        findings = review_document(
+            db, endpoint_for(config), body.title, body.document_type_uid, body.body_markdown
+        )
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return ReviewDocumentOut(
+        findings=findings,
+        mentioned_objects=objects_mentioned(
+            db, workspace_id, body.title, body.body_markdown
+        ),
+    )
+
+
+@router.post("/draft-ticket", response_model=DraftTicketOut)
+def draft_a_ticket(
+    body: DraftTicketIn,
+    workspace_id: str = Depends(require_permission("create", resource="tickets")),
+    db: Session = Depends(get_db),
+):
+    """The structured fields a fault report implies, plus the objects it
+    names. Fills a form; creates nothing."""
+    config = _usable_config(db, workspace_id)
+    if not body.title.strip() and not body.description.strip():
+        raise HTTPException(status_code=422, detail="Write the report first.")
+    try:
+        fields = draft_ticket_fields(endpoint_for(config), body.title, body.description)
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return DraftTicketOut(
+        **fields,
+        mentioned_objects=objects_mentioned(db, workspace_id, body.title, body.description),
+    )

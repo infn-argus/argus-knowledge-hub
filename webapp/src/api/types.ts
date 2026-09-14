@@ -843,6 +843,40 @@ export interface AIStatus {
   reason: string | null;
 }
 
+export interface MentionedObject {
+  uid: string;
+  key: string | null;
+  name: string | null;
+  /** "key" is something somebody wrote down; "name" could be a coincidence. */
+  matched_on: string;
+}
+
+export interface DraftDocumentResult {
+  body_markdown: string;
+  mentioned_objects: MentionedObject[];
+}
+
+export interface ReviewFinding {
+  severity: "high" | "medium" | "low";
+  message: string;
+}
+
+export interface ReviewDocumentResult {
+  findings: ReviewFinding[];
+  mentioned_objects: MentionedObject[];
+}
+
+export interface DraftTicketResult {
+  category: string | null;
+  impact: string | null;
+  detected_by: string | null;
+  system: string | null;
+  subsystem: string | null;
+  root_cause: string | null;
+  corrective_action: string | null;
+  mentioned_objects: MentionedObject[];
+}
+
 export interface PhotoIdentification {
   type_uid: string | null;
   type_name: string | null;

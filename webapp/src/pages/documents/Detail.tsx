@@ -12,6 +12,7 @@ import {
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
 import { AttributeInput } from "../../components/AttributeInput";
 import { AttributeValue } from "../../components/AttributeValue";
+import { DocumentAssistant } from "../../components/DocumentAssistant";
 import { DrawingViewer } from "../../components/DrawingViewer";
 import { RecordPicker } from "../../components/RecordPicker";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
@@ -451,6 +452,15 @@ export function DocumentDetail() {
                   onChange={setBodyMarkdown}
                   onUpload={uploadIntoBody}
                   placeholder="Write the document in Markdown…"
+                />
+                <DocumentAssistant
+                  title={doc.title}
+                  documentTypeUid={doc.document_type_uid}
+                  body={bodyMarkdown}
+                  onDraft={setBodyMarkdown}
+                  onLinkObject={(assetUid) =>
+                    addRelationMutation.mutate({ to_type: "asset", to_uid: assetUid })
+                  }
                 />
               </div>
             ) : (
