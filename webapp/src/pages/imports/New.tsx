@@ -1,9 +1,11 @@
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { importPaths } from "./paths";
 import { ApiError, importConfigsApi } from "../../api/client";
 import { MergeStrategy, MERGE_STRATEGIES } from "../../api/types";
+import { WorkspaceScopeBanner } from "../../components/WorkspaceScopeBanner";
 
 export function ImportConfigForm() {
   const { uid, workspaceId } = useParams<{ uid: string; workspaceId: string }>();
@@ -164,6 +166,8 @@ export function ImportConfigForm() {
         schemas/assets are matched by key — the merge strategy below controls what happens
         when a match is found.
       </p>
+
+      <WorkspaceScopeBanner action="This import writes into" />
 
       <div className="mt-6 flex gap-2">
         {(["jira", "jira-issues", "confluence", "git", "epik8s"] as const).map((s) => (

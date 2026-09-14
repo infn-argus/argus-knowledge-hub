@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { importConfigsApi, importsApi } from "../../api/client";
 import { MERGE_STRATEGIES, importSourceLabel } from "../../api/types";
 import { IMPORT_SOURCES, importPaths } from "./paths";
+import { WorkspaceScopeBanner } from "../../components/WorkspaceScopeBanner";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "bg-slate-100 text-slate-600",
@@ -117,6 +118,7 @@ export function ImportList() {
             Everything this workspace pulls in from elsewhere — objects, tickets and
             documentation — with one history of what ran.
           </p>
+          <WorkspaceScopeBanner action="These imports belong to" />
         </div>
         <Link
           to={importPaths.create(workspaceId)}

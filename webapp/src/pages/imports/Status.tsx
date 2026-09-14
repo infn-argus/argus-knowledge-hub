@@ -68,6 +68,12 @@ export function ImportStatus() {
 
           <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
             <dl className="grid grid-cols-2 gap-y-3 text-sm">
+              {/* A fact about this run, not about whichever workspace is
+                  selected now: an import writes into one workspace and
+                  afterwards nothing else on the page says which. */}
+              <dt className="text-slate-500">Wrote into workspace</dt>
+              <dd className="font-medium text-slate-900">{data.workspace_id}</dd>
+
               <dt className="text-slate-500">Progress</dt>
               <dd className="text-slate-900">{data.progress ?? "—"}</dd>
 

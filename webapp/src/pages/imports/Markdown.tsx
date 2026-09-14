@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { documentsApi, schemasApi } from "../../api/client";
 import { importPaths } from "./paths";
+import { WorkspaceScopeBanner } from "../../components/WorkspaceScopeBanner";
 
 /** Upload Markdown as documentation.
  *
@@ -42,6 +43,7 @@ export function MarkdownImport() {
         links to images and attachments are rewritten to the copies stored here, and links
         between the uploaded files become relations.
       </p>
+      <WorkspaceScopeBanner action="These documents are created in" />
 
       <div className="mt-6 space-y-4">
         <div>
