@@ -33,6 +33,12 @@ class LLMConfig(Base, TimestampMixin):
     # chat model INFN serves by default answers "not a multimodal model"
     # when shown a picture.
     vision_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Speech, for the voice assistant the beamline dashboards already carry.
+    # Separate names again: an endpoint serving a chat model and a Whisper
+    # transcriber lists them as two different models, and picking the wrong
+    # one fails at the microphone rather than at configuration time.
+    asr_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    tts_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # Fernet-encrypted, never returned to the client — the same handling the
     # import configurations give a source PAT. Nullable: some endpoints on
     # the internal network take no key at all.

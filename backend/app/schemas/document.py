@@ -37,6 +37,7 @@ class DocumentUpdate(BaseModel):
     responsible_service_asset_uid: Optional[str] = None
     authority_level: Optional[AuthorityLevel] = None
     confidentiality: Optional[Confidentiality] = None
+    is_global: Optional[bool] = None
 
 
 class DocumentOut(BaseModel):
@@ -52,6 +53,7 @@ class DocumentOut(BaseModel):
     authority_level: str
     confidentiality: str
     source: str
+    is_global: bool = False
     current_revision_uid: Optional[str]
     created_at: datetime
     updated_at: datetime

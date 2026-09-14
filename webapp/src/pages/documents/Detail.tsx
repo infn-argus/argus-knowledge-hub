@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 import {
   ApiError,
   assetsApi,
@@ -31,6 +32,7 @@ const STATE_STYLES: Record<string, string> = {
 
 export function DocumentDetail() {
   const { uid } = useParams<{ uid: string }>();
+  const workspaceId = useCurrentWorkspaceId();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [viewedRevisionUid, setViewedRevisionUid] = useState<string | null>(null);
@@ -298,6 +300,18 @@ export function DocumentDetail() {
             </select>
             <span className="rounded bg-slate-100 px-2 py-0.5">{doc.authority_level}</span>
             <span className="rounded bg-slate-100 px-2 py-0.5">{doc.confidentiality}</span>
+            {doc.is_global && (
+              <span
+                className="rounded bg-sky-100 px-2 py-0.5 text-sky-800"
+                title={
+                  doc.workspace_id === workspaceId
+                    ? "Shared with every workspace"
+                    : `Shared from ${doc.workspace_id} — editing belongs to that workspace`
+                }
+              >
+                {doc.workspace_id === workspaceId ? "shared" : `shared from ${doc.workspace_id}`}
+              </span>
+            )}
             <span className="rounded bg-slate-100 px-2 py-0.5">source: {doc.source}</span>
             {sourceUrl && (
               <a

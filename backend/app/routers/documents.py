@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -14,6 +14,7 @@ from app.services.permissions import has_permission
 from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation, DocumentRevision
 from app.models.schema import Schema
+from app.models.workspace import Workspace
 from app.schemas.attachment import AttachmentOut
 from app.schemas.document import (
     ApproveAction,
@@ -84,8 +85,15 @@ def _get_visible_document(
     uid: str, workspace_id: str, identity: Identity, db: Session
 ) -> Document:
     doc = db.get(Document, uid)
-    if doc is None or doc.workspace_id != workspace_id:
+    if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
+    if doc.workspace_id != workspace_id:
+        # Shared across workspaces, but never something marked riservato:
+        # "confidential" and "readable by every workspace" cannot both be
+        # true, and the safe reading of that contradiction is the strict one.
+        if not doc.is_global or doc.confidentiality == "riservato":
+            raise HTTPException(status_code=404, detail="Document not found")
+        return doc
     _check_confidentiality(doc, workspace_id, identity, db)
     return doc
 
@@ -115,7 +123,15 @@ def list_documents(
     workspace_id: str = Depends(require_permission("read", resource="documents")),
     db: Session = Depends(get_db),
 ):
-    stmt = select(Document).where(Document.workspace_id == workspace_id)
+    stmt = select(Document).where(
+        or_(
+            Document.workspace_id == workspace_id,
+            and_(
+                Document.is_global.is_(True),
+                Document.confidentiality != "riservato",
+            ),
+        )
+    )
     if document_type_uid:
         stmt = stmt.where(Document.document_type_uid == document_type_uid)
     return db.scalars(stmt).all()
@@ -131,6 +147,7 @@ def create_document(
     if db.get(Document, body.uid) is not None:
         raise HTTPException(status_code=409, detail="Document uid already exists")
 
+    workspace = db.get(Workspace, workspace_id)
     code = (body.code or "").strip() or next_code(db, workspace_id, body.document_type_uid)
     if db.scalar(select(Document).where(Document.code == code)) is not None:
         raise HTTPException(
@@ -143,6 +160,10 @@ def create_document(
         responsible_service_asset_uid=body.responsible_service_asset_uid,
         authority_level=body.authority_level, confidentiality=body.confidentiality,
         source=body.source,
+        # A globally-shared workspace shares what is written in it, including
+        # documents created after the flag was set — the same rule types
+        # already follow, so the workspace-level flag doesn't decay.
+        is_global=bool(workspace is not None and workspace.is_global),
     )
     doc_schema = db.get(Schema, doc.document_type_uid) if doc.document_type_uid else None
     stamp_current_user_attributes(db, doc_schema, body.attributes, _actor_user_id(identity))
@@ -244,7 +265,17 @@ def update_document(
     db: Session = Depends(get_db),
 ):
     doc = _get_owned_document(uid, workspace_id, db)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    patch = body.model_dump(exclude_unset=True)
+    # Sharing something marked riservato is a contradiction, and the reader
+    # of a 404 would have no idea why. Say it.
+    confidentiality = patch.get("confidentiality", doc.confidentiality)
+    if patch.get("is_global", doc.is_global) and confidentiality == "riservato":
+        raise HTTPException(
+            status_code=422,
+            detail="A confidential document cannot be shared with other workspaces. "
+                   "Change its confidentiality first, or leave it unshared.",
+        )
+    for field, value in patch.items():
         setattr(doc, field, value)
     db.commit()
     db.refresh(doc)

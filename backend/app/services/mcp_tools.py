@@ -14,7 +14,7 @@ where the risk is not.
 import json
 from typing import Any, Callable, Optional
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.asset import Asset, Relation
@@ -39,6 +39,33 @@ def _confidential_allowed(db: Session, workspace_id: str) -> bool:
     """
     config = db.get(LLMConfig, workspace_id)
     return bool(config and config.allow_confidential)
+
+
+def _asset_visible(db: Session, asset: Asset, workspace_id: str) -> bool:
+    """The same rule as the REST API and the graph: this workspace's own
+    objects, plus whatever is shared with it.
+
+    An installation that keeps device models in a global workspace needs
+    them here too, or "what model is this camera" is unanswerable in the
+    tool built to answer it.
+    """
+    if asset.workspace_id == workspace_id or asset.is_global:
+        return True
+    schema = db.get(Schema, asset.schema_uid)
+    return bool(schema is not None and schema.is_global)
+
+
+def _document_visible(workspace_id: str):
+    """This workspace's documentation, plus whatever is shared with it.
+
+    A global workspace holding the procedures that cover every beamline is
+    only worth having if the tools can read them from the beamline asking
+    the question.
+    """
+    return or_(
+        Document.workspace_id == workspace_id,
+        and_(Document.is_global.is_(True), Document.confidentiality != "riservato"),
+    )
 
 
 def _asset_summary(asset: Asset) -> dict:
@@ -77,7 +104,15 @@ def search_objects(db: Session, workspace_id: str, query: str = "",
                    type: Optional[str] = None, limit: int = DEFAULT_LIMIT) -> dict:
     """Equipment by name, key or type."""
     needle = (query or "").strip().lower()
-    stmt = select(Asset).where(Asset.workspace_id == workspace_id)
+    stmt = select(Asset).where(
+        or_(
+            Asset.workspace_id == workspace_id,
+            Asset.is_global.is_(True),
+            Asset.schema_uid.in_(
+                select(Schema.uid).where(Schema.is_global.is_(True))
+            ),
+        )
+    )
     if type:
         stmt = stmt.where(Asset.type == type)
     # The type counts as a match. Equipment here is named FI4-B-CAM-VIS-001,
@@ -98,12 +133,10 @@ def search_objects(db: Session, workspace_id: str, query: str = "",
 
 def get_object(db: Session, workspace_id: str, uid_or_key: str) -> dict:
     """One object: its attributes, and what it is physically connected to."""
-    asset = db.scalar(
-        select(Asset).where(Asset.workspace_id == workspace_id, Asset.uid == uid_or_key)
-    ) or db.scalar(
-        select(Asset).where(Asset.workspace_id == workspace_id, Asset.key == uid_or_key)
+    asset = db.scalar(select(Asset).where(Asset.uid == uid_or_key)) or db.scalar(
+        select(Asset).where(Asset.key == uid_or_key)
     )
-    if asset is None:
+    if asset is None or not _asset_visible(db, asset, workspace_id):
         return {"found": False, "looked_for": uid_or_key}
 
     relations = []
@@ -176,7 +209,7 @@ def search_documents(db: Session, workspace_id: str, query: str = "",
     names = {s.uid: s.name for s in db.scalars(
         select(Schema).where(Schema.workspace_id == workspace_id)
     )}
-    stmt = select(Document).where(Document.workspace_id == workspace_id)
+    stmt = select(Document).where(_document_visible(workspace_id))
     if not _confidential_allowed(db, workspace_id):
         stmt = stmt.where(Document.confidentiality != "riservato")
 
@@ -214,13 +247,9 @@ def search_documents(db: Session, workspace_id: str, query: str = "",
 def get_document(db: Session, workspace_id: str, uid_or_code: str) -> dict:
     """A document's current text, as Markdown."""
     document = db.scalar(
-        select(Document).where(
-            Document.workspace_id == workspace_id, Document.uid == uid_or_code
-        )
+        select(Document).where(_document_visible(workspace_id), Document.uid == uid_or_code)
     ) or db.scalar(
-        select(Document).where(
-            Document.workspace_id == workspace_id, Document.code == uid_or_code
-        )
+        select(Document).where(_document_visible(workspace_id), Document.code == uid_or_code)
     )
     if document is None:
         return {"found": False, "looked_for": uid_or_code}

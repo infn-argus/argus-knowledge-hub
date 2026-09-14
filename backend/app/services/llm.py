@@ -26,6 +26,8 @@ class Endpoint:
     model: str
     embedding_model: Optional[str] = None
     vision_model: Optional[str] = None
+    asr_model: Optional[str] = None
+    tts_model: Optional[str] = None
     api_key: Optional[str] = None
 
     @property
@@ -90,6 +92,20 @@ def check(endpoint: Endpoint) -> tuple[bool, Optional[str], list[str]]:
         return (
             False,
             f"This endpoint does not serve the vision model “{endpoint.vision_model}”.",
+            models,
+        )
+    # Speech is checked here for the same reason as the rest: a wrong name
+    # would otherwise surface at a microphone, mid-shift, in a control room.
+    if endpoint.asr_model and endpoint.asr_model not in models:
+        return (
+            False,
+            f"This endpoint does not serve the speech-to-text model “{endpoint.asr_model}”.",
+            models,
+        )
+    if endpoint.tts_model and endpoint.tts_model not in models:
+        return (
+            False,
+            f"This endpoint does not serve the text-to-speech model “{endpoint.tts_model}”.",
             models,
         )
 

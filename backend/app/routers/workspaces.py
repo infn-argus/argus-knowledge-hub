@@ -12,6 +12,7 @@ from app.models.role import RoleBinding
 from app.services.permissions import effective_permissions, has_permission, user_group_uids
 from app.models.global_value import GlobalValue
 from app.models.membership import Membership
+from app.models.document import Document
 from app.models.schema import Schema
 from app.models.user import User
 from app.models.workspace import Workspace
@@ -289,6 +290,12 @@ def update_workspace(
         db.query(Schema).filter(Schema.workspace_id == workspace_id).update(
             {Schema.is_global: True}, synchronize_session=False
         )
+        # Documents too, except confidential ones: sharing a workspace is not
+        # a decision to publish what somebody marked riservato.
+        db.query(Document).filter(
+            Document.workspace_id == workspace_id,
+            Document.confidentiality != "riservato",
+        ).update({Document.is_global: True}, synchronize_session=False)
         db.commit()
         rebuild_relations_for_schemas(db, schema_uids)
         db.commit()

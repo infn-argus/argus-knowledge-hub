@@ -619,6 +619,8 @@ export interface AppDocument {
   authority_level: AuthorityLevel;
   confidentiality: Confidentiality;
   source: string;
+  /** Readable from every workspace. Never true for a riservato document. */
+  is_global: boolean;
   current_revision_uid: string | null;
   created_at: string;
   updated_at: string;
@@ -650,6 +652,7 @@ export interface DocumentUpdateInput {
   responsible_service_asset_uid?: string | null;
   authority_level?: AuthorityLevel;
   confidentiality?: Confidentiality;
+  is_global?: boolean;
 }
 
 export interface DocumentRevision {
@@ -807,6 +810,8 @@ export interface LLMConfig {
   model: string;
   embedding_model: string | null;
   vision_model: string | null;
+  asr_model: string | null;
+  tts_model: string | null;
   /** The key itself is never sent back — only whether one is stored. */
   has_api_key: boolean;
   enabled: boolean;
@@ -821,6 +826,8 @@ export interface LLMConfigInput {
   model: string;
   embedding_model?: string | null;
   vision_model?: string | null;
+  asr_model?: string | null;
+  tts_model?: string | null;
   /** Omitted keeps the stored key; "" clears it. */
   api_key?: string;
   enabled: boolean;
@@ -840,6 +847,11 @@ export interface AIStatus {
   model: string | null;
   has_embeddings: boolean;
   has_vision: boolean;
+  has_asr: boolean;
+  has_tts: boolean;
+  /** Set when these settings belong to another workspace — the shared
+   * default — rather than to this one. */
+  inherited_from: string | null;
   reason: string | null;
 }
 

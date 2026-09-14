@@ -1,23 +1,18 @@
-"""Configuring where AI features send their requests.
+"""The shared AI endpoint.
 
-The behaviour that matters is the gate: nothing is available until an
-endpoint has been checked, and the check has to fail for the three reasons
-that actually occur — unreachable, key rejected, model not served — rather
-than just pinging the host.
+With a workspace per beamline, configuring the same gateway eight times is
+eight chances to get it wrong. A workspace with no endpoint of its own uses
+the one in the global workspace — except for the two things that must not
+travel with it.
 """
 import secrets
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app.auth import hash_token
 from app.db import Base, SessionLocal, engine
-from app.main import app
-from app.models.api_token import ApiToken
+from app.models.llm_config import LLMConfig
 from app.models.workspace import Workspace
-from app.services.llm import Endpoint, check
-
-client = TestClient(app)
+from app.services.ai_config import resolve
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -26,145 +21,105 @@ def _schema():
     yield
 
 
-@pytest.fixture()
-def token():
+@pytest.fixture(autouse=True)
+def _only_this_tests_global_workspace():
+    """The shared default is installation-wide by definition, so a global
+    workspace left behind by another test would answer for this one."""
     db = SessionLocal()
-    workspace_id = f"ai-{secrets.token_hex(4)}"
-    db.add(Workspace(id=workspace_id, name="Test"))
-    db.flush()
-    raw = secrets.token_urlsafe(16)
-    db.add(ApiToken(workspace_id=workspace_id, token_hash=hash_token(raw)))
+    db.query(Workspace).filter(Workspace.is_global.is_(True)).update(
+        {Workspace.is_global: False}, synchronize_session=False
+    )
     db.commit()
     db.close()
-    return raw
+    yield
 
 
-def auth(raw: str) -> dict:
-    return {"Authorization": f"Bearer {raw}"}
+def make(is_global=False, **config):
+    """A workspace, optionally with an endpoint configured in it."""
+    ws = f"ws-{secrets.token_hex(4)}"
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name=ws, is_global=is_global))
+    db.flush()
+    if config:
+        db.add(LLMConfig(workspace_id=ws, **{
+            "base_url": "https://shared/v1", "model": "minimax-m27",
+            "enabled": True, "last_check_ok": True, **config,
+        }))
+    db.commit()
+    db.close()
+    return ws
 
 
-def test_a_workspace_starts_with_no_endpoint(token):
-    assert client.get("/v1/ai/config", headers=auth(token)).json() is None
-
-    status = client.get("/v1/ai/status", headers=auth(token)).json()
-    assert status["configured"] is False
-    assert status["validated"] is False
-    assert "No AI endpoint" in status["reason"]
-
-
-def test_the_api_key_is_never_returned(token):
-    """It is stored encrypted and only decrypted to make a request. A form
-    needs to know whether one is set, and nothing more."""
-    resp = client.put(
-        "/v1/ai/config",
-        json={
-            "base_url": "https://gateway.invalid/v1",
-            "model": "some-model",
-            "api_key": "sk-secret-value",
-            "enabled": True,
-        },
-        headers=auth(token),
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["has_api_key"] is True
-    assert "api_key" not in body
-    assert "sk-secret-value" not in resp.text
+def test_a_workspace_with_no_endpoint_uses_the_shared_default():
+    make(is_global=True, base_url="https://gw.infn.it/v1", model="minimax-m27",
+         vision_model="gemma-4-31b-it", asr_model="whisper-3", tts_model="kokoro-1")
+    beamline = make()
+    db = SessionLocal()
+    config, inherited_from = resolve(db, beamline)
+    assert config is not None and inherited_from is not None
+    assert config.base_url == "https://gw.infn.it/v1"
+    assert config.vision_model == "gemma-4-31b-it"
+    assert (config.asr_model, config.tts_model) == ("whisper-3", "kokoro-1")
+    db.close()
 
 
-def test_the_stored_key_survives_an_edit_that_omits_it(token):
-    client.put(
-        "/v1/ai/config",
-        json={"base_url": "https://gateway.invalid/v1", "model": "m", "api_key": "sk-keep-me"},
-        headers=auth(token),
-    )
-    # A later edit that changes the model shouldn't wipe the credential.
-    resp = client.put(
-        "/v1/ai/config",
-        json={"base_url": "https://gateway.invalid/v1", "model": "m2"},
-        headers=auth(token),
-    )
-    assert resp.json()["has_api_key"] is True
+def test_its_own_endpoint_wins_over_the_default():
+    make(is_global=True, base_url="https://shared/v1", model="shared-model")
+    beamline = make(base_url="https://own/v1", model="own-model")
+    db = SessionLocal()
+    config, inherited_from = resolve(db, beamline)
+    assert (config.base_url, inherited_from) == ("https://own/v1", None)
+    db.close()
 
 
-def test_an_empty_key_clears_it(token):
-    """Some endpoints on the internal network take no key at all."""
-    client.put(
-        "/v1/ai/config",
-        json={"base_url": "https://gateway.invalid/v1", "model": "m", "api_key": "sk-x"},
-        headers=auth(token),
-    )
-    resp = client.put(
-        "/v1/ai/config",
-        json={"base_url": "https://gateway.invalid/v1", "model": "m", "api_key": ""},
-        headers=auth(token),
-    )
-    assert resp.json()["has_api_key"] is False
+def test_permission_to_send_confidential_text_never_travels():
+    """It is a decision about this workspace's documents, and nobody made it
+    by ticking a box in another workspace."""
+    make(is_global=True, allow_confidential=True)
+    beamline = make()
+    db = SessionLocal()
+    config, _ = resolve(db, beamline)
+    assert config.allow_confidential is False
+    db.close()
 
 
-def test_changing_the_settings_invalidates_the_last_check(token):
-    """What a check proved was about the configuration it ran against. A
-    new model name has not been checked, whatever the old result said."""
-    client.put(
-        "/v1/ai/config",
-        json={"base_url": "https://gateway.invalid/v1", "model": "m", "enabled": True},
-        headers=auth(token),
-    )
-    client.post("/v1/ai/config/check", headers=auth(token))
-
-    resp = client.put(
-        "/v1/ai/config",
-        json={"base_url": "https://gateway.invalid/v1", "model": "different", "enabled": True},
-        headers=auth(token),
-    )
-    assert resp.json()["last_check_ok"] is None
-    assert client.get("/v1/ai/status", headers=auth(token)).json()["validated"] is False
+def test_a_default_that_has_not_been_checked_is_not_inherited():
+    """Inheriting a broken endpoint only moves the failure to the point of
+    use, which is what checking exists to prevent."""
+    make(is_global=True, last_check_ok=False)
+    beamline = make()
+    db = SessionLocal()
+    assert resolve(db, beamline) == (None, None)
+    db.close()
 
 
-def test_features_stay_unavailable_until_a_check_passes(token):
-    """Enabling is not the same as working. An endpoint whose key has since
-    been rotated must read as unavailable, not offer suggestions that fail."""
-    client.put(
-        "/v1/ai/config",
-        json={"base_url": "https://gateway.invalid/v1", "model": "m", "enabled": True},
-        headers=auth(token),
-    )
-    status = client.get("/v1/ai/status", headers=auth(token)).json()
-    assert status["enabled"] is True
-    assert status["validated"] is False
-    assert "not been checked" in status["reason"]
+def test_a_disabled_default_is_not_inherited():
+    make(is_global=True, enabled=False)
+    beamline = make()
+    db = SessionLocal()
+    assert resolve(db, beamline) == (None, None)
+    db.close()
 
 
-def test_checking_an_unconfigured_workspace_says_so(token):
-    assert client.post("/v1/ai/config/check", headers=auth(token)).status_code == 404
+def test_inheriting_never_writes_to_the_shared_configuration():
+    """The borrowed settings are a copy; a caller that touches them must not
+    reconfigure every other beamline."""
+    global_ws = make(is_global=True, base_url="https://shared/v1")
+    beamline = make()
+    db = SessionLocal()
+    config, _ = resolve(db, beamline)
+    config.base_url = "https://tampered/v1"
+    db.commit()
+    db.close()
+
+    db = SessionLocal()
+    assert db.get(LLMConfig, global_ws).base_url == "https://shared/v1"
+    assert db.get(LLMConfig, beamline) is None, "no row should have been created"
+    db.close()
 
 
-def test_an_unreachable_endpoint_is_reported_not_raised():
-    ok, error, models = check(
-        Endpoint(base_url="http://127.0.0.1:9/v1", model="anything")
-    )
-    assert ok is False
-    assert "Could not reach" in error
-    assert models == []
-
-
-def test_a_model_the_endpoint_does_not_serve_is_caught(monkeypatch):
-    """The failure that passes every other health check and then breaks on
-    the first real request."""
-    monkeypatch.setattr(
-        "app.services.llm.list_models", lambda endpoint: ["qwen36-27b", "gemma-4-31b-it"]
-    )
-    ok, error, models = check(Endpoint(base_url="https://x/v1", model="minimax-m27"))
-    assert ok is False
-    assert "does not serve" in error and "minimax-m27" in error
-    assert "qwen36-27b" in error, "and it should say what is on offer"
-    assert models == ["qwen36-27b", "gemma-4-31b-it"]
-
-
-def test_a_missing_embedding_model_is_caught(monkeypatch):
-    monkeypatch.setattr("app.services.llm.list_models", lambda endpoint: ["chat-model"])
-    ok, error, _models = check(
-        Endpoint(base_url="https://x/v1", model="chat-model", embedding_model="nope")
-    )
-    assert ok is False
-    assert "embedding model" in error
+def test_with_no_global_workspace_there_is_simply_nothing():
+    beamline = make()
+    db = SessionLocal()
+    assert resolve(db, beamline) == (None, None)
+    db.close()

@@ -214,7 +214,8 @@ def test_another_workspace_is_not_reachable(world):
     db.close()
 
     assert tool(raw_other, "get_object", {"uid_or_key": ids["camera"]})["found"] is False
-    assert tool(raw_other, "search_objects", {})["total"] == 0
+    found = tool(raw_other, "search_objects", {})
+    assert ids["camera"] not in [o["uid"] for o in found["objects"]]
 
 
 # --- confidentiality ----------------------------------------------------
@@ -230,7 +231,8 @@ def test_a_confidential_document_is_withheld_by_default(world):
     db.close()
 
     assert tool(raw, "get_document", {"uid_or_code": ids["document"]})["found"] is False
-    assert tool(raw, "search_documents", {})["total"] == 0
+    found = tool(raw, "search_documents", {})
+    assert ids["document"] not in [d["uid"] for d in found["documents"]]
 
 
 def test_a_confidential_document_is_returned_where_the_workspace_allows_it(world):

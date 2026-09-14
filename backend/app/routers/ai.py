@@ -39,6 +39,7 @@ from app.schemas.ai import (
     SuggestRunResult,
 )
 from app.services.ai_authoring import draft_document, draft_ticket_fields, review_document
+from app.services.ai_config import resolve as resolve_config
 from app.services.ask import ask as run_ask
 from app.services.asset_vision import MAX_IMAGE_BYTES, identify
 from app.services.text_links import objects_mentioned
@@ -55,6 +56,8 @@ def endpoint_for(config: LLMConfig) -> Endpoint:
         model=config.model,
         embedding_model=config.embedding_model,
         vision_model=config.vision_model,
+        asr_model=config.asr_model,
+        tts_model=config.tts_model,
         api_key=decrypt_secret(config.encrypted_secret) if config.encrypted_secret else None,
     )
 
@@ -66,6 +69,8 @@ def _out(config: LLMConfig) -> LLMConfigOut:
         model=config.model,
         embedding_model=config.embedding_model,
         vision_model=config.vision_model,
+        asr_model=config.asr_model,
+        tts_model=config.tts_model,
         has_api_key=bool(config.encrypted_secret),
         enabled=config.enabled,
         allow_confidential=config.allow_confidential,
@@ -102,6 +107,8 @@ def put_config(
     config.model = body.model.strip()
     config.embedding_model = (body.embedding_model or "").strip() or None
     config.vision_model = (body.vision_model or "").strip() or None
+    config.asr_model = (body.asr_model or "").strip() or None
+    config.tts_model = (body.tts_model or "").strip() or None
     config.enabled = body.enabled
     config.allow_confidential = body.allow_confidential
 
@@ -156,49 +163,43 @@ def status(
     A feature that cannot work should not be presented as if it could, and
     the reason belongs here rather than in a failed request later.
     """
-    config = _get(db, workspace_id)
+    config, inherited_from = resolve_config(db, workspace_id)
     if config is None:
         return AIStatus(
             configured=False,
             enabled=False,
             validated=False,
-            reason="No AI endpoint is configured for this workspace.",
+            reason="No AI endpoint is configured for this workspace, and no shared "
+                   "default is available.",
         )
-    if not config.enabled:
-        return AIStatus(
-            configured=True,
-            enabled=False,
-            validated=bool(config.last_check_ok),
-            model=config.model,
-            has_embeddings=bool(config.embedding_model),
-            has_vision=bool(config.vision_model),
-            reason="AI features are switched off for this workspace.",
-        )
-    if not config.last_check_ok:
-        return AIStatus(
-            configured=True,
-            enabled=True,
-            validated=False,
-            model=config.model,
-            has_embeddings=bool(config.embedding_model),
-            has_vision=bool(config.vision_model),
-            reason=config.last_check_error
-            or "The AI endpoint has not been checked since it was last changed.",
-        )
-    return AIStatus(
-        configured=True,
-        enabled=True,
-        validated=True,
+
+    shape = dict(
         model=config.model,
         has_embeddings=bool(config.embedding_model),
         has_vision=bool(config.vision_model),
+        has_asr=bool(config.asr_model),
+        has_tts=bool(config.tts_model),
+        inherited_from=inherited_from,
     )
+    if not config.enabled:
+        return AIStatus(
+            configured=True, enabled=False, validated=bool(config.last_check_ok),
+            reason="AI features are switched off for this workspace.", **shape,
+        )
+    if not config.last_check_ok:
+        return AIStatus(
+            configured=True, enabled=True, validated=False,
+            reason=config.last_check_error
+            or "The AI endpoint has not been checked since it was last changed.",
+            **shape,
+        )
+    return AIStatus(configured=True, enabled=True, validated=True, **shape)
 
 
 def _usable_config(db: Session, workspace_id: str) -> LLMConfig:
     """The endpoint, if it is actually usable. The same gate the status
     endpoint reports, enforced rather than trusted."""
-    config = _get(db, workspace_id)
+    config, _inherited_from = resolve_config(db, workspace_id)
     if config is None:
         raise HTTPException(status_code=409, detail="No AI endpoint is configured")
     if not config.enabled:

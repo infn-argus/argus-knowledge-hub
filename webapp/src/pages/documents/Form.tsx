@@ -28,6 +28,7 @@ export function DocumentForm() {
   const [documentTypeUid, setDocumentTypeUid] = useState(searchParams.get("document_type_uid") ?? "");
   const [authorityLevel, setAuthorityLevel] = useState<AuthorityLevel>("informativo");
   const [confidentiality, setConfidentiality] = useState<Confidentiality>("interno");
+  const [isGlobal, setIsGlobal] = useState(false);
   const [bodyMarkdown, setBodyMarkdown] = useState("");
   const [steps, setSteps] = useState<DocumentStep[]>([]);
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
@@ -86,6 +87,7 @@ export function DocumentForm() {
           document_type_uid: documentTypeUid || null,
           authority_level: authorityLevel,
           confidentiality: confidentiality,
+          is_global: isGlobal && confidentiality !== "riservato",
         });
         await documentsApi.updateRevision(createdUid, `${createdUid}-r1`, {
           body_markdown: bodyMarkdown,
@@ -197,6 +199,24 @@ export function DocumentForm() {
             </select>
           </div>
         </div>
+
+        <label className="flex items-start gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={isGlobal && confidentiality !== "riservato"}
+            disabled={confidentiality === "riservato"}
+            onChange={(e) => setIsGlobal(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Share with every workspace
+            <span className="block text-xs text-slate-500">
+              {confidentiality === "riservato"
+                ? "Not available for a riservato document — confidential and readable everywhere cannot both be true."
+                : "For documentation that covers more than one beamline. Other workspaces can read it; editing stays here."}
+            </span>
+          </span>
+        </label>
 
         <div>
           <label className="block text-sm font-medium text-slate-700">Body</label>

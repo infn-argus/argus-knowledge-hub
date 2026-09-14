@@ -9,6 +9,8 @@ class LLMConfigIn(BaseModel):
     model: str
     embedding_model: Optional[str] = None
     vision_model: Optional[str] = None
+    asr_model: Optional[str] = None
+    tts_model: Optional[str] = None
     # Left out on an update, the stored key is kept. Sent empty, it is
     # cleared — for an endpoint that takes none.
     api_key: Optional[str] = None
@@ -27,6 +29,8 @@ class LLMConfigOut(BaseModel):
     model: str
     embedding_model: Optional[str]
     vision_model: Optional[str]
+    asr_model: Optional[str]
+    tts_model: Optional[str]
     has_api_key: bool
     enabled: bool
     allow_confidential: bool
@@ -53,6 +57,12 @@ class AIStatus(BaseModel):
     model: Optional[str] = None
     has_embeddings: bool = False
     has_vision: bool = False
+    has_asr: bool = False
+    has_tts: bool = False
+    # The workspace this endpoint is configured in, when it is not this one.
+    # A beamline running on the shared default should be told so rather than
+    # shown settings it does not own.
+    inherited_from: Optional[str] = None
     # Why it is unavailable, in words a person can act on.
     reason: Optional[str] = None
 

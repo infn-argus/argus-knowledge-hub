@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,6 +41,11 @@ class Document(Base, WorkspaceScopedMixin, TimestampMixin):
     current_revision_uid: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("document_revisions.uid", ondelete="SET NULL"), nullable=True
     )
+    # Readable from any workspace when true — the same contract schemas and
+    # assets already have. A procedure covering every Agilent ion pump is
+    # written once; editing and deleting it still belong to the workspace
+    # that owns it (workspace_id, unchanged).
+    is_global: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class DocumentRevision(Base, TimestampMixin):

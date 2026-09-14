@@ -287,21 +287,34 @@ _NEIGHBOURS = {
 }
 
 
+def _asset_visible(db: Session, asset: Asset, workspace_id: str) -> bool:
+    """The same rule the REST API applies (routers/assets._get_visible_asset).
+
+    It has to be the same rule, or a global model is referenced everywhere
+    and then vanishes from the one view built to show what connects to what
+    — which is where an installation with a shared model layer needs it most.
+    """
+    if asset.workspace_id == workspace_id or asset.is_global:
+        return True
+    schema = db.get(Schema, asset.schema_uid)
+    return bool(schema is not None and schema.is_global)
+
+
 def load_node(db: Session, workspace_id: str, kind: str, uid: str) -> Optional[Node]:
     """The node itself, or None when it doesn't exist or isn't this
     workspace's to see."""
     if kind == "asset":
         asset = db.get(Asset, uid)
-        return _label_asset(asset) if asset and asset.workspace_id == workspace_id else None
+        return _label_asset(asset) if asset and _asset_visible(db, asset, workspace_id) else None
     if kind == "ticket":
         issue = db.get(Issue, uid)
         return _label_issue(issue) if issue and issue.workspace_id == workspace_id else None
     if kind == "document":
         document = db.get(Document, uid)
-        return (
-            _label_document(document)
-            if document and document.workspace_id == workspace_id else None
+        visible = document is not None and (
+            document.workspace_id == workspace_id or document.is_global
         )
+        return _label_document(document) if visible else None
     if kind == "group":
         group = db.get(Group, uid)
         return _label_group(group) if group else None
@@ -349,6 +362,19 @@ def traverse(
             for edge, neighbour in expand(db, workspace_id, ref.uid, ctx):
                 if wanted is not None and neighbour.kind not in wanted:
                     continue
+
+                # Resolve before drawing. Relations are not filtered by
+                # workspace when they are collected, so a link to another
+                # workspace's private object would otherwise be drawn as an
+                # edge to nothing — naming a uid the caller may not see, and
+                # rendering as a line into empty space.
+                known = neighbour in seen_nodes
+                node = None if known else load_node(
+                    db, workspace_id, neighbour.kind, neighbour.uid
+                )
+                if not known and node is None:
+                    continue
+
                 signature = (
                     edge.from_kind, edge.from_uid, edge.to_kind, edge.to_uid,
                     edge.relation, edge.via,
@@ -356,14 +382,11 @@ def traverse(
                 if signature not in seen_edges:
                     seen_edges.add(signature)
                     graph.edges.append(edge)
-                if neighbour in seen_nodes:
+                if known:
                     continue
                 if len(graph.nodes) >= max_nodes:
                     graph.truncated = True
                     return graph
-                node = load_node(db, workspace_id, neighbour.kind, neighbour.uid)
-                if node is None:
-                    continue
                 node.depth = hop
                 seen_nodes.add(neighbour)
                 graph.nodes.append(node)

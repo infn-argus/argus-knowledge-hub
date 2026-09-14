@@ -12,11 +12,14 @@ import { aiApi } from "../../api/client";
 export function WorkspaceAI() {
   const queryClient = useQueryClient();
   const config = useQuery({ queryKey: ["ai-config"], queryFn: aiApi.getConfig });
+  const status = useQuery({ queryKey: ["ai-status"], queryFn: aiApi.status });
 
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
   const [embeddingModel, setEmbeddingModel] = useState("");
   const [visionModel, setVisionModel] = useState("");
+  const [asrModel, setAsrModel] = useState("");
+  const [ttsModel, setTtsModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [enabled, setEnabled] = useState(false);
   const [allowConfidential, setAllowConfidential] = useState(false);
@@ -30,6 +33,8 @@ export function WorkspaceAI() {
       setModel(c.model);
       setEmbeddingModel(c.embedding_model ?? "");
       setVisionModel(c.vision_model ?? "");
+      setAsrModel(c.asr_model ?? "");
+      setTtsModel(c.tts_model ?? "");
       setEnabled(c.enabled);
       setAllowConfidential(c.allow_confidential);
     }
@@ -43,6 +48,8 @@ export function WorkspaceAI() {
         model: model.trim(),
         embedding_model: embeddingModel.trim() || null,
         vision_model: visionModel.trim() || null,
+        asr_model: asrModel.trim() || null,
+        tts_model: ttsModel.trim() || null,
         // Left out entirely when untouched, so saving a model change does
         // not wipe the stored key.
         ...(apiKey ? { api_key: apiKey } : {}),
@@ -75,6 +82,16 @@ export function WorkspaceAI() {
         this endpoint passes, so a gateway whose key has since been rotated reads as
         unavailable rather than quietly failing.
       </p>
+
+      {status.data?.inherited_from && (
+        <div className="mt-4 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+          This workspace has no endpoint of its own and is using the shared default from{" "}
+          <span className="font-medium">{status.data.inherited_from}</span>
+          {status.data.model && <> — {status.data.model}</>}. Filling this form in gives the
+          workspace its own settings instead. Confidential documents are never sent on the
+          shared default: that permission has to be granted here.
+        </div>
+      )}
 
       <div className="mt-6 space-y-4">
         <div>
@@ -127,6 +144,38 @@ export function WorkspaceAI() {
             answers “not a multimodal model” when shown a photograph. Needed to identify
             equipment from a picture.
           </p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="block text-sm font-medium text-slate-700">
+              Speech-to-text model
+            </label>
+            <input
+              value={asrModel}
+              onChange={(e) => setAsrModel(e.target.value)}
+              placeholder="whisper-large-v3"
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Optional. Used by the voice assistant on the beamline dashboards.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700">
+              Text-to-speech model
+            </label>
+            <input
+              value={ttsModel}
+              onChange={(e) => setTtsModel(e.target.value)}
+              placeholder="kokoro-82m"
+              className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Optional. Checked against the endpoint like the others, so a wrong
+              name surfaces here and not at a microphone mid-shift.
+            </p>
+          </div>
         </div>
 
         <div>
