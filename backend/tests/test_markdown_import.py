@@ -281,20 +281,24 @@ def test_an_upload_with_no_markdown_says_so(token):
     assert "Markdown" in resp.json()["detail"]
 
 
-def test_a_dwg_gets_a_viewable_dxf_beside_it(token, monkeypatch):
-    """Nothing renders DWG in a browser, so the upload produces the DXF the
-    viewer can read. The original stays exactly as uploaded."""
+def test_a_dwg_gets_viewable_sheets_beside_it(token, monkeypatch):
+    """Nothing renders DWG in a browser, so the upload produces the sheets a
+    reader can see. The original stays exactly as uploaded."""
     workspace_id, raw = token
     monkeypatch.setattr(
         "app.services.markdown_import.dwg_to_dxf",
-        lambda content: (b"0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n", None),
+        lambda content: (b"<dxf>", None),
+    )
+    monkeypatch.setattr(
+        "app.services.markdown_import.render_sheets",
+        lambda dxf: ([("a_1", b"<svg/>"), ("a_2", b"<svg/>")], None),
     )
     resp = upload(raw, [
         ("drawing-doc.md", b"# Chamber\n\n[plan](chamber.dwg)\n"),
         ("chamber.dwg", b"AC1015 fake dwg bytes"),
     ])
     assert resp.status_code == 200, resp.text
-    assert resp.json()["attachments"] == 2, "the original and its derivative"
+    assert resp.json()["attachments"] == 3, "the original and its two sheets"
 
     db = SessionLocal()
     document = db.scalar(select(Document).where(Document.workspace_id == workspace_id))
@@ -303,9 +307,11 @@ def test_a_dwg_gets_a_viewable_dxf_beside_it(token, monkeypatch):
         select(Attachment).where(Attachment.document_revision_uid == revision.uid)
     ).all()
     by_name = {a.filename: a for a in files}
-    assert set(by_name) == {"chamber.dwg", "chamber.dxf"}
+    assert set(by_name) == {"chamber.dwg", "chamber (a_1).svg", "chamber (a_2).svg"}
     assert open(by_name["chamber.dwg"].storage_path, "rb").read() == b"AC1015 fake dwg bytes"
-    assert by_name["chamber.dxf"].backend_id == f"dxf-of:{by_name['chamber.dwg'].uid}"
+    for sheet in ("chamber (a_1).svg", "chamber (a_2).svg"):
+        assert by_name[sheet].backend_id == f"sheet-of:{by_name['chamber.dwg'].uid}"
+        assert by_name[sheet].mime_type == "image/svg+xml"
     # The body still links the original, which is what someone downloads.
     assert f"/v1/attachments/{by_name['chamber.dwg'].uid}" in revision.body_markdown
     db.close()

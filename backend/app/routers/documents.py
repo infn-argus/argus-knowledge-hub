@@ -34,10 +34,12 @@ from app.schemas.document import (
 from app.services.attribute_validation import check_attributes
 from app.services.document_codes import next_code
 from app.services.drawings import (
-    derivative_filename,
-    derivative_marker,
     dwg_to_dxf,
     needs_conversion,
+    render_sheets,
+    sheet_filename,
+    sheet_marker,
+    suffix_of,
 )
 from app.services.markdown_import import import_markdown
 from app.services.current_user_attrs import stamp_current_user_attributes
@@ -578,32 +580,36 @@ async def upload_revision_attachment(
     )
     db.add(attachment)
 
-    # A DWG gets a DXF alongside it, because nothing renders DWG in a
-    # browser. The original stays exactly as uploaded and stays the file
-    # people download; if the conversion fails the upload still succeeds,
-    # since a drawing with no preview beats no drawing.
-    if needs_conversion(attachment.filename):
-        dxf, error = dwg_to_dxf(contents)
-        if dxf:
-            derivative_uid = str(uuid.uuid4())
-            derivative_path = os.path.join(ATTACHMENTS_DIR, derivative_uid)
-            with open(derivative_path, "wb") as f:
-                f.write(dxf)
+    # A drawing gets viewable sheets alongside it, because nothing renders
+    # DWG in a browser and the browser DXF renderers do not draw paper
+    # space. The original stays exactly as uploaded and stays the file
+    # people download; if this fails the upload still succeeds, since a
+    # drawing with no preview beats no drawing.
+    if needs_conversion(attachment.filename) or suffix_of(attachment.filename) == ".dxf":
+        dxf, error = (
+            dwg_to_dxf(contents) if needs_conversion(attachment.filename) else (contents, None)
+        )
+        sheets, render_error = render_sheets(dxf) if dxf else ([], None)
+        for sheet_name, svg in sheets:
+            sheet_uid = str(uuid.uuid4())
+            sheet_path = os.path.join(ATTACHMENTS_DIR, sheet_uid)
+            with open(sheet_path, "wb") as f:
+                f.write(svg)
             db.add(Attachment(
-                uid=derivative_uid,
+                uid=sheet_uid,
                 workspace_id=workspace_id,
                 document_revision_uid=rev_uid,
-                filename=derivative_filename(attachment.filename),
-                mime_type="image/vnd.dxf",
-                file_size=len(dxf),
+                filename=sheet_filename(attachment.filename, sheet_name),
+                mime_type="image/svg+xml",
+                file_size=len(svg),
                 author=_actor_user_id(identity),
-                storage_path=derivative_path,
-                backend_id=derivative_marker(attachment.uid),
+                storage_path=sheet_path,
+                backend_id=sheet_marker(attachment.uid),
             ))
-        else:
+        if not sheets:
             # Recorded on the attachment itself so the page can say why
             # there is no preview instead of silently offering none.
-            attachment.backend_url = f"preview-failed: {error}"
+            attachment.backend_url = f"preview-failed: {error or render_error}"
 
     db.commit()
     db.refresh(attachment)

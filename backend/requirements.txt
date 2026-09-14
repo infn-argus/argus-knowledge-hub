@@ -13,3 +13,7 @@ ldap3==2.9.1
 # Kerberos (GSSAPI) binding for ldap3 — see LDAP_AUTH=gssapi.
 gssapi==1.8.3
 markdownify==1.2.3
+# Renders a converted drawing to SVG, including paper-space sheets.
+ezdxf==1.4.4
+# ezdxf's drawing add-on imports PIL for image entities.
+pillow==11.3.0

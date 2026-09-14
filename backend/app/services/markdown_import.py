@@ -27,10 +27,11 @@ from app.models.document import Document, DocumentRelation, DocumentRevision
 from app.services.confluence_import import choose_document_type
 from app.services.document_types import ensure_document_types, type_uid
 from app.services.drawings import (
-    derivative_filename,
-    derivative_marker,
     dwg_to_dxf,
     needs_conversion,
+    render_sheets,
+    sheet_filename,
+    sheet_marker,
 )
 
 ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
@@ -298,16 +299,18 @@ def import_markdown(
             stored[candidate] = f"/v1/attachments/{attachment.uid}"
             attachments += 1
 
-            # A drawing referenced by a document gets its viewable
-            # derivative here too, for the same reason it does on upload.
+            # A drawing referenced by a document gets its viewable sheets
+            # here too, for the same reason it does on upload.
             if needs_conversion(candidate):
                 dxf, _error = dwg_to_dxf(contents[candidate])
-                if dxf:
-                    derivative = _store_resource(
+                sheets, _render_error = render_sheets(dxf) if dxf else ([], None)
+                for sheet_name, svg in sheets:
+                    sheet = _store_resource(
                         db, workspace_id, revision.uid,
-                        derivative_filename(candidate), dxf,
+                        sheet_filename(candidate, sheet_name), svg,
                     )
-                    derivative.backend_id = derivative_marker(attachment.uid)
+                    sheet.mime_type = "image/svg+xml"
+                    sheet.backend_id = sheet_marker(attachment.uid)
                     db.flush()
                     attachments += 1
 

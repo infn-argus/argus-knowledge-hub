@@ -34,9 +34,7 @@ export function DocumentDetail() {
   const queryClient = useQueryClient();
   const [viewedRevisionUid, setViewedRevisionUid] = useState<string | null>(null);
   const [rejectComment, setRejectComment] = useState("");
-  const [viewingDrawing, setViewingDrawing] = useState<{ uid: string; filename: string } | null>(
-    null,
-  );
+  const [viewingDrawing, setViewingDrawing] = useState<string | null>(null);
   const [showReject, setShowReject] = useState(false);
 
   const document = useQuery({
@@ -222,18 +220,21 @@ export function DocumentDetail() {
 
   const sourceUrl = (viewed?.attributes?.argus_source_url as string | undefined) ?? null;
 
-  // Converted DXF files are machinery, not documents: they are listed only
-  // through the drawing they came from, never as files of their own.
+  // Rendered sheets are machinery, not documents: they are reachable only
+  // through the drawing they came from, never listed as files of their own.
   const allAttachments = attachments.data ?? [];
-  const derivatives = new Map(
-    allAttachments
-      .filter((a) => a.backend_id?.startsWith("dxf-of:"))
-      .map((a) => [a.backend_id!.slice("dxf-of:".length), a.uid]),
-  );
+  const sheetsBySource = new Map<string, typeof allAttachments>();
+  for (const a of allAttachments) {
+    const source = a.backend_id?.startsWith("sheet-of:")
+      ? a.backend_id.slice("sheet-of:".length)
+      : null;
+    if (source) sheetsBySource.set(source, [...(sheetsBySource.get(source) ?? []), a]);
+  }
   const visibleAttachments = allAttachments.filter(
-    (a) => !a.backend_id?.startsWith("dxf-of:"),
+    (a) => !a.backend_id?.startsWith("sheet-of:"),
   );
   const isDrawing = (filename: string) => /\.(dwg|dxf|dwf|dwfx)$/i.test(filename);
+  const sheetsFor = (a: { uid: string }) => sheetsBySource.get(a.uid) ?? [];
 
   const linkOptions = {
     asset: (linkAssets.data ?? []).map((a) => ({ uid: a.uid, label: a.name, sub: a.key })),
@@ -266,9 +267,6 @@ export function DocumentDetail() {
       kindLabel: LINK_KINDS.find((k) => k.kind === kind)!.label,
     };
   };
-  const previewFor = (a: { uid: string; filename: string }): string | null =>
-    /\.dxf$/i.test(a.filename) ? a.uid : derivatives.get(a.uid) ?? null;
-
   if (document.isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
   if (!document.data) return <p className="text-sm text-red-600">Document not found.</p>;
   const doc = document.data;
@@ -571,7 +569,7 @@ export function DocumentDetail() {
                 // A DWG is shown through the DXF the server converted it
                 // to; a DXF is shown directly. Either way the file people
                 // download is the one they uploaded.
-                const viewable = previewFor(a);
+                const sheets = sheetsFor(a);
                 return (
                 <div
                   key={a.uid}
@@ -580,18 +578,16 @@ export function DocumentDetail() {
                   <span className="truncate text-slate-700">{a.filename}</span>
                   <span className="ml-3 flex shrink-0 items-center gap-3 text-xs text-slate-400">
                     {a.file_size != null && <span>{Math.ceil(a.file_size / 1024)} KB</span>}
-                    {viewable && (
+                    {sheets.length > 0 && (
                       <button
                         type="button"
-                        onClick={() =>
-                          setViewingDrawing({ uid: viewable, filename: a.filename })
-                        }
+                        onClick={() => setViewingDrawing(a.uid)}
                         className="text-indigo-600 hover:underline"
                       >
-                        View
+                        View{sheets.length > 1 ? ` (${sheets.length} sheets)` : ""}
                       </button>
                     )}
-                    {isDrawing(a.filename) && !viewable && (
+                    {isDrawing(a.filename) && sheets.length === 0 && (
                       <span title={a.backend_url ?? undefined}>no preview</span>
                     )}
                     <button
@@ -687,8 +683,10 @@ export function DocumentDetail() {
 
       {viewingDrawing && (
         <DrawingViewer
-          attachmentUid={viewingDrawing.uid}
-          filename={viewingDrawing.filename}
+          sheets={sheetsFor({ uid: viewingDrawing })}
+          filename={
+            allAttachments.find((a) => a.uid === viewingDrawing)?.filename ?? "Drawing"
+          }
           onClose={() => setViewingDrawing(null)}
         />
       )}

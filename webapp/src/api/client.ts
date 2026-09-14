@@ -273,6 +273,18 @@ export const attachmentsApi = {
   // The download endpoint requires the Bearer header, so a plain <img src=""> /
   // <a href=""> can't hit it directly — fetch as a blob and hand back an object
   // URL the caller is responsible for revoking (URL.revokeObjectURL) when done.
+  /** An attachment's content as text — for the SVG sheets of a drawing,
+   * which are rendered inline rather than shown through an <img>. */
+  fetchText: async (uid: string): Promise<string> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const resp = await fetch(`${session.baseUrl}/v1/attachments/${uid}`, {
+      headers: authHeaders(session),
+    });
+    if (!resp.ok) throw new ApiError(resp.status, await resp.text());
+    return resp.text();
+  },
+
   fetchBlobUrl: async (uid: string): Promise<string> => {
     const session = await loadSession();
     if (!session) throw new Error("Not signed in");
