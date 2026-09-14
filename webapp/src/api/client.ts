@@ -37,6 +37,10 @@ import type {
   MemberInput,
   MyWorkspace,
   RelinkResult,
+  AIStatus,
+  LLMCheckResult,
+  LLMConfig,
+  LLMConfigInput,
   MarkdownImportResult,
   Relation,
   RetypeResult,
@@ -566,4 +570,14 @@ export const attributeValuesApi = {
     request<string[]>(
       `/v1/attribute-values?applies_to=${appliesTo}&key=${encodeURIComponent(key)}&limit=200`,
     ),
+};
+
+export const aiApi = {
+  getConfig: () => request<LLMConfig | null>("/v1/ai/config"),
+  saveConfig: (input: LLMConfigInput) =>
+    request<LLMConfig>("/v1/ai/config", { method: "PUT", body: json(input) }),
+  deleteConfig: () => request<void>("/v1/ai/config", { method: "DELETE" }),
+  check: () => request<LLMCheckResult>("/v1/ai/config/check", { method: "POST" }),
+  /** What the application asks before offering an AI action. */
+  status: () => request<AIStatus>("/v1/ai/status"),
 };

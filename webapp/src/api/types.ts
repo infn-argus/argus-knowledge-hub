@@ -801,6 +801,45 @@ export interface EffectivePermissions {
   workspace: string[];
 }
 
+export interface LLMConfig {
+  workspace_id: string;
+  base_url: string;
+  model: string;
+  embedding_model: string | null;
+  /** The key itself is never sent back — only whether one is stored. */
+  has_api_key: boolean;
+  enabled: boolean;
+  allow_confidential: boolean;
+  last_checked_at: string | null;
+  last_check_ok: boolean | null;
+  last_check_error: string | null;
+}
+
+export interface LLMConfigInput {
+  base_url: string;
+  model: string;
+  embedding_model?: string | null;
+  /** Omitted keeps the stored key; "" clears it. */
+  api_key?: string;
+  enabled: boolean;
+  allow_confidential: boolean;
+}
+
+export interface LLMCheckResult {
+  ok: boolean;
+  error: string | null;
+  models: string[];
+}
+
+export interface AIStatus {
+  configured: boolean;
+  enabled: boolean;
+  validated: boolean;
+  model: string | null;
+  has_embeddings: boolean;
+  reason: string | null;
+}
+
 export interface MarkdownImportResult {
   documents: number;
   attachments: number;

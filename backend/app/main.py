@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from app.db import engine
 from app.routers import (
+    ai,
     asset_subresources,
     assets,
     attachments,
@@ -47,6 +48,7 @@ app.include_router(attachments.router)
 app.include_router(global_values.router)
 app.include_router(graph.router)
 app.include_router(attribute_values.router)
+app.include_router(ai.router)
 app.include_router(groups.router)
 app.include_router(import_configs.router)
 app.include_router(imports.router)

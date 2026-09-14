@@ -29,6 +29,7 @@ import { IssueSearch } from "./pages/issues/Search";
 import { LabelList } from "./pages/labels/List";
 import { SchemaDetail } from "./pages/schemas/Detail";
 import { SchemaForm } from "./pages/schemas/Form";
+import { WorkspaceAI } from "./pages/workspace/AI";
 import { WorkspaceAccess } from "./pages/workspace/Access";
 import { WorkspaceMembers } from "./pages/workspace/Members";
 import { WorkspaceIntegrity } from "./pages/workspace/Integrity";
@@ -98,6 +99,7 @@ export function App() {
             element={<ImportConfigForm />}
           />
           <Route path="/workspaces/:workspaceId/imports/:uid" element={<ImportStatus />} />
+          <Route path="/workspaces/:workspaceId/ai" element={<WorkspaceAI />} />
           <Route path="/workspaces/:workspaceId/access" element={<WorkspaceAccess />} />
           <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembers />} />
           <Route path="/workspaces/:workspaceId/integrity" element={<WorkspaceIntegrity />} />
