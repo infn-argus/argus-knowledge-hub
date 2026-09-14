@@ -279,3 +279,57 @@ def test_an_upload_with_no_markdown_says_so(token):
     resp = upload(raw, [("layout.png", PNG)])
     assert resp.status_code == 422
     assert "Markdown" in resp.json()["detail"]
+
+
+def test_a_dwg_gets_a_viewable_dxf_beside_it(token, monkeypatch):
+    """Nothing renders DWG in a browser, so the upload produces the DXF the
+    viewer can read. The original stays exactly as uploaded."""
+    workspace_id, raw = token
+    monkeypatch.setattr(
+        "app.services.markdown_import.dwg_to_dxf",
+        lambda content: (b"0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n", None),
+    )
+    resp = upload(raw, [
+        ("drawing-doc.md", b"# Chamber\n\n[plan](chamber.dwg)\n"),
+        ("chamber.dwg", b"AC1015 fake dwg bytes"),
+    ])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["attachments"] == 2, "the original and its derivative"
+
+    db = SessionLocal()
+    document = db.scalar(select(Document).where(Document.workspace_id == workspace_id))
+    revision = db.get(DocumentRevision, document.current_revision_uid)
+    files = db.scalars(
+        select(Attachment).where(Attachment.document_revision_uid == revision.uid)
+    ).all()
+    by_name = {a.filename: a for a in files}
+    assert set(by_name) == {"chamber.dwg", "chamber.dxf"}
+    assert open(by_name["chamber.dwg"].storage_path, "rb").read() == b"AC1015 fake dwg bytes"
+    assert by_name["chamber.dxf"].backend_id == f"dxf-of:{by_name['chamber.dwg'].uid}"
+    # The body still links the original, which is what someone downloads.
+    assert f"/v1/attachments/{by_name['chamber.dwg'].uid}" in revision.body_markdown
+    db.close()
+
+
+def test_a_drawing_that_cannot_be_converted_still_arrives(token, monkeypatch):
+    """A failed conversion must not take the file with it."""
+    workspace_id, raw = token
+    monkeypatch.setattr(
+        "app.services.markdown_import.dwg_to_dxf",
+        lambda content: (None, "unsupported version"),
+    )
+    resp = upload(raw, [
+        ("doc.md", b"# Chamber\n\n[plan](chamber.dwg)\n"),
+        ("chamber.dwg", b"whatever"),
+    ])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["attachments"] == 1
+
+    db = SessionLocal()
+    document = db.scalar(select(Document).where(Document.workspace_id == workspace_id))
+    revision = db.get(DocumentRevision, document.current_revision_uid)
+    attachment = db.scalar(
+        select(Attachment).where(Attachment.document_revision_uid == revision.uid)
+    )
+    assert attachment.filename == "chamber.dwg"
+    db.close()

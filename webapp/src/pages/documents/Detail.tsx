@@ -5,6 +5,7 @@ import { assetsApi, attachmentsApi, documentsApi, schemasApi } from "../../api/c
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
 import { AttributeInput } from "../../components/AttributeInput";
 import { AttributeValue } from "../../components/AttributeValue";
+import { DrawingViewer } from "../../components/DrawingViewer";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { MarkdownView } from "../../components/MarkdownView";
 import { StepsEditor } from "../../components/StepsEditor";
@@ -25,6 +26,9 @@ export function DocumentDetail() {
   const queryClient = useQueryClient();
   const [viewedRevisionUid, setViewedRevisionUid] = useState<string | null>(null);
   const [rejectComment, setRejectComment] = useState("");
+  const [viewingDrawing, setViewingDrawing] = useState<{ uid: string; filename: string } | null>(
+    null,
+  );
   const [showReject, setShowReject] = useState(false);
 
   const document = useQuery({
@@ -170,6 +174,21 @@ export function DocumentDetail() {
   });
 
   const sourceUrl = (viewed?.attributes?.argus_source_url as string | undefined) ?? null;
+
+  // Converted DXF files are machinery, not documents: they are listed only
+  // through the drawing they came from, never as files of their own.
+  const allAttachments = attachments.data ?? [];
+  const derivatives = new Map(
+    allAttachments
+      .filter((a) => a.backend_id?.startsWith("dxf-of:"))
+      .map((a) => [a.backend_id!.slice("dxf-of:".length), a.uid]),
+  );
+  const visibleAttachments = allAttachments.filter(
+    (a) => !a.backend_id?.startsWith("dxf-of:"),
+  );
+  const isDrawing = (filename: string) => /\.(dwg|dxf|dwf|dwfx)$/i.test(filename);
+  const previewFor = (a: { uid: string; filename: string }): string | null =>
+    /\.dxf$/i.test(a.filename) ? a.uid : derivatives.get(a.uid) ?? null;
 
   if (document.isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
   if (!document.data) return <p className="text-sm text-red-600">Document not found.</p>;
@@ -399,7 +418,12 @@ export function DocumentDetail() {
               Files
             </label>
             <div className="mt-1 space-y-1">
-              {(attachments.data ?? []).map((a) => (
+              {visibleAttachments.map((a) => {
+                // A DWG is shown through the DXF the server converted it
+                // to; a DXF is shown directly. Either way the file people
+                // download is the one they uploaded.
+                const viewable = previewFor(a);
+                return (
                 <div
                   key={a.uid}
                   className="flex items-center justify-between rounded border border-slate-100 px-2 py-1 text-sm"
@@ -407,6 +431,20 @@ export function DocumentDetail() {
                   <span className="truncate text-slate-700">{a.filename}</span>
                   <span className="ml-3 flex shrink-0 items-center gap-3 text-xs text-slate-400">
                     {a.file_size != null && <span>{Math.ceil(a.file_size / 1024)} KB</span>}
+                    {viewable && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewingDrawing({ uid: viewable, filename: a.filename })
+                        }
+                        className="text-indigo-600 hover:underline"
+                      >
+                        View
+                      </button>
+                    )}
+                    {isDrawing(a.filename) && !viewable && (
+                      <span title={a.backend_url ?? undefined}>no preview</span>
+                    )}
                     <button
                       type="button"
                       onClick={() => downloadAttachment(a.uid, a.filename)}
@@ -416,8 +454,9 @@ export function DocumentDetail() {
                     </button>
                   </span>
                 </div>
-              ))}
-              {(attachments.data ?? []).length === 0 && (
+                );
+              })}
+              {visibleAttachments.length === 0 && (
                 <p className="text-sm text-slate-400">
                   {viewed.state === "draft"
                     ? "None yet — drop a file into the editor above."
@@ -496,6 +535,14 @@ export function DocumentDetail() {
       )}
 
       {!viewed && <p className="mt-4 text-sm text-slate-400">No revisions.</p>}
+
+      {viewingDrawing && (
+        <DrawingViewer
+          attachmentUid={viewingDrawing.uid}
+          filename={viewingDrawing.filename}
+          onClose={() => setViewingDrawing(null)}
+        />
+      )}
 
       <p className="mt-4">
         <Link to="/documents" className="text-sm text-slate-500 hover:underline">

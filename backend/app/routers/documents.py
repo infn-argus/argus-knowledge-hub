@@ -32,6 +32,12 @@ from app.schemas.document import (
     RetypeResult,
 )
 from app.services.attribute_validation import check_attributes
+from app.services.drawings import (
+    derivative_filename,
+    derivative_marker,
+    dwg_to_dxf,
+    needs_conversion,
+)
 from app.services.markdown_import import import_markdown
 from app.services.current_user_attrs import stamp_current_user_attributes
 
@@ -566,6 +572,34 @@ async def upload_revision_attachment(
         storage_path=storage_path,
     )
     db.add(attachment)
+
+    # A DWG gets a DXF alongside it, because nothing renders DWG in a
+    # browser. The original stays exactly as uploaded and stays the file
+    # people download; if the conversion fails the upload still succeeds,
+    # since a drawing with no preview beats no drawing.
+    if needs_conversion(attachment.filename):
+        dxf, error = dwg_to_dxf(contents)
+        if dxf:
+            derivative_uid = str(uuid.uuid4())
+            derivative_path = os.path.join(ATTACHMENTS_DIR, derivative_uid)
+            with open(derivative_path, "wb") as f:
+                f.write(dxf)
+            db.add(Attachment(
+                uid=derivative_uid,
+                workspace_id=workspace_id,
+                document_revision_uid=rev_uid,
+                filename=derivative_filename(attachment.filename),
+                mime_type="image/vnd.dxf",
+                file_size=len(dxf),
+                author=_actor_user_id(identity),
+                storage_path=derivative_path,
+                backend_id=derivative_marker(attachment.uid),
+            ))
+        else:
+            # Recorded on the attachment itself so the page can say why
+            # there is no preview instead of silently offering none.
+            attachment.backend_url = f"preview-failed: {error}"
+
     db.commit()
     db.refresh(attachment)
     return attachment

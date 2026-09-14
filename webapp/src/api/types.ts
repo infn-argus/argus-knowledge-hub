@@ -230,6 +230,10 @@ export interface Attachment {
   workspace_id: string;
   asset_uid: string | null;
   document_revision_uid?: string | null;
+  /** "dxf-of:<uid>" on a converted drawing; identifies what it came from. */
+  backend_id?: string | null;
+  /** Carries "preview-failed: …" when a drawing could not be converted. */
+  backend_url?: string | null;
   filename: string;
   mime_type: string | null;
   file_size: number | null;
