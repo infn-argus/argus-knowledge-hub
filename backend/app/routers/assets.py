@@ -12,7 +12,15 @@ from app.db import get_db
 from app.models.asset import Asset, Relation
 from app.models.attachment import Attachment
 from app.models.schema import Schema
-from app.schemas.asset import AssetCreate, AssetOut, AssetUpdate, RelationCreate, RelationOut
+from app.schemas.asset import (
+    AssetCreate,
+    AssetOut,
+    AssetUpdate,
+    BulkDeleteRequest,
+    BulkDeleteResult,
+    RelationCreate,
+    RelationOut,
+)
 from app.services.attribute_validation import validate_attributes
 from app.services.current_user_attrs import stamp_current_user_attributes
 from app.services.relations import rebuild_asset_relations, rebuild_asset_relations_with_neighbors
@@ -142,6 +150,25 @@ def delete_asset(
     asset = _get_owned_asset(uid, workspace_id, db)
     db.delete(asset)
     db.commit()
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResult)
+def bulk_delete_assets(
+    body: BulkDeleteRequest,
+    workspace_id: str = Depends(require_permission("delete")),
+    db: Session = Depends(get_db),
+):
+    deleted = 0
+    missing: list[str] = []
+    for uid in body.uids:
+        asset = db.get(Asset, uid)
+        if asset is None or asset.workspace_id != workspace_id:
+            missing.append(uid)
+            continue
+        db.delete(asset)
+        deleted += 1
+    db.commit()
+    return BulkDeleteResult(deleted=deleted, not_found=missing)
 
 
 @router.post("/{uid}/avatar", response_model=AssetOut)

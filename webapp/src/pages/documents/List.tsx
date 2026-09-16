@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { documentsApi, schemasApi } from "../../api/client";
-import { TransferSelectionBar } from "../../components/TransferSelectionBar";
+import { BulkActionsBar } from "../../components/BulkActionsBar";
 
 const AUTHORITY_STYLES: Record<string, string> = {
   ufficiale: "bg-indigo-100 text-indigo-700",
@@ -105,12 +105,16 @@ export function DocumentList() {
         )}
       </div>
 
-      <TransferSelectionBar
+      <BulkActionsBar
         selected={selected}
         kind="document_uids"
         label="documents"
-        onStarted={() => setSelected(new Set())}
+        onStarted={() => {
+          queryClient.invalidateQueries({ queryKey: ["documents"] });
+          setSelected(new Set());
+        }}
         onClear={() => setSelected(new Set())}
+        bulkDelete={documentsApi.bulkDelete}
       />
 
       {data && (

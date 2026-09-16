@@ -320,6 +320,7 @@ export interface TransferRequest {
   mode: TransferMode;
   type_uids?: string[];
   include_instances?: boolean;
+  include_descendant_types?: boolean;
   asset_uids?: string[];
   document_uids?: string[];
   issue_uids?: string[];
@@ -979,6 +980,11 @@ export interface MarkdownImportResult {
 
 export interface RetypeResult {
   moved: number;
+  not_found: string[];
+}
+
+export interface BulkDeleteResult {
+  deleted: number;
   not_found: string[];
 }
 

@@ -47,6 +47,15 @@ class AssetOut(BaseModel):
     deleted_at: Optional[datetime]
 
 
+class BulkDeleteRequest(BaseModel):
+    uids: list[str]
+
+
+class BulkDeleteResult(BaseModel):
+    deleted: int
+    not_found: list[str]
+
+
 class RelationCreate(BaseModel):
     from_asset_uid: str
     to_asset_uid: str

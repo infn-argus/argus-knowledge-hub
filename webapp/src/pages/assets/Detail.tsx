@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
   assetSubresourcesApi,
@@ -17,6 +17,7 @@ import { ImageSlot } from "../../components/ImageSlot";
 import { isScannableType, LabelCode, printLabel } from "../../components/LabelCode";
 import { LabelScanner } from "../../components/LabelScanner";
 import { RelationGraph } from "../../components/RelationGraph";
+import { TransferItemAction } from "../../components/TransferItemAction";
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
 
 function SectionCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
@@ -45,6 +46,7 @@ async function downloadAttachment(uid: string, filename: string) {
 export function AssetDetail() {
   const { uid } = useParams<{ uid: string }>();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [commentText, setCommentText] = useState("");
   const [commentAuthor, setCommentAuthor] = useState("web-user");
@@ -94,6 +96,15 @@ export function AssetDetail() {
     queryKey: ["asset-labels", uid],
     queryFn: () => assetSubresourcesApi.labels(uid!),
     enabled: !!uid,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => assetsApi.delete(uid!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["assets"] });
+      navigate("/assets/search");
+    },
+    onError: () => alert("Delete failed."),
   });
 
   const uploadMutation = useMutation({
@@ -217,12 +228,24 @@ export function AssetDetail() {
             </p>
           </div>
         </div>
-        <Link
-          to={`/assets/${a.uid}/edit`}
-          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-        >
-          Edit
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to={`/assets/${a.uid}/edit`}
+            className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          >
+            Edit
+          </Link>
+          <TransferItemAction kind="asset" uid={a.uid} />
+          <button
+            onClick={() => {
+              if (confirm(`Delete object "${a.name}"? This cannot be undone.`)) deleteMutation.mutate();
+            }}
+            disabled={deleteMutation.isPending}
+            className="rounded border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            Delete
+          </button>
+        </div>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">

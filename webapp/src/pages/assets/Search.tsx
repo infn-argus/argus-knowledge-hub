@@ -1,13 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { assetsApi, schemasApi } from "../../api/client";
 import { AttributeFilterInput } from "../../components/AttributeFilterInput";
 import { activeFilterCount, defaultFilterFor, FilterState, matchesFilters } from "../../components/AttributeFilters";
-import { TransferSelectionBar } from "../../components/TransferSelectionBar";
+import { BulkActionsBar } from "../../components/BulkActionsBar";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 
 export function AssetSearch() {
+  const queryClient = useQueryClient();
   const [q, setQ] = useState("");
   const [schemaUid, setSchemaUid] = useState("");
   const [filters, setFilters] = useState<FilterState>({});
@@ -136,12 +137,16 @@ export function AssetSearch() {
 
       {assets.data && (
         <>
-          <TransferSelectionBar
+          <BulkActionsBar
             selected={selected}
             kind="asset_uids"
             label="objects"
-            onStarted={() => setSelected(new Set())}
+            onStarted={() => {
+              queryClient.invalidateQueries({ queryKey: ["assets"] });
+              setSelected(new Set());
+            }}
             onClear={() => setSelected(new Set())}
+            bulkDelete={assetsApi.bulkDelete}
           />
           <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
             <table className="w-full text-sm">

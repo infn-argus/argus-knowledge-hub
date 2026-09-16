@@ -135,3 +135,12 @@ class IssueCommentOut(BaseModel):
     body: str
     created_at: datetime
     updated_at: datetime
+
+
+class BulkDeleteRequest(BaseModel):
+    uids: list[str]
+
+
+class BulkDeleteResult(BaseModel):
+    deleted: int
+    not_found: list[str]

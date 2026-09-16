@@ -18,6 +18,8 @@ from app.models.workspace import Workspace
 from app.schemas.attachment import AttachmentOut
 from app.schemas.document import (
     ApproveAction,
+    BulkDeleteRequest,
+    BulkDeleteResult,
     DocumentCreate,
     DocumentOut,
     DocumentRelationCreate,
@@ -291,6 +293,25 @@ def delete_document(
     doc = _get_owned_document(uid, workspace_id, db)
     db.delete(doc)
     db.commit()
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResult)
+def bulk_delete_documents(
+    body: BulkDeleteRequest,
+    workspace_id: str = Depends(require_permission("delete", resource="documents")),
+    db: Session = Depends(get_db),
+):
+    deleted = 0
+    missing: list[str] = []
+    for uid in body.uids:
+        doc = db.get(Document, uid)
+        if doc is None or doc.workspace_id != workspace_id:
+            missing.append(uid)
+            continue
+        db.delete(doc)
+        deleted += 1
+    db.commit()
+    return BulkDeleteResult(deleted=deleted, not_found=missing)
 
 
 @router.post("/{uid}/retire", response_model=DocumentOut)

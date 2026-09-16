@@ -13,6 +13,7 @@ import {
   SortableTh,
   useConfigurableColumns,
 } from "../../components/ConfigurableTable";
+import { TransferItemAction } from "../../components/TransferItemAction";
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
 
 function resolveUserLabel(members: MemberDirectoryEntry[] | undefined, value: unknown): string {
@@ -393,6 +394,7 @@ export function SchemaDetail() {
           >
             Edit
           </Link>
+          <TransferItemAction kind="type" uid={schema.uid} hasChildren={children.length > 0} />
           <button
             onClick={() => {
               const noun = isTicketType ? "ticket" : isDocumentType ? "document" : "object";

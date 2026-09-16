@@ -14,6 +14,10 @@ class TransferRequest(BaseModel):
     type_uids: list[str] = []
     # False: transfer the selected types only, none of their instances.
     include_instances: bool = True
+    # True: also pull in every descendant of each selected type (and, if
+    # include_instances is set, their instances too). Ancestors are always
+    # included regardless of this flag — a child type needs its parent.
+    include_descendant_types: bool = False
     asset_uids: list[str] = []
     document_uids: list[str] = []
     issue_uids: list[str] = []

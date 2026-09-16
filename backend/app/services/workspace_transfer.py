@@ -51,6 +51,7 @@ def run_transfer(
     asset_uids: list[str],
     document_uids: list[str],
     issue_uids: list[str],
+    include_descendant_types: bool = False,
 ) -> None:
     db = SessionLocal()
     job = db.get(TransferJob, job_uid)
@@ -59,7 +60,7 @@ def run_transfer(
         job.started_at = datetime.now(timezone.utc)
         db.commit()
 
-        schema_uids = _resolve_schema_set(db, source_workspace_id, type_uids)
+        schema_uids = _resolve_schema_set(db, source_workspace_id, type_uids, include_descendant_types)
         working_assets = set(asset_uids)
         working_documents = set(document_uids)
         working_issues = set(issue_uids)
@@ -98,14 +99,19 @@ def run_transfer(
         db.close()
 
 
-def _resolve_schema_set(db: Session, source_workspace_id: str, type_uids: list[str]) -> list[str]:
-    """type_uids plus every non-global ancestor, ancestors first, deduped.
-    Descendant types are never auto-included — moving/copying a base type
-    doesn't drag everything built on it."""
+def _resolve_schema_set(
+    db: Session, source_workspace_id: str, type_uids: list[str], include_descendant_types: bool = False,
+) -> list[str]:
+    """type_uids plus every non-global ancestor (always — a child type needs
+    its parent to exist), ancestors first, deduped. Descendant types are
+    only pulled in when `include_descendant_types` is set — moving/copying a
+    base type doesn't have to drag everything built on it unless asked to.
+    Descendants are appended breadth-first, after their own parent, so the
+    schema map in _copy() can always resolve parent_schema_uid in order."""
     ordered: list[str] = []
     seen: set[str] = set()
 
-    def visit(uid: str) -> None:
+    def visit_up(uid: str) -> None:
         if uid in seen:
             return
         seen.add(uid)
@@ -115,11 +121,30 @@ def _resolve_schema_set(db: Session, source_workspace_id: str, type_uids: list[s
         if schema.parent_schema_uid:
             parent = db.get(Schema, schema.parent_schema_uid)
             if parent is not None and not parent.is_global and parent.workspace_id == source_workspace_id:
-                visit(parent.uid)
+                visit_up(parent.uid)
         ordered.append(uid)
 
     for uid in type_uids:
-        visit(uid)
+        visit_up(uid)
+
+    if include_descendant_types:
+        frontier = list(ordered)
+        while frontier:
+            next_frontier: list[str] = []
+            for uid in frontier:
+                children = db.scalars(
+                    select(Schema.uid).where(
+                        Schema.parent_schema_uid == uid, Schema.workspace_id == source_workspace_id
+                    )
+                ).all()
+                for child_uid in children:
+                    if child_uid in seen:
+                        continue
+                    seen.add(child_uid)
+                    ordered.append(child_uid)
+                    next_frontier.append(child_uid)
+            frontier = next_frontier
+
     return ordered
 
 

@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { issuesApi } from "../../api/client";
-import { TransferSelectionBar } from "../../components/TransferSelectionBar";
+import { BulkActionsBar } from "../../components/BulkActionsBar";
 
 export function IssueList() {
+  const queryClient = useQueryClient();
   const [stateFilter, setStateFilter] = useState<"all" | "open" | "closed">("open");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { data, isLoading } = useQuery({ queryKey: ["issues"], queryFn: () => issuesApi.list() });
@@ -54,12 +55,16 @@ export function IssueList() {
 
       {data && (
         <>
-        <TransferSelectionBar
+        <BulkActionsBar
           selected={selected}
           kind="issue_uids"
           label="tickets"
-          onStarted={() => setSelected(new Set())}
+          onStarted={() => {
+            queryClient.invalidateQueries({ queryKey: ["issues"] });
+            setSelected(new Set());
+          }}
           onClear={() => setSelected(new Set())}
+          bulkDelete={issuesApi.bulkDelete}
         />
         <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
           <table className="w-full text-sm">

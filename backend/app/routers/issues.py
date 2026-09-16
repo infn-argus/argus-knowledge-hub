@@ -18,6 +18,8 @@ from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
 from app.models.schema import Schema
 from app.schemas.attachment import AttachmentOut
 from app.schemas.issue import (
+    BulkDeleteRequest,
+    BulkDeleteResult,
     IssueCommentCreate,
     IssueCommentOut,
     IssueCreate,
@@ -479,6 +481,25 @@ def delete_issue(
     issue = _get_owned_issue(uid, workspace_id, db)
     db.delete(issue)
     db.commit()
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResult)
+def bulk_delete_issues(
+    body: BulkDeleteRequest,
+    workspace_id: str = Depends(require_permission("delete", resource="tickets")),
+    db: Session = Depends(get_db),
+):
+    deleted = 0
+    missing: list[str] = []
+    for uid in body.uids:
+        issue = db.get(Issue, uid)
+        if issue is None or issue.workspace_id != workspace_id:
+            missing.append(uid)
+            continue
+        db.delete(issue)
+        deleted += 1
+    db.commit()
+    return BulkDeleteResult(deleted=deleted, not_found=missing)
 
 
 @router.post("/{uid}/close", response_model=IssueOut)

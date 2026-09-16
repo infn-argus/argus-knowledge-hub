@@ -17,6 +17,7 @@ import { AttributeValue } from "../../components/AttributeValue";
 import { TicketGraph } from "../../components/TicketGraph";
 import { TicketPicker } from "../../components/TicketPicker";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage";
+import { TransferItemAction } from "../../components/TransferItemAction";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 
 const STATE_STYLES: Record<string, string> = {
@@ -350,6 +351,11 @@ export function IssueDetail() {
           >
             Edit
           </Link>
+          <TransferItemAction
+            kind="issue"
+            uid={i.uid}
+            buttonClassName="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+          />
           <button
             onClick={() => {
               if (confirm("Delete this ticket?")) deleteMutation.mutate();

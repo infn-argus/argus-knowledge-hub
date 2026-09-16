@@ -11,6 +11,7 @@ import type {
   AssetTicket,
   Attachment,
   AppDocument,
+  BulkDeleteResult,
   DocumentInput,
   DocumentUpdateInput,
   DocumentRevision,
@@ -176,6 +177,8 @@ export const assetsApi = {
   update: (uid: string, input: Partial<AssetInput>) =>
     request<Asset>(`/v1/assets/${uid}`, { method: "PUT", body: json(input) }),
   delete: (uid: string) => request<void>(`/v1/assets/${uid}`, { method: "DELETE" }),
+  bulkDelete: (uids: string[]) =>
+    request<BulkDeleteResult>("/v1/assets/bulk-delete", { method: "POST", body: json({ uids }) }),
   uploadAvatar: async (uid: string, file: File): Promise<Asset> => {
     const session = await loadSession();
     if (!session) throw new Error("Not signed in");
@@ -218,6 +221,8 @@ export const issuesApi = {
   update: (uid: string, input: Partial<IssueInput>) =>
     request<Issue>(`/v1/issues/${uid}`, { method: "PUT", body: json(input) }),
   delete: (uid: string) => request<void>(`/v1/issues/${uid}`, { method: "DELETE" }),
+  bulkDelete: (uids: string[]) =>
+    request<BulkDeleteResult>("/v1/issues/bulk-delete", { method: "POST", body: json({ uids }) }),
   labels: () => request<string[]>("/v1/issues/labels"),
   listComments: (uid: string) =>
     request<IssueComment[]>(`/v1/issues/${uid}/comments`),
@@ -462,6 +467,8 @@ export const documentsApi = {
   update: (uid: string, input: DocumentUpdateInput) =>
     request<AppDocument>(`/v1/documents/${uid}`, { method: "PUT", body: json(input) }),
   delete: (uid: string) => request<void>(`/v1/documents/${uid}`, { method: "DELETE" }),
+  bulkDelete: (uids: string[]) =>
+    request<BulkDeleteResult>("/v1/documents/bulk-delete", { method: "POST", body: json({ uids }) }),
   retire: (uid: string, reason: string) =>
     request<AppDocument>(`/v1/documents/${uid}/retire`, { method: "POST", body: json({ reason }) }),
   current: (uid: string) => request<DocumentRevision>(`/v1/documents/${uid}/current`),

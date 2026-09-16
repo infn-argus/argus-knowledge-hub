@@ -24,6 +24,7 @@ export function WorkspaceTransfer() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [includeInstances, setIncludeInstances] = useState(true);
+  const [includeDescendantTypes, setIncludeDescendantTypes] = useState(false);
   const [target, setTarget] = useState("");
   const [mode, setMode] = useState<TransferMode>("copy");
 
@@ -42,6 +43,7 @@ export function WorkspaceTransfer() {
         mode,
         type_uids: [...selected],
         include_instances: includeInstances,
+        include_descendant_types: includeDescendantTypes,
       }),
     onSuccess: (job) => navigate(`/workspaces/${workspaceId}/transfers/${job.uid}`),
     onError: (err) => alert(err instanceof Error ? err.message : "Could not start the transfer."),
@@ -50,6 +52,11 @@ export function WorkspaceTransfer() {
   // Only types actually owned here — an is_global type from elsewhere just
   // shows up as already usable, not as something to transfer.
   const own = (schemas.data ?? []).filter((s) => s.workspace_id === currentWorkspaceId);
+  const childCount = new Map<string, number>();
+  for (const s of own) {
+    if (s.parent_schema_uid) childCount.set(s.parent_schema_uid, (childCount.get(s.parent_schema_uid) ?? 0) + 1);
+  }
+  const selectedHaveChildren = [...selected].some((uid) => (childCount.get(uid) ?? 0) > 0);
 
   return (
     <div className="max-w-3xl">
@@ -79,16 +86,24 @@ export function WorkspaceTransfer() {
           <section key={appliesTo} className="mt-6">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{label}</h2>
             <div className="mt-2 space-y-1">
-              {group.map((s) => (
-                <label key={s.uid} className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(s.uid)}
-                    onChange={() => toggle(s.uid)}
-                  />
-                  {s.name}
-                </label>
-              ))}
+              {group.map((s) => {
+                const children = childCount.get(s.uid) ?? 0;
+                return (
+                  <label key={s.uid} className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(s.uid)}
+                      onChange={() => toggle(s.uid)}
+                    />
+                    {s.name}
+                    {children > 0 && (
+                      <span className="text-xs text-slate-400">
+                        ({children} child type{children === 1 ? "" : "s"})
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
             </div>
           </section>
         );
@@ -102,6 +117,16 @@ export function WorkspaceTransfer() {
             onChange={(e) => setIncludeInstances(e.target.checked)}
           />
           Include every object of the selected type(s)
+        </label>
+        <label
+          className={`flex items-center gap-2 text-sm ${selectedHaveChildren ? "text-slate-700" : "text-slate-400"}`}
+        >
+          <input
+            type="checkbox"
+            checked={includeDescendantTypes}
+            onChange={(e) => setIncludeDescendantTypes(e.target.checked)}
+          />
+          Include child types
         </label>
         <span className="text-sm text-slate-300">|</span>
         <select

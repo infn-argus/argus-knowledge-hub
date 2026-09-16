@@ -18,6 +18,7 @@ import { DrawingViewer } from "../../components/DrawingViewer";
 import { RecordPicker } from "../../components/RecordPicker";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { MarkdownView } from "../../components/MarkdownView";
+import { TransferItemAction } from "../../components/TransferItemAction";
 import { StepsEditor } from "../../components/StepsEditor";
 import { DocumentStep } from "../../api/types";
 
@@ -337,6 +338,11 @@ export function DocumentDetail() {
               Retire
             </button>
           )}
+          <TransferItemAction
+            kind="document"
+            uid={doc.uid}
+            buttonClassName="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
+          />
           <button
             onClick={() => {
               if (confirm(`Delete document "${doc.title}"? This cannot be undone.`)) {

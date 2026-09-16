@@ -144,6 +144,15 @@ class RetypeResult(BaseModel):
     not_found: list[str]
 
 
+class BulkDeleteRequest(BaseModel):
+    uids: list[str]
+
+
+class BulkDeleteResult(BaseModel):
+    deleted: int
+    not_found: list[str]
+
+
 class MarkdownImportResult(BaseModel):
     documents: int
     attachments: int

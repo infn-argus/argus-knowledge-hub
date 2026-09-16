@@ -142,6 +142,76 @@ def test_move_type_with_instances_pulls_in_ancestor_and_moves_its_assets():
     db.close()
 
 
+def test_move_base_type_leaves_children_behind_unless_asked():
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    source, target = _workspaces(db, suffix)
+    base_uid, child_uid, grandchild_uid = f"base-{suffix}", f"child-{suffix}", f"grand-{suffix}"
+    db.add(Schema(uid=base_uid, workspace_id=source, name="Equipment"))
+    db.flush()
+    db.add(Schema(uid=child_uid, workspace_id=source, name="Camera", parent_schema_uid=base_uid))
+    db.flush()
+    db.add(Schema(uid=grandchild_uid, workspace_id=source, name="PTZ Camera", parent_schema_uid=child_uid))
+    db.flush()
+    child_asset_uid = f"a-{suffix}"
+    db.add(Asset(uid=child_asset_uid, workspace_id=source, schema_uid=child_uid, key=f"KEY-{suffix}", name="Cam", type="Camera"))
+    db.commit()
+
+    job_uid = f"job-{suffix}"
+    db.add(TransferJob(uid=job_uid, workspace_id=source, target_workspace_id=target, mode="move"))
+    db.commit()
+    db.close()
+
+    # Moving the base type without include_descendant_types must not touch
+    # its children at all — only the base type itself moves.
+    run_transfer(job_uid, source, target, "move", [base_uid], True, [], [], [], False)
+
+    db = SessionLocal()
+    assert db.get(Schema, base_uid).workspace_id == target
+    assert db.get(Schema, child_uid).workspace_id == source
+    assert db.get(Schema, grandchild_uid).workspace_id == source
+    assert db.get(Asset, child_asset_uid).workspace_id == source
+    refreshed = db.get(TransferJob, job_uid)
+    assert refreshed.counts["types"] == 1
+    assert refreshed.counts["assets"] == 0
+    db.close()
+
+
+def test_move_base_type_with_descendants_pulls_in_whole_tree_and_instances():
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    source, target = _workspaces(db, suffix)
+    base_uid, child_uid, grandchild_uid = f"base-{suffix}", f"child-{suffix}", f"grand-{suffix}"
+    db.add(Schema(uid=base_uid, workspace_id=source, name="Equipment"))
+    db.flush()
+    db.add(Schema(uid=child_uid, workspace_id=source, name="Camera", parent_schema_uid=base_uid))
+    db.flush()
+    db.add(Schema(uid=grandchild_uid, workspace_id=source, name="PTZ Camera", parent_schema_uid=child_uid))
+    db.flush()
+    child_asset_uid, grandchild_asset_uid = f"a-{suffix}", f"b-{suffix}"
+    db.add(Asset(uid=child_asset_uid, workspace_id=source, schema_uid=child_uid, key=f"KEY-A-{suffix}", name="Cam", type="Camera"))
+    db.add(Asset(uid=grandchild_asset_uid, workspace_id=source, schema_uid=grandchild_uid, key=f"KEY-B-{suffix}", name="PTZ", type="PTZ Camera"))
+    db.commit()
+
+    job_uid = f"job-{suffix}"
+    db.add(TransferJob(uid=job_uid, workspace_id=source, target_workspace_id=target, mode="move"))
+    db.commit()
+    db.close()
+
+    run_transfer(job_uid, source, target, "move", [base_uid], True, [], [], [], True)
+
+    db = SessionLocal()
+    assert db.get(Schema, base_uid).workspace_id == target
+    assert db.get(Schema, child_uid).workspace_id == target
+    assert db.get(Schema, grandchild_uid).workspace_id == target
+    assert db.get(Asset, child_asset_uid).workspace_id == target
+    assert db.get(Asset, grandchild_asset_uid).workspace_id == target
+    refreshed = db.get(TransferJob, job_uid)
+    assert refreshed.counts["types"] == 3
+    assert refreshed.counts["assets"] == 2
+    db.close()
+
+
 # --------------------------------------------------------------------------
 # Copy
 # --------------------------------------------------------------------------
