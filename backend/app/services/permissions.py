@@ -16,9 +16,12 @@ from app.models.group import GroupMember
 from app.models.membership import Membership
 from app.models.role import Role, RoleBinding
 from app.models.user import User
+from app.models.workspace import Workspace
 from app.services.roles import membership_permissions
 
 RESOURCES = ("objects", "tickets", "documents", "workspace")
+
+RESOURCE_SUFFIX = {"objects": "", "tickets": "_tickets", "documents": "_documents"}
 
 
 def user_group_uids(db: Session, user_id: str) -> list[str]:
@@ -67,3 +70,26 @@ def has_permission(db: Session, user: User, workspace_id: str, action: str, reso
     if user.is_admin:
         return True
     return action in effective_permissions(db, user, workspace_id).get(resource, set())
+
+
+def resolve_permission(db: Session, user: User, workspace_id: str, action: str, resource: str) -> bool:
+    """Whether `user` may do `action` on `resource` in `workspace_id`,
+    including the workspace's own default-access fallback for anyone with no
+    explicit role/membership grant there. This is the full check
+    `require_permission`'s dependency runs for the X-Workspace-Id header;
+    factored out here so a second workspace (e.g. a transfer's target) can
+    be checked with the exact same semantics."""
+    if user.is_admin:
+        return True
+
+    granted = effective_permissions(db, user, workspace_id)
+    if action in granted.get(resource, set()):
+        return True
+    if granted[resource] or granted["workspace"]:
+        # Held something here, just not this — a definite "no", rather than
+        # falling through to the workspace's open-door defaults.
+        return False
+
+    workspace = db.get(Workspace, workspace_id)
+    default_flag_name = f"default_can_{action}{RESOURCE_SUFFIX[resource]}"
+    return workspace is not None and bool(getattr(workspace, default_flag_name, False))

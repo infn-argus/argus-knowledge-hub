@@ -19,6 +19,7 @@ from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
 from app.models.membership import Membership
 from app.models.role import Role, RoleBinding
 from app.models.schema import Schema
+from app.models.transfer_job import TransferJob
 from app.models.user import User
 from app.models.workspace import Workspace
 
@@ -50,6 +51,7 @@ __all__ = [
     "Role",
     "RoleBinding",
     "Schema",
+    "TransferJob",
     "User",
     "Workspace",
 ]

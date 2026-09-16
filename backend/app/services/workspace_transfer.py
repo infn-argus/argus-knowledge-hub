@@ -1,0 +1,567 @@
+"""Copying or moving types and objects from one workspace to another.
+
+A "type" is a Schema row (asset types, ticket types and document types are
+all Schema rows, discriminated by applies_to). An "object" is an Asset,
+Document or Issue instance.
+
+Move reassigns workspace_id in place — cheap, and nothing needs a new
+identity since Asset.key/Document.code are unique across the whole
+installation already, not per workspace. Copy mints new rows with new uids
+(and, where the column is globally unique, a new key/code), and only carries
+a relation/link over when both of its endpoints are part of the same
+transfer — anything left behind is dropped and counted into the job's
+warnings rather than left dangling or blocking the transfer.
+
+Reference-typed attribute values that happen to name another object by uid
+or key are deliberately left untouched here: services.integrity.
+relink_workspace already re-resolves those in a workspace, and duplicating
+that logic for a second time in this file would only give it a second place
+to drift out of sync.
+"""
+import os
+import shutil
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
+
+from app.db import SessionLocal
+from app.models.asset import Asset, Relation
+from app.models.asset_subresources import AssetComment, AssetHistory, AssetLabel, AssetTicket
+from app.models.attachment import Attachment
+from app.models.document import Document, DocumentRelation, DocumentRevision
+from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
+from app.models.schema import Schema
+from app.models.transfer_job import TransferJob
+from app.services.asset_ticket_links import ticket_key_for
+from app.services.document_codes import next_code
+from app.services.relations import rebuild_asset_relations_with_neighbors
+
+ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
+
+
+def run_transfer(
+    job_uid: str,
+    source_workspace_id: str,
+    target_workspace_id: str,
+    mode: str,
+    type_uids: list[str],
+    include_instances: bool,
+    asset_uids: list[str],
+    document_uids: list[str],
+    issue_uids: list[str],
+) -> None:
+    db = SessionLocal()
+    job = db.get(TransferJob, job_uid)
+    try:
+        job.status = "running"
+        job.started_at = datetime.now(timezone.utc)
+        db.commit()
+
+        schema_uids = _resolve_schema_set(db, source_workspace_id, type_uids)
+        working_assets = set(asset_uids)
+        working_documents = set(document_uids)
+        working_issues = set(issue_uids)
+        if include_instances and schema_uids:
+            a, d, i = _resolve_instances(db, source_workspace_id, schema_uids)
+            working_assets |= a
+            working_documents |= d
+            working_issues |= i
+
+        if mode == "move":
+            counts, warnings = _move(
+                db, source_workspace_id, target_workspace_id,
+                schema_uids, working_assets, working_documents, working_issues,
+            )
+        else:
+            counts, warnings = _copy(
+                db, source_workspace_id, target_workspace_id,
+                schema_uids, working_assets, working_documents, working_issues,
+            )
+
+        db.commit()
+        job.status = "succeeded"
+        job.progress = "Transfer complete"
+        job.counts = counts
+        job.warnings = warnings
+        job.completed_at = datetime.now(timezone.utc)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        job = db.get(TransferJob, job_uid)
+        job.status = "failed"
+        job.error = str(e)
+        job.completed_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _resolve_schema_set(db: Session, source_workspace_id: str, type_uids: list[str]) -> list[str]:
+    """type_uids plus every non-global ancestor, ancestors first, deduped.
+    Descendant types are never auto-included — moving/copying a base type
+    doesn't drag everything built on it."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def visit(uid: str) -> None:
+        if uid in seen:
+            return
+        seen.add(uid)
+        schema = db.get(Schema, uid)
+        if schema is None or schema.workspace_id != source_workspace_id:
+            return
+        if schema.parent_schema_uid:
+            parent = db.get(Schema, schema.parent_schema_uid)
+            if parent is not None and not parent.is_global and parent.workspace_id == source_workspace_id:
+                visit(parent.uid)
+        ordered.append(uid)
+
+    for uid in type_uids:
+        visit(uid)
+    return ordered
+
+
+def _resolve_instances(db: Session, source_workspace_id: str, schema_uids: list[str]) -> tuple[set[str], set[str], set[str]]:
+    if not schema_uids:
+        return set(), set(), set()
+    asset_uids = set(db.scalars(
+        select(Asset.uid).where(Asset.workspace_id == source_workspace_id, Asset.schema_uid.in_(schema_uids))
+    ))
+    document_uids = set(db.scalars(
+        select(Document.uid).where(Document.workspace_id == source_workspace_id, Document.document_type_uid.in_(schema_uids))
+    ))
+    issue_uids = set(db.scalars(
+        select(Issue.uid).where(Issue.workspace_id == source_workspace_id, Issue.schema_uid.in_(schema_uids))
+    ))
+    return asset_uids, document_uids, issue_uids
+
+
+# --------------------------------------------------------------------------
+# Move
+# --------------------------------------------------------------------------
+
+def _move(
+    db: Session, source: str, target: str,
+    schema_uids: list[str], asset_uids: set[str], document_uids: set[str], issue_uids: set[str],
+) -> tuple[dict, list[str]]:
+    warnings: list[str] = []
+    counts = {
+        "types": 0, "assets": 0, "documents": 0, "issues": 0,
+        "relations_dropped": 0, "links_dropped": 0,
+    }
+
+    for uid in schema_uids:
+        schema = db.get(Schema, uid)
+        if schema is None or schema.workspace_id != source:
+            continue
+        schema.workspace_id = target
+        counts["types"] += 1
+
+    for uid in asset_uids:
+        asset = db.get(Asset, uid)
+        if asset is None or asset.workspace_id != source:
+            continue
+        asset.workspace_id = target
+        counts["assets"] += 1
+
+    for uid in document_uids:
+        doc = db.get(Document, uid)
+        if doc is None or doc.workspace_id != source:
+            continue
+        doc.workspace_id = target
+        counts["documents"] += 1
+
+    for uid in issue_uids:
+        issue = db.get(Issue, uid)
+        if issue is None or issue.workspace_id != source:
+            continue
+        issue.workspace_id = target
+        counts["issues"] += 1
+    db.flush()
+
+    # Relations between two assets: keep (and re-stamp) only when both ends
+    # moved together, otherwise the edge now crosses the boundary — drop it.
+    if asset_uids:
+        rebuild_uids: set[str] = set(asset_uids)
+        crossing = db.scalars(
+            select(Relation).where(
+                or_(Relation.from_asset_uid.in_(asset_uids), Relation.to_asset_uid.in_(asset_uids))
+            )
+        ).all()
+        for rel in crossing:
+            if rel.from_asset_uid in asset_uids and rel.to_asset_uid in asset_uids:
+                rel.workspace_id = target
+                continue
+            rebuild_uids.add(rel.from_asset_uid)
+            rebuild_uids.add(rel.to_asset_uid)
+            db.delete(rel)
+            counts["relations_dropped"] += 1
+        db.flush()
+        for uid in rebuild_uids:
+            rebuild_asset_relations_with_neighbors(db, uid)
+
+    # Document relations: keep only when the document and its target moved
+    # (or already lived in the target) together.
+    if document_uids:
+        counts["relations_dropped"] += _move_document_relations(db, target, document_uids, schema_uids, asset_uids, issue_uids)
+        for uid in document_uids:
+            doc = db.get(Document, uid)
+            if doc and doc.responsible_service_asset_uid and doc.responsible_service_asset_uid not in asset_uids:
+                asset = db.get(Asset, doc.responsible_service_asset_uid)
+                if asset is None or asset.workspace_id != target:
+                    doc.responsible_service_asset_uid = None
+                    counts["links_dropped"] += 1
+
+    # Ticket links: a ticket and its subject asset, or two linked tickets,
+    # that don't move together.
+    counts["links_dropped"] += _move_ticket_links(db, source, target, asset_uids, issue_uids)
+    if issue_uids:
+        links = db.scalars(
+            select(IssueLink).where(
+                or_(IssueLink.from_issue_uid.in_(issue_uids), IssueLink.to_issue_uid.in_(issue_uids))
+            )
+        ).all()
+        for link in links:
+            if link.from_issue_uid in issue_uids and link.to_issue_uid in issue_uids:
+                continue
+            db.delete(link)
+            counts["links_dropped"] += 1
+
+    # Attachments carry their own workspace_id, independent of their owner.
+    moved_revision_uids = set(db.scalars(
+        select(DocumentRevision.uid).where(DocumentRevision.document_uid.in_(document_uids))
+    )) if document_uids else set()
+    conditions = []
+    if asset_uids:
+        conditions.append(Attachment.asset_uid.in_(asset_uids))
+    if moved_revision_uids:
+        conditions.append(Attachment.document_revision_uid.in_(moved_revision_uids))
+    if issue_uids:
+        conditions.append(Attachment.issue_uid.in_(issue_uids))
+    if conditions:
+        for att in db.scalars(select(Attachment).where(or_(*conditions))).all():
+            att.workspace_id = target
+
+    if counts["relations_dropped"]:
+        warnings.append(f"Dropped {counts['relations_dropped']} relation(s) crossing the workspace boundary.")
+    if counts["links_dropped"]:
+        warnings.append(f"Dropped {counts['links_dropped']} ticket/document link(s) crossing the workspace boundary.")
+    return counts, warnings
+
+
+def _move_document_relations(
+    db: Session, target: str, document_uids: set[str],
+    schema_uids: list[str], asset_uids: set[str], issue_uids: set[str],
+) -> int:
+    moved_by_type = {"asset": asset_uids, "document": document_uids, "issue": issue_uids, "schema": set(schema_uids)}
+    dropped = 0
+    rels = db.scalars(select(DocumentRelation).where(DocumentRelation.from_document_uid.in_(document_uids))).all()
+    for rel in rels:
+        if rel.to_uid in moved_by_type.get(rel.to_type, set()):
+            rel.workspace_id = target
+            continue
+        db.delete(rel)
+        dropped += 1
+
+    incoming = db.scalars(
+        select(DocumentRelation).where(
+            DocumentRelation.to_type == "document", DocumentRelation.to_uid.in_(document_uids)
+        )
+    ).all()
+    for rel in incoming:
+        if rel.from_document_uid in document_uids:
+            continue  # already handled above
+        db.delete(rel)
+        dropped += 1
+    return dropped
+
+
+def _move_ticket_links(db: Session, source: str, target: str, asset_uids: set[str], issue_uids: set[str]) -> int:
+    if not asset_uids and not issue_uids:
+        return 0
+    ticket_key_to_issue: dict[str, str] = {}
+    for issue in db.scalars(select(Issue).where(Issue.workspace_id.in_([source, target]))):
+        ticket_key_to_issue[ticket_key_for(issue)] = issue.uid
+
+    dropped = 0
+    if asset_uids:
+        for at in db.scalars(select(AssetTicket).where(AssetTicket.asset_uid.in_(asset_uids))).all():
+            linked_issue_uid = ticket_key_to_issue.get(at.ticket_key)
+            if linked_issue_uid is not None and linked_issue_uid in issue_uids:
+                continue
+            if linked_issue_uid is not None:
+                issue = db.get(Issue, linked_issue_uid)
+                if issue is not None and issue.asset_uid == at.asset_uid:
+                    issue.asset_uid = None
+            db.delete(at)
+            dropped += 1
+
+    for uid in issue_uids:
+        issue = db.get(Issue, uid)
+        if issue is None or not issue.asset_uid or issue.asset_uid in asset_uids:
+            continue
+        stale = db.scalar(
+            select(AssetTicket).where(
+                AssetTicket.asset_uid == issue.asset_uid, AssetTicket.ticket_key == ticket_key_for(issue)
+            )
+        )
+        if stale is not None:
+            db.delete(stale)
+            dropped += 1
+        issue.asset_uid = None
+    return dropped
+
+
+# --------------------------------------------------------------------------
+# Copy
+# --------------------------------------------------------------------------
+
+def _unique_asset_key(db: Session, base_key: str, used: set[str]) -> str:
+    candidate = f"{base_key}-copy"
+    n = 2
+    while candidate in used or db.scalar(select(Asset.uid).where(Asset.key == candidate)) is not None:
+        candidate = f"{base_key}-copy-{n}"
+        n += 1
+    used.add(candidate)
+    return candidate
+
+
+def _copy_attachments_for(db: Session, target: str, column, old_id: str, new_id: str) -> int:
+    n = 0
+    for att in db.scalars(select(Attachment).where(column == old_id)).all():
+        new_uid = str(uuid.uuid4())
+        new_path = os.path.join(ATTACHMENTS_DIR, new_uid)
+        try:
+            if os.path.exists(att.storage_path):
+                shutil.copyfile(att.storage_path, new_path)
+        except OSError:
+            pass
+        db.add(Attachment(
+            uid=new_uid,
+            workspace_id=target,
+            asset_uid=new_id if column is Attachment.asset_uid else None,
+            document_revision_uid=new_id if column is Attachment.document_revision_uid else None,
+            issue_uid=new_id if column is Attachment.issue_uid else None,
+            filename=att.filename,
+            mime_type=att.mime_type,
+            file_size=att.file_size,
+            author=att.author,
+            storage_path=new_path,
+            backend_id=None,
+            backend_url=att.backend_url,
+        ))
+        n += 1
+    return n
+
+
+def _copy(
+    db: Session, source: str, target: str,
+    schema_uids: list[str], asset_uids: set[str], document_uids: set[str], issue_uids: set[str],
+) -> tuple[dict, list[str]]:
+    warnings: list[str] = []
+    counts = {
+        "types": 0, "assets": 0, "documents": 0, "issues": 0,
+        "relations_copied": 0, "relations_dropped": 0, "links_dropped": 0,
+    }
+    schema_map: dict[str, str] = {}
+    asset_map: dict[str, str] = {}
+    document_map: dict[str, str] = {}
+    issue_map: dict[str, str] = {}
+    used_keys: set[str] = set()
+
+    for uid in schema_uids:
+        schema = db.get(Schema, uid)
+        if schema is None or schema.workspace_id != source:
+            continue
+        new_uid = str(uuid.uuid4())
+        new_parent = schema_map.get(schema.parent_schema_uid, schema.parent_schema_uid) if schema.parent_schema_uid else None
+        db.add(Schema(
+            uid=new_uid, workspace_id=target, name=schema.name, description=schema.description,
+            is_concrete=schema.is_concrete, parent_schema_uid=new_parent,
+            attributes=list(schema.attributes or []), metadata_json=dict(schema.metadata_json or {}),
+            version=schema.version, icon_attachment_uid=None, is_global=schema.is_global,
+            applies_to=schema.applies_to,
+        ))
+        schema_map[uid] = new_uid
+        counts["types"] += 1
+    db.flush()
+
+    for uid in asset_uids:
+        asset = db.get(Asset, uid)
+        if asset is None or asset.workspace_id != source:
+            continue
+        new_uid = str(uuid.uuid4())
+        new_key = _unique_asset_key(db, asset.key, used_keys)
+        db.add(Asset(
+            uid=new_uid, workspace_id=target,
+            schema_uid=schema_map.get(asset.schema_uid, asset.schema_uid),
+            key=new_key, name=asset.name, type=asset.type, avatar_icon_uid=None,
+            attributes=dict(asset.attributes or {}), inbound_relations=[], outbound_relations=[],
+            deleted_at=None, is_global=asset.is_global,
+        ))
+        asset_map[uid] = new_uid
+        counts["assets"] += 1
+    db.flush()
+
+    for old_uid, new_uid in asset_map.items():
+        for c in db.scalars(select(AssetComment).where(AssetComment.asset_uid == old_uid)):
+            db.add(AssetComment(
+                uid=str(uuid.uuid4()), asset_uid=new_uid, author=c.author, text=c.text,
+                created=c.created, updated=c.updated, backend_id=None, backend_url=c.backend_url,
+            ))
+        for h in db.scalars(select(AssetHistory).where(AssetHistory.asset_uid == old_uid)):
+            db.add(AssetHistory(
+                uid=str(uuid.uuid4()), asset_uid=new_uid, type=h.type, author=h.author,
+                details=h.details, timestamp=h.timestamp, backend_id=None,
+            ))
+        for lbl in db.scalars(select(AssetLabel).where(AssetLabel.asset_uid == old_uid)):
+            db.add(AssetLabel(
+                uid=str(uuid.uuid4()), asset_uid=new_uid, type=lbl.type, value=lbl.value,
+                namespace=lbl.namespace, issuer=lbl.issuer, verified=lbl.verified,
+                confidence=lbl.confidence, created_at=lbl.created_at, updated_at=lbl.updated_at,
+                metadata_json=lbl.metadata_json,
+            ))
+        _copy_attachments_for(db, target, Attachment.asset_uid, old_uid, new_uid)
+
+    if asset_map:
+        rels = db.scalars(select(Relation).where(Relation.from_asset_uid.in_(asset_map.keys()))).all()
+        for rel in rels:
+            if rel.to_asset_uid in asset_map:
+                db.add(Relation(
+                    workspace_id=target, from_asset_uid=asset_map[rel.from_asset_uid],
+                    to_asset_uid=asset_map[rel.to_asset_uid], relation_type=rel.relation_type,
+                ))
+                counts["relations_copied"] += 1
+            else:
+                counts["relations_dropped"] += 1
+    db.flush()
+    for new_uid in asset_map.values():
+        rebuild_asset_relations_with_neighbors(db, new_uid)
+
+    for uid in document_uids:
+        doc = db.get(Document, uid)
+        if doc is None or doc.workspace_id != source:
+            continue
+        new_uid = str(uuid.uuid4())
+        new_type_uid = schema_map.get(doc.document_type_uid, doc.document_type_uid) if doc.document_type_uid else None
+        new_responsible = asset_map.get(doc.responsible_service_asset_uid) if doc.responsible_service_asset_uid else None
+        if doc.responsible_service_asset_uid and new_responsible is None:
+            counts["links_dropped"] += 1
+        new_code = next_code(db, target, new_type_uid)
+        copy = Document(
+            uid=new_uid, workspace_id=target, code=new_code, title=doc.title,
+            document_type_uid=new_type_uid, owner_user_id=doc.owner_user_id,
+            responsible_service_asset_uid=new_responsible, authority_level=doc.authority_level,
+            confidentiality=doc.confidentiality, source=doc.source, current_revision_uid=None,
+            is_global=doc.is_global,
+        )
+        db.add(copy)
+        db.flush()
+
+        if doc.current_revision_uid:
+            rev = db.get(DocumentRevision, doc.current_revision_uid)
+            if rev is not None:
+                new_rev_uid = str(uuid.uuid4())
+                db.add(DocumentRevision(
+                    uid=new_rev_uid, document_uid=new_uid, revision_number=rev.revision_number,
+                    state=rev.state, body_markdown=rev.body_markdown, steps=list(rev.steps or []),
+                    attributes=dict(rev.attributes or {}), valid_from=rev.valid_from,
+                    valid_until=rev.valid_until, next_review_due=rev.next_review_due,
+                    authored_by=rev.authored_by, approved_by=rev.approved_by,
+                    submitted_at=rev.submitted_at, approved_at=rev.approved_at,
+                    published_at=rev.published_at, review_comment=rev.review_comment,
+                    superseded_by_uid=None,
+                ))
+                db.flush()
+                copy.current_revision_uid = new_rev_uid
+                _copy_attachments_for(db, target, Attachment.document_revision_uid, rev.uid, new_rev_uid)
+
+        document_map[uid] = new_uid
+        counts["documents"] += 1
+    db.flush()
+
+    for uid in issue_uids:
+        issue = db.get(Issue, uid)
+        if issue is None or issue.workspace_id != source:
+            continue
+        new_uid = str(uuid.uuid4())
+        new_asset_uid = asset_map.get(issue.asset_uid) if issue.asset_uid else None
+        if issue.asset_uid and new_asset_uid is None:
+            counts["links_dropped"] += 1
+        db.add(Issue(
+            uid=new_uid, workspace_id=target, asset_uid=new_asset_uid,
+            schema_uid=schema_map.get(issue.schema_uid, issue.schema_uid) if issue.schema_uid else None,
+            attributes=dict(issue.attributes or {}), title=issue.title, description=issue.description,
+            state=issue.state, priority=issue.priority, assignee=issue.assignee,
+            labels=list(issue.labels or []), due_date=issue.due_date, closed_at=issue.closed_at,
+            created_by=issue.created_by, version=1, deleted_at=None,
+        ))
+        for c in db.scalars(select(IssueComment).where(IssueComment.issue_uid == uid)):
+            db.add(IssueComment(uid=str(uuid.uuid4()), issue_uid=new_uid, author=c.author, body=c.body))
+        for h in db.scalars(select(IssueHistory).where(IssueHistory.issue_uid == uid)):
+            db.add(IssueHistory(
+                uid=str(uuid.uuid4()), issue_uid=new_uid, type=h.type, author=h.author,
+                field=h.field, from_value=h.from_value, to_value=h.to_value,
+                details=h.details, timestamp=h.timestamp, backend_id=None,
+            ))
+        _copy_attachments_for(db, target, Attachment.issue_uid, uid, new_uid)
+        issue_map[uid] = new_uid
+        counts["issues"] += 1
+    db.flush()
+
+    if issue_map:
+        links = db.scalars(select(IssueLink).where(IssueLink.from_issue_uid.in_(issue_map.keys()))).all()
+        for link in links:
+            if link.to_issue_uid in issue_map:
+                db.add(IssueLink(
+                    from_issue_uid=issue_map[link.from_issue_uid], to_issue_uid=issue_map[link.to_issue_uid],
+                    relation_type=link.relation_type, created_at=link.created_at,
+                ))
+            else:
+                counts["links_dropped"] += 1
+
+    if document_map:
+        rels = db.scalars(select(DocumentRelation).where(DocumentRelation.from_document_uid.in_(document_map.keys()))).all()
+        target_maps = {"asset": asset_map, "document": document_map, "issue": issue_map, "schema": schema_map}
+        for rel in rels:
+            mapped_to = target_maps.get(rel.to_type, {}).get(rel.to_uid)
+            if mapped_to is not None:
+                db.add(DocumentRelation(
+                    workspace_id=target, from_document_uid=document_map[rel.from_document_uid],
+                    to_type=rel.to_type, to_uid=mapped_to, relation_type=rel.relation_type,
+                ))
+            else:
+                counts["links_dropped"] += 1
+
+    if asset_map or issue_map:
+        for old_asset_uid, new_asset_uid in asset_map.items():
+            tickets = db.scalars(select(AssetTicket).where(AssetTicket.asset_uid == old_asset_uid)).all()
+            if not tickets:
+                continue
+            ticket_key_to_new_issue = {}
+            for old_issue_uid, new_issue_uid in issue_map.items():
+                issue = db.get(Issue, old_issue_uid)
+                if issue is not None:
+                    ticket_key_to_new_issue[ticket_key_for(issue)] = new_issue_uid
+            for at in tickets:
+                if at.ticket_key not in ticket_key_to_new_issue:
+                    counts["links_dropped"] += 1
+                    continue
+                db.add(AssetTicket(
+                    uid=str(uuid.uuid4()), asset_uid=new_asset_uid, ticket_key=at.ticket_key,
+                    summary=at.summary, type=at.type, status=at.status, created=at.created,
+                    updated=at.updated, backend_id=None, backend_url=at.backend_url,
+                ))
+
+    if counts["relations_dropped"]:
+        warnings.append(f"Dropped {counts['relations_dropped']} relation(s) to an object outside the transfer.")
+    if counts["links_dropped"]:
+        warnings.append(f"Dropped {counts['links_dropped']} ticket/document link(s) to an object outside the transfer.")
+    if counts["relations_copied"] or counts["assets"]:
+        warnings.append(
+            "Reference-typed attribute values still point at the source workspace's objects — "
+            "run Integrity → Relink in the target workspace to re-resolve them."
+        )
+    return counts, warnings

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { documentsApi, schemasApi } from "../../api/client";
+import { TransferSelectionBar } from "../../components/TransferSelectionBar";
 
 const AUTHORITY_STYLES: Record<string, string> = {
   ufficiale: "bg-indigo-100 text-indigo-700",
@@ -103,6 +104,14 @@ export function DocumentList() {
           </>
         )}
       </div>
+
+      <TransferSelectionBar
+        selected={selected}
+        kind="document_uids"
+        label="documents"
+        onStarted={() => setSelected(new Set())}
+        onClear={() => setSelected(new Set())}
+      />
 
       {data && (
         <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">

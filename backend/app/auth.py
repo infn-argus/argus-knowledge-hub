@@ -15,8 +15,7 @@ from app.auth_oidc import oidc_configured, verify_oidc_token
 from app.db import get_db
 from app.models.api_token import ApiToken
 from app.models.user import User
-from app.models.workspace import Workspace
-from app.services.permissions import effective_permissions
+from app.services.permissions import resolve_permission
 
 TOKEN_PEPPER = os.environ["TOKEN_PEPPER"]
 
@@ -28,8 +27,6 @@ security = HTTPBearer(auto_error=False)
 
 Action = Literal["read", "create", "modify", "delete", "approve"]
 Resource = Literal["objects", "tickets", "documents"]
-
-_RESOURCE_SUFFIX = {"objects": "", "tickets": "_tickets", "documents": "_documents"}
 
 
 def hash_token(raw_token: str) -> str:
@@ -125,8 +122,6 @@ def get_current_user_id(identity: Identity = Depends(get_identity)) -> Optional[
 
 
 def require_permission(action: Action, resource: Resource = "objects"):
-    flag_name = f"can_{action}{_RESOURCE_SUFFIX[resource]}"
-
     def dependency(
         identity: Identity = Depends(get_identity),
         db: Session = Depends(get_db),
@@ -135,28 +130,9 @@ def require_permission(action: Action, resource: Resource = "objects"):
         if isinstance(identity, PatIdentity):
             return identity.workspace_id
 
-        user = identity.user
         if not x_workspace_id:
             raise HTTPException(status_code=400, detail="Missing X-Workspace-Id header")
-        if user.is_admin:
-            return x_workspace_id
-
-        # Roles held directly or through a group, unioned with any legacy
-        # membership row. This is the whole of the change roles brought:
-        # every call site above still asks the same question.
-        granted = effective_permissions(db, user, x_workspace_id)
-        if action in granted.get(resource, set()):
-            return x_workspace_id
-        if granted[resource] or granted["workspace"]:
-            # Held something here, just not this — a definite "no", rather
-            # than falling through to the workspace's open-door defaults.
-            raise HTTPException(status_code=403, detail="Not permitted")
-
-        # Nothing granted at all — fall back to the workspace's default access
-        # for any authenticated user (all unchecked unless an owner/admin opts in).
-        workspace = db.get(Workspace, x_workspace_id)
-        default_flag_name = f"default_{flag_name}"
-        if workspace is None or not getattr(workspace, default_flag_name):
+        if not resolve_permission(db, identity.user, x_workspace_id, action, resource):
             raise HTTPException(status_code=403, detail="Not permitted")
         return x_workspace_id
 

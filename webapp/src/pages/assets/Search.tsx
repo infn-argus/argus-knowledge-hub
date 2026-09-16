@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { assetsApi, schemasApi } from "../../api/client";
 import { AttributeFilterInput } from "../../components/AttributeFilterInput";
 import { activeFilterCount, defaultFilterFor, FilterState, matchesFilters } from "../../components/AttributeFilters";
+import { TransferSelectionBar } from "../../components/TransferSelectionBar";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 
 export function AssetSearch() {
@@ -11,6 +12,15 @@ export function AssetSearch() {
   const [schemaUid, setSchemaUid] = useState("");
   const [filters, setFilters] = useState<FilterState>({});
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const toggle = (uid: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
 
   const schemas = useQuery({ queryKey: ["schemas"], queryFn: schemasApi.list });
   const assets = useQuery({ queryKey: ["assets"], queryFn: () => assetsApi.list() });
@@ -126,10 +136,31 @@ export function AssetSearch() {
 
       {assets.data && (
         <>
+          <TransferSelectionBar
+            selected={selected}
+            kind="asset_uids"
+            label="objects"
+            onStarted={() => setSelected(new Set())}
+            onClear={() => setSelected(new Set())}
+          />
           <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
+                  <th className="w-8 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={results.length > 0 && selected.size === results.length}
+                      onChange={() =>
+                        setSelected(
+                          selected.size === results.length
+                            ? new Set()
+                            : new Set(results.map((a) => a.uid)),
+                        )
+                      }
+                      aria-label="Select all objects"
+                    />
+                  </th>
                   <th className="px-4 py-2">Name</th>
                   <th className="px-4 py-2">Key</th>
                   <th className="px-4 py-2">Type</th>
@@ -137,7 +168,15 @@ export function AssetSearch() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {results.map((a) => (
-                  <tr key={a.uid} className="hover:bg-slate-50">
+                  <tr key={a.uid} className={selected.has(a.uid) ? "bg-indigo-50/60" : "hover:bg-slate-50"}>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(a.uid)}
+                        onChange={() => toggle(a.uid)}
+                        aria-label={`Select ${a.name}`}
+                      />
+                    </td>
                     <td className="px-4 py-2 font-medium text-slate-900">
                       <Link to={`/assets/${a.uid}`} className="hover:underline">
                         {a.name}
@@ -149,7 +188,7 @@ export function AssetSearch() {
                 ))}
                 {results.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-4 py-6 text-center text-slate-400">
+                    <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
                       No objects match.
                     </td>
                   </tr>

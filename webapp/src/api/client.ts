@@ -50,6 +50,8 @@ import type {
   MarkdownImportResult,
   Relation,
   RetypeResult,
+  TransferJob,
+  TransferRequest,
   Workspace,
   WorkspaceUpdateInput,
   SchemaInput,
@@ -326,6 +328,13 @@ export const importsApi = {
   get: (uid: string) => request<ImportJob>(`/v1/imports/${uid}`),
   create: (input: ImportInput) =>
     request<ImportJob>("/v1/imports", { method: "POST", body: json(input) }),
+};
+
+export const transfersApi = {
+  list: () => request<TransferJob[]>("/v1/transfers"),
+  get: (uid: string) => request<TransferJob>(`/v1/transfers/${uid}`),
+  create: (input: TransferRequest) =>
+    request<TransferJob>("/v1/transfers", { method: "POST", body: json(input) }),
 };
 
 export const importConfigsApi = {

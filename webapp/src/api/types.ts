@@ -313,6 +313,33 @@ export interface ImportJob {
 
 export type MergeStrategy = "override" | "no_override" | "update_if_newer" | "remove_all_before";
 
+export type TransferMode = "copy" | "move";
+
+export interface TransferRequest {
+  target_workspace_id: string;
+  mode: TransferMode;
+  type_uids?: string[];
+  include_instances?: boolean;
+  asset_uids?: string[];
+  document_uids?: string[];
+  issue_uids?: string[];
+}
+
+export interface TransferJob {
+  uid: string;
+  workspace_id: string;
+  target_workspace_id: string;
+  mode: TransferMode;
+  status: "pending" | "running" | "succeeded" | "failed";
+  progress: string | null;
+  counts: Record<string, number>;
+  warnings: string[];
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
 export const MERGE_STRATEGIES: { value: MergeStrategy; label: string; description: string }[] = [
   {
     value: "override",

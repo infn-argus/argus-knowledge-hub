@@ -2,10 +2,20 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { issuesApi } from "../../api/client";
+import { TransferSelectionBar } from "../../components/TransferSelectionBar";
 
 export function IssueList() {
   const [stateFilter, setStateFilter] = useState<"all" | "open" | "closed">("open");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const { data, isLoading } = useQuery({ queryKey: ["issues"], queryFn: () => issuesApi.list() });
+
+  const toggle = (uid: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -43,10 +53,32 @@ export function IssueList() {
       {isLoading && <p className="mt-4 text-sm text-slate-500">Loading…</p>}
 
       {data && (
+        <>
+        <TransferSelectionBar
+          selected={selected}
+          kind="issue_uids"
+          label="tickets"
+          onStarted={() => setSelected(new Set())}
+          onClear={() => setSelected(new Set())}
+        />
         <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
+                <th className="w-8 px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && selected.size === filtered.length}
+                    onChange={() =>
+                      setSelected(
+                        selected.size === filtered.length
+                          ? new Set()
+                          : new Set(filtered.map((i) => i.uid)),
+                      )
+                    }
+                    aria-label="Select all tickets"
+                  />
+                </th>
                 <th className="px-4 py-2">Title</th>
                 <th className="px-4 py-2">State</th>
                 <th className="px-4 py-2">Priority</th>
@@ -56,7 +88,15 @@ export function IssueList() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((i) => (
-                <tr key={i.uid} className="hover:bg-slate-50">
+                <tr key={i.uid} className={selected.has(i.uid) ? "bg-indigo-50/60" : "hover:bg-slate-50"}>
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(i.uid)}
+                      onChange={() => toggle(i.uid)}
+                      aria-label={`Select ${i.title}`}
+                    />
+                  </td>
                   <td className="px-4 py-2 font-medium text-slate-900">
                     <Link to={`/tickets/${i.uid}`} className="hover:underline">
                       {i.title}
@@ -82,7 +122,7 @@ export function IssueList() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
                     No tickets.
                   </td>
                 </tr>
@@ -90,6 +130,7 @@ export function IssueList() {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </div>
   );

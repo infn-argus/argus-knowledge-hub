@@ -36,6 +36,9 @@ import { WorkspaceAI } from "./pages/workspace/AI";
 import { WorkspaceAccess } from "./pages/workspace/Access";
 import { WorkspaceMembers } from "./pages/workspace/Members";
 import { WorkspaceIntegrity } from "./pages/workspace/Integrity";
+import { WorkspaceTransfer } from "./pages/workspace/Transfer";
+import { TransferList } from "./pages/workspace/TransferList";
+import { TransferStatus } from "./pages/workspace/TransferStatus";
 
 /** Sends /imports/... to the workspace-scoped equivalent, keeping whatever
  * came after it. */
@@ -109,6 +112,9 @@ export function App() {
           <Route path="/workspaces/:workspaceId/access" element={<WorkspaceAccess />} />
           <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembers />} />
           <Route path="/workspaces/:workspaceId/integrity" element={<WorkspaceIntegrity />} />
+          <Route path="/workspaces/:workspaceId/transfer" element={<WorkspaceTransfer />} />
+          <Route path="/workspaces/:workspaceId/transfers" element={<TransferList />} />
+          <Route path="/workspaces/:workspaceId/transfers/:uid" element={<TransferStatus />} />
           <Route path="/admin/workspaces" element={<AdminWorkspaces />} />
           <Route path="/admin/new-workspace" element={<NewWorkspace />} />
           <Route path="/admin/users" element={<AdminUsers />} />

@@ -156,6 +156,12 @@ export function AdminWorkspaces() {
                         >
                           Integrity
                         </Link>
+                        <Link
+                          to={`/workspaces/${ws.id}/transfer`}
+                          className="mr-3 text-slate-500 hover:text-slate-900"
+                        >
+                          Transfer
+                        </Link>
                         <button
                           onClick={() => {
                             setEditingId(ws.id);
