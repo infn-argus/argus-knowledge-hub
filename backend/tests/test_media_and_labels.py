@@ -7,7 +7,7 @@ import secrets
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import hash_token
+from app.auth import OidcIdentity, get_identity, hash_token
 from app.db import Base, SessionLocal, engine
 from app.main import app
 from app.models.api_token import ApiToken
@@ -15,6 +15,7 @@ from app.models.asset import Asset
 from app.models.asset_subresources import AssetLabel
 from app.models.icon import Icon
 from app.models.schema import Schema
+from app.models.user import User
 from app.models.workspace import Workspace
 from app.services.jira_import import _import_object_qrcode
 
@@ -200,6 +201,59 @@ def test_icon_library_reuse_and_reference_counted_delete(token):
     removed = client.delete(f"/v1/icons/{icon['uid']}", headers=auth(token))
     assert removed.status_code == 204
     assert not os.path.exists(path)
+
+
+def test_icon_upload_inherits_workspace_global_flag(tmp_path, monkeypatch):
+    """A globally-shared workspace shares every icon uploaded to it too —
+    otherwise the icon quietly fails to follow its type the first time that
+    type is copied elsewhere, since a private icon is deliberately dropped
+    on copy."""
+    monkeypatch.setattr("app.routers.icons.ATTACHMENTS_DIR", str(tmp_path))
+    suffix = secrets.token_hex(4)
+    workspace_id = f"global-ws-{suffix}"
+    db = SessionLocal()
+    db.add(Workspace(id=workspace_id, name="Global WS", is_global=True))
+    db.flush()
+    raw = secrets.token_urlsafe(16)
+    db.add(ApiToken(workspace_id=workspace_id, token_hash=hash_token(raw)))
+    db.commit()
+    db.close()
+
+    resp = client.post("/v1/icons", files={"file": ("icon.png", PNG, "image/png")}, headers=auth(raw))
+    assert resp.status_code == 201
+    assert resp.json()["is_global"] is True
+
+
+def test_turning_workspace_global_cascades_to_its_icons(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.routers.icons.ATTACHMENTS_DIR", str(tmp_path))
+    suffix = secrets.token_hex(4)
+    workspace_id = f"ws-{suffix}"
+    admin_id = f"admin-{suffix}"
+    db = SessionLocal()
+    db.add(Workspace(id=workspace_id, name="WS"))
+    db.flush()
+    raw = secrets.token_urlsafe(16)
+    db.add(ApiToken(workspace_id=workspace_id, token_hash=hash_token(raw)))
+    db.add(User(id=admin_id, email=f"{admin_id}@test.invalid", is_admin=True))
+    db.commit()
+    db.close()
+
+    uploaded = client.post(
+        "/v1/icons", files={"file": ("icon.png", PNG, "image/png")}, headers=auth(raw)
+    ).json()
+    assert uploaded["is_global"] is False
+
+    db = SessionLocal()
+    admin = db.get(User, admin_id)
+    app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=admin)
+    try:
+        resp = client.put(f"/v1/workspaces/{workspace_id}", json={"is_global": True})
+    finally:
+        app.dependency_overrides.pop(get_identity, None)
+    assert resp.status_code == 200, resp.text
+
+    assert db.get(Icon, uploaded["uid"]).is_global is True
+    db.close()
 
 
 def test_duplicate_label_is_rejected(token):

@@ -21,6 +21,10 @@ class TransferRequest(BaseModel):
     asset_uids: list[str] = []
     document_uids: list[str] = []
     issue_uids: list[str] = []
+    # Copy only: when a type already exists at the same level in the target
+    # workspace, merge into it (and match instances by key/code) instead of
+    # refusing. Move never merges, regardless of this flag.
+    force: bool = False
 
 
 class TransferJobOut(BaseModel):

@@ -415,6 +415,122 @@ def test_move_schema_icon_follows_both_types_when_moved_together():
 
 
 # --------------------------------------------------------------------------
+# Name conflicts
+# --------------------------------------------------------------------------
+
+def test_copy_blocks_on_type_name_conflict_without_force():
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    source, target = _workspaces(db, suffix)
+    source_uid, target_uid = f"src-widget-{suffix}", f"dst-widget-{suffix}"
+    db.add(Schema(uid=source_uid, workspace_id=source, name="Widget"))
+    db.add(Schema(uid=target_uid, workspace_id=target, name="Widget"))
+    db.commit()
+    job_uid = f"job-{suffix}"
+    db.add(TransferJob(uid=job_uid, workspace_id=source, target_workspace_id=target, mode="copy"))
+    db.commit()
+    db.close()
+
+    run_transfer(job_uid, source, target, "copy", [source_uid], False, [], [], [])
+
+    db = SessionLocal()
+    refreshed = db.get(TransferJob, job_uid)
+    assert refreshed.status == "failed"
+    assert "Widget" in refreshed.error
+    assert db.query(Schema).filter(Schema.workspace_id == target, Schema.name == "Widget").count() == 1
+    db.close()
+
+
+def test_copy_with_force_re_copy_merges_into_the_earlier_copy():
+    """The real scenario this guards: someone copies a type+object, the
+    source changes, and they re-run the copy with Force to sync it — that
+    must update the one earlier copy in place, not add a second one. (A
+    plain re-copy can't match by Asset.key: it's unique across the whole
+    install, so a copy can never share its source's own key — matching
+    goes through a provenance stamp set on the first copy instead.)"""
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    source, target = _workspaces(db, suffix)
+    source_type = f"src-widget-{suffix}"
+    db.add(Schema(uid=source_type, workspace_id=source, name="Widget", description="v1"))
+    db.flush()
+    source_asset = f"src-a-{suffix}"
+    db.add(Asset(
+        uid=source_asset, workspace_id=source, schema_uid=source_type, key=f"KEY-{suffix}",
+        name="Name v1", type="Widget", attributes={"x": 1},
+    ))
+    db.commit()
+    job1 = f"job1-{suffix}"
+    db.add(TransferJob(uid=job1, workspace_id=source, target_workspace_id=target, mode="copy"))
+    db.commit()
+    db.close()
+
+    run_transfer(job1, source, target, "copy", [source_type], False, [source_asset], [], [])
+
+    db = SessionLocal()
+    first_schema = db.query(Schema).filter(Schema.workspace_id == target, Schema.name == "Widget").one()
+    first_asset = db.query(Asset).filter(Asset.workspace_id == target).one()
+    assert first_asset.key != f"KEY-{suffix}"  # minted a fresh key, as usual
+    first_schema_uid, first_asset_uid = first_schema.uid, first_asset.uid
+
+    # The source changes, then gets re-copied with Force.
+    db.get(Schema, source_type).description = "v2"
+    source_asset_row = db.get(Asset, source_asset)
+    source_asset_row.name = "Name v2"
+    source_asset_row.attributes = {"x": 2}
+    db.commit()
+    job2 = f"job2-{suffix}"
+    db.add(TransferJob(uid=job2, workspace_id=source, target_workspace_id=target, mode="copy"))
+    db.commit()
+    db.close()
+
+    run_transfer(job2, source, target, "copy", [source_type], False, [source_asset], [], [], False, True)
+
+    db = SessionLocal()
+    schemas = db.query(Schema).filter(Schema.workspace_id == target, Schema.name == "Widget").all()
+    assert len(schemas) == 1
+    assert schemas[0].uid == first_schema_uid
+    assert schemas[0].description == "v2"
+
+    assets = db.query(Asset).filter(Asset.workspace_id == target).all()
+    assert len(assets) == 1
+    assert assets[0].uid == first_asset_uid
+    assert assets[0].name == "Name v2"
+    assert assets[0].attributes.get("x") == 2
+
+    refreshed = db.get(TransferJob, job2)
+    assert refreshed.status == "succeeded"
+    assert refreshed.counts["types_overridden"] == 1
+    assert refreshed.counts["assets_overridden"] == 1
+    assert refreshed.counts["types"] == 0
+    assert refreshed.counts["assets"] == 0
+    db.close()
+
+
+def test_move_blocks_on_type_name_conflict_even_with_force():
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    source, target = _workspaces(db, suffix)
+    source_uid, target_uid = f"src-widget-{suffix}", f"dst-widget-{suffix}"
+    db.add(Schema(uid=source_uid, workspace_id=source, name="Widget"))
+    db.add(Schema(uid=target_uid, workspace_id=target, name="Widget"))
+    db.commit()
+    job_uid = f"job-{suffix}"
+    db.add(TransferJob(uid=job_uid, workspace_id=source, target_workspace_id=target, mode="move"))
+    db.commit()
+    db.close()
+
+    # Move has no merge path — force is ignored for it.
+    run_transfer(job_uid, source, target, "move", [source_uid], False, [], [], [], False, True)
+
+    db = SessionLocal()
+    refreshed = db.get(TransferJob, job_uid)
+    assert refreshed.status == "failed"
+    assert db.get(Schema, source_uid).workspace_id == source
+    db.close()
+
+
+# --------------------------------------------------------------------------
 # API: permissions
 # --------------------------------------------------------------------------
 

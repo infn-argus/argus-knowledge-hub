@@ -324,6 +324,9 @@ export interface TransferRequest {
   asset_uids?: string[];
   document_uids?: string[];
   issue_uids?: string[];
+  /** Copy only: merge into a same-named type/object at the target instead
+   * of refusing. Move never merges, regardless of this flag. */
+  force?: boolean;
 }
 
 export interface TransferJob {

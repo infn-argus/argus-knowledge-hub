@@ -187,7 +187,6 @@ export function AppShell() {
               section switcher rather than inside one of them. */}
           <SectionLink to="/graph">Knowledge graph</SectionLink>
           <SectionLink to="/ask">Ask</SectionLink>
-          <SectionLink to="/icons">Icon library</SectionLink>
         </div>
 
         <div className="flex flex-1 flex-col overflow-hidden border-t border-slate-200">

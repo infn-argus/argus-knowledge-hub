@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_permission
 from app.db import get_db
 from app.models.icon import Icon
+from app.models.workspace import Workspace
 from app.schemas.icon import IconOut, IconUpdate
 
 router = APIRouter(prefix="/v1/icons", tags=["icons"])
@@ -54,6 +55,11 @@ async def upload_icon(
     with open(storage_path, "wb") as f:
         f.write(contents)
 
+    # A globally-shared workspace shares every icon uploaded to it too,
+    # including after the flag was set — the same rule schemas already
+    # follow, so an icon from a global workspace doesn't quietly get
+    # dropped the next time one of its types is copied elsewhere.
+    workspace = db.get(Workspace, workspace_id)
     icon = Icon(
         uid=uid,
         workspace_id=workspace_id,
@@ -62,6 +68,7 @@ async def upload_icon(
         mime_type=file.content_type,
         file_size=len(contents),
         storage_path=storage_path,
+        is_global=bool(workspace is not None and workspace.is_global),
     )
     db.add(icon)
     db.commit()

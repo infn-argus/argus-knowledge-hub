@@ -53,6 +53,7 @@ def run_transfer(
     document_uids: list[str],
     issue_uids: list[str],
     include_descendant_types: bool = False,
+    force: bool = False,
 ) -> None:
     db = SessionLocal()
     job = db.get(TransferJob, job_uid)
@@ -72,6 +73,7 @@ def run_transfer(
             working_issues |= i
 
         if mode == "move":
+            _block_on_type_name_conflicts(db, target_workspace_id, schema_uids)
             counts, warnings = _move(
                 db, source_workspace_id, target_workspace_id,
                 schema_uids, working_assets, working_documents, working_issues,
@@ -79,7 +81,7 @@ def run_transfer(
         else:
             counts, warnings = _copy(
                 db, source_workspace_id, target_workspace_id,
-                schema_uids, working_assets, working_documents, working_issues,
+                schema_uids, working_assets, working_documents, working_issues, force,
             )
 
         db.commit()
@@ -282,6 +284,38 @@ def _move(
     return counts, warnings
 
 
+def _block_on_type_name_conflicts(db: Session, target: str, schema_uids: list[str]) -> None:
+    """Moving a type into a workspace that already has one with the same
+    name at the same level would produce two indistinguishable siblings —
+    refuse rather than silently duplicate. Move has no force/merge escape
+    hatch (unlike copy): merging here would mean deleting the moved schema
+    out from under any of its own left-behind children, which is real data
+    loss risk this doesn't take on."""
+    conflicts: list[str] = []
+    for uid in schema_uids:
+        schema = db.get(Schema, uid)
+        if schema is None:
+            continue
+        parent_clause = (
+            (Schema.parent_schema_uid == schema.parent_schema_uid) if schema.parent_schema_uid
+            else Schema.parent_schema_uid.is_(None)
+        )
+        existing = db.scalar(
+            select(Schema.uid).where(
+                Schema.workspace_id == target, Schema.name == schema.name,
+                Schema.applies_to == schema.applies_to, parent_clause, Schema.uid != uid,
+            )
+        )
+        if existing is not None:
+            conflicts.append(schema.name)
+    if conflicts:
+        names = ", ".join(sorted(set(conflicts))[:20])
+        raise ValueError(
+            f"A type named {names} already exists in the target workspace at the same level — "
+            "move doesn't merge. Copy with Force overwrite instead, or rename/remove it there first."
+        )
+
+
 def _move_schema_icons(db: Session, source: str, target: str, schema_uids: list[str]) -> int:
     """A non-global icon moves with the moved type(s) only if nothing left
     behind still needs it — otherwise it stays put and the moved type(s)
@@ -420,24 +454,34 @@ def _copy_attachments_for(db: Session, target: str, column, old_id: str, new_id:
 def _copy(
     db: Session, source: str, target: str,
     schema_uids: list[str], asset_uids: set[str], document_uids: set[str], issue_uids: set[str],
+    force: bool = False,
 ) -> tuple[dict, list[str]]:
     warnings: list[str] = []
     counts = {
         "types": 0, "assets": 0, "documents": 0, "issues": 0,
         "relations_copied": 0, "relations_dropped": 0, "links_dropped": 0, "icons_dropped": 0,
+        "types_overridden": 0, "assets_overridden": 0,
     }
     schema_map: dict[str, str] = {}
     asset_map: dict[str, str] = {}
     document_map: dict[str, str] = {}
     issue_map: dict[str, str] = {}
     used_keys: set[str] = set()
+    overridden_assets: set[str] = set()
+    type_conflicts: list[str] = []
 
     for uid in schema_uids:
         schema = db.get(Schema, uid)
         if schema is None or schema.workspace_id != source:
             continue
-        new_uid = str(uuid.uuid4())
         new_parent = schema_map.get(schema.parent_schema_uid, schema.parent_schema_uid) if schema.parent_schema_uid else None
+        parent_clause = (Schema.parent_schema_uid == new_parent) if new_parent else Schema.parent_schema_uid.is_(None)
+        existing = db.scalar(
+            select(Schema).where(
+                Schema.workspace_id == target, Schema.name == schema.name,
+                Schema.applies_to == schema.applies_to, parent_clause,
+            )
+        )
         # A private icon isn't duplicated — a copy in another workspace can't
         # see it, so it's dropped, not forked. A global one is already
         # visible from the target, so the copy just keeps pointing at it.
@@ -448,6 +492,25 @@ def _copy(
                 new_icon_uid = schema.icon_uid
             else:
                 counts["icons_dropped"] += 1
+
+        if existing is not None:
+            type_conflicts.append(schema.name)
+            if not force:
+                schema_map[uid] = existing.uid  # only matters if we end up not raising after all
+                continue
+            existing.description = schema.description
+            existing.is_concrete = schema.is_concrete
+            existing.attributes = list(schema.attributes or [])
+            existing.metadata_json = dict(schema.metadata_json or {})
+            existing.version = schema.version
+            existing.is_global = schema.is_global
+            if new_icon_uid:
+                existing.icon_uid = new_icon_uid
+            schema_map[uid] = existing.uid
+            counts["types_overridden"] += 1
+            continue
+
+        new_uid = str(uuid.uuid4())
         db.add(Schema(
             uid=new_uid, workspace_id=target, name=schema.name, description=schema.description,
             is_concrete=schema.is_concrete, parent_schema_uid=new_parent,
@@ -459,9 +522,35 @@ def _copy(
         counts["types"] += 1
     db.flush()
 
+    if type_conflicts and not force:
+        names = ", ".join(sorted(set(type_conflicts))[:20])
+        raise ValueError(
+            f"A type named {names} already exists in the target workspace at the same level. "
+            "Copy again with Force overwrite to merge into it, or rename/remove it there first."
+        )
+
     for uid in asset_uids:
         asset = db.get(Asset, uid)
         if asset is None or asset.workspace_id != source:
+            continue
+        # Asset.key is unique across the whole install, so a copy can never
+        # share its source's own key — matching a previously-copied asset
+        # for force-merge has to go by a provenance stamp instead, set the
+        # first time this source asset was copied here.
+        existing_asset = db.scalar(
+            select(Asset).where(
+                Asset.workspace_id == target, Asset.attributes["_copy_source_uid"].astext == uid
+            )
+        ) if force else None
+        if existing_asset is not None:
+            existing_asset.name = asset.name
+            existing_asset.type = asset.type
+            existing_asset.schema_uid = schema_map.get(asset.schema_uid, asset.schema_uid)
+            existing_asset.attributes = {**dict(asset.attributes or {}), "_copy_source_uid": uid}
+            existing_asset.is_global = asset.is_global
+            asset_map[uid] = existing_asset.uid
+            overridden_assets.add(uid)
+            counts["assets_overridden"] += 1
             continue
         new_uid = str(uuid.uuid4())
         new_key = _unique_asset_key(db, asset.key, used_keys)
@@ -469,14 +558,20 @@ def _copy(
             uid=new_uid, workspace_id=target,
             schema_uid=schema_map.get(asset.schema_uid, asset.schema_uid),
             key=new_key, name=asset.name, type=asset.type, avatar_icon_uid=None,
-            attributes=dict(asset.attributes or {}), inbound_relations=[], outbound_relations=[],
+            attributes={**dict(asset.attributes or {}), "_copy_source_uid": uid},
+            inbound_relations=[], outbound_relations=[],
             deleted_at=None, is_global=asset.is_global,
         ))
         asset_map[uid] = new_uid
         counts["assets"] += 1
     db.flush()
 
+    # Subresources (comments/history/labels/attachments) are only copied for
+    # freshly-created assets — an overridden asset already has its own, and
+    # re-copying them on every force re-run would just keep piling up.
     for old_uid, new_uid in asset_map.items():
+        if old_uid in overridden_assets:
+            continue
         for c in db.scalars(select(AssetComment).where(AssetComment.asset_uid == old_uid)):
             db.add(AssetComment(
                 uid=str(uuid.uuid4()), asset_uid=new_uid, author=c.author, text=c.text,
@@ -500,16 +595,23 @@ def _copy(
             db.get(Asset, new_uid).avatar_icon_uid = attachment_map[old_asset.avatar_icon_uid]
 
     if asset_map:
+        existing_relations = {
+            (r.from_asset_uid, r.to_asset_uid, r.relation_type)
+            for r in db.scalars(
+                select(Relation).where(Relation.from_asset_uid.in_(asset_map.values()))
+            )
+        }
         rels = db.scalars(select(Relation).where(Relation.from_asset_uid.in_(asset_map.keys()))).all()
         for rel in rels:
-            if rel.to_asset_uid in asset_map:
-                db.add(Relation(
-                    workspace_id=target, from_asset_uid=asset_map[rel.from_asset_uid],
-                    to_asset_uid=asset_map[rel.to_asset_uid], relation_type=rel.relation_type,
-                ))
-                counts["relations_copied"] += 1
-            else:
+            if rel.to_asset_uid not in asset_map:
                 counts["relations_dropped"] += 1
+                continue
+            key = (asset_map[rel.from_asset_uid], asset_map[rel.to_asset_uid], rel.relation_type)
+            if key in existing_relations:
+                continue  # already there from a previous force-copy of this same pair
+            db.add(Relation(workspace_id=target, from_asset_uid=key[0], to_asset_uid=key[1], relation_type=key[2]))
+            existing_relations.add(key)
+            counts["relations_copied"] += 1
     db.flush()
     for new_uid in asset_map.values():
         rebuild_asset_relations_with_neighbors(db, new_uid)
@@ -642,5 +744,10 @@ def _copy(
         warnings.append(
             "Reference-typed attribute values still point at the source workspace's objects — "
             "run Integrity → Relink in the target workspace to re-resolve them."
+        )
+    if counts["types_overridden"] or counts["assets_overridden"]:
+        warnings.append(
+            f"Force overwrite merged {counts['types_overridden']} existing type(s) and "
+            f"{counts['assets_overridden']} existing object(s) in place instead of duplicating them."
         )
     return counts, warnings

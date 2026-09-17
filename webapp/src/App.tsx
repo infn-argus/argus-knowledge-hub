@@ -64,7 +64,6 @@ export function App() {
           <Route path="/" element={<Dashboard />} />
 
           <Route path="/ask" element={<Ask />} />
-          <Route path="/icons" element={<IconLibrary />} />
 
           <Route path="/schemas/new" element={<SchemaForm />} />
           <Route path="/schemas/:uid" element={<SchemaDetail />} />
@@ -114,6 +113,7 @@ export function App() {
           <Route path="/workspaces/:workspaceId/access" element={<WorkspaceAccess />} />
           <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembers />} />
           <Route path="/workspaces/:workspaceId/integrity" element={<WorkspaceIntegrity />} />
+          <Route path="/workspaces/:workspaceId/icons" element={<IconLibrary />} />
           <Route path="/workspaces/:workspaceId/transfer" element={<WorkspaceTransfer />} />
           <Route path="/workspaces/:workspaceId/transfers" element={<TransferList />} />
           <Route path="/workspaces/:workspaceId/transfers/:uid" element={<TransferStatus />} />

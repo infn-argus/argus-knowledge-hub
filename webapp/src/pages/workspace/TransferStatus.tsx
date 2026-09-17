@@ -5,12 +5,15 @@ import { transfersApi } from "../../api/client";
 
 const COUNTS: [string, string][] = [
   ["types", "Types"],
+  ["types_overridden", "Types overwritten in place"],
   ["assets", "Objects"],
+  ["assets_overridden", "Objects overwritten in place"],
   ["documents", "Documents"],
   ["issues", "Tickets"],
   ["relations_copied", "Relations copied"],
   ["relations_dropped", "Relations dropped"],
   ["links_dropped", "Ticket/document links dropped"],
+  ["icons_dropped", "Icons not carried over"],
 ];
 
 const STATUS_STYLES: Record<string, string> = {

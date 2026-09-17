@@ -27,6 +27,7 @@ export function WorkspaceTransfer() {
   const [includeDescendantTypes, setIncludeDescendantTypes] = useState(false);
   const [target, setTarget] = useState("");
   const [mode, setMode] = useState<TransferMode>("copy");
+  const [force, setForce] = useState(false);
 
   const toggle = (uid: string) =>
     setSelected((current) => {
@@ -44,6 +45,7 @@ export function WorkspaceTransfer() {
         type_uids: [...selected],
         include_instances: includeInstances,
         include_descendant_types: includeDescendantTypes,
+        force: mode === "copy" ? force : undefined,
       }),
     onSuccess: (job) => navigate(`/workspaces/${workspaceId}/transfers/${job.uid}`),
     onError: (err) => alert(err instanceof Error ? err.message : "Could not start the transfer."),
@@ -137,6 +139,15 @@ export function WorkspaceTransfer() {
           <option value="copy">Copy</option>
           <option value="move">Move</option>
         </select>
+        {mode === "copy" && (
+          <label
+            className="flex items-center gap-2 text-sm text-slate-700"
+            title="If a type with the same name already exists at the same level in the target, merge into it (and match objects by key/code) instead of refusing."
+          >
+            <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+            Force overwrite
+          </label>
+        )}
         <span className="text-sm text-slate-400">to</span>
         <WorkspaceTargetPicker excludeWorkspaceId={currentWorkspaceId} value={target} onChange={setTarget} />
         <button

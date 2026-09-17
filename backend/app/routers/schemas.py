@@ -163,6 +163,7 @@ async def upload_schema_icon(
     with open(storage_path, "wb") as f:
         f.write(contents)
 
+    workspace = db.get(Workspace, workspace_id)
     db.add(Icon(
         uid=icon_uid,
         workspace_id=workspace_id,
@@ -171,6 +172,7 @@ async def upload_schema_icon(
         mime_type=file.content_type,
         file_size=len(contents),
         storage_path=storage_path,
+        is_global=bool(workspace is not None and workspace.is_global),
     ))
     schema.icon_uid = icon_uid
     db.commit()

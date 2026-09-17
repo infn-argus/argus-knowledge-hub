@@ -36,6 +36,7 @@ export function TransferItemAction({
   const [mode, setMode] = useState<TransferMode>("copy");
   const [includeInstances, setIncludeInstances] = useState(true);
   const [includeDescendantTypes, setIncludeDescendantTypes] = useState(false);
+  const [force, setForce] = useState(false);
   const navigate = useNavigate();
   const workspaceId = useCurrentWorkspaceId();
 
@@ -48,6 +49,7 @@ export function TransferItemAction({
         ...(kind === "type"
           ? { include_instances: includeInstances, include_descendant_types: includeDescendantTypes }
           : {}),
+        ...(kind === "type" && mode === "copy" ? { force } : {}),
       }),
     onSuccess: (job) => {
       setOpen(false);
@@ -101,6 +103,15 @@ export function TransferItemAction({
                     onChange={(e) => setIncludeDescendantTypes(e.target.checked)}
                   />
                   Include its child type(s)
+                </label>
+              )}
+              {mode === "copy" && (
+                <label
+                  className="flex items-center gap-2 text-xs text-slate-600"
+                  title="If a type with the same name already exists at the same level in the target, merge into it instead of refusing."
+                >
+                  <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+                  Force overwrite
                 </label>
               )}
             </div>

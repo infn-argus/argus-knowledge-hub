@@ -13,6 +13,7 @@ from app.services.permissions import effective_permissions, has_permission, user
 from app.models.global_value import GlobalValue
 from app.models.membership import Membership
 from app.models.document import Document
+from app.models.icon import Icon
 from app.models.schema import Schema
 from app.models.user import User
 from app.models.workspace import Workspace
@@ -349,6 +350,11 @@ def update_workspace(
             Document.workspace_id == workspace_id,
             Document.confidentiality != "riservato",
         ).update({Document.is_global: True}, synchronize_session=False)
+        # And icons — otherwise a type's picture silently fails to follow it
+        # the next time that type is copied to another workspace.
+        db.query(Icon).filter(Icon.workspace_id == workspace_id).update(
+            {Icon.is_global: True}, synchronize_session=False
+        )
         db.commit()
         rebuild_relations_for_schemas(db, schema_uids)
         db.commit()

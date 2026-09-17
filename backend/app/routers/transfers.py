@@ -103,7 +103,7 @@ def create_transfer(
     background_tasks.add_task(
         run_transfer, job.uid, workspace_id, body.target_workspace_id, body.mode,
         body.type_uids, body.include_instances, body.asset_uids, body.document_uids, body.issue_uids,
-        body.include_descendant_types,
+        body.include_descendant_types, body.force,
     )
     db.refresh(job)
     return job
