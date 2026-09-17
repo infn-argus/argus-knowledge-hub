@@ -11,8 +11,6 @@ class Attachment(Base, WorkspaceScopedMixin, TimestampMixin):
     __tablename__ = "attachments"
 
     uid: Mapped[str] = mapped_column(String, primary_key=True)
-    # Nullable: schema-icon attachments (see schemas.py's icon upload endpoint) have
-    # no owning asset.
     asset_uid: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("assets.uid", ondelete="CASCADE"), nullable=True, index=True
     )

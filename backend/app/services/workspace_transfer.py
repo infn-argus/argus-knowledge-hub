@@ -31,6 +31,7 @@ from app.models.asset import Asset, Relation
 from app.models.asset_subresources import AssetComment, AssetHistory, AssetLabel, AssetTicket
 from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation, DocumentRevision
+from app.models.icon import Icon
 from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
 from app.models.schema import Schema
 from app.models.transfer_job import TransferJob
@@ -174,7 +175,7 @@ def _move(
     warnings: list[str] = []
     counts = {
         "types": 0, "assets": 0, "documents": 0, "issues": 0,
-        "relations_dropped": 0, "links_dropped": 0,
+        "relations_dropped": 0, "links_dropped": 0, "icons_dropped": 0,
     }
 
     for uid in schema_uids:
@@ -183,6 +184,7 @@ def _move(
             continue
         schema.workspace_id = target
         counts["types"] += 1
+    counts["icons_dropped"] += _move_schema_icons(db, source, target, schema_uids)
 
     for uid in asset_uids:
         asset = db.get(Asset, uid)
@@ -273,7 +275,39 @@ def _move(
         warnings.append(f"Dropped {counts['relations_dropped']} relation(s) crossing the workspace boundary.")
     if counts["links_dropped"]:
         warnings.append(f"Dropped {counts['links_dropped']} ticket/document link(s) crossing the workspace boundary.")
+    if counts["icons_dropped"]:
+        warnings.append(
+            f"Unlinked {counts['icons_dropped']} icon(s) still used by a type left behind in the source workspace."
+        )
     return counts, warnings
+
+
+def _move_schema_icons(db: Session, source: str, target: str, schema_uids: list[str]) -> int:
+    """A non-global icon moves with the moved type(s) only if nothing left
+    behind still needs it — otherwise it stays put and the moved type(s)
+    lose the reference rather than leave a cross-workspace pointer that
+    icons.py's visibility check would just 404 on anyway. A global icon
+    needs no change either way: it's already visible from both sides."""
+    dropped = 0
+    handled: set[str] = set()
+    for uid in schema_uids:
+        schema = db.get(Schema, uid)
+        if schema is None or not schema.icon_uid or schema.icon_uid in handled:
+            continue
+        icon = db.get(Icon, schema.icon_uid)
+        if icon is None or icon.is_global:
+            continue
+        handled.add(schema.icon_uid)
+        used_outside = db.scalar(
+            select(Schema.uid).where(Schema.icon_uid == icon.uid, ~Schema.uid.in_(schema_uids))
+        ) is not None
+        if used_outside:
+            for s in db.scalars(select(Schema).where(Schema.icon_uid == icon.uid, Schema.uid.in_(schema_uids))):
+                s.icon_uid = None
+                dropped += 1
+        else:
+            icon.workspace_id = target
+    return dropped
 
 
 def _move_document_relations(
@@ -353,8 +387,10 @@ def _unique_asset_key(db: Session, base_key: str, used: set[str]) -> str:
     return candidate
 
 
-def _copy_attachments_for(db: Session, target: str, column, old_id: str, new_id: str) -> int:
-    n = 0
+def _copy_attachments_for(db: Session, target: str, column, old_id: str, new_id: str) -> dict[str, str]:
+    """Returns old attachment uid -> new attachment uid, so a caller whose
+    object points at one of these by uid (an asset's avatar) can follow it."""
+    mapping: dict[str, str] = {}
     for att in db.scalars(select(Attachment).where(column == old_id)).all():
         new_uid = str(uuid.uuid4())
         new_path = os.path.join(ATTACHMENTS_DIR, new_uid)
@@ -377,8 +413,8 @@ def _copy_attachments_for(db: Session, target: str, column, old_id: str, new_id:
             backend_id=None,
             backend_url=att.backend_url,
         ))
-        n += 1
-    return n
+        mapping[att.uid] = new_uid
+    return mapping
 
 
 def _copy(
@@ -388,7 +424,7 @@ def _copy(
     warnings: list[str] = []
     counts = {
         "types": 0, "assets": 0, "documents": 0, "issues": 0,
-        "relations_copied": 0, "relations_dropped": 0, "links_dropped": 0,
+        "relations_copied": 0, "relations_dropped": 0, "links_dropped": 0, "icons_dropped": 0,
     }
     schema_map: dict[str, str] = {}
     asset_map: dict[str, str] = {}
@@ -402,11 +438,21 @@ def _copy(
             continue
         new_uid = str(uuid.uuid4())
         new_parent = schema_map.get(schema.parent_schema_uid, schema.parent_schema_uid) if schema.parent_schema_uid else None
+        # A private icon isn't duplicated — a copy in another workspace can't
+        # see it, so it's dropped, not forked. A global one is already
+        # visible from the target, so the copy just keeps pointing at it.
+        new_icon_uid = None
+        if schema.icon_uid:
+            icon = db.get(Icon, schema.icon_uid)
+            if icon is not None and icon.is_global:
+                new_icon_uid = schema.icon_uid
+            else:
+                counts["icons_dropped"] += 1
         db.add(Schema(
             uid=new_uid, workspace_id=target, name=schema.name, description=schema.description,
             is_concrete=schema.is_concrete, parent_schema_uid=new_parent,
             attributes=list(schema.attributes or []), metadata_json=dict(schema.metadata_json or {}),
-            version=schema.version, icon_attachment_uid=None, is_global=schema.is_global,
+            version=schema.version, icon_uid=new_icon_uid, is_global=schema.is_global,
             applies_to=schema.applies_to,
         ))
         schema_map[uid] = new_uid
@@ -448,7 +494,10 @@ def _copy(
                 confidence=lbl.confidence, created_at=lbl.created_at, updated_at=lbl.updated_at,
                 metadata_json=lbl.metadata_json,
             ))
-        _copy_attachments_for(db, target, Attachment.asset_uid, old_uid, new_uid)
+        attachment_map = _copy_attachments_for(db, target, Attachment.asset_uid, old_uid, new_uid)
+        old_asset = db.get(Asset, old_uid)
+        if old_asset.avatar_icon_uid and old_asset.avatar_icon_uid in attachment_map:
+            db.get(Asset, new_uid).avatar_icon_uid = attachment_map[old_asset.avatar_icon_uid]
 
     if asset_map:
         rels = db.scalars(select(Relation).where(Relation.from_asset_uid.in_(asset_map.keys()))).all()
@@ -584,6 +633,11 @@ def _copy(
         warnings.append(f"Dropped {counts['relations_dropped']} relation(s) to an object outside the transfer.")
     if counts["links_dropped"]:
         warnings.append(f"Dropped {counts['links_dropped']} ticket/document link(s) to an object outside the transfer.")
+    if counts["icons_dropped"]:
+        warnings.append(
+            f"Didn't copy {counts['icons_dropped']} private icon(s) — mark them global first if you want "
+            "copies to keep using them."
+        )
     if counts["relations_copied"] or counts["assets"]:
         warnings.append(
             "Reference-typed attribute values still point at the source workspace's objects — "

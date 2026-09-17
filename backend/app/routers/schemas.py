@@ -1,6 +1,5 @@
 import os
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import or_, select
@@ -9,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_permission
 from app.db import get_db
-from app.models.attachment import Attachment
+from app.models.icon import Icon
 from app.models.schema import Schema
 from app.models.workspace import Workspace
 from app.schemas.schema import SchemaCreate, SchemaOut, SchemaUpdate
@@ -151,47 +150,51 @@ async def upload_schema_icon(
     workspace_id: str = Depends(require_permission("modify")),
     db: Session = Depends(get_db),
 ):
+    """Upload straight onto a type — the common case, and a shortcut for
+    "upload to the library, then pick it" in one step. The uploaded picture
+    joins the shared icon library same as anything uploaded there directly,
+    so it can be reused by, or unlinked from, this type without losing it."""
     schema = _get_owned_schema(uid, workspace_id, db)
-    previous_uid = schema.icon_attachment_uid
 
-    attachment_uid = str(uuid.uuid4())
+    icon_uid = str(uuid.uuid4())
     os.makedirs(ATTACHMENTS_DIR, exist_ok=True)
-    storage_path = os.path.join(ATTACHMENTS_DIR, attachment_uid)
+    storage_path = os.path.join(ATTACHMENTS_DIR, icon_uid)
     contents = await file.read()
     with open(storage_path, "wb") as f:
         f.write(contents)
 
-    db.add(Attachment(
-        uid=attachment_uid,
+    db.add(Icon(
+        uid=icon_uid,
         workspace_id=workspace_id,
-        asset_uid=None,
-        filename=file.filename or attachment_uid,
+        name=file.filename or icon_uid,
+        filename=file.filename or icon_uid,
         mime_type=file.content_type,
         file_size=len(contents),
         storage_path=storage_path,
     ))
-    schema.icon_attachment_uid = attachment_uid
-    _discard_icon_attachment(db, previous_uid, workspace_id)
+    schema.icon_uid = icon_uid
     db.commit()
     db.refresh(schema)
     return schema
 
 
-def _discard_icon_attachment(db: Session, attachment_uid: Optional[str], workspace_id: str) -> None:
-    """A type icon isn't attached to any object, so once a type stops
-    pointing at it nothing can reach it again — unlike an object's avatar,
-    which stays visible among that object's attachments. Drop the row and
-    the file instead of leaving an unreachable blob behind."""
-    if not attachment_uid:
-        return
-    attachment = db.get(Attachment, attachment_uid)
-    if attachment is None or attachment.workspace_id != workspace_id:
-        return
-    if attachment.asset_uid is not None:
-        return
-    if attachment.storage_path and os.path.exists(attachment.storage_path):
-        os.remove(attachment.storage_path)
-    db.delete(attachment)
+@router.put("/{uid}/icon/{icon_uid}", response_model=SchemaOut)
+def set_schema_icon_from_library(
+    uid: str,
+    icon_uid: str,
+    workspace_id: str = Depends(require_permission("modify")),
+    db: Session = Depends(get_db),
+):
+    """Point this type at a picture already in the shared icon library —
+    reused as-is, not duplicated."""
+    schema = _get_owned_schema(uid, workspace_id, db)
+    icon = db.get(Icon, icon_uid)
+    if icon is None or (icon.workspace_id != workspace_id and not icon.is_global):
+        raise HTTPException(status_code=404, detail="Icon not found")
+    schema.icon_uid = icon_uid
+    db.commit()
+    db.refresh(schema)
+    return schema
 
 
 @router.delete("/{uid}/icon", response_model=SchemaOut)
@@ -200,10 +203,10 @@ def clear_schema_icon(
     workspace_id: str = Depends(require_permission("modify")),
     db: Session = Depends(get_db),
 ):
+    """Unlink this type's icon — the picture itself stays in the library,
+    since other types may still be using it."""
     schema = _get_owned_schema(uid, workspace_id, db)
-    previous_uid = schema.icon_attachment_uid
-    schema.icon_attachment_uid = None
-    _discard_icon_attachment(db, previous_uid, workspace_id)
+    schema.icon_uid = None
     db.commit()
     db.refresh(schema)
     return schema

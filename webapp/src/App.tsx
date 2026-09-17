@@ -31,6 +31,7 @@ import { IssueList } from "./pages/issues/List";
 import { IssueSearch } from "./pages/issues/Search";
 import { LabelList } from "./pages/labels/List";
 import { SchemaDetail } from "./pages/schemas/Detail";
+import { IconLibrary } from "./pages/icons/List";
 import { SchemaForm } from "./pages/schemas/Form";
 import { WorkspaceAI } from "./pages/workspace/AI";
 import { WorkspaceAccess } from "./pages/workspace/Access";
@@ -63,6 +64,7 @@ export function App() {
           <Route path="/" element={<Dashboard />} />
 
           <Route path="/ask" element={<Ask />} />
+          <Route path="/icons" element={<IconLibrary />} />
 
           <Route path="/schemas/new" element={<SchemaForm />} />
           <Route path="/schemas/:uid" element={<SchemaDetail />} />

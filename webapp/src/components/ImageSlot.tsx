@@ -13,6 +13,8 @@ export function ImageSlot({
   busy = false,
   onPick,
   onClear,
+  fetchBlobUrl,
+  extra,
 }: {
   attachmentUid: string | null;
   fallbackText: string;
@@ -22,6 +24,11 @@ export function ImageSlot({
   busy?: boolean;
   onPick: (file: File) => void;
   onClear: () => void;
+  /** Defaults to /v1/attachments/{uid}; pass iconsApi.fetchBlobUrl to show a
+   * picture from the shared icon library instead of a plain attachment. */
+  fetchBlobUrl?: (uid: string) => Promise<string>;
+  /** An extra action alongside Upload/Remove — e.g. "Choose from library". */
+  extra?: React.ReactNode;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -43,6 +50,7 @@ export function ImageSlot({
         <AuthenticatedImage
           uid={attachmentUid}
           alt={alt}
+          fetchBlobUrl={fetchBlobUrl}
           className={`${rounded} border border-slate-200 bg-white object-contain`}
           style={{ width: size, height: size }}
         />
@@ -74,6 +82,7 @@ export function ImageSlot({
             Remove
           </button>
         )}
+        {extra}
       </div>
     </div>
   );

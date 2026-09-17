@@ -15,6 +15,7 @@ from app.routers import (
     global_values,
     graph,
     groups,
+    icons,
     import_configs,
     imports,
     issues,
@@ -53,6 +54,7 @@ app.include_router(attribute_values.router)
 app.include_router(ai.router)
 app.include_router(mcp.router)
 app.include_router(groups.router)
+app.include_router(icons.router)
 app.include_router(import_configs.router)
 app.include_router(imports.router)
 app.include_router(labels.router)

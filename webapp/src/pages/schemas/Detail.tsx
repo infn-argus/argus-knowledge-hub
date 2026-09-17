@@ -2,8 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Asset, AppDocument, Issue, MemberDirectoryEntry } from "../../api/types";
-import { assetsApi, documentsApi, globalValuesApi, issuesApi, membersApi, schemasApi } from "../../api/client";
+import { assetsApi, documentsApi, globalValuesApi, iconsApi, issuesApi, membersApi, schemasApi } from "../../api/client";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage";
+import { IconPicker } from "../../components/IconPicker";
 import { ImageSlot } from "../../components/ImageSlot";
 import {
   ColumnDef,
@@ -34,6 +35,7 @@ export function SchemaDetail() {
   const { uid } = useParams<{ uid: string }>();
   const [tab, setTab] = useState<"items" | "attributes">("items");
   const [search, setSearch] = useState("");
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -83,6 +85,10 @@ export function SchemaDetail() {
   };
   const uploadIconMutation = useMutation({
     mutationFn: (file: File) => schemasApi.uploadIcon(uid!, file),
+    onSuccess: invalidateIcon,
+  });
+  const setIconMutation = useMutation({
+    mutationFn: (iconUid: string) => schemasApi.setIconFromLibrary(uid!, iconUid),
     onSuccess: invalidateIcon,
   });
   const clearIconMutation = useMutation({
@@ -367,13 +373,35 @@ export function SchemaDetail() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <ImageSlot
-            attachmentUid={schema.icon_attachment_uid}
+            attachmentUid={schema.icon_uid}
             fallbackText={schema.name}
             alt={`${schema.name} icon`}
             size={40}
             busy={uploadIconMutation.isPending}
             onPick={(file) => uploadIconMutation.mutate(file)}
             onClear={() => clearIconMutation.mutate()}
+            fetchBlobUrl={iconsApi.fetchBlobUrl}
+            extra={
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIconPickerOpen((v) => !v)}
+                  className="text-xs text-indigo-600 hover:text-indigo-800"
+                >
+                  Choose from library
+                </button>
+                {iconPickerOpen && (
+                  <div className="absolute left-0 z-20 mt-1 w-64">
+                    <IconPicker
+                      onPick={(iconUid) => {
+                        setIconMutation.mutate(iconUid);
+                        setIconPickerOpen(false);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            }
           />
           <div>
             <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-900">

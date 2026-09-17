@@ -20,6 +20,7 @@ from app.models.asset import Asset, Relation
 from app.models.asset_subresources import AssetComment, AssetHistory, AssetLabel
 from app.models.attachment import Attachment
 from app.models.global_value import GlobalValue
+from app.models.icon import Icon
 from app.models.import_job import ImportJob
 from app.models.schema import Schema
 from app.models.workspace import Workspace
@@ -637,13 +638,20 @@ def run_jira_import(
                 icon = icon_type_resp.json().get("icon") or {}
                 icon_url = icon.get("url48") or icon.get("url16")
                 schema_icon_urls[jid] = icon_url
-                if icon_url and not schema.icon_attachment_uid:
-                    att = _download_attachment(
-                        jira, workspace_id, icon_url, filename=f"{jid}.png", mime_type="image/png",
-                    )
-                    db.add(att)
+                if icon_url and not schema.icon_uid:
+                    resp = jira.get(icon_url)
+                    resp.raise_for_status()
+                    icon_uid = str(uuid.uuid4())
+                    storage_path = os.path.join(ATTACHMENTS_DIR, icon_uid)
+                    with open(storage_path, "wb") as f:
+                        f.write(resp.content)
+                    db.add(Icon(
+                        uid=icon_uid, workspace_id=workspace_id, name=f"{t['name']} icon",
+                        filename=f"{jid}.png", mime_type=resp.headers.get("Content-Type", "image/png"),
+                        file_size=len(resp.content), storage_path=storage_path,
+                    ))
                     db.flush()
-                    schema.icon_attachment_uid = att.uid
+                    schema.icon_uid = icon_uid
             except Exception:
                 schema_icon_urls[jid] = None
 

@@ -21,7 +21,12 @@ class Schema(Base, WorkspaceScopedMixin, TimestampMixin):
     attributes: Mapped[list] = mapped_column(JSONB, default=list)
     metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     version: Mapped[int] = mapped_column(Integer, default=1)
-    icon_attachment_uid: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # A picture from the shared icon library, not owned exclusively by this
+    # type — the FK has no ondelete, so an icon still in use here can't be
+    # deleted out from under it (see icons.py's delete endpoint).
+    icon_uid: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("icons.uid"), nullable=True
+    )
     # Visible/referenceable from any workspace when true; editing/deleting still
     # requires permission in the workspace that owns it (workspace_id, unchanged).
     is_global: Mapped[bool] = mapped_column(Boolean, default=False)

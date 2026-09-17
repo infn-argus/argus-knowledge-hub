@@ -19,6 +19,8 @@ import type {
   DocumentRelation,
   GlobalValue,
   GlobalValueInput,
+  Icon,
+  IconUpdate,
   ImportConfig,
   ImportConfigInput,
   ImportConfigUpdateInput,
@@ -165,6 +167,8 @@ export const schemasApi = {
     if (!resp.ok) throw new ApiError(resp.status, data);
     return data as AppSchema;
   },
+  setIconFromLibrary: (uid: string, iconUid: string) =>
+    request<AppSchema>(`/v1/schemas/${uid}/icon/${iconUid}`, { method: "PUT" }),
   clearIcon: (uid: string) => request<AppSchema>(`/v1/schemas/${uid}/icon`, { method: "DELETE" }),
 };
 
@@ -316,6 +320,40 @@ export const attachmentsApi = {
     return URL.createObjectURL(blob);
   },
   delete: (uid: string) => request<void>(`/v1/attachments/${uid}`, { method: "DELETE" }),
+};
+
+/** The shared icon library types are chosen from — upload once, reuse
+ * anywhere, unlike an object's avatar or a one-off attachment. */
+export const iconsApi = {
+  list: () => request<Icon[]>("/v1/icons"),
+  upload: async (file: File, name?: string): Promise<Icon> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const form = new FormData();
+    form.append("file", file);
+    if (name) form.append("name", name);
+    const resp = await fetch(`${session.baseUrl}/v1/icons`, {
+      method: "POST",
+      headers: authHeaders(session),
+      body: form,
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new ApiError(resp.status, data);
+    return data as Icon;
+  },
+  update: (uid: string, input: IconUpdate) =>
+    request<Icon>(`/v1/icons/${uid}`, { method: "PUT", body: json(input) }),
+  delete: (uid: string) => request<void>(`/v1/icons/${uid}`, { method: "DELETE" }),
+  fetchBlobUrl: async (uid: string): Promise<string> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const resp = await fetch(`${session.baseUrl}/v1/icons/${uid}`, {
+      headers: authHeaders(session),
+    });
+    if (!resp.ok) throw new ApiError(resp.status, await resp.text());
+    const blob = await resp.blob();
+    return URL.createObjectURL(blob);
+  },
 };
 
 export const globalValuesApi = {

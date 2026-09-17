@@ -49,7 +49,7 @@ class SchemaOut(BaseModel):
     attributes: list
     metadata_json: dict = Field(serialization_alias="metadata")
     version: int
-    icon_attachment_uid: Optional[str] = None
+    icon_uid: Optional[str] = None
     is_global: bool
     applies_to: str
     created_at: datetime

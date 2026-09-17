@@ -47,7 +47,7 @@ export interface AppSchema {
   attributes: SchemaAttribute[];
   metadata: Record<string, unknown>;
   version: number;
-  icon_attachment_uid: string | null;
+  icon_uid: string | null;
   is_global: boolean;
   applies_to: "objects" | "tickets" | "documents";
   created_at: string;
@@ -986,6 +986,23 @@ export interface RetypeResult {
 export interface BulkDeleteResult {
   deleted: number;
   not_found: string[];
+}
+
+export interface Icon {
+  uid: string;
+  workspace_id: string;
+  name: string;
+  filename: string;
+  mime_type: string | null;
+  file_size: number | null;
+  is_global: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IconUpdate {
+  name?: string;
+  is_global?: boolean;
 }
 
 /** A node in the knowledge graph. `kind` is what the thing *is*, which is

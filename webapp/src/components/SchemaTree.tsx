@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { assetsApi, documentsApi, issuesApi, schemasApi } from "../api/client";
+import { assetsApi, documentsApi, iconsApi, issuesApi, schemasApi } from "../api/client";
 import { AppSchema } from "../api/types";
 import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
 import { AuthenticatedImage } from "./AuthenticatedImage";
@@ -85,10 +85,11 @@ function TreeNodeRow({
         >
           {hasChildren ? (expanded ? "▾" : "▸") : ""}
         </span>
-        {node.schema.icon_attachment_uid ? (
+        {node.schema.icon_uid ? (
           <AuthenticatedImage
-            uid={node.schema.icon_attachment_uid}
+            uid={node.schema.icon_uid}
             alt=""
+            fetchBlobUrl={iconsApi.fetchBlobUrl}
             className="h-3.5 w-3.5 shrink-0 rounded-sm object-contain"
           />
         ) : (

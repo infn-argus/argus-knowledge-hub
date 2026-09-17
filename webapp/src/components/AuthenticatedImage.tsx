@@ -6,19 +6,22 @@ export function AuthenticatedImage({
   alt,
   className,
   style,
+  fetchBlobUrl = attachmentsApi.fetchBlobUrl,
 }: {
   uid: string;
   alt: string;
   className?: string;
   style?: React.CSSProperties;
+  /** Defaults to fetching from /v1/attachments/{uid}; pass a different
+   * fetcher (e.g. iconsApi.fetchBlobUrl) to render from another endpoint. */
+  fetchBlobUrl?: (uid: string) => Promise<string>;
 }) {
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
-    attachmentsApi
-      .fetchBlobUrl(uid)
+    fetchBlobUrl(uid)
       .then((url) => {
         if (cancelled) {
           URL.revokeObjectURL(url);

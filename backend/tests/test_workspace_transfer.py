@@ -13,6 +13,8 @@ from app.auth import OidcIdentity, PatIdentity, get_identity
 from app.db import Base, SessionLocal, engine
 from app.main import app
 from app.models.asset import Asset, Relation
+from app.models.attachment import Attachment
+from app.models.icon import Icon
 from app.models.membership import Membership
 from app.models.schema import Schema
 from app.models.transfer_job import TransferJob
@@ -294,6 +296,121 @@ def test_copy_type_only_does_not_copy_instances():
     refreshed = db.get(TransferJob, job_uid)
     assert refreshed.counts["types"] == 1
     assert refreshed.counts["assets"] == 0
+    db.close()
+
+
+def test_copy_reassigns_the_avatar_to_the_new_attachment():
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    source, target = _workspaces(db, suffix)
+    schema_uid, a_uid, _b_uid = _two_linked_assets(db, source, suffix)
+    att_uid = f"att-{suffix}"
+    db.add(Attachment(
+        uid=att_uid, workspace_id=source, asset_uid=a_uid, filename="pic.png",
+        mime_type="image/png", storage_path=f"/tmp/{att_uid}",
+    ))
+    db.flush()
+    db.get(Asset, a_uid).avatar_icon_uid = att_uid
+    db.commit()
+    job_uid = f"job-{suffix}"
+    db.add(TransferJob(uid=job_uid, workspace_id=source, target_workspace_id=target, mode="copy"))
+    db.commit()
+    db.close()
+
+    run_transfer(job_uid, source, target, "copy", [], False, [a_uid], [], [])
+
+    db = SessionLocal()
+    copy = db.query(Asset).filter(Asset.workspace_id == target).one()
+    assert copy.avatar_icon_uid is not None
+    assert copy.avatar_icon_uid != att_uid
+    copied_attachment = db.get(Attachment, copy.avatar_icon_uid)
+    assert copied_attachment is not None
+    assert copied_attachment.asset_uid == copy.uid
+    db.close()
+
+
+def test_copy_keeps_a_global_icon_but_drops_a_private_one():
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    source, target = _workspaces(db, suffix)
+    global_icon_uid, private_icon_uid = f"gi-{suffix}", f"pi-{suffix}"
+    db.add(Icon(uid=global_icon_uid, workspace_id=source, name="Global", filename="g.png", storage_path="/tmp/g", is_global=True))
+    db.add(Icon(uid=private_icon_uid, workspace_id=source, name="Private", filename="p.png", storage_path="/tmp/p", is_global=False))
+    db.flush()
+    global_type, private_type = f"gt-{suffix}", f"pt-{suffix}"
+    db.add(Schema(uid=global_type, workspace_id=source, name="Global type", icon_uid=global_icon_uid))
+    db.add(Schema(uid=private_type, workspace_id=source, name="Private type", icon_uid=private_icon_uid))
+    db.commit()
+    job_uid = f"job-{suffix}"
+    db.add(TransferJob(uid=job_uid, workspace_id=source, target_workspace_id=target, mode="copy"))
+    db.commit()
+    db.close()
+
+    run_transfer(job_uid, source, target, "copy", [global_type, private_type], False, [], [], [])
+
+    db = SessionLocal()
+    copies = {s.name: s for s in db.query(Schema).filter(Schema.workspace_id == target)}
+    assert copies["Global type"].icon_uid == global_icon_uid
+    assert copies["Private type"].icon_uid is None
+    refreshed = db.get(TransferJob, job_uid)
+    assert refreshed.counts["icons_dropped"] == 1
+    db.close()
+
+
+def test_move_schema_icon_follows_when_exclusive_but_drops_when_shared():
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    source, target = _workspaces(db, suffix)
+    icon_uid = f"icon-{suffix}"
+    db.add(Icon(uid=icon_uid, workspace_id=source, name="Shared", filename="s.png", storage_path="/tmp/s", is_global=False))
+    db.flush()
+    moving_uid, staying_uid = f"mv-{suffix}", f"st-{suffix}"
+    db.add(Schema(uid=moving_uid, workspace_id=source, name="Moving", icon_uid=icon_uid))
+    db.add(Schema(uid=staying_uid, workspace_id=source, name="Staying", icon_uid=icon_uid))
+    db.commit()
+    job_uid = f"job-{suffix}"
+    db.add(TransferJob(uid=job_uid, workspace_id=source, target_workspace_id=target, mode="move"))
+    db.commit()
+    db.close()
+
+    # The icon is also used by a type that isn't moving — it must stay
+    # behind, and the moved type loses the reference rather than keep a
+    # cross-workspace pointer.
+    run_transfer(job_uid, source, target, "move", [moving_uid], False, [], [], [])
+
+    db = SessionLocal()
+    assert db.get(Schema, moving_uid).icon_uid is None
+    assert db.get(Schema, staying_uid).icon_uid == icon_uid
+    assert db.get(Icon, icon_uid).workspace_id == source
+    refreshed = db.get(TransferJob, job_uid)
+    assert refreshed.counts["icons_dropped"] == 1
+    db.close()
+
+
+def test_move_schema_icon_follows_both_types_when_moved_together():
+    suffix = secrets.token_hex(4)
+    db = SessionLocal()
+    source, target = _workspaces(db, suffix)
+    icon_uid = f"icon-{suffix}"
+    db.add(Icon(uid=icon_uid, workspace_id=source, name="Shared", filename="s.png", storage_path="/tmp/s", is_global=False))
+    db.flush()
+    a_uid, b_uid = f"a-{suffix}", f"b-{suffix}"
+    db.add(Schema(uid=a_uid, workspace_id=source, name="A", icon_uid=icon_uid))
+    db.add(Schema(uid=b_uid, workspace_id=source, name="B", icon_uid=icon_uid))
+    db.commit()
+    job_uid = f"job-{suffix}"
+    db.add(TransferJob(uid=job_uid, workspace_id=source, target_workspace_id=target, mode="move"))
+    db.commit()
+    db.close()
+
+    run_transfer(job_uid, source, target, "move", [a_uid, b_uid], False, [], [], [])
+
+    db = SessionLocal()
+    assert db.get(Schema, a_uid).icon_uid == icon_uid
+    assert db.get(Schema, b_uid).icon_uid == icon_uid
+    assert db.get(Icon, icon_uid).workspace_id == target
+    refreshed = db.get(TransferJob, job_uid)
+    assert refreshed.counts["icons_dropped"] == 0
     db.close()
 
 

@@ -13,6 +13,7 @@ from app.models.global_value import GlobalValue
 from app.models.ai_suggestion import AISuggestion
 from app.models.llm_config import LLMConfig
 from app.models.group import Group, GroupMember
+from app.models.icon import Icon
 from app.models.import_config import ImportConfig
 from app.models.import_job import ImportJob
 from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
@@ -41,6 +42,7 @@ __all__ = [
     "LLMConfig",
     "Group",
     "GroupMember",
+    "Icon",
     "ImportConfig",
     "ImportJob",
     "Issue",
