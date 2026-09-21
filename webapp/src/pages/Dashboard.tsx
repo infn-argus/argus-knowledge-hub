@@ -1,12 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { assetsApi, documentsApi, issuesApi, schemasApi } from "../api/client";
+import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
 
-function StatCard({ label, value, to }: { label: string; value: number | string; to?: string }) {
+function StatCard({
+  label,
+  value,
+  to,
+  note,
+}: {
+  label: string;
+  value: number | string;
+  to?: string;
+  note?: string;
+}) {
   const content = (
     <>
       <p className="text-sm text-slate-500">{label}</p>
       <p className="mt-1 text-3xl font-semibold text-slate-900">{value}</p>
+      {note && <p className="mt-1 text-xs text-slate-400">{note}</p>}
     </>
   );
   const className = "block rounded-lg border border-slate-200 bg-white p-6 shadow-sm hover:border-slate-300";
@@ -53,24 +65,47 @@ const KIND_STYLES: Record<ActivityKind, string> = {
   document: "bg-emerald-100 text-emerald-700",
 };
 
+/**
+ * The list endpoints return what this workspace owns *plus* everything other
+ * workspaces have shared as global, because references have to resolve across
+ * workspaces. A workspace emptied of its own types and objects still "sees"
+ * all of those, so counting the whole response reports another workspace's
+ * catalogue as this one's. Split the two, as the type tree already does.
+ */
+function splitOwn<T extends { workspace_id: string }>(rows: T[] | undefined, workspaceId: string | null) {
+  if (!rows || workspaceId === null) return { own: undefined, shared: 0 };
+  const own = rows.filter((r) => r.workspace_id === workspaceId);
+  return { own, shared: rows.length - own.length };
+}
+
+function sharedNote(n: number): string | undefined {
+  return n > 0 ? `+ ${n.toLocaleString()} shared from other workspaces` : undefined;
+}
+
 export function Dashboard() {
+  const workspaceId = useCurrentWorkspaceId();
   const schemas = useQuery({ queryKey: ["schemas"], queryFn: schemasApi.list });
   const assets = useQuery({ queryKey: ["assets"], queryFn: () => assetsApi.list() });
   const issues = useQuery({ queryKey: ["issues"], queryFn: () => issuesApi.list() });
   const documents = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
 
-  const objectTypeCount = (schemas.data ?? []).filter((s) => (s.applies_to ?? "objects") === "objects").length;
+  const objectTypes = splitOwn(
+    schemas.data?.filter((s) => (s.applies_to ?? "objects") === "objects"),
+    workspaceId,
+  );
+  const objects = splitOwn(assets.data, workspaceId);
+  const docs = splitOwn(documents.data, workspaceId);
   const openTickets = issues.data?.filter((i) => i.state !== "closed").length ?? 0;
-  const publishedDocuments = documents.data?.filter((d) => d.current_revision_uid).length ?? 0;
+  const publishedDocuments = docs.own?.filter((d) => d.current_revision_uid).length ?? 0;
 
   const activity: ActivityItem[] = [
-    ...(assets.data ?? []).map((a): ActivityItem => ({
+    ...(objects.own ?? []).map((a): ActivityItem => ({
       kind: "asset", label: a.name, to: `/assets/${a.uid}`, updatedAt: a.updated_at,
     })),
     ...(issues.data ?? []).map((i): ActivityItem => ({
       kind: "ticket", label: i.title, to: `/tickets/${i.uid}`, updatedAt: i.updated_at,
     })),
-    ...(documents.data ?? []).map((d): ActivityItem => ({
+    ...(docs.own ?? []).map((d): ActivityItem => ({
       kind: "document", label: d.title, to: `/documents/${d.uid}`, updatedAt: d.updated_at,
     })),
   ]
@@ -85,8 +120,17 @@ export function Dashboard() {
 
       <div className="mt-6 space-y-6">
         <StatGroup title="Assets">
-          <StatCard label="Object types" value={schemas.isLoading ? "…" : objectTypeCount} />
-          <StatCard label="Objects" value={assets.data?.length ?? "…"} to="/assets/search" />
+          <StatCard
+            label="Object types"
+            value={objectTypes.own?.length ?? "…"}
+            note={sharedNote(objectTypes.shared)}
+          />
+          <StatCard
+            label="Objects"
+            value={objects.own?.length ?? "…"}
+            to="/assets/search"
+            note={sharedNote(objects.shared)}
+          />
         </StatGroup>
 
         <StatGroup title="Tickets">
@@ -97,10 +141,15 @@ export function Dashboard() {
         <StatGroup title="Documentation">
           <StatCard
             label="Published documents"
-            value={documents.isLoading ? "…" : publishedDocuments}
+            value={docs.own ? publishedDocuments : "…"}
             to="/documents"
           />
-          <StatCard label="Total documents" value={documents.data?.length ?? "…"} to="/documents" />
+          <StatCard
+            label="Total documents"
+            value={docs.own?.length ?? "…"}
+            to="/documents"
+            note={sharedNote(docs.shared)}
+          />
         </StatGroup>
       </div>
 
