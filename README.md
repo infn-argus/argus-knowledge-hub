@@ -52,6 +52,13 @@ currently valid* revision rather than to an arbitrary PDF.
 - **Data integrity tools**: relink of unresolved references, and a report of missing
   references, dangling links and orphaned objects, with targeted cleanup actions.
 
+## Design notes
+
+- [Object schema design for a large-scale accelerator](docs/asset-schema-design.md) — the
+  type catalogue (103 types over four planes), the relation vocabulary, composite elements such
+  as a screen station, and how a beamline's EPIK8s control configuration and a EuPRAXIA-style
+  product breakdown both come in as equipment rather than as files.
+
 ## Development
 
 Backend:
