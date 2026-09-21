@@ -1,0 +1,71 @@
+# A self-contained ARGUS Knowledge Hub for local use: database, API and web UI.
+#
+#   docker compose up -d --build --wait
+#   docker compose exec api python scripts/create_token.py dev "Local development" local
+#
+# The second command prints an API token once. Open http://localhost:5173, give
+# the API address http://localhost:8080 (plain http: the API does not speak
+# TLS) and that token.
+#
+# Everything here is for one developer's machine. The pepper and the secrets key
+# below are public defaults; never reuse them anywhere that holds real data.
+#
+# Ports are overridable when something else already holds them, e.g. a dev
+# server started by hand:   API_PORT=18080 WEB_PORT=15173 docker compose up -d
+#
+# State lives in two named volumes and survives "docker compose down"; add -v to
+# throw it away:   docker compose down -v
+
+name: argus-knowledge-hub
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d app"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/app
+      # Mixed into every token hash. Tokens minted under one pepper are not
+      # accepted under another, so changing it logs everybody out.
+      TOKEN_PEPPER: ${TOKEN_PEPPER:-dev-only}
+      # Encrypts import credentials at rest. Only needed if you store a token in
+      # a saved import configuration.
+      IMPORT_SECRETS_KEY: ${IMPORT_SECRETS_KEY:-yADxm1nk5JiTglldbDr6z-QsCFvuKVnRO-UVZgarSdc=}
+      ATTACHMENTS_DIR: /data/attachments
+    volumes:
+      - attachments:/data/attachments
+    ports:
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  web:
+    build: ./webapp
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-5173}:8080"
+
+volumes:
+  pgdata:
+  attachments:

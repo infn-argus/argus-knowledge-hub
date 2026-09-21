@@ -61,6 +61,34 @@ currently valid* revision rather than to an arbitrary PDF.
 
 ## Development
 
+### Everything at once, with Docker Compose
+
+The quickest way to a working hub on your own machine: database, API and web UI, with
+migrations applied on start.
+
+```bash
+docker compose up -d --build --wait
+docker compose exec api python scripts/create_token.py dev "Local development" local
+```
+
+The second command prints an API token **once**. Open <http://localhost:5173>, give the API
+address `http://localhost:8080` (plain `http`, the API does not speak TLS) and that token.
+
+- `TOKEN_PEPPER=dev-only` is a secret mixed into token hashes, **not** a token. Use the one the
+  script prints.
+- Something already on 8080 or 5173, such as a dev server started by hand? Move the published
+  ports: `API_PORT=18080 WEB_PORT=15173 docker compose up -d --build --wait`.
+- Load the accelerator object types into the workspace:
+  `docker compose exec api python scripts/seed_asset_types.py dev`
+  (add `--dry-run` first to see what it would do).
+- State lives in two named volumes and survives `docker compose down`;
+  `docker compose down -v` wipes it.
+
+The defaults in `docker-compose.yml` are public and meant for one machine. Never reuse them
+anywhere that holds real data.
+
+### Running the pieces by hand
+
 Backend:
 
 ```bash
@@ -70,8 +98,16 @@ pip install -r requirements.txt -r requirements-dev.txt
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/app
 export TOKEN_PEPPER=dev-only
 alembic upgrade head
+python scripts/create_token.py dev "Local development" local   # prints an API token once
 uvicorn app.main:app --reload --port 8080
 ```
+
+This needs a reachable PostgreSQL at `DATABASE_URL`; `GET /health` answers 500 when it is not.
+Run `create_token.py` from `backend/` and under the same `TOKEN_PEPPER` the server uses, or
+the token it prints will not be accepted.
+
+The tests use the same environment plus `IMPORT_SECRETS_KEY` (any Fernet key) and a database
+they may write to: `pytest tests`. Two drawing tests also need the `dwg2dxf` converter on `PATH`.
 
 Web app:
 
@@ -81,8 +117,8 @@ npm install
 npm run dev
 ```
 
-The web app asks for the API base URL and either a personal access token or a Google sign-in
-at first launch.
+The web app asks for the API base URL (`http://localhost:8080` when running locally) and either
+a personal access token or a Google sign-in at first launch.
 
 ### Environment variables (backend)
 
