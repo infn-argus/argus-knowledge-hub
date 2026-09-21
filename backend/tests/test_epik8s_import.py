@@ -115,8 +115,21 @@ def workspace():
     return ws
 
 
-def run(ws, beamline, create_missing=True):
+def as_mapping(values, keep_names=True):
+    """The same configuration with `iocs` spelled the way the beamline
+    repositories that have moved on spell it: a mapping keyed by IOC name."""
+    iocs = values["epicsConfiguration"]["iocs"]
+    values["epicsConfiguration"]["iocs"] = {
+        entry["name"]: (entry if keep_names else {k: v for k, v in entry.items() if k != "name"})
+        for entry in iocs
+    }
+    return values
+
+
+def run(ws, beamline, create_missing=True, iocs_as_mapping=False, keep_names=True):
     values = yaml.safe_load(VALUES_TEMPLATE.replace("BEAMLINE", beamline))
+    if iocs_as_mapping:
+        as_mapping(values, keep_names)
     db = SessionLocal()
     job = ImportJob(uid=f"job-{secrets.token_hex(4)}", workspace_id=ws, source="epik8s")
     db.add(job)
@@ -357,3 +370,33 @@ epicsConfiguration:
     assert importer.counts["access_points_linked"] == 0, \
         "nothing in the inventory carried this address"
     db.close()
+
+
+# --- the two ways a file spells its IOCs --------------------------------
+#
+# `epicsConfiguration.iocs` became a mapping in the repositories that moved
+# on. Read as a list, a mapping yields nothing and says nothing, so the
+# failure is an import that reports success with zero IOCs.
+
+def test_iocs_written_as_a_mapping_are_read_as_iocs(workspace, beamline):
+    _, _, listed = run(workspace, beamline)
+    other = f"t{secrets.token_hex(3)}"
+    _, _, mapped = run(workspace, other, iocs_as_mapping=True)
+    assert mapped.counts["iocs"] == listed.counts["iocs"] == 3
+    assert mapped.counts["devices"] == listed.counts["devices"] == 4
+    assert mapped.counts["relations"] == listed.counts["relations"]
+
+
+def test_a_mapping_entry_without_a_name_is_called_what_its_key_is(workspace, beamline):
+    db, _, importer = run(workspace, beamline, iocs_as_mapping=True, keep_names=False)
+    assert importer.counts["iocs"] == 3
+    assert {"vac-gunvpc", "vac-kly01vpc", "eeips-dvl671"} <= set(assets_of(db, workspace, "IOC"))
+
+
+def test_a_mapping_entry_that_is_not_a_mapping_is_skipped_not_fatal():
+    from app.services.epik8s_import import _ioc_entries
+
+    assert _ioc_entries({"a": {"name": "a"}, "b": None, "c": "x", "d": {}}) == [
+        {"name": "a"}, {"name": "d"},
+    ]
+    assert _ioc_entries(None) == [] and _ioc_entries("oops") == []

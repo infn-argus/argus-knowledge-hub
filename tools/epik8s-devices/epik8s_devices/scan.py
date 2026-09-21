@@ -43,6 +43,27 @@ def _is_network_address(value: Any) -> bool:
     )
 
 
+def _ioc_entries(iocs: Any) -> list[dict]:
+    """The IOCs as a list of dicts, whichever way the file spells them.
+
+    `epicsConfiguration.iocs` was a list of `{name: ...}` entries and is now,
+    in the beamline repositories that have moved on, a mapping keyed by the
+    IOC's name. Both are in use at once, and reading one as the other yields
+    no IOCs at all, silently. A mapping entry that leaves out `name` is
+    called what its key is.
+    """
+    if isinstance(iocs, dict):
+        out = []
+        for key, entry in iocs.items():
+            if not isinstance(entry, dict):
+                continue
+            out.append(entry if entry.get("name") else {**entry, "name": key})
+        return out
+    if isinstance(iocs, list):
+        return [entry for entry in iocs if isinstance(entry, dict)]
+    return []
+
+
 def _as_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -188,11 +209,11 @@ def scan(values: dict, templates: Optional[dict] = None,
     beamline = str(values.get("beamline") or "").strip() or "unknown"
     tag = beamline.upper()
     defaults = values.get("iocDefaults") or {}
-    iocs = (values.get("epicsConfiguration") or {}).get("iocs") or []
+    iocs = _ioc_entries((values.get("epicsConfiguration") or {}).get("iocs"))
 
     devices: list[Device] = []
     for entry in iocs:
-        if not isinstance(entry, dict) or not entry.get("name"):
+        if not entry.get("name"):
             continue
         merged = {**(defaults.get(entry.get("template")) or {}), **entry}
         params = _params(merged)

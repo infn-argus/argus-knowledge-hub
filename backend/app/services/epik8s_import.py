@@ -95,6 +95,28 @@ def _progress(db: Session, job: ImportJob, message: str, **counts) -> None:
         db.rollback()
 
 
+def _ioc_entries(iocs: Any) -> list[dict]:
+    """The IOCs as a list of dicts, whichever way the file spells them.
+
+    `epicsConfiguration.iocs` was a list of `{name: ...}` entries and is now,
+    in the beamline repositories that have moved on, a mapping keyed by the
+    IOC's name. Both are in use at once, and reading one as the other yields
+    no IOCs at all — with no error, since a string key simply fails the
+    "is this a dict" check every entry has always had to pass. A mapping
+    entry that leaves out `name` is called what its key is.
+    """
+    if isinstance(iocs, dict):
+        out = []
+        for key, entry in iocs.items():
+            if not isinstance(entry, dict):
+                continue
+            out.append(entry if entry.get("name") else {**entry, "name": key})
+        return out
+    if isinstance(iocs, list):
+        return [entry for entry in iocs if isinstance(entry, dict)]
+    return []
+
+
 def _as_list(value: Any) -> list[str]:
     """`zones` is a string here and a list there, meaning the same thing."""
     if value is None:
@@ -386,7 +408,7 @@ class _Importer:
         epics = values.get("epicsConfiguration") or {}
 
         self._services(epics.get("services") or {}, facility, tag)
-        self._iocs(epics.get("iocs") or [], defaults, facility, tag, beamline, create_missing)
+        self._iocs(epics.get("iocs"), defaults, facility, tag, beamline, create_missing)
         self._cross_references(tag)
 
         self.db.commit()
@@ -411,10 +433,10 @@ class _Importer:
             self.relate(service, facility, "deployed on")
             self.counts["services"] += 1
 
-    def _iocs(self, iocs: list, defaults: dict, facility: Asset, tag: str,
+    def _iocs(self, iocs: Any, defaults: dict, facility: Asset, tag: str,
               beamline: str, create_missing: bool) -> None:
-        for entry in iocs:
-            if not isinstance(entry, dict) or not entry.get("name"):
+        for entry in _ioc_entries(iocs):
+            if not entry.get("name"):
                 continue
             # A template supplies what the IOC leaves out; the IOC always wins.
             template = defaults.get(entry.get("template")) or {}

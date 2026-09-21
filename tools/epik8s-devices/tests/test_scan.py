@@ -231,3 +231,28 @@ def test_the_real_template_tree_is_read_when_it_is_there():
     assert templates.get("ocem") == ("ps", "ocem")
     assert templates.get("agilent-vac") == ("vac", "agilent")
     assert "day-accumulator" not in templates, "global fragments are not devices"
+
+
+# `epicsConfiguration.iocs` is a list in some repositories and a mapping keyed
+# by IOC name in the ones that moved on. Read as a list, a mapping yields no
+# devices and no error.
+
+def _as_mapping(values, keep_names=True):
+    out = yaml.safe_load(yaml.safe_dump(values))
+    out["epicsConfiguration"]["iocs"] = {
+        e["name"]: (e if keep_names else {k: v for k, v in e.items() if k != "name"})
+        for e in values["epicsConfiguration"]["iocs"]
+    }
+    return out
+
+
+def test_iocs_written_as_a_mapping_give_the_same_devices():
+    listed = scan(VALUES, TEMPLATES)
+    mapped = scan(_as_mapping(VALUES), TEMPLATES)
+    assert listed and len(mapped) == len(listed)
+    assert [(d.key, d.ioc, d.name) for d in mapped] == [(d.key, d.ioc, d.name) for d in listed]
+
+
+def test_a_mapping_entry_without_a_name_is_called_what_its_key_is():
+    mapped = scan(_as_mapping(VALUES, keep_names=False), TEMPLATES)
+    assert {d.ioc for d in mapped} == {d.ioc for d in scan(VALUES, TEMPLATES)}
