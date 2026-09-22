@@ -11,18 +11,36 @@ fronts ten turbo pumps, one address fronts seven magnet supplies. When it
 fails, ten faults are filed and nothing connects them. That link is
 mechanical — `server` plus `port` — and once it is an edge it is an answer.
 
-Five kinds of thing come out:
+Nine kinds of thing come out, of the types the object catalogue defines
+(services/asset_types.py), and each is linked to what the file says it is
+tied to:
 
-  Facility          the beamline
-  IOC               the deployable unit
-  Control Device    the channel, axis or gauge that actually fails
-  Access Point      what sits between EPICS and the metal
-  Control Service   archiver, gateways, alarm server, logbook
+  Facility               the beamline
+  Control Configuration  this file, at this revision: what every object below is declared in
+  IOC Template           the recipe an IOC is deployed from, named or not in iocDefaults
+  IOC                    the deployable unit
+  Control Device         the channel, axis or gauge that actually fails
+  Access Point           what sits between EPICS and the metal
+  Control Network        a network an IOC is attached to
+  Control Service        archiver, gateways, alarm server, logbook
+  Storage Mount          an NFS mount or backup target
+
+With `infer_elements` the import also makes what the channels are *for*: the ion pump behind
+`GUNSIP01`, the quadrupole and the power supply behind `QUATB002`, the camera, the BPM's
+electronics, the LLRF and modulator units (services/element_inference.py says how each is read,
+and what is deliberately left alone). Off by default: they are inferences, not statements in the
+file, and every one says so and is easy to find (`argus_keywords: inferred`).
+
+The types are found wherever the catalogue put them: this workspace's own, or a
+shared one. Where the catalogue was never seeded, empty ones are made, as they
+always were.
 
 The device is first-class rather than the IOC, because "GUNSIP01 tripped"
 is the sentence people actually write.
 """
+import collections
 import hashlib
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -43,6 +61,10 @@ from app.services.git_import import (
     github_api,
     gitlab_api,
 )
+from app.services.asset_types import resolve_type_uids
+from app.services.element_inference import (
+    ASSET_TYPES, CAMERA, ELEMENT_TYPES, LATTICE_NAME, SCREEN_NAME, infer_device, infer_ioc,
+)
 from app.services.network_resolve import IPV4, NetworkIndex, short_host
 from app.services.relations import rebuild_asset_relations
 
@@ -59,6 +81,10 @@ TYPES: dict[str, str] = {
                     "server, a converter, or the hardware's own network socket.",
     "Control Service": "A shared control service: archiver, gateway, alarm server, "
                        "logbook.",
+    "Control Configuration": "One values.yaml at one git revision.",
+    "IOC Template": "An iocDefaults entry: the recipe an IOC is deployed from.",
+    "Control Network": "A named network and its address range.",
+    "Storage Mount": "An NFS mount or backup target.",
 }
 
 # Where a device's settings end up. Everything else on a device row is a
@@ -115,6 +141,16 @@ def _ioc_entries(iocs: Any) -> list[dict]:
     if isinstance(iocs, list):
         return [entry for entry in iocs if isinstance(entry, dict)]
     return []
+
+
+def _present(attributes: dict) -> dict:
+    """What a configuration actually says: a key it leaves out is not a value of None."""
+    return {k: v for k, v in attributes.items() if v not in (None, "", [], {})}
+
+
+def _text(value: Any) -> Optional[str]:
+    text = str(value).strip() if value is not None else ""
+    return text or None
 
 
 def _as_list(value: Any) -> list[str]:
@@ -214,15 +250,37 @@ def _settings(entry: dict) -> dict:
 
 
 class _Importer:
-    def __init__(self, db: Session, job: ImportJob, workspace_id: str, source_ref: str):
+    def __init__(self, db: Session, job: ImportJob, workspace_id: str, source_ref: str,
+                 infer_elements: bool = False):
         self.db = db
+        self.infer = infer_elements
         self.job = job
         self.workspace_id = workspace_id
         self.source_ref = source_ref
         self.schemas: dict[str, Schema] = {}
         self.index = NetworkIndex(db, workspace_id)
+        # Set as the walk goes: what everything below is declared in, and the
+        # things several IOCs share, made once.
+        self.tag = ""
+        self.cfg: Optional[Asset] = None
+        self.templates: dict[str, Asset] = {}
+        self.networks: dict[str, Asset] = {}
+        self.mounts: dict[tuple, Asset] = {}
+        # What the inference had no rule for, by "devgroup/template": said, not guessed at.
+        self.not_inferred: collections.Counter = collections.Counter()
+        self._inferred: set = set()
+        # The cameras inferred, by channel name, for the screens that are read with them.
+        self._cameras: dict = {}
+        # Chillers that cool every asset of a type, and the timing units, wired once all are made.
+        self._acted_on: dict = {}          # control device uid -> the asset it acts on
+        self._cooling: list = []
+        self._timing: list = []
+        # RF conditioning IOCs and the readbacks that gate them: (IOC asset, tag, entries).
+        self._gates: list = []
         self.counts = {
             "facilities": 0, "iocs": 0, "devices": 0, "services": 0,
+            "configurations": 0, "templates": 0, "networks": 0, "mounts": 0,
+            "inferred_assets": 0, "inferred_elements": 0, "screens_paired": 0, "gates": 0, "gates_unresolved": 0,
             # Three different things, because conflating them makes the
             # report say the opposite of the truth: an import that matched
             # nothing at all read as "42 matched to existing equipment",
@@ -242,15 +300,18 @@ class _Importer:
     # --- types ----------------------------------------------------------
 
     def ensure_types(self) -> None:
-        existing = {
-            s.name: s for s in self.db.scalars(
-                select(Schema).where(
-                    Schema.workspace_id == self.workspace_id, Schema.applies_to == "objects"
-                )
-            )
-        }
+        """Each type this import writes, found where the catalogue put it (this
+        workspace's own, or a shared one), or made empty if nobody has one."""
+        usable = resolve_type_uids(self.db, self.workspace_id)
+        if self.infer:
+            missing = [n for n in (*ASSET_TYPES, *ELEMENT_TYPES) if n not in usable]
+            if missing:
+                raise ValueError(
+                    f"Inferring elements writes objects of the catalogue's types, and this "
+                    f"workspace cannot use {len(missing)} of them (e.g. {', '.join(missing[:4])}). "
+                    f"Seed the catalogue first: scripts/seed_asset_types.py.")
         for name, description in TYPES.items():
-            schema = existing.get(name)
+            schema = self.db.get(Schema, usable[name]) if name in usable else None
             if schema is None:
                 schema = Schema(
                     uid=_uid(self.workspace_id, f"type:{name}"),
@@ -263,6 +324,9 @@ class _Importer:
                 self.db.add(schema)
                 self.db.flush()
             self.schemas[name] = schema
+        if self.infer:
+            for name in (*ASSET_TYPES, *ELEMENT_TYPES):
+                self.schemas[name] = self.db.get(Schema, usable[name])
         self.db.commit()
 
     # --- objects --------------------------------------------------------
@@ -285,6 +349,9 @@ class _Importer:
                 )
         stamped = {
             **attributes,
+            # The same key tickets and documents use, so "everything about SPARC"
+            # is one filter across all three.
+            **({"argus_facility": self.tag} if self.tag else {}),
             "argus_source": SOURCE,
             "argus_source_ref": self.source_ref,
         }
@@ -307,6 +374,152 @@ class _Importer:
         self.db.flush()
         self.assets[key] = asset
         return asset
+
+    def upsert_inferred(self, type_name: str, key: str, name: str, attributes: dict) -> Asset:
+        """An object the configuration implies rather than states. A person's word outranks a
+        guess: what is already on it stays, and inference only fills what is missing, so a
+        serial number or a location entered by hand survives every later read."""
+        uid = _uid(self.workspace_id, key)
+        asset = self.db.get(Asset, uid)
+        provenance = {"argus_facility": self.tag, "argus_source": SOURCE,
+                      "argus_source_ref": self.source_ref}
+        if asset is None:
+            clash = self.db.scalar(select(Asset).where(Asset.key == key))
+            if clash is not None:
+                raise ValueError(
+                    f"“{key}” already exists in workspace “{clash.workspace_id}”. Object keys "
+                    f"are unique across the installation.")
+            asset = Asset(uid=uid, workspace_id=self.workspace_id,
+                          schema_uid=self.schemas[type_name].uid, key=key, name=name,
+                          type=type_name, attributes={**attributes, **provenance})
+            self.db.add(asset)
+        else:
+            asset.attributes = {**attributes, **(asset.attributes or {}), **provenance}
+        self.db.flush()
+        self.assets[key] = asset
+        return asset
+
+    def _infer_from(self, inference, control: Asset, relation: str, key_stem: str,
+                    label: str, source: dict, zones: list) -> Optional[Asset]:
+        """The asset a channel or an IOC drives, and the lattice element it serves. Returns
+        the asset, which a unit's own channels then hang from."""
+        note = (f"Inferred by the control-configuration import: {inference.why}. Nobody has "
+                f"confirmed what this is, its serial number or where it is installed.")
+        url = source.get("asset")
+        asset = self.upsert_inferred(
+            inference.asset_type, f"{self.tag}:AST:{key_stem}", f"{label} {inference.asset_type}",
+            _present({**inference.asset_attrs, "description": note, "argus_keywords": ["inferred"],
+                      "inventory_url": url if isinstance(url, str) and url.startswith("http") else None}))
+        self.relate(control, asset, relation)
+        self._acted_on[control.uid] = asset
+        if inference.asset_type == CAMERA:
+            self._cameras[label.upper()] = asset
+        if inference.cools_type:
+            self._cooling.append((asset, inference.cools_type))
+        if inference.timing_role:
+            self._timing.append((asset, inference.timing_role, inference.triggers_type))
+        self._count_inferred("inferred_assets", f"inferred {inference.asset_type}", asset.key)
+        if inference.element_type:
+            element = self.upsert_inferred(
+                inference.element_type, f"{self.tag}:ELM:{inference.element_name}",
+                inference.element_name,
+                _present({**inference.element_attrs, "argus_beamline": self.tag, "zone": zones,
+                          "description": note, "argus_keywords": ["inferred"]}))
+            # A supply powers its magnet and a chiller cools its structure; the electronics of a BPM
+            # are what realises it; a screen station or a mirror mount is assembled from its
+            # actuator or axes.
+            if inference.asset_to_element:
+                self.relate(asset, element, inference.element_link)
+            else:
+                self.relate(element, asset, inference.element_link)
+            self._count_inferred("inferred_elements", f"inferred {inference.element_type}", element.key)
+        return asset
+
+    def _infer_channel_element(self, element_type: str, control: Asset, unit: Asset,
+                               name: str, zones: list, why: str) -> None:
+        """One channel of a unit whose channels are each an element: a Libera Spectra's BPMs."""
+        note = (f"Inferred by the control-configuration import: {why}. Nobody has confirmed "
+                f"what this is or where it is installed.")
+        upper = name.upper()
+        element = self.upsert_inferred(
+            element_type, f"{self.tag}:ELM:{upper}", upper,
+            _present({"lattice_name": upper if LATTICE_NAME.match(upper) else None,
+                      "argus_beamline": self.tag, "zone": zones, "description": note,
+                      "argus_keywords": ["inferred"]}))
+        self.relate(control, element, "acts on")
+        self.relate(element, unit, "realized by")
+        self._count_inferred("inferred_elements", f"inferred {element_type}", element.key)
+
+    def _wire_plant(self, tag: str) -> None:
+        """What the plant feeds, from what the configuration names.
+
+        A chiller whose channel is `MOD` cools every modulator; a timing receiver is timed by the
+        beamline's event generator (when there is exactly one, since with two nothing says which);
+        and one whose name says `LLRF` or `CAM` triggers those. Every object on these links is an
+        inference, so the links are too."""
+        own = [a for k, a in self.assets.items() if k.startswith(f"{tag}:AST:")]
+        for chiller, kind in self._cooling:
+            for asset in own:
+                if asset.type == kind:
+                    self.relate(chiller, asset, "cools")
+        generators = [a for a, role, _ in self._timing if role == "generator"]
+        for receiver, role, kind in self._timing:
+            if role != "receiver":
+                continue
+            if len(generators) == 1:
+                self.relate(receiver, generators[0], "timed by")
+            for asset in own:
+                if kind and asset.type == kind:
+                    self.relate(receiver, asset, "triggers")
+
+    def _gating(self, tag: str) -> None:
+        """An RF conditioning IOC lists the pumps and gauges whose pressure it watches, and the level
+        above which it will not raise power. That is the file saying, in as many words, that RF depends
+        on vacuum: the IOC is `enabled by` each of them. With inference on, the pump or gauge itself is
+        linked too, so a pump that fails reaches the permit as well as one whose readout is lost."""
+        for ioc, entries in self._gates:
+            conditions = []
+            for entry in entries:
+                if not isinstance(entry, dict) or not entry.get("name"):
+                    continue
+                pv = f"{entry.get('prefix') or ''}{entry['name']}"
+                device = self.pv_index.get(pv)
+                if device is None:
+                    self.counts["gates_unresolved"] += 1
+                    continue
+                self.relate(ioc, device, "enabled by")
+                asset = self._acted_on.get(device.uid)
+                if asset is not None:
+                    self.relate(ioc, asset, "enabled by")
+                limit = entry.get("tsh")
+                conditions.append(f"{pv}{entry.get('suffix') or ''} < {limit}" if limit not in (None, "")
+                                  else f"{pv}{entry.get('suffix') or ''}")
+                self.counts["gates"] += 1
+            if conditions:
+                ioc.attributes = {**(ioc.attributes or {}), "permit_conditions": conditions}
+        self.db.flush()
+
+    def _pair_screens(self, tag: str) -> None:
+        """A screen station is a flag, a camera and the optics between them, and the file lists
+        the flag and the camera on two IOCs with nothing joining them. The names do: `AC1FLG01`
+        and `AC101`, `UTLFLG02` and `UTL02`, `FELFLG03A` and `FEL03` (both flags of a pair
+        share their camera). Where the camera exists, the station is composed of it; where it
+        does not (`GUNFLG01`), nothing is guessed."""
+        for key, station in list(self.assets.items()):
+            if station.type != "Screen Station" or not key.startswith(f"{tag}:ELM:"):
+                continue
+            named = SCREEN_NAME.match(key.rsplit(":", 1)[-1])
+            camera = self._cameras.get(f"{named['section']}{named['n']}") if named else None
+            if camera is not None:
+                self.relate(station, camera, "composed of")
+                self.counts["screens_paired"] += 1
+
+    def _count_inferred(self, total: str, kind: str, key: str) -> None:
+        if key in self._inferred:
+            return
+        self._inferred.add(key)
+        self.counts[total] += 1
+        self.counts[kind] = self.counts.get(kind, 0) + 1
 
     def relate(self, source: Asset, target: Asset, relation_type: str) -> None:
         if source is None or target is None or source.uid == target.uid:
@@ -391,6 +604,7 @@ class _Importer:
     def run(self, values: dict, create_missing: bool) -> None:
         beamline = str(values.get("beamline") or "").strip() or "unknown"
         tag = beamline.upper()
+        self.tag = tag
 
         facility = self.upsert(
             "Facility", f"{tag}", beamline,
@@ -406,12 +620,130 @@ class _Importer:
 
         defaults = values.get("iocDefaults") or {}
         epics = values.get("epicsConfiguration") or {}
+        ioc_entries = _ioc_entries(epics.get("iocs"))
 
+        self._configuration(values, epics, beamline, tag, facility)
+        self._templates(defaults, ioc_entries, tag)
+        self._mounts(values, tag, facility)
         self._services(epics.get("services") or {}, facility, tag)
-        self._iocs(epics.get("iocs"), defaults, facility, tag, beamline, create_missing)
+        self._iocs(ioc_entries, defaults, facility, tag, beamline, create_missing)
+        if self.infer:
+            self._pair_screens(tag)
+            self._wire_plant(tag)
+        self._gating(tag)
         self._cross_references(tag)
 
         self.db.commit()
+
+    # --- what the file is, and what it is made of --------------------------------
+
+    def _configuration(self, values: dict, epics: dict, beamline: str, tag: str,
+                       facility: Asset) -> None:
+        """This file at this revision: the one thing every other object is declared
+        in, so "what did the configuration say when this broke" has an answer."""
+        max_bytes = epics.get("max_array_bytes")
+        self.cfg = self.upsert(
+            "Control Configuration", f"{tag}:CFG", f"{beamline} configuration",
+            _present({
+                "beamline": beamline,
+                "git_url": values.get("giturl"),
+                "git_revision": values.get("gitrev"),
+                "config_path": self.source_ref.rsplit(":", 1)[-1],
+                "namespace": values.get("namespace"),
+                "cluster": values.get("epik8namespace"),
+                "argocd_project": values.get("argocdProject"),
+                "epics_address_list": _text(epics.get("address_list")),
+                "max_array_bytes": int(max_bytes) if str(max_bytes or "").isdigit() else None,
+                "base_ip": values.get("baseIp"),
+                "ingress_class": values.get("ingressClassName"),
+                "imported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }),
+        )
+        self.relate(self.cfg, facility, "configures")
+        self.counts["configurations"] += 1
+
+    def _templates(self, defaults: dict, ioc_entries: list, tag: str) -> None:
+        """A template is a thing in its own right: ten IOCs deployed from one recipe
+        share its fate. Named in iocDefaults, or only referred to by the IOCs that
+        use it (the recipe then lives in the chart repository), it is one object."""
+        names = list(defaults) + [
+            str(e["template"]) for e in ioc_entries
+            if e.get("template") and str(e["template"]) not in defaults
+        ]
+        for name in dict.fromkeys(names):
+            body = defaults.get(name) if isinstance(defaults.get(name), dict) else {}
+            self.templates[name] = self.upsert(
+                "IOC Template", f"{tag}:TPL:{name}", name,
+                _present({
+                    "beamline": tag,
+                    "template_name": name,
+                    "chart_url": body.get("charturl"),
+                    "image": body.get("image"),
+                    "devgroup": body.get("devgroup"),
+                    "devtype": body.get("devtype"),
+                    "devfunc": body.get("devfunc"),
+                    "opi": body.get("opi"),
+                    "autosync": body.get("autosync") if isinstance(body.get("autosync"), bool) else None,
+                    "pva": body.get("pva") if isinstance(body.get("pva"), bool) else None,
+                    "inventory_url": body.get("asset") or None,
+                }),
+            )
+            self.relate(self.templates[name], self.cfg, "declared in")
+            self.counts["templates"] += 1
+
+    def _mounts(self, values: dict, tag: str, facility: Asset) -> None:
+        for backup, entries in ((False, values.get("nfsMounts")), (True, values.get("nfsBackups"))):
+            for entry in entries if isinstance(entries, list) else []:
+                self._mount(entry, tag, facility, backup)
+
+    def _mount(self, entry: Any, tag: str, facility: Asset, backup: bool,
+               owner: Optional[str] = None) -> Optional[Asset]:
+        """One mount, made once however many things name it: the same server and
+        path is the same storage."""
+        if not isinstance(entry, dict) or not entry.get("name"):
+            return None
+        identity = (str(entry.get("server") or ""), str(entry.get("path") or ""))
+        if identity[0] and identity in self.mounts:
+            return self.mounts[identity]
+        key = f"{tag}:MNT:{owner + ':' if owner else ''}{entry['name']}"
+        mount = self.upsert(
+            "Storage Mount", key, f"{entry['name']} ({tag})",
+            _present({
+                "beamline": tag,
+                "mount_kind": "NFS",
+                "server": entry.get("server"),
+                "export_path": entry.get("path"),
+                "mount_path": entry.get("mountPath"),
+                "is_backup": backup,
+            }),
+        )
+        self.relate(mount, facility, "part of")
+        self.relate(mount, self.cfg, "declared in")
+        if identity[0]:
+            self.mounts[identity] = mount
+        self.counts["mounts"] += 1
+        return mount
+
+    def _network(self, entry: Any, tag: str) -> Optional[Asset]:
+        """`{name: control, annotation: sparc-magnets}`: the annotation is what tells
+        two networks both called `control` apart."""
+        if not isinstance(entry, dict) or not (entry.get("annotation") or entry.get("name")):
+            return None
+        identity = str(entry.get("annotation") or entry["name"])
+        if identity not in self.networks:
+            vlan = re.match(r"^vlan-(\d+)$", str(entry.get("name") or ""))
+            self.networks[identity] = self.upsert(
+                "Control Network", f"{tag}:NET:{identity}", identity,
+                _present({
+                    "beamline": tag,
+                    "network_name": entry.get("name"),
+                    "annotation": entry.get("annotation"),
+                    "vlan": int(vlan.group(1)) if vlan else None,
+                }),
+            )
+            self.relate(self.networks[identity], self.cfg, "declared in")
+            self.counts["networks"] += 1
+        return self.networks[identity]
 
     def _services(self, services: dict, facility: Asset, tag: str) -> None:
         for name, body in services.items():
@@ -428,14 +760,22 @@ class _Importer:
                     "chart_url": body.get("charturl"),
                     "loadbalancer_ip": body.get("loadbalancer"),
                     "ingress": bool(body.get("enable_ingress") or (body.get("ingress") or {}).get("enabled")),
+                    "image": body.get("image") if isinstance(body.get("image"), str) else None,
+                    "chart_revision": _text(body.get("targetRevision")),
+                    "replicas": body.get("replicaCount") if isinstance(body.get("replicaCount"), int) else None,
                 },
             )
             self.relate(service, facility, "deployed on")
+            self.relate(service, self.cfg, "declared in")
+            for entry in body.get("nfsMounts") if isinstance(body.get("nfsMounts"), list) else []:
+                mount = self._mount(entry, tag, facility, False, owner=name)
+                if mount is not None:
+                    self.relate(service, mount, "mounts")
             self.counts["services"] += 1
 
     def _iocs(self, iocs: Any, defaults: dict, facility: Asset, tag: str,
               beamline: str, create_missing: bool) -> None:
-        for entry in _ioc_entries(iocs):
+        for entry in iocs if isinstance(iocs, list) else _ioc_entries(iocs):
             if not entry.get("name"):
                 continue
             # A template supplies what the IOC leaves out; the IOC always wins.
@@ -461,10 +801,37 @@ class _Importer:
                     "chart_url": merged.get("charturl"),
                     "opi": merged.get("opi"),
                     "inventory_url": merged.get("asset") or None,
+                    "image": merged.get("image") if isinstance(merged.get("image"), str) else None,
+                    "host": _text(merged.get("host")),
+                    "autosync": merged.get("autosync") if isinstance(merged.get("autosync"), bool) else None,
+                    "pva": merged.get("pva") if isinstance(merged.get("pva"), bool) else None,
+                    "networks": [str(n.get("annotation") or n.get("name"))
+                                 for n in merged.get("networks") or []
+                                 if isinstance(n, dict) and (n.get("annotation") or n.get("name"))],
+                    "ioc_init": json.dumps(merged["iocinit"]) if merged.get("iocinit") else None,
+                    "ssh_nodeport": _text(merged.get("ssh_nodeport")),
                 },
             )
             self.relate(ioc, facility, "deployed on")
+            self.relate(ioc, self.cfg, "declared in")
+            recipe = self.templates.get(str(entry.get("template") or ""))
+            if recipe is not None:
+                self.relate(ioc, recipe, "templated from")
+            for net in merged.get("networks") or []:
+                network = self._network(net, tag)
+                if network is not None:
+                    self.relate(ioc, network, "on network")
             self.counts["iocs"] += 1
+            if isinstance(merged.get("pump"), list) and merged["pump"]:
+                self._gates.append((ioc, merged["pump"]))
+
+            # An IOC that is one unit (a BPM's electronics, an LLRF chassis, a modulator): its
+            # channels are that unit's, not more things.
+            unit = infer_ioc(merged) if self.infer else None
+            unit_asset = None
+            if unit is not None:
+                unit_asset = self._infer_from(unit, ioc, "drives", name, name, merged,
+                                              _as_list(merged.get("zones")))
 
             if not merged.get("asset"):
                 _note(self.job, self.db,
@@ -481,16 +848,23 @@ class _Importer:
             if not devices:
                 # An IOC with no device list still drives something; the IOC
                 # is the only handle on it.
+                if self.infer and unit is None:
+                    self.not_inferred[self._kind_of(merged)] += 1
                 continue
 
             for device in devices:
                 if not isinstance(device, dict) or not device.get("name"):
                     continue
-                self._device(device, merged, ioc, ioc_access, tag, beamline, create_missing)
+                self._device(device, merged, ioc, ioc_access, tag, beamline, create_missing,
+                             unit=unit, unit_asset=unit_asset)
+
+    @staticmethod
+    def _kind_of(entry: dict) -> str:
+        return f"{_text(entry.get('devgroup')) or '-'}/{_text(entry.get('template')) or '-'}"
 
     def _device(self, device: dict, ioc: dict, ioc_asset: Asset,
                 ioc_access: Optional[Asset], tag: str, beamline: str,
-                create_missing: bool) -> None:
+                create_missing: bool, unit=None, unit_asset: Optional[Asset] = None) -> None:
         device_name = str(device["name"]).strip()
         pv = _pv_prefix(ioc, device_name)
         key = f"{tag}:DEV:{ioc['name']}:{device_name}"
@@ -501,6 +875,7 @@ class _Importer:
             "Control Device", key, device_name,
             {
                 "beamline": tag,
+                "pv": pv,
                 "pv_prefix": pv,
                 # The same vocabulary tickets use for argus_system, so a
                 # ticket about "vac" reaches the pumps it is about.
@@ -521,9 +896,31 @@ class _Importer:
         )
         self.counts["devices"] += 1
         if pv:
+            other = self.pv_index.get(pv)
+            if other is not None and other.uid != asset.uid:
+                # Two IOCs configured to serve one PV: EPICS clients will find whichever
+                # answers first. Both are recorded, because both are in the file.
+                _note(self.job, self.db,
+                      f"PV {pv} is configured on two IOCs: {other.key} and {asset.key}")
             self.pv_index[pv] = asset
 
         self.relate(asset, ioc_asset, "provided by")
+        self.relate(asset, self.cfg, "declared in")
+
+        if self.infer and unit is not None:
+            # The IOC is one unit and its channels are its own; but where each channel is an
+            # element (a Libera Spectra's BPMs), each one is made.
+            if unit.channel_element:
+                self._infer_channel_element(unit.channel_element, asset, unit_asset, device_name, zones,
+                                            f"channel {device_name} of {unit.why}")
+        elif self.infer:
+            inference = infer_device(ioc, device)
+            if inference is None:
+                self.not_inferred[self._kind_of({**ioc, **{k: v for k, v in device.items()
+                                                           if k in ("devgroup", "template")}})] += 1
+            else:
+                self._infer_from(inference, asset, "acts on", f"{ioc['name']}:{device_name}",
+                                 device_name, {**ioc, **device}, zones)
 
         # Addressed directly, or through whatever the IOC connects to.
         if address:
@@ -595,6 +992,7 @@ def run_epik8s_import(
     path: str = "deploy/values.yaml",
     merge_strategy: str = "override",
     create_missing_nodes: bool = True,
+    infer_elements: bool = False,
 ):
     """Read one beamline's values.yaml and mirror what it describes."""
     db = SessionLocal()
@@ -610,7 +1008,8 @@ def run_epik8s_import(
         if not isinstance(values, dict):
             raise ValueError(f"{path} did not parse as a mapping — is that the right file?")
 
-        importer = _Importer(db, job, workspace_id, f"{repo_url}@{branch}:{path}")
+        importer = _Importer(db, job, workspace_id, f"{repo_url}@{branch}:{path}",
+                             infer_elements=infer_elements)
         importer.ensure_types()
 
         if merge_strategy == "remove_all_before":

@@ -1,0 +1,163 @@
+"""Admin script: read an EPIK8s control configuration into a workspace.
+
+Reads a beamline's deploy/values.yaml from disk and writes what it describes as
+objects of the catalogue's types, each linked to what the file says it is tied to:
+
+  Facility                the beamline
+  Control Configuration   this file at this revision; everything below is declared in it
+  IOC Template            the recipe an IOC is deployed from
+  IOC                     the deployable unit, on its networks, from its template
+  Control Device          the channel, axis or gauge that actually fails
+  Access Point            the terminal server or address a device is reached through
+  Control Network         a network an IOC is attached to
+  Control Service         archiver, gateways, alarm server, logbook
+  Storage Mount           an NFS mount or backup target
+
+Access Points are found in the inventory by address before any is made, so a Moxa
+that is already an object is linked, not duplicated; --no-create-missing reports
+the addresses nothing carries instead of making an object for each.
+
+--infer-elements also makes what the channels are for, which the file never lists: the
+ion pump behind GUNSIP01, the quadrupole and its power supply behind QUATB002, the
+camera, a BPM's electronics, an LLRF chassis, a modulator. They are read from the
+device metadata (devgroup, devfunc, devtype, template) and, for magnets, from the LNF
+name code; a channel neither says anything about is counted and reported, not guessed
+at. Each is marked `inferred` and says why, keeps anything a person adds to it, and
+needs the catalogue's types (seeded first).
+
+The types are seeded first if they are not there: with --catalogue the shared ones
+are used where they are and only this beamline's own are created here; a workspace
+already seeded against a catalogue keeps using it; any other gets the whole
+catalogue. Run it again after the file changes: it updates what the file says and
+leaves what has been added since.
+
+Usage (from anywhere, with the backend's virtualenv and DATABASE_URL set):
+  python backend/scripts/import_epik8s.py <workspace_id> <values.yaml>
+      [--catalogue <catalogue_workspace>] [--no-create-missing] [--infer-elements] [--dry-run]
+"""
+import os
+import sys
+
+# Runs from any directory: the app package is next to scripts/, not next to
+# wherever the shell happens to be.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def parse(argv: list) -> tuple:
+    """(workspace, path, catalogue, create_missing, dry_run, infer), or None."""
+    catalogue = argv[argv.index("--catalogue") + 1] if "--catalogue" in argv[:-1] else None
+    if "--catalogue" in argv and catalogue is None:
+        return None
+    rest = [a for i, a in enumerate(argv)
+            if not a.startswith("--") and not (i and argv[i - 1] == "--catalogue")]
+    if len(rest) != 2:
+        return None
+    return (rest[0], rest[1], catalogue, "--no-create-missing" not in argv, "--dry-run" in argv,
+            "--infer-elements" in argv)
+
+
+def main() -> None:
+    parsed = parse(sys.argv[1:])
+    if parsed is None:
+        print(__doc__)
+        sys.exit(1)
+    workspace_id, path, catalogue, create_missing, dry_run, infer = parsed
+    if not os.path.exists(path):
+        print(f"No such file: {path}")
+        sys.exit(1)
+    if not os.environ.get("DATABASE_URL"):
+        print("DATABASE_URL is not set, e.g. "
+              "postgresql://postgres:postgres@localhost:5432/app")
+        sys.exit(1)
+
+    import secrets
+
+    import yaml
+    from sqlalchemy.orm import Session
+
+    from app.db import SessionLocal, engine
+    from app.models.import_job import ImportJob
+    from app.models.workspace import Workspace
+    from app.services.asset_types import (
+        SCOPE_ALL, SCOPE_BEAMLINE, CatalogueMissing, catalogue_of, ensure_asset_types,
+    )
+    from app.services.epik8s_import import _Importer
+    from app.services.relations import rebuild_asset_relations
+
+    values = yaml.safe_load(open(path))
+    if not isinstance(values, dict):
+        print(f"{path} did not parse as a mapping: is that the right file?")
+        sys.exit(1)
+
+    if dry_run:
+        # The importer commits as it goes, so a rollback at the end would undo
+        # nothing. Run inside an outer transaction whose commits are savepoints,
+        # and throw the whole thing away: a real run that leaves no trace.
+        connection = engine.connect()
+        outer = connection.begin()
+        db = Session(bind=connection, join_transaction_mode="create_savepoint")
+    else:
+        connection = outer = None
+        db = SessionLocal()
+    try:
+        for name in (workspace_id, catalogue):
+            if name and db.get(Workspace, name) is None:
+                print(f"No workspace {name!r}.")
+                sys.exit(1)
+        catalogue = catalogue or catalogue_of(db, workspace_id)
+        try:
+            seeded = ensure_asset_types(
+                db, workspace_id, scope=SCOPE_BEAMLINE if catalogue else SCOPE_ALL,
+                catalogue_workspace_id=catalogue)
+        except (CatalogueMissing, ValueError) as e:
+            print(e)
+            sys.exit(1)
+        db.commit()
+
+        job = ImportJob(uid=f"job-{secrets.token_hex(6)}", workspace_id=workspace_id,
+                        source="epik8s")
+        db.add(job)
+        db.commit()
+        importer = _Importer(db, job, workspace_id, path, infer_elements=infer)
+        try:
+            importer.ensure_types()
+            importer.run(values, create_missing)
+        except ValueError as e:                 # a key that belongs to another workspace, or no catalogue
+            db.rollback()
+            print(e)
+            sys.exit(1)
+        for asset in importer.assets.values():
+            rebuild_asset_relations(db, asset.uid)
+        db.commit()
+
+        beamline = str(values.get("beamline") or "").strip() or "unknown"
+        print(f"read {path}: beamline {beamline}")
+        if seeded.created:
+            where = f", hanging from {catalogue!r}" if catalogue else ""
+            print(f"  ({len(seeded.created)} types created first{where})")
+        for name, n in sorted(importer.counts.items()):
+            if n:
+                print(f"  {name:24s} {n}")
+        if infer and importer.not_inferred:
+            left = sum(importer.not_inferred.values())
+            print(f"  not inferred: {left} channel(s) no rule covers, by group/template:")
+            for kind, n in importer.not_inferred.most_common(8):
+                print(f"    {n:4d}  {kind}")
+        warnings = list(job.warnings or [])
+        if warnings:
+            print(f"{len(warnings)} warning(s):")
+            for w in warnings[:40]:
+                print("  - " + w)
+            if len(warnings) > 40:
+                print(f"  … and {len(warnings) - 40} more")
+        if dry_run:
+            print("dry run: nothing written.")
+    finally:
+        db.close()
+        if outer is not None:
+            outer.rollback()
+            connection.close()
+
+
+if __name__ == "__main__":
+    main()

@@ -71,6 +71,10 @@ class Epik8sImportRequest(BaseModel):
     # An address no object in the inventory carries becomes an Access Point
     # marked as needing confirmation. Off, and it is only reported.
     create_missing_nodes: bool = True
+    # Also make what the channels drive: the pumps, magnets, power supplies, cameras,
+    # BPM electronics, LLRF and modulator units the file refers to without listing.
+    # They are inferences, marked as such, and need the catalogue's types seeded.
+    infer_elements: bool = False
     merge_strategy: MergeStrategy = "override"
 
 

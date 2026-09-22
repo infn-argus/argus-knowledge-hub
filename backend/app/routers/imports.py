@@ -88,7 +88,7 @@ def create_import(
         background_tasks.add_task(
             run_epik8s_import,
             job.uid, workspace_id, body.provider, body.repo_url, body.pat, body.branch,
-            body.path, body.merge_strategy, body.create_missing_nodes,
+            body.path, body.merge_strategy, body.create_missing_nodes, body.infer_elements,
         )
     else:
         background_tasks.add_task(

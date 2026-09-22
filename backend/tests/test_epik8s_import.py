@@ -400,3 +400,12 @@ def test_a_mapping_entry_that_is_not_a_mapping_is_skipped_not_fatal():
         {"name": "a"}, {"name": "d"},
     ]
     assert _ioc_entries(None) == [] and _ioc_entries("oops") == []
+
+
+def test_an_objects_uid_is_the_one_the_cli_derives():
+    """tools/epik8s-devices derives the same uid for the same workspace and key, so its
+    `push` and this import write to one object. The literal is asserted there too: if
+    either changes how a uid is made, one of the two tests fails."""
+    from app.services.epik8s_import import _uid
+
+    assert _uid("ws1", "SPARC:DEV:histar:GUNQUA01") == "epik8s-fe97cc093dbeb345ecb787f0"
