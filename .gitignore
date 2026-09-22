@@ -28,3 +28,13 @@ kubeconfig*
 .vscode/
 *.swp
 tsconfig.tsbuildinfo
+
+# Local API tokens (create_token.py output) — never committed
+*_TOKEN.txt
+
+# Reference spreadsheets and device lists kept locally for design work,
+# not meant for the repo
+docs/*.xlsx
+docs/*.csv
+~$*
+tools/epik8s-devices/*-devices.csv
