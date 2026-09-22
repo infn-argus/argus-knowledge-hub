@@ -52,6 +52,11 @@ def workspace(db):
     return ws
 
 
+# Every type the EPIK8s import writes objects of.
+IMPORTER_TYPES = ("Facility", "Control Configuration", "IOC Template", "IOC", "Control Device",
+                  "Access Point", "Control Network", "Control Service", "Storage Mount")
+
+
 def keys_of(name):
     return {a["key"] for a in at.BY_NAME[name].attributes}
 
@@ -64,7 +69,7 @@ def effective_keys(db, ws, name):
 # --- the shape --------------------------------------------------------------
 
 def test_the_catalogue_is_the_size_the_design_says():
-    assert len(at.CATALOGUE) == 103
+    assert len(at.CATALOGUE) == 104
     assert sum(t.abstract for t in at.CATALOGUE) == 12
     assert max(at.depth(t.name) for t in at.CATALOGUE) == 6
 
@@ -106,7 +111,7 @@ def test_no_type_declares_the_same_key_twice():
 
 def test_only_the_root_and_the_five_branches_sit_directly_under_it():
     assert {t.name for t in at.CATALOGUE if t.parent == "Item"} == {
-        "Engineered Item", "Catalog Item", "Control Item", "Engineering Record", "Place"}
+        "Engineered Item", "Catalog Item", "Control Item", "Engineering Record", "Location"}
 
 
 # --- keys other parts of the hub already depend on --------------------------
@@ -125,7 +130,7 @@ def test_the_keys_shared_with_tickets_and_documents_are_spelled_the_same():
 def test_the_keys_photo_identification_writes_are_declared():
     # asset_vision fills these four on a new object, unprefixed.
     assert "description" in keys_of("Item")
-    assert {"manufacturer", "model", "serial"} <= keys_of("Equipment Item")
+    assert {"manufacturer", "model", "serial"} <= keys_of("Asset")
 
 
 def test_every_enumeration_option_has_a_unique_id():
@@ -147,12 +152,12 @@ def test_the_source_options_include_the_ones_the_importers_write():
 def test_seeding_creates_the_whole_tree(db, workspace):
     result = at.ensure_asset_types(db, workspace)
     db.commit()
-    assert len(result.created) == 103 and not result.adopted and not result.duplicates
+    assert len(result.created) == 104 and not result.adopted and not result.duplicates
     rows = db.query(Schema).filter(Schema.workspace_id == workspace).all()
-    assert len(rows) == 103
+    assert len(rows) == 104
     by_name = {s.name: s for s in rows}
     assert by_name["Ion Pump"].parent_schema_uid == at.type_uid(workspace, "Vacuum Pump")
-    assert by_name["Vacuum Pump"].parent_schema_uid == at.type_uid(workspace, "Equipment Item")
+    assert by_name["Vacuum Pump"].parent_schema_uid == at.type_uid(workspace, "Asset")
     assert by_name["Item"].parent_schema_uid is None
     assert by_name["Vacuum Pump"].is_concrete is False and by_name["Ion Pump"].is_concrete is True
     assert all(s.applies_to == "objects" for s in rows)
@@ -164,7 +169,7 @@ def test_seeding_twice_changes_nothing(db, workspace):
     again = at.ensure_asset_types(db, workspace)
     db.commit()
     assert not again.created and not again.adopted and not again.extended
-    assert db.query(Schema).filter(Schema.workspace_id == workspace).count() == 103
+    assert db.query(Schema).filter(Schema.workspace_id == workspace).count() == 104
 
 
 def test_a_leaf_inherits_what_the_ancestors_declare(db, workspace):
@@ -180,9 +185,9 @@ def test_a_leaf_inherits_what_the_ancestors_declare(db, workspace):
 def test_a_reference_is_bound_to_the_type_in_this_workspace(db, workspace):
     at.ensure_asset_types(db, workspace)
     db.commit()
-    schema = db.get(Schema, at.type_uid(workspace, "Equipment Item"))
+    schema = db.get(Schema, at.type_uid(workspace, "Asset"))
     located = next(a for a in schema.attributes if a["key"] == "argus_location")
-    assert located["referenceSchemaUid"] == at.type_uid(workspace, "Place")
+    assert located["referenceSchemaUid"] == at.type_uid(workspace, "Location")
     assert located["includeChildren"] is True
 
 
@@ -218,13 +223,13 @@ def test_a_type_an_importer_made_is_adopted_not_duplicated(db, workspace):
     assert sorted(result.adopted) == ["IOC", "Power Supply"]
     assert result.uids["IOC"] == ioc_uid
     rows = db.query(Schema).filter(Schema.workspace_id == workspace).all()
-    assert len(rows) == 103 and sum(1 for s in rows if s.name == "IOC") == 1
+    assert len(rows) == 104 and sum(1 for s in rows if s.name == "IOC") == 1
     ioc = db.get(Schema, ioc_uid)
     assert ioc.parent_schema_uid == at.type_uid(workspace, "Control Item")
     assert {a["key"] for a in ioc.attributes} == keys_of("IOC")
     # a child reaches its adopted parent by the adopted uid, not by a new one
     assert db.get(Schema, at.type_uid(workspace, "Camera")).parent_schema_uid == \
-        at.type_uid(workspace, "Equipment Item")
+        at.type_uid(workspace, "Asset")
 
 
 def test_somebody_elses_type_of_the_same_name_is_left_alone_and_reported(db, workspace):
@@ -259,7 +264,7 @@ def test_the_importer_adopts_the_typed_types_when_they_are_seeded_first(db, work
     at.ensure_asset_types(db, workspace)
     db.commit()
     run_import(db, workspace)
-    for name in ("Facility", "IOC", "Control Device", "Access Point", "Control Service"):
+    for name in IMPORTER_TYPES:
         found = db.query(Schema).filter(Schema.workspace_id == workspace, Schema.name == name).all()
         assert len(found) == 1, name
         assert found[0].uid == at.type_uid(workspace, name)
@@ -271,8 +276,7 @@ def test_every_key_the_importer_writes_is_declared_by_the_type_it_writes_to(db, 
     at.ensure_asset_types(db, workspace)
     db.commit()
     run_import(db, workspace)
-    declared = {name: effective_keys(db, workspace, name)
-                for name in ("Facility", "IOC", "Control Device", "Access Point", "Control Service")}
+    declared = {name: effective_keys(db, workspace, name) for name in IMPORTER_TYPES}
     undeclared = {}
     for asset in db.query(Asset).filter(Asset.workspace_id == workspace):
         missing = set(asset.attributes) - declared[asset.type]
@@ -285,9 +289,8 @@ def test_seeded_after_the_importer_the_result_is_the_same(db, workspace):
     run_import(db, workspace)              # makes its own empty, epik8s-... types
     result = at.ensure_asset_types(db, workspace)
     db.commit()
-    assert set(result.adopted) == {"Facility", "IOC", "Control Device", "Access Point",
-                                   "Control Service"}
-    for name in ("Facility", "IOC", "Control Device", "Access Point", "Control Service"):
+    assert set(result.adopted) == set(IMPORTER_TYPES)
+    for name in IMPORTER_TYPES:
         assert db.query(Schema).filter(Schema.workspace_id == workspace,
                                        Schema.name == name).count() == 1
 
@@ -344,7 +347,7 @@ def make(ws, headers, type_name, prefix, attributes=None, name=None):
 def test_the_seeded_types_are_listed_and_an_object_of_one_can_be_made(seeded):
     ws, headers = seeded
     listed = client.get("/v1/schemas", headers=headers).json()
-    assert len([s for s in listed if s["workspace_id"] == ws]) == 103
+    assert len([s for s in listed if s["workspace_id"] == ws]) == 104
     _, resp = make(ws, headers, "Ion Pump", "pump", {
         "serial": "IPC-1234", "manufacturer": "Agilent", "pumping_speed": 55.0,
         "argus_lifecycle": "In service", "pbs_code": "INJ-A-VAC-PUMP-001"})
@@ -364,7 +367,7 @@ def test_a_location_reference_accepts_a_rack_and_refuses_a_pump(seeded):
     rack, made = make(ws, headers, "Rack", "rack")
     assert made.status_code == 201
     pump, _ = make(ws, headers, "Ion Pump", "pump")
-    # Rack is a Place, and `Located in` accepts any Place descendant.
+    # Rack is a Location, and `Located in` accepts any Location descendant.
     _, ok = make(ws, headers, "Ion Pump", "pump", {"argus_location": rack})
     assert ok.status_code == 201, ok.text
     _, wrong = make(ws, headers, "Ion Pump", "pump", {"argus_location": pump})
@@ -386,3 +389,281 @@ def test_a_screen_station_is_composed_of_its_parts(seeded):
              if r["from_asset_uid"] == station]
     assert {(e["to_asset_uid"], e["relation_type"]) for e in edges} == {
         (camera, "composed of"), (actuator, "composed of")}
+
+
+# --- two sets: shared, and one machine's own ------------------------------------
+
+def test_the_two_sets_partition_the_catalogue():
+    assert set(at.GLOBAL_TYPES) | set(at.BEAMLINE_TYPES) == set(at.BY_NAME)
+    assert not set(at.GLOBAL_TYPES) & set(at.BEAMLINE_TYPES)
+    assert (len(at.GLOBAL_TYPES), len(at.BEAMLINE_TYPES)) == (59, 45)
+
+
+def test_a_machines_structure_and_control_are_its_own_and_the_rest_is_shared():
+    beamline_roots = {"Functional Element", "Control Item", "Engineering Record"}
+    for name in at.BEAMLINE_TYPES:
+        cur = name
+        while cur not in beamline_roots:
+            cur = at.BY_NAME[cur].parent
+    for name in ("Asset", "Ion Pump", "Camera", "Product Model", "Vendor", "Location", "Rack",
+                 "Engineered Item", "Item"):
+        assert name in at.GLOBAL_TYPES, name
+    for name in ("Facility", "Quadrupole", "Screen Station", "IOC", "Control Device",
+                 "Access Point", "Machine Module", "RF Station"):
+        assert name in at.BEAMLINE_TYPES, name
+
+
+def test_what_a_machine_costs_is_not_readable_from_another_machines_workspace():
+    """A procurement record carries a price, and the objects of a global type are
+    readable everywhere. The engineering records are the machine's own for that reason."""
+    for name in ("Engineering Record", "Procurement Record", "Utility Requirement", "Work Package"):
+        assert name in at.BEAMLINE_TYPES, name
+
+
+def test_no_shared_type_depends_on_a_beamline_type():
+    """A global type that named a beamline one would be unusable from any workspace
+    that has not seeded that beamline's set."""
+    for name in at.GLOBAL_TYPES:
+        spec = at.BY_NAME[name]
+        assert spec.parent is None or spec.parent in at.GLOBAL_TYPES, name
+        for attr in spec.attributes:
+            if attr["type"] == "reference":
+                assert attr["referenceType"] in at.GLOBAL_TYPES, (name, attr["key"])
+
+
+@pytest.fixture()
+def catalogue(db):
+    ws = f"cat-{secrets.token_hex(4)}"
+    db.add(Workspace(id=ws, name="Catalogue"))
+    db.commit()
+    result = at.ensure_asset_types(db, ws, scope="global")
+    db.commit()
+    return ws, result
+
+
+def test_the_global_set_is_created_in_the_catalogue_and_shared(db, catalogue):
+    ws, result = catalogue
+    rows = db.query(Schema).filter(Schema.workspace_id == ws).all()
+    assert len(result.created) == len(rows) == len(at.GLOBAL_TYPES)
+    assert all(r.is_global for r in rows)
+    assert {r.name for r in rows} == set(at.GLOBAL_TYPES)
+
+
+# Every attribute key tools/epik8s-devices `push` can write on a Control Device. The same
+# list is asserted there against what `push` really writes: if a key is added on either
+# side, one of the two tests fails, instead of the hub quietly storing a key no type declares.
+CLI_PUSHES = {
+    "beamline", "pv", "pv_prefix", "ioc", "system", "function", "zones", "address", "port", "channel",
+    "axis", "settings", "argus_facility", "argus_source", "argus_source_ref", "device_class",
+    "element", "vendor", "model_code", "argus_keywords",
+}
+
+
+def test_every_key_the_cli_pushes_is_declared_by_control_device(db, workspace):
+    at.ensure_asset_types(db, workspace)
+    db.commit()
+    assert CLI_PUSHES <= effective_keys(db, workspace, "Control Device")
+
+
+def test_a_pv_can_repeat_because_the_configuration_repeats_it():
+    """SPARC configures two PVs on two IOCs each. A unique rule would make the hub
+    refuse every later edit of those four devices."""
+    pv = next(a for a in at.BY_NAME["Control Device"].attributes if a["key"] == "pv")
+    assert not pv["unique"] and pv["indexed"]
+
+
+def test_the_beamline_set_needs_the_global_one_to_hang_from(db, workspace):
+    with pytest.raises(ValueError, match="say which workspace"):
+        at.ensure_asset_types(db, workspace, scope="beamline")
+    with pytest.raises(ValueError, match="cannot be its own catalogue"):
+        at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=workspace)
+    empty = f"cat-{secrets.token_hex(4)}"
+    db.add(Workspace(id=empty, name="Empty"))
+    db.commit()
+    with pytest.raises(at.CatalogueMissing, match="Seed it first"):
+        at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=empty)
+    db.rollback()
+    assert db.query(Schema).filter(Schema.workspace_id == workspace).count() == 0   # nothing half-written
+
+
+def test_the_beamline_set_hangs_from_the_global_one(db, catalogue, workspace):
+    cat, _ = catalogue
+    result = at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=cat)
+    db.commit()
+    rows = {r.name: r for r in db.query(Schema).filter(Schema.workspace_id == workspace)}
+    assert len(result.created) == len(rows) == len(at.BEAMLINE_TYPES) and set(rows) == set(at.BEAMLINE_TYPES)
+    assert not any(r.is_global for r in rows.values())            # a machine's own
+    # a beamline type reaches its parent and its references in the catalogue workspace
+    assert rows["Functional Element"].parent_schema_uid == at.type_uid(cat, "Engineered Item")
+    assert rows["Control Item"].parent_schema_uid == at.type_uid(cat, "Item")
+    assert rows["Quadrupole"].parent_schema_uid == at.type_uid(workspace, "Beam Element")
+    isolated = next(a for a in rows["Vacuum Sector"].attributes if a["key"] == "isolated_by")
+    assert isolated["referenceSchemaUid"] == at.type_uid(cat, "Vacuum Valve")
+    # every type is usable from here, by name
+    assert set(result.uids) == set(at.BY_NAME)
+    assert result.uids["Ion Pump"] == at.type_uid(cat, "Ion Pump")
+    assert result.uids["IOC"] == at.type_uid(workspace, "IOC")
+
+
+def test_a_beamline_type_inherits_from_its_shared_ancestors(db, catalogue, workspace):
+    cat, _ = catalogue
+    at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=cat)
+    db.commit()
+    keys = {a["key"] for a in effective_attributes(db, db.get(Schema, at.type_uid(workspace, "Quadrupole")))}
+    assert {"gradient", "lattice_name",          # its own and its beamline parent's
+            "pbs_code", "argus_system", "description"} <= keys      # from the global ancestors
+
+
+def test_seeding_the_beamline_set_twice_changes_nothing(db, catalogue, workspace):
+    cat, _ = catalogue
+    at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=cat)
+    db.commit()
+    again = at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=cat)
+    assert not again.created and not again.extended and not again.adopted
+
+
+def test_a_workspace_seeded_in_full_can_become_the_catalogue(db, workspace):
+    at.ensure_asset_types(db, workspace)                        # scope "all": nothing shared yet
+    db.commit()
+    assert not db.query(Schema).filter(Schema.workspace_id == workspace, Schema.is_global).count()
+    result = at.ensure_asset_types(db, workspace, scope="global")
+    db.commit()
+    assert not result.created
+    assert db.query(Schema).filter(Schema.workspace_id == workspace, Schema.is_global).count() == len(at.GLOBAL_TYPES)
+
+
+def test_the_importers_find_a_type_wherever_it_is(db, catalogue, workspace):
+    cat, _ = catalogue
+    at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=cat)
+    db.commit()
+    uids = at.resolve_type_uids(db, workspace)
+    assert uids["Ion Pump"] == at.type_uid(cat, "Ion Pump")       # global, from the catalogue
+    assert uids["IOC"] == at.type_uid(workspace, "IOC")           # its own
+    # a workspace that has an own type of the same name prefers it
+    other = f"cat-{secrets.token_hex(4)}"
+    db.add(Workspace(id=other, name="Other"))
+    db.flush()
+    db.add(Schema(uid=f"{other}:mine", workspace_id=other, name="Ion Pump", applies_to="objects",
+                  attributes=[]))
+    db.commit()
+    assert at.resolve_type_uids(db, other)["Ion Pump"] == f"{other}:mine"
+
+
+# --- a workspace seeded before the two types were renamed ---------------------------
+
+def _as_it_was_before_the_rename(db, ws):
+    """Recreate what an earlier seeding left: `Equipment Item` and `Place` under their
+    own uids, with their children pointing at them."""
+    for new, old in (("Asset", "Equipment Item"), ("Location", "Place")):
+        current = db.get(Schema, at.type_uid(ws, new))
+        legacy = at.type_uid(ws, old)
+        db.add(Schema(uid=legacy, workspace_id=ws, name=old, description=current.description,
+                      applies_to="objects", is_concrete=False,
+                      parent_schema_uid=current.parent_schema_uid,
+                      attributes=current.attributes, metadata_json={"source": "argus"}))
+        db.flush()
+        db.query(Schema).filter(Schema.parent_schema_uid == current.uid).update(
+            {Schema.parent_schema_uid: legacy}, synchronize_session=False)
+        db.delete(current)
+        db.flush()
+    schema = db.get(Schema, at.type_uid(ws, "Asset")) or db.get(Schema, at.type_uid(ws, "Equipment Item"))
+    fixed = []
+    for a in schema.attributes:
+        a = dict(a)
+        if a["key"] == "argus_location":
+            a["referenceType"], a["referenceSchemaUid"] = "Place", at.type_uid(ws, "Place")
+        fixed.append(a)
+    schema.attributes = fixed
+    db.commit()
+
+
+def test_a_workspace_seeded_under_the_old_names_is_carried_across_in_place(db, workspace):
+    at.ensure_asset_types(db, workspace)
+    db.commit()
+    _as_it_was_before_the_rename(db, workspace)
+    assert db.get(Schema, at.type_uid(workspace, "Equipment Item")) is not None
+
+    result = at.ensure_asset_types(db, workspace)
+    db.commit()
+    db.expire_all()
+
+    assert sorted(result.renamed) == ["Asset", "Location"] and not result.created
+    assert db.query(Schema).filter(Schema.workspace_id == workspace).count() == 104
+    asset = db.get(Schema, at.type_uid(workspace, "Equipment Item"))    # same row, same uid
+    assert asset.name == "Asset"
+    assert db.get(Schema, at.type_uid(workspace, "Place")).name == "Location"
+    assert not db.query(Schema).filter(Schema.workspace_id == workspace,
+                                       Schema.name.in_(["Equipment Item", "Place"])).count()
+    # what pointed at the old row still does
+    assert db.get(Schema, at.type_uid(workspace, "Camera")).parent_schema_uid == asset.uid
+    located = next(a for a in asset.attributes if a["key"] == "argus_location")
+    assert located["referenceType"] == "Location"                       # the display name follows
+    assert located["referenceSchemaUid"] == at.type_uid(workspace, "Place")
+
+
+def test_a_stale_catalogue_workspace_is_named_not_worked_around(db, workspace):
+    cat = f"cat-{secrets.token_hex(4)}"
+    db.add(Workspace(id=cat, name="Old catalogue"))
+    db.commit()
+    at.ensure_asset_types(db, cat)                       # everything, in one workspace
+    at.ensure_asset_types(db, cat, scope="global")
+    db.commit()
+    _as_it_was_before_the_rename(db, cat)
+    with pytest.raises(at.CatalogueMissing, match="seed it again"):
+        at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=cat)
+
+
+# --- what "global" means to the people using a beamline --------------------------------
+
+def test_an_object_of_a_shared_type_is_seen_everywhere_and_one_of_a_beamline_type_is_not(db, catalogue):
+    """The trade this design accepts, written down so it stays deliberate."""
+    cat, _ = catalogue
+    sparc, btf = f"bl-{secrets.token_hex(4)}", f"bl-{secrets.token_hex(4)}"
+    headers = {}
+    for ws in (sparc, btf):
+        db.add(Workspace(id=ws, name=ws))
+        db.commit()
+        at.ensure_asset_types(db, ws, scope="beamline", catalogue_workspace_id=cat)
+        raw = secrets.token_urlsafe(16)
+        db.add(ApiToken(workspace_id=ws, token_hash=hash_token(raw)))
+        db.commit()
+        headers[ws] = {"Authorization": f"Bearer {raw}"}
+
+    def make_in(ws, type_uid, type_name, prefix):
+        uid = f"{prefix}-{secrets.token_hex(4)}"
+        resp = client.post("/v1/assets", headers=headers[ws], json={
+            "uid": uid, "schema_uid": type_uid, "key": f"{prefix.upper()}-{secrets.randbelow(10**7) + 10**6}",
+            "name": type_name, "type": type_name, "attributes": {}})
+        assert resp.status_code == 201, resp.text
+        return uid
+
+    pump = make_in(sparc, at.type_uid(cat, "Ion Pump"), "Ion Pump", "pump")       # a shared type
+    facility = make_in(sparc, at.type_uid(sparc, "Facility"), "Facility", "fac")  # SPARC's own
+
+    seen_from_btf = {a["uid"] for a in client.get("/v1/assets", headers=headers[btf]).json()}
+    assert pump in seen_from_btf and facility not in seen_from_btf
+    # seen, not editable: the owning workspace is the only one that can change it
+    assert client.put(f"/v1/assets/{pump}", headers=headers[btf], json={"name": "x"}).status_code == 404
+    assert client.put(f"/v1/assets/{pump}", headers=headers[sparc], json={"name": "x"}).status_code == 200
+
+
+def test_a_workspace_knows_which_catalogue_it_hangs_from(db, catalogue, workspace):
+    cat, _ = catalogue
+    assert at.catalogue_of(db, workspace) is None                 # nothing seeded yet
+    assert at.catalogue_of(db, cat) is None                       # a catalogue hangs from nothing
+    at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=cat)
+    db.commit()
+    assert at.catalogue_of(db, workspace) == cat
+
+
+def test_seeding_in_full_a_workspace_that_hangs_from_a_catalogue_is_refused(db, catalogue, workspace):
+    """Otherwise the shared types would be copied into it: the copies this design
+    exists to avoid."""
+    cat, _ = catalogue
+    at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=cat)
+    db.commit()
+    for scope in ("all", "global"):
+        with pytest.raises(ValueError, match="already hangs from the catalogue"):
+            at.ensure_asset_types(db, workspace, scope=scope)
+    db.rollback()
+    assert db.query(Schema).filter(Schema.workspace_id == workspace).count() == len(at.BEAMLINE_TYPES)

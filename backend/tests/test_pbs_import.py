@@ -307,3 +307,49 @@ def test_the_real_workbook_reads_and_imports(db, workspace, facility):
         schema = db.get(Schema, obj.schema_uid)
         assert not check_attributes(db, schema, obj.attributes, workspace, Asset,
                                     exclude_uid=obj.uid, skip_unique=True, skip_reference=True), obj.key
+
+
+def test_with_a_shared_catalogue_only_the_beamlines_own_types_are_made_here(db, workspace, facility):
+    from app.services import asset_types as at
+    cat = f"pbs-cat-{secrets.token_hex(4)}"
+    db.add(Workspace(id=cat, name="Catalogue"))
+    db.commit()
+    at.ensure_asset_types(db, cat, scope="global")
+    db.commit()
+
+    import_pbs(db, workspace, read_workbook(workbook(GOOD)), facility, "x.xlsx",
+               catalogue_workspace_id=cat)
+    made_here = {s.name for s in db.query(Schema).filter(Schema.workspace_id == workspace)}
+    assert made_here == set(at.BEAMLINE_TYPES)                    # no copy of the shared ones
+
+    objs = assets(db, workspace)
+    coupler = objs[f"{facility}:MHX3-I-WGS-BDC-001"]             # a shared type
+    structure = objs[f"{facility}:INJ-A-ACC-SB3M-001"]           # this beamline's own
+    assert coupler.schema_uid == at.type_uid(cat, "Directional Coupler")
+    assert structure.schema_uid == at.type_uid(workspace, "Accelerating Structure")
+    assert objs[f"{facility}:WP:WP-04"].schema_uid == at.type_uid(workspace, "Work Package")   # money stays here
+    assert objs[f"{facility}:MHX3-I-WGS-BDC-001:PROC"].schema_uid == at.type_uid(workspace, "Procurement Record")
+    assert objs[f"{facility}:AREA:MHX3"].schema_uid == at.type_uid(cat, "Area")
+
+
+def test_a_shared_catalogue_that_is_not_there_is_named(db, workspace, facility):
+    from app.services import asset_types as at
+    empty = f"pbs-cat-{secrets.token_hex(4)}"
+    db.add(Workspace(id=empty, name="Empty"))
+    db.commit()
+    with pytest.raises(at.CatalogueMissing):
+        import_pbs(db, workspace, read_workbook(workbook(GOOD)), facility, "x.xlsx",
+                   catalogue_workspace_id=empty)
+    db.rollback()
+
+
+def test_a_beamline_workspace_keeps_using_its_catalogue_without_being_told(db, workspace, facility):
+    from app.services import asset_types as at
+    cat = f"pbs-cat-{secrets.token_hex(4)}"
+    db.add(Workspace(id=cat, name="Catalogue"))
+    db.commit()
+    at.ensure_asset_types(db, cat, scope="global")
+    at.ensure_asset_types(db, workspace, scope="beamline", catalogue_workspace_id=cat)
+    db.commit()
+    import_pbs(db, workspace, read_workbook(workbook(GOOD)), facility, "x.xlsx")   # no catalogue given
+    assert db.query(Schema).filter(Schema.workspace_id == workspace).count() == len(at.BEAMLINE_TYPES)

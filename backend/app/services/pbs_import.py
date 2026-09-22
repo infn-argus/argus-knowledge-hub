@@ -35,7 +35,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.asset import Asset, Relation
-from app.services.asset_types import ensure_asset_types
+from app.services.asset_types import SCOPE_ALL, SCOPE_BEAMLINE, catalogue_of, ensure_asset_types
 from app.services.relations import rebuild_asset_relations
 
 SOURCE_LABEL = "PBS workbook"
@@ -416,10 +416,20 @@ class _Writer:
 
 
 def import_pbs(db: Session, workspace_id: str, book: Workbook, facility: str,
-               source_ref: str, dry_run: bool = False) -> PbsResult:
+               source_ref: str, dry_run: bool = False,
+               catalogue_workspace_id: Optional[str] = None) -> PbsResult:
     """Write a read workbook into a workspace. `facility` prefixes every key,
-    because object keys are unique across the whole installation."""
-    seeded = ensure_asset_types(db, workspace_id)
+    because object keys are unique across the whole installation.
+
+    With `catalogue_workspace_id` the shared types are used where they are, and only
+    this beamline's own are created here. Without it, a workspace already seeded
+    against a catalogue keeps using it, and one that is not gets the whole catalogue,
+    which is right for a hub that has only one workspace."""
+    catalogue_workspace_id = catalogue_workspace_id or catalogue_of(db, workspace_id)
+    seeded = ensure_asset_types(
+        db, workspace_id,
+        scope=SCOPE_BEAMLINE if catalogue_workspace_id else SCOPE_ALL,
+        catalogue_workspace_id=catalogue_workspace_id)
     w = _Writer(db, workspace_id, facility, source_ref, seeded.uids)
     w.warnings.extend(book.warnings)
 
