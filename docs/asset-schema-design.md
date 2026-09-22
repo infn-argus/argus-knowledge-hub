@@ -58,7 +58,7 @@ Six roots under one abstract `Item`: four planes, plus place and the engineering
         │                                    ▲
         │ instance of                        │ located in
         ▼                                    │
-    CATALOGUE                              PLACE
+    CATALOGUE                              LOCATION
     Hi-Star (CAEN ELS)                     Rack B12 → Area LINAC → Building SPARC Hall
         ▲
         │ templated from
@@ -80,10 +80,10 @@ Each plane answers a question no other plane can:
 | Plane | Root | The question it owns |
 |---|---|---|
 | Functional | `Functional Element` | What is the machine made of, and where along the beam? |
-| Physical | `Equipment Item` | Which serialised box is installed, since when, under warranty until? |
+| Physical | `Asset` | Which serialised box is installed, since when, under warranty until? |
 | Catalogue | `Catalog Item` | What kind of thing is it, and what does the vendor say about it? |
 | Control | `Control Item` | How is it driven, by which IOC, through which wire, declared where? |
-| Place | `Place` | Where is it, and what are the access rules to reach it? |
+| Location | `Location` | Where is it, and what are the access rules to reach it? |
 | Engineering | `Engineering Record` | What does the design say it needs, costs and belongs to? |
 
 A composite element — a screen station, an RF station, an assembled module — is a functional
@@ -109,16 +109,16 @@ Verified against the code, because the catalogue must fit the machinery that wil
 | MCP object search matches the type **name** as a substring | `backend/app/services/mcp_tools.py:126` | Type names must be the words operators use. "Ion Pump", not "VacuumDevice". This is the strongest argument for a wide catalogue. |
 | Photo identification writes `manufacturer`, `model`, `serial`, `description`, and reads keys matching `^[A-Z][A-Z0-9]{1,9}-\d{1,8}$` | `backend/app/services/asset_vision.py:31` | Those four keys are **reserved**; the physical base must declare them unprefixed, and the key scheme must match that pattern. |
 | `argus_system` / `argus_subsystem` / `argus_facility` / `argus_keywords` already mean something on tickets and documents | `ticket_types.py:72`; `document_types.py:77` | Objects must spell them identically, or "everything about the vacuum system" cannot be answered across sections. |
-| A workspace with `is_global=True` cascades global onto every type created in it | `backend/app/routers/schemas.py:46` | The catalogue's home is one global workspace shared by every beamline. |
+| A type flagged global is usable and inheritable from every workspace, and **the objects of a global type are readable in every workspace**, editable only in the one that made them | `backend/app/routers/assets.py:45-52`; `schemas.py:46` | The shared types live in one catalogue workspace (§8). Sharing a type shares its objects, and that is what decides what may be shared. |
 | An enumeration is **stored as its label**: the edit form writes `opt.value`, and the validator compares against labels (`attribute_validation.py:137`). The read view resolves ids, then falls back to showing the raw value | `AttributeInput.tsx:260`; `AttributeValue.tsx:56` | Importers must write labels (`"Approved"`), not ids (`"approved"`), or the first human edit of the object fails validation. `argus_source: "epik8s"` passes only because the label `EPIK8s` lower-cases to it. |
 | Regex is `re.search`, not `fullmatch` | `attribute_validation.py:127` | Anchor every pattern `^…$`. |
-| `unique` is scoped to one exact `schema_uid`, not the subtree | `attribute_validation.py:163` | A serial unique on `Equipment Item` is *not* unique across its leaves. Put `unique` on the leaf, or accept it as advisory. |
+| `unique` is scoped to one exact `schema_uid`, not the subtree | `attribute_validation.py:163` | A serial unique on `Asset` is *not* unique across its leaves. Put `unique` on the leaf, or accept it as advisory. |
 
 ---
 
 ## 4. The type catalogue
 
-**103 types, 12 of them abstract, maximum depth 6.** Abstract types are marked *(abstract)*.
+**104 types, 12 of them abstract, maximum depth 6.** Abstract types are marked *(abstract)*.
 
 ```
 Item (abstract)
@@ -134,7 +134,7 @@ Item (abstract)
 │   │       ├── Corrector            ├── Solenoid              ├── Accelerating Structure
 │   │       ├── RF Gun               ├── RF Deflector          ├── Undulator
 │   │       ├── Plasma Module        ├── Collimator            ├── Beam Stopper
-│   │       ├── Vacuum Sector
+│   │       ├── Vacuum Sector        ├── Mirror
 │   │       └── Diagnostic Element (abstract)
 │   │           ├── Screen Station          camera + screen + actuator + optics
 │   │           ├── Beam Position Monitor   ├── Beam Charge Monitor
@@ -142,7 +142,7 @@ Item (abstract)
 │   │           ├── Emittance Meter         ├── Spectrometer Station
 │   │           ├── Beam Loss Monitor       ├── Beam Arrival Monitor
 │   │           └── Bunch Length Monitor
-│   └── Equipment Item (abstract)   the serialised box, with a purchase order
+│   └── Asset (abstract)   the serialised box, with a purchase order
 │       ├── Power Supply             ├── Magnet Assembly
 │       ├── RF Amplifier             ├── Modulator             ├── Low-Level RF Unit
 │       ├── Waveguide Component (abstract)
@@ -181,7 +181,7 @@ Item (abstract)
 │   ├── Utility Requirement          power, cooling water, air, gases — one per component
 │   ├── Procurement Record           cost, supplier, delivery, funding line, CIG
 │   └── Work Package                 WP-01 … WP-13
-└── Place (abstract)
+└── Location (abstract)
     ├── Building                     ├── Area                  ├── Rack
     └── Storage Location
 ```
@@ -194,7 +194,7 @@ bought separately, replaced separately, driven by **two different IOCs**. Modell
 object means the camera cannot be swapped without rewriting the element, and a motion fault
 and an imaging fault look like the same fault.
 
-So a composite is a `Functional Element` with `composed of` edges to its `Equipment Item`
+So a composite is a `Functional Element` with `composed of` edges to its `Asset`
 parts:
 
 ```
@@ -328,6 +328,9 @@ Leaves add only their own physics, nothing else:
 - `RF Gun` — `frequency` (MHz), `cathode_material`, `peak_field` (MV/m)
 - `Undulator` — `period` (mm), `n_periods`, `k_value`, `gap_min`/`gap_max` (mm)
 - `Collimator` / `Beam Stopper` — `aperture_min`/`aperture_max` (mm), `material`
+- `Mirror` — `mirror_kind` (enum: Flat, Parabolic, Other), `beam` (laser line: main, probe; indexed),
+  `coating`, `diameter_mm`, `substrate`. A laser-line mirror on a mount that motors tilt; made by
+  the motor inference from its axes (§9.5).
 - `Vacuum Sector` — `nominal_pressure` (mbar), `length` (m), `isolated_by` (reference → `Vacuum Valve`, multiValue)
 - `Plasma Module` — `capillary_length` (mm), `capillary_diameter` (mm), `gas` (indexed),
   `discharge_voltage` (kV), `plasma_density` (cm⁻³)
@@ -359,7 +362,7 @@ Its leaves:
 - `Bunch Length Monitor` — `method` (enum: Electro-optic sampling, Streak camera, CTR, CDR,
   RF deflector), `time_range_ps`
 
-### 5.3 `Equipment Item` — the serialised box
+### 5.3 `Asset` — the serialised box
 
 | key | name | type | flags | notes |
 |---|---|---|---|---|
@@ -367,7 +370,7 @@ Its leaves:
 | `model` | Model | string | indexed | **reserved** — photo identification |
 | `serial` | Serial number | string | indexed | **reserved** — photo identification |
 | `product_model` | Instance of | reference → `Product Model` | | named for the relation, see §3 |
-| `argus_location` | Located in | reference → `Place`, includeChildren | | named for the relation |
+| `argus_location` | Located in | reference → `Location`, includeChildren | | named for the relation |
 | `inventory_number` | Inventory number | string | unique, indexed | the INFN inventory number |
 | `installed_on` | Installed on | date | | |
 | `removed_on` | Removed on | date | | set when it comes out, not deleted |
@@ -450,9 +453,9 @@ cover all 46, and `documents.is_global` already supports exactly that sharing.
 `Vendor` — `contact`, `support_contract`, `support_expires` (date), `rma_procedure` (text),
 `website`.
 
-### 5.5 `Place`
+### 5.5 `Location`
 
-`Place` carries `site`, `floor`, `access_rule` (enum Free/Badge/Interlocked/Radiation-controlled).
+`Location` carries `site`, `floor`, `access_rule` (enum Free/Badge/Interlocked/Radiation-controlled).
 
 - `Area` — `zone` (string, indexed — matches the configuration's `zones:`),
   `radiation_classification` (enum Supervised/Controlled/Prohibited), `interlock_group`
@@ -504,9 +507,16 @@ missed all five.
 `image`, `host` (indexed), `opi`, `autosync` (bool), `pva` (bool), `networks` (multiValue,
 indexed), `ioc_init` (text), `ssh_nodeport`.
 
-**`Control Device`** — `pv` (unique, indexed), `devtype` (indexed), `element` (indexed),
-`device_class` (indexed), `channel`, `axis`, `address`, `port`, `interlock` (bool), `geo`,
+**`Control Device`** — `pv` (indexed), `devtype` (indexed), `element` (indexed),
+`device_class` (indexed), `vendor` and `model_code` (as found, before a Product Model is
+linked), `channel`, `axis`, `address`, `port`, `interlock` (bool), `geo`,
 `settings` (text — the rating block, see below), `enable_pv`.
+
+`pv` is **not** unique. It was, and the first push of a reviewed SPARC file failed on it: the
+configuration puts `SPARC:TIM:ac1bpm01` and `SPARC:TIM:llrf1` on two IOCs each
+(`ioc-time-profile` and `profile-sync-test`). A unique rule would make the hub refuse every later
+edit of those four devices over a fact about the file, so both are recorded and the import
+reports the pair instead.
 
 > The rating sub-blocks in the configuration (`ps: {current: {max: 280}}`,
 > `motor: {velo_max: 50, dhlm: …}`, `pump: [{name, prefix, suffix, tsh}]`) are
@@ -578,10 +588,10 @@ Added, with direction `from → to`:
 
 | relation | from → to | the question it answers |
 |---|---|---|
-| `realized by` | Beam Element → Equipment Item | which magnet is in the quadrupole *right now* |
-| `instance of` | Equipment Item → Product Model | the CSV's *"model"* |
+| `realized by` | Beam Element → Asset | which magnet is in the quadrupole *right now* |
+| `instance of` | Asset → Product Model | the CSV's *"model"* |
 | `acts on` | Control Device → Item | the CSV's *"element it serves"* — polymorphic on purpose |
-| `drives` | IOC → Equipment Item | the CSV's *"link to the physical asset"*, resolved from `asset:` |
+| `drives` | IOC → Asset | the CSV's *"link to the physical asset"*, resolved from `asset:` |
 | `templated from` | IOC → IOC Template | which recipe deployed it |
 | `declared in` | IOC, Control Service, Control Device → Control Configuration | which revision said so |
 | `configures` | Control Configuration → Facility | |
@@ -594,10 +604,10 @@ Added, with direction `from → to`:
 | `interlocks` | Interlock Unit → Item | |
 | `upstream of` | Beam Element → Beam Element | beam-path order, to propagate a fault downstream |
 | `part of` | Item → Item | assemblies, sections, systems |
-| `located in` | Equipment Item → Place | |
+| `located in` | Asset → Location | |
 | `spare for` | Spare Part → Product Model | |
-| `replaced` | Equipment Item → Equipment Item | swap history, so a chronic failure becomes visible |
-| `composed of` | Functional Element → Equipment Item, Item | a screen station's camera, screen, actuator and optics |
+| `replaced` | Asset → Asset | swap history, so a chronic failure becomes visible |
+| `composed of` | Functional Element → Asset, Item | a screen station's camera, screen, actuator and optics |
 | `requires` | Engineered Item → Utility Requirement | what the building has to supply |
 | `procured under` | Engineered Item → Procurement Record | cost, supplier, delivery |
 | `assigned to` | Engineered Item → Work Package | who is responsible for delivering it |
@@ -643,43 +653,85 @@ noted in §15.
 
 ## 8. Where the catalogue lives
 
-**In every workspace that holds objects — seeded, not shared.** An earlier draft of this
-document put the catalogue in one `is_global` workspace that every beamline would reference.
-That does not work with the platform as it is, for two reasons found while building the seeder:
+**Two sets, seeded separately.** The types divide by what they describe, and each set goes
+where its objects should be readable.
 
-- `SchemaTree` shows only the types a workspace **owns** (`webapp/src/components/SchemaTree.tsx:147`,
-  which says why: a workspace with 24 types was listing 105 once a neighbour shared its
-  catalogue). Objects in `sparc` typed by a type in `catalog` would be there and unbrowsable.
-- The importers look for types **in their own workspace** (`epik8s_import.py:224`), so an import
-  into `sparc` would not find a shared `IOC` and would create its own empty one — the exact
-  situation the catalogue exists to end.
+| | Global set — 59 types | Per-beamline set — 45 types |
+|---|---|---|
+| Where | one catalogue workspace, every type flagged global | each beamline's own workspace, not global |
+| What | `Item`, `Engineered Item`, the whole **`Asset`** branch, the **`Catalog Item`** branch (`Product Model`, `Vendor`), the **`Location`** branch | the **`Functional Element`** branch (facility, sections, modules, lattice elements, screen stations…), the **`Control Item`** branch (configuration, IOCs, devices, access points…), the **`Engineering Record`** branch (utilities, procurement, work packages) |
+| Meaning | what exists physically and can be bought: one inventory | how one machine is arranged, controlled and paid for |
+| Objects | readable in **every** workspace, editable only where they were made | stay in the workspace that made them |
 
-So `ensure_asset_types(db, workspace_id)` creates the whole tree in the workspace it is given,
-with uids `{workspace_id}:argus-object:{slug}`, exactly as the ticket and document seeders do.
+A beamline type hangs from global parents (`Functional Element` from `Engineered Item`,
+`Control Item` from `Item`), and inherits their attributes across workspaces. **Dependencies
+point one way**: no global type has a beamline parent or refers to a beamline type, which a
+test asserts, so a workspace that has the shared set never needs another beamline's.
 
 ```
-sparc     103 types   123 IOCs, 340 devices
-btf       103 types    27 IOCs,  74 devices
-euaps     103 types    52 IOCs,  95 devices
+catalogue   59 types, all global          Product Models, Vendors, and anything else made from them
+   ▲ hang from
+   ├── sparc    44 types   123 IOCs, 305 devices, 22 templates …
+   ├── btf      44 types    27 IOCs,  69 devices, 10 templates …
+   └── euaps    44 types    52 IOCs,  95 devices,  5 templates …  + the PBS import
 ```
 
-Three properties make the copies one catalogue rather than three:
+### Seeding
+
+```bash
+python backend/scripts/seed_asset_types.py global   catalogue
+python backend/scripts/seed_asset_types.py beamline sparc --catalogue catalogue
+python backend/scripts/seed_asset_types.py beamline btf   --catalogue catalogue
+python backend/scripts/seed_asset_types.py all      single   # everything in one workspace, if there is only one
+```
+
+Each takes `--dry-run`. Nothing runs when a workspace is created, unlike tickets (5 types) and
+documents (14): a workspace that only holds tickets has no use for object types in its tree.
 
 - **Additive.** Re-running adds the attributes a type lacks and never overwrites or drops one a
   workspace has, so a release that adds a field reaches every workspace and none loses an edit.
 - **Adopting.** A type an EPIK8s importer already made (uid `epik8s-…`, no parent) is the same
   thing, empty, and is adopted rather than duplicated. Seeding before or after an import gives
   the same result.
+- **Renaming in place.** A workspace seeded before `Equipment Item` and `Place` became `Asset` and
+  `Location` is carried across: the row keeps its uid, so every child and object that points at it
+  still does, and only the name changes. A stale catalogue is named, not worked around.
+- **Refusing copies.** A workspace that already hangs from a catalogue cannot be seeded in full,
+  which would copy the shared types into it. The importers need no `--catalogue` after the first
+  seeding: a workspace's own types have their parents in the catalogue, so it is known.
 - **Extendable.** A beamline that needs a field nobody else has adds a child type in its own
   workspace, which inherits everything.
 
-It is **not** run when a workspace is created, unlike tickets (5 types) and documents (14): a
-workspace that only holds tickets has no use for 103 object types in its tree. It is run
-deliberately, with `backend/scripts/seed_asset_types.py <workspace_id> [--dry-run]`.
+### What sharing a type costs
 
-What genuinely is shared is **data**, not types: a procedure written against `Ion Pump` can be a
-global document (`documents.is_global`), and a `Product Model` object can be global, since a
-reference to a global object resolves from any workspace (`_is_reference_visible`).
+Measured on the three real configurations and the PBS workbook, with the catalogue seeded once
+and each beamline seeded against it: SPARC's token sees **176 objects** of EuAPS's PBS import
+(156 RF loads, couplers, mode converters and other components of shared types, and 20 areas) and
+**none** of its control, structure or cost objects. That is the trade, and it is deliberate: a
+shared inventory is readable everywhere.
+
+It is also why the engineering records are the beamline's own. They were first classed as shared,
+and the same measurement then showed SPARC reading 408 of EuAPS's objects, among them its 179
+procurement records, which carry prices. A cost is not something a classification should
+publish, so `Engineering Record` moved to the per-beamline set; it is one line (`BEAMLINE_ROOTS`
+in `asset_types.py`) to move anything.
+
+### What it does not do
+
+- **The sidebar tree shows only a workspace's own types.** Shared types, and the objects made
+  from them, are found by search, on the type's own page and in the type picker of the object
+  form, but they do not appear in a beamline's tree. A "Shared catalogue" group in the tree is the
+  natural fix and has not been built.
+- **Document types are still seeded per workspace.** Creating a workspace makes its 14 document
+  types (`ensure_document_types`). Sharing them means it stops doing that, which is a separate
+  decision. Documents themselves are shared one at a time, or by flagging the catalogue workspace.
+- **Creating an object does not check the type's workspace.** `create_asset` accepts any type uid,
+  so a token can attach an object to another workspace's private type. It is not new, but it was
+  harmless while types were per-workspace.
+- **Toggling a shared type's flag reaches beamline types.** Turning a global type off and on
+  cascades to every descendant, in any workspace (`_cascade_global_to_children`), which would make
+  a beamline's child types global. The seeder creates the shared types global directly; do not
+  toggle them.
 
 ---
 
@@ -713,13 +765,43 @@ and 40 such IOCs):
 | `beamline`, `namespace`, `giturl`, `gitrev`, `baseIp` | attributes of the above | |
 | `iocDefaults.<template>` | `IOC Template` | `instance of` → Product Model, when the template's `asset:` resolves |
 | `epicsConfiguration.services.<name>` | `Control Service` | `deployed on` → Facility; `declared in` → Control Configuration; `mounts` → Storage Mount |
-| `epicsConfiguration.iocs.<name>` | `IOC` | `deployed on` → Facility; `templated from` → IOC Template; `connects to` → Access Point; `on network` → Control Network; **`drives` → Equipment Item** |
-| `iocs.<n>.devices[]` | `Control Device` | `provided by` → IOC; `reached through` → Access Point; **`acts on` → Beam Element or Equipment Item** |
+| `epicsConfiguration.iocs.<name>` | `IOC` | `deployed on` → Facility; `templated from` → IOC Template; `connects to` → Access Point; `on network` → Control Network; **`drives` → Asset** |
+| `iocs.<n>.devices[]` | `Control Device` | `provided by` → IOC; `reached through` → Access Point; **`acts on` → Beam Element or Asset** |
 | `iocparam.server` / `.port`, device `ip`/`id`/`addr` | `Access Point` | `implemented by` → Network Device, when the address matches one |
 | `networks[]` + `baseIp` + `address_list` | `Control Network` | |
 | `nfsMounts[]`, `nfsBackups[]` | `Storage Mount` | |
 | `ps:`, `motor:`, `pump:` rating blocks | `Control Device.settings` | `pump:` also → `enabled by` edges |
 | `zones:` | `zone` attribute, and `part of` → Area | |
+
+**As built.** `backend/scripts/import_epik8s.py <workspace> <values.yaml>` (and the same code
+behind the import page) creates everything in that table except three things, which are still
+open: `drives` and `acts on` (they need the `asset:` resolution of §9.2), `instance of` from a
+template, and `implemented by` from an Access Point to a Network Device. Choices worth knowing:
+
+- Two networks can both be called `control`; the **annotation** tells them apart, so `sparc-magnets`
+  and `sparc-br-cams` are two objects and every IOC on one shares it.
+- A template only the IOCs name (`ocem`, `caenels`: the recipe lives in the chart repository) is
+  still one object, so "which IOCs share this recipe" is a graph query. SPARC has 22, of which 6
+  are in no `iocDefaults`.
+- A mount that a service and the top level both name is **one** object, matched by server and
+  path, whatever it is called in each place.
+- Every object carries `argus_facility`, the key tickets and documents use, so "everything about
+  SPARC" is one filter across all three.
+- `--dry-run` reads and reports in full and keeps nothing.
+
+Run on the three files:
+
+| | Configuration | Templates | IOCs | Devices | Access Points | Networks | Mounts | Services | Relations |
+|---|---|---|---|---|---|---|---|---|---|
+| SPARC | 1 | 22 | 123 | 305 | 138 | 3 | 6 | 20 | 1,442 |
+| BTF | 1 | 10 | 27 | 69 | 41 | 1 | 6 | 17 | 360 |
+| EuAPS | 1 | 5 | 52 | 95 | 23 | 1 | 4 | 16 | 539 |
+
+"Devices" here are the ones a file lists (469). The 40 IOCs that list none are IOC objects; the
+`tools/epik8s-devices` scan counts them as rows, which is why it reports 340, 74 and 95 (509).
+
+The import also **reports** what the file says that is odd: the 42 SPARC IOCs with no `asset:`
+link, and the two PVs configured on two IOCs.
 
 ### 9.2 The `asset:` field is already the link you want
 
@@ -740,7 +822,7 @@ asset: https://servicedesk.infn.it/secure/ObjectSchema.jspa?id=44&typeId=2505&ob
 Two rules make these into edges:
 
 1. **On an IOC or a device, `asset:` is the individual box** → `drives` / `acts on` →
-   `Equipment Item`.
+   `Asset`.
 2. **On an `iocDefaults` template, `asset:` is the product**, not a unit — one template
    deploys forty pumps → `instance of` → `Product Model`.
 
@@ -787,6 +869,122 @@ between systems that otherwise look unrelated.
 `token|password|secret|key|credential` before writing attributes — the hub is read by more
 people than the deployment repository is, and an attribute bag is not a secret store. This is
 worth fixing in the configuration too.
+
+### 9.5 Inferring what the channels drive
+
+A values.yaml lists control channels. It never lists the ion pump behind `GUNSIP01`, the
+quadrupole and its power supply behind `QUATB002`, the camera at `AC101` or the electronics of a
+BPM, and each of those is what fails, gets replaced and turns up in a report. With
+**`--infer-elements`** (or `infer_elements: true` on the import request) the import makes them.
+It is off by default, because these are inferences and not statements in the file, and that is a
+real trade: §15 argues a person should sit between the configuration and the inventory, and this
+option removes that step in exchange for having the objects at all. What it keeps of that
+argument is that every inferred object says so.
+
+```bash
+python backend/scripts/import_epik8s.py sparc values.yaml --infer-elements [--dry-run]
+```
+
+**How a channel is read.** Two things carry the information and both are used. The device
+metadata (`devgroup`, `devfunc`, `devtype`, `template`) is chosen by whoever wrote the file to
+say what the hardware is, so it gives the asset type. The name gives the lattice element, which
+metadata cannot: every magnet supply is `mag`, and only `QUA` in the name says it powers a
+quadrupole.
+
+| A channel or IOC that is… | becomes | and, where the name says |
+|---|---|---|
+| `mag`, any template | `Power Supply` (limits from `ps:`, maker from the template) | `Quadrupole`, `Dipole`, `Corrector` (plane H or V), `Solenoid`, `Sextupole`, which it `powers` |
+| `vac`, name `SIP`/`IONP` | `Ion Pump` | |
+| `vac`, name `NEG` | `NEG Cartridge` (the name wins over the controller's `ion`) | |
+| `vac`, `turbo` / `TRB` | `Turbo Pump` (a TwisTorr 305 is the pump) | |
+| `vac`, `scroll` / `PRY` | `Primary Pump` | |
+| `vac`, `pig` / `VGA` `VUG` / `img` | `Vacuum Gauge` | |
+| `cam`, not a simulator | `Camera` (`Basler-scA640-70gm` gives maker and model) | |
+| an IOC that is BPM electronics | `Digitizer` (Libera Single Pass, or Spectra) | `Beam Position Monitor`, `realized by` it |
+| a Libera Spectra: one box, several channels | one `Digitizer` | a `Beam Position Monitor` per channel |
+| `libera-llrf` | `Low-Level RF Unit`, one per IOC (its `ad1`, `ad2` are its channels) | |
+| a modulator IOC with no channels | `Modulator`, the IOC being the unit | |
+| a modulator IOC that lists channels | a `Modulator` per channel (ELI's four) | |
+| a `motor` IOC's channel | `Motor Axis` (`axis_id` from `axid`) | |
+| …whose name has `FLG` (a flag) | `Actuator`, its `poi` as `position_labels` | a `Screen Station`, `composed of` the actuator, with the `poi` as `insertion_positions` |
+| …that is an axis of a mirror (`FI4-HMN-01`, `FI8-PRH-01`, `FI3-MMR-001`) | `Motor Axis` | a `Mirror` (`FI4-MMIR-001`), `composed of` its axes |
+
+The control device `acts on` what it drives; an IOC `drives` a unit. Assets are of shared types
+and elements of the beamline's own, so the elements stay in the beamline and the assets are
+readable everywhere (§8).
+
+**The plant.** Chillers, timing and what gates RF are read as well (`docs/knowledge-graph-design.md`
+§5): a chiller channel is a `Chiller` and `cools` the gun, section or structure its name gives (ELI's
+`MOD` cools every modulator); event receivers are timed by the beamline's one generator and trigger
+what their names say (`LLRF`, `CAM`); and an RF conditioning IOC, which lists the pumps and gauges
+whose pressure it will not raise power above, is `enabled by` each of them.
+
+**Motors.** The template says the channel is an axis, so every motor channel is a `Motor Axis`
+whatever its group. What the axis moves is in the file only for two cases, and only those get an
+element. **A flag is a screen:** `GUNFLG01`, `AC1FLG01`, `FELFLG03A` and BTF's `TESTFLG` carry the
+LNF code for a screen, and list the positions they can be driven to (`YAG`, `calibration`, `OUT`),
+so each becomes an `Actuator` and a `Screen Station` composed of it. **A mirror is named by the EuAPS Utility Matrix.** `docs/EuAPS Utility Matrix.xlsx` says what the
+motor codes are: the third field of its codes is the object a motor belongs to (`MMIR` the
+main-laser mirror, `PMIR` the probe-laser mirror, `PAR` the parabolic mirror) and the fourth
+what the motor does (`HMOT`, `VMOT`, `RMOT`: horizontal, vertical, rotation). The configuration
+abbreviates them, so the rule reads the abbreviations back:
+
+| In the configuration | In the matrix | Becomes |
+|---|---|---|
+| `FI4-HMN-01`, `FI4-VMN-01` | `FI4-C-MMIR-HMOT-001`, `…VMOT-001` | the two axes of `FI4-MMIR-001`, laser line `main` |
+| `FI1-HPB-01`, `FI1-VPB-01` | `FI1-C-PMIR-HMOT-001`, `…VMOT-001` | the two axes of `FI1-PMIR-001`, laser line `probe` |
+| `FI8-PRH-01`, `FI8-PRV-01` | `FI8-C-PAR-HMOT-001`, `…VMOT-001` | the two axes of `FI8-PAR-001`, a `Parabolic` mirror |
+| `FI3-MMR-001` | `FI3-C-MMIR-RMOT-001` | the third (rotation) axis of `FI3-MMIR-001` |
+
+The mirror is named as the matrix names it, so importing the matrix later reaches the same
+object. Every other code on the same controllers is an axis and nothing more: `MPB` is the probe
+delay line and in/out stage in the matrix (`PDEL`, `PIO`), and `HEX`, `DIP`, `SLT` and `PBM` are
+stages it labels *slitte?* itself. Adding a code is one line in `element_inference.py`.
+Cross-check: the matrix lists 11 main-laser and 10 probe-laser mirrors in the two FLAME areas; the
+configuration drives 11 and 7. Where the two disagree on the rotation axis, the matrix has it at
+`FP4` and the configuration at `FP2` (`FP2-MMR-001`, whose port carries a `TODO check`), and the
+rule follows the configuration.
+
+**A screen and its camera.** The file lists a flag and its camera on two IOCs with nothing joining
+them; the names do. `AC1FLG01` is read with `AC101`, `UTLFLG02` with `UTL02`, and `FELFLG03A` and
+`FELFLG03B` are two screens that share `FEL03`, so a station is also `composed of` the camera its
+name pairs it with. In SPARC that pairs 22 of the 23 flags; `GUNFLG01` has no camera by that name and
+is left without one. A camera with no flag (`CAT01`, `EOS01`, `LCR02`…) is not made a screen.
+
+**What is left alone, and counted.** I/O channels, chillers, scope channels and timing modules
+have no rule: a scope channel that measures a BCM is not a BCM. They are counted by
+`devgroup/template` in the report (SPARC: 26 `io/icpdas`, 16 `diag/tektronix`, 8 `cool/smc`). A name that matches no
+magnet code gets a supply and no element, because a quadrupole that is really a corrector is
+worse in an inventory than an unlabelled one. Simulated cameras are skipped.
+
+**What it makes, measured** on the four configurations (SPARC, BTF, EuAPS, ELI), each into a
+beamline workspace hanging from one catalogue:
+
+| | Assets | Elements | Of which |
+|---|---|---|---|
+| SPARC | 249 | 114 | 81 power supplies, 50 ion pumps, 42 motor axes, 26 cameras, 23 actuators, 10 BPM electronics, 8 gauges, 4 LLRF, 3 modulators, 2 NEG; 44 correctors, 23 screen stations, 17 quadrupoles, 10 solenoids, 10 BPMs, 8 dipoles, 2 sextupoles (22 of the 23 screens paired with a camera) |
+| BTF | 62 | 44 | 44 power supplies, 14 motor axes, 3 cameras, 1 actuator; 16 quadrupoles, 14 correctors, 13 dipoles, 1 screen station |
+| EuAPS | 94 | 19 | 52 motor axes, 9 turbo pumps, 9 primary pumps, 9 gauges, 15 cameras; 19 mirrors (11 main, 7 probe, 1 parabolic; 40 of the axes) |
+| ELI | 87 | 29 | 35 ion pumps, 24 power supplies, 6 gauges, 6 cameras, 6 motor axes, 4 LLRF, 4 modulators, 2 Spectra units; 14 correctors, 5 BPMs, 6 solenoids, 3 quadrupoles, 1 dipole |
+
+**Properties that make it safe to run and re-run.**
+
+- **Marked.** Each has `argus_keywords: inferred` and a `description` naming the channel and the
+  rule, so "everything that is only a guess" is one filter.
+- **A person outranks it.** What is already on an inferred object stays: a serial, a location or a
+  rewritten description survives every later read. Inference only fills what is missing.
+- **Stable.** An asset's key is its channel's (`SPARC:AST:vac-gunvpc:GUNSIP01`), an element's is
+  its name (`SPARC:ELM:GUNQUA01`), so a re-read updates rather than duplicates, and turning the
+  option on after an import adds to it without disturbing what was there.
+- **Typed by the catalogue.** It needs the catalogue's types and says so if they are missing.
+
+**Not done.** No `instance of` to a `Product Model`: those are global objects that belong in the
+catalogue workspace, and one import writes one workspace. A screen station is composed of its actuator and, by name, its
+camera, but not of a scintillator or optics, which the file never mentions, and a person should
+confirm the camera pairing.
+An inferred asset is not matched to one already in the inventory (§9.2), so if the same pump is
+already an object there are now two, and the `asset:` link is kept as `inventory_url` for whoever
+merges them.
 
 ---
 
@@ -838,7 +1036,7 @@ exception is the RF gun, which is coded `A`/`RF` because it is both a structure 
 control-plane keys already use (`SPARC:DEV:histar:GUNQUA01`). The facility prefix is what makes
 it unique across the installation, and the PBS code is what everybody already calls the
 component. It cannot be a photograph-friendly key (§7) and does not need to be: a planned
-component has no label on it yet. When the box is installed and labelled, the `Equipment Item`
+component has no label on it yet. When the box is installed and labelled, the `Asset`
 made for it gets a §7 key, and `realized by` joins the two.
 
 ### 10.2 Column by column
@@ -1124,7 +1322,7 @@ MHX3-I-WGX-MCNV-001,2  MCV    Mode converter × 2                   5 000 € ea
 MHX3-R-RF-LOAD-001…005 RFL    RF load × 5                          8 000 € each
 ```
 
-One `RF Station` object, fifteen `composed of` edges, each part its own `Equipment Item` with
+One `RF Station` object, fifteen `composed of` edges, each part its own `Asset` with
 its own `Procurement Record`. The station carries `band: X-band`, `station_number: 3`,
 `pbs_area: MHX3`; the modulator sits in `MHX` rather than `MHX3` and is shared, which the edge
 records and the label could not.
@@ -1207,7 +1405,7 @@ read time, and the UI badges the difference as "3 own + 19 inherited".
   "applies_to": "objects",
   "metadata": {"source": "argus"},
   "attributes": [
-    {"id": "pv", "key": "pv", "name": "PV", "type": "string", "unique": true, "indexed": true},
+    {"id": "pv", "key": "pv", "name": "PV", "type": "string", "indexed": true},
     {"id": "pv_prefix", "key": "pv_prefix", "name": "PV prefix", "type": "string", "indexed": true},
     {"id": "beamline", "key": "beamline", "name": "Beamline", "type": "string", "indexed": true},
     {"id": "ioc", "key": "ioc", "name": "IOC", "type": "string", "indexed": true},
@@ -1216,6 +1414,8 @@ read time, and the UI badges the difference as "3 own + 19 inherited".
     {"id": "devtype", "key": "devtype", "name": "Device type", "type": "string", "indexed": true},
     {"id": "device_class", "key": "device_class", "name": "Device class", "type": "string", "indexed": true},
     {"id": "element", "key": "element", "name": "Element it serves", "type": "string", "indexed": true},
+    {"id": "vendor", "key": "vendor", "name": "Vendor (as found)", "type": "string", "indexed": true},
+    {"id": "model_code", "key": "model_code", "name": "Model (as found)", "type": "string", "indexed": true},
     {"id": "zones", "key": "zones", "name": "Zones", "type": "string", "multiValue": true, "indexed": true},
     {"id": "channel", "key": "channel", "name": "Channel", "type": "integer"},
     {"id": "axis", "key": "axis", "name": "Axis", "type": "integer"},
@@ -1247,7 +1447,7 @@ The catalogue is only right if nothing currently recorded falls out of it. Check
 
 A row of `sparc-devices.csv` describes a control channel — a PV, an address, an IOC — so it is a
 `Control Device` (§11.1), and `device_class` is what it records, not what type it is. The right
-column is the `Equipment Item` a person would link it to, and what `match` can propose.
+column is the `Asset` a person would link it to, and what `match` can propose.
 
 | device_class | rows | `Control Device.device_class` | suggests physical type |
 |---|---|---|---|
@@ -1338,7 +1538,7 @@ seeded as empty sections rather than invented.
 | `vendor`, `model` | `Product Model.vendor` / `.model_code`, and `instance of` |
 | `element` | `element`, and `acts on` |
 | `system` | `argus_system` |
-| `physical_asset` | `drives` / `acts on` → Equipment Item |
+| `physical_asset` | `drives` / `acts on` → Asset |
 | `needs` | `argus_keywords`, so "what is still incomplete" is one filter |
 | `connection` | `Access Point`, and `reached through` |
 | `model_spec` | `Control Device.settings` |
@@ -1347,7 +1547,7 @@ seeded as empty sections rather than invented.
 
 ## 14. What has to change in the code
 
-Ordered by what blocks what. Items 1, 3 and 10–11 are done; the rest are open.
+Ordered by what blocks what. Items 1, 3, 4, 9, 10, 11 and 12–15 are done; the rest are open.
 
 1. **DONE — `epicsConfiguration.iocs` may be a list or a mapping.** The beamline repositories
    have been moving it from a list of `{name: …}` entries to a mapping keyed by IOC name
@@ -1380,42 +1580,30 @@ Ordered by what blocks what. Items 1, 3 and 10–11 are done; the rest are open.
    and is already handled correctly (`_services` iterates `.items()`). No change; noted so the
    fix to 1 does not "tidy" it in the wrong direction.
 
-3. **DONE — the catalogue is seeded.** `backend/app/services/asset_types.py` holds all 103
-   types as data (`CATALOGUE`), with `ensure_asset_types(db, workspace_id)` and `type_uid()`,
-   modelled on `document_types.py` with three deliberate differences:
+3. **DONE — the catalogue is seeded, in two sets.** `backend/app/services/asset_types.py` holds
+   all 104 types as data (`CATALOGUE`), of which 59 are global and 45 are a beamline's own
+   (§8), with `ensure_asset_types(db, workspace_id, scope, catalogue_workspace_id)`,
+   `resolve_type_uids()` and `catalogue_of()`. Run with `scripts/seed_asset_types.py` in three
+   modes: `global`, `beamline --catalogue`, and `all` for a hub with one workspace.
 
-   - **additive, not "refresh the base, leave the children"** — see §8;
-   - **adopts** importer-made `epik8s-…` types instead of duplicating them;
-   - **not wired into `create_workspace`** — run with `scripts/seed_asset_types.py`, which has
-     a `--dry-run`. This departs from what an earlier draft of this item said, for the reason
-     in §8.
+   It follows `document_types.py` with differences that are deliberate: **additive** rather than
+   "refresh the base, leave the children"; it **adopts** importer-made `epik8s-…` types; it
+   **renames in place** what was seeded as `Equipment Item` and `Place`; and it is **not** wired
+   into `create_workspace`, for the reason in §8.
 
-   `backend/tests/test_asset_types.py` (27 tests) checks the shape against this document (103
-   types, 12 abstract, depth 6, parents before children, every reference resolves, every
-   pattern anchored), that the shared keys are spelled as tickets and documents spell them, that
-   seeding is idempotent and additive, that importer-made types are adopted in either order,
-   that **every key the real importer writes is declared by the type it writes to**, and — through
-   the REST API — that an object of a seeded type is created, held to the type's rules
-   (an unlisted enumeration value and a malformed PBS code both return 422), that a `Located in`
-   reference accepts a `Rack` and refuses a pump, and that a `Screen Station` can be
-   `composed of` a camera and an actuator.
+   `backend/tests/test_asset_types.py` (45 tests) checks the shape against this document,
+   that the shared keys are spelled as tickets and documents spell them, that the two sets
+   partition the catalogue and no shared type depends on a beamline type, that seeding is
+   idempotent and additive, that the rename carries a seeded workspace across, that **every key
+   the real importer writes is declared by the type it writes to**, and, through the REST API,
+   that an object of a shared type is readable from another workspace but not editable there,
+   and one of a beamline type is not readable at all.
 
-4. **Seeding and importing, in either order.** `epik8s_import.ensure_types()` matches existing
-   types **by name** (`epik8s_import.py:224`), so seeding first makes the importer use the typed
-   `Facility` / `IOC` / `Control Device` / `Access Point` / `Control Service`; importing first
-   and seeding after adopts the importer's empty ones. Both are tested.
-
-   **Not yet done, and it matters:** `tools/epik8s-devices push` creates one type per
-   `device_class` by exact name. Three of the ten names happen to be catalogue types; the other
-   seven (`Vacuum`, `Data Acquisition`, `I/O`, `Low-Level RF`, `Cooling`, `Timing`,
-   `Unclassified Device`) would be created flat beside them. Per §11.1 a CLI row is a
-   `Control Device`, so `push` should write every row as one and record `device_class` and
-   `element` as attributes — which also makes the previous `Power Supply` etc. types unnecessary.
-   That changes what the tool creates in a hub, so it is a decision (§15), not a tidy-up.
-
-   Also worth knowing: the CLI's uids are `epik8s-{class}` with no workspace in them, and
-   `schemas.uid` is a primary key across the whole installation, so pushing the same beamline
-   class into a second workspace collides.
+4. **DONE — seeding and importing, in either order.** `epik8s_import.ensure_types()` finds each
+   type where the catalogue put it (a workspace's own, then the catalogue it hangs from, then any
+   other global), and makes an empty one only if nobody has it. Seeding first uses the typed
+   types; importing first and seeding after adopts the importer's empty ones. Both are tested,
+   and so is the case with no catalogue at all.
 
 5. **Resolve `asset:` into edges** — §9.2. A helper that parses `objectId=` out of a Jira
    Service Desk URL and looks up `asset_labels.metadata->>'jiraObjectId'`, used for `drives`,
@@ -1428,15 +1616,23 @@ Ordered by what blocks what. Items 1, 3 and 10–11 are done; the rest are open.
 8. **The `argus_*` alias pass** for the control plane's bare keys, following
    `ticket_types.py::migrate_legacy_attributes`. Only after 3 and 4 are in and stable.
 
-9. **Reconcile the two epik8s paths.** With the catalogue in place, the server importer and the
-   CLI produce the same types; the remaining difference is that only the server importer builds
-   relations. Either the CLI's `push` starts creating them, or the server importer takes the
-   CLI's scan output as input. That is a decision, not a detail — see §15.
+9. **DONE — the two epik8s paths write to one set of objects.** `tools/epik8s-devices push` used
+   to create one type per `device_class` and objects under its own keys, beside the hub's import.
+   It now writes `Control Device` objects of the catalogue's type, under the key and uid the
+   import gives them (`SPARC:DEV:histar:GUNQUA01`), and adds only what a review can: the class of
+   hardware, the element, the vendor and model as found, and the link to a physical asset. Run
+   against the real SPARC file after its import: 340 scanned rows are 305 devices and 35
+   IOC-only rows, **0 created** (every device was already there), 305 updated, and a second
+   push writes nothing. A test in each package pins the same uid literal, so neither can drift.
 
 10. **DONE — a PBS importer.** `backend/app/services/pbs_import.py`, run with
-    `scripts/import_pbs.py <workspace> <workbook.xlsx> --facility EUAP [--dry-run]`. It seeds the
-    catalogue into the workspace if it is not there, reads every sheet with a `PBS-CODE` column,
-    and writes per §10.2. Run on `2026-06-11 - EuPRAXIA PBS_ver2.xlsx` it produces **463 objects
+    `scripts/import_pbs.py <workspace> <workbook.xlsx> --facility EUAP [--catalogue <ws>] [--dry-run]`.
+    It seeds the types it needs if they are not there (only the beamline's own when the workspace
+    hangs from a catalogue, given or known; the whole catalogue in a hub with one workspace),
+    reads every sheet with a `PBS-CODE` column, and writes per §10.2. In a split hub the
+    components of shared types (RF loads, couplers, areas) are readable everywhere, while the
+    accelerating structures, modules and stations, and every utility, procurement and work-package
+    record, stay in the beamline. Run on `2026-06-11 - EuPRAXIA PBS_ver2.xlsx` it produces **463 objects
     and 937 relations**:
 
     | | |
@@ -1460,13 +1656,43 @@ Ordered by what blocks what. Items 1, 3 and 10–11 are done; the rest are open.
     design state — and never overwritten on a re-read, so a later *In service* survives. Running
     it twice creates nothing.
 
-    22 tests in `backend/tests/test_pbs_import.py`, including one over the real workbook when it
+    25 tests in `backend/tests/test_pbs_import.py`, including one over the real workbook when it
     is in `docs/`, and one asserting every attribute the importer writes is declared by the
     catalogue **and passes its validation** — so an edit through the API never fails on a value
     the importer itself wrote.
 
 11. **DONE — the legend sheets became objects**: 13 `Work Package`, 6 `Section`, 20 `Area`. Not
     enumerations, so they can carry a leader, a budget and documents.
+
+12. **DONE — `Equipment Item` is `Asset` and `Place` is `Location`.** Renamed throughout; a
+    workspace seeded under the old names is carried across in place (§8).
+
+13. **DONE — `scripts/import_epik8s.py`, and the import writes the whole configuration.** It
+    reads a `values.yaml` from disk into a workspace as objects of the catalogue's types, with a
+    `--dry-run` that runs the import for real inside a transaction and discards it (the importer
+    commits as it goes, so a rollback at the end would undo nothing). New objects: the Control
+    Configuration, IOC Templates, Control Networks and Storage Mounts, with `declared in`,
+    `templated from`, `on network`, `mounts` and `part of` (§9.1). 14 tests in
+    `test_epik8s_configuration.py`.
+
+14. **DONE — found by running it.** Pushing the reviewed SPARC file failed on four devices
+    because `pv` was unique and the file configures two PVs on two IOCs. `pv` is now indexed, not
+    unique, and the import reports the pair (§5.6). A second push also rewrote every object; it
+    now writes only what changed. And `push` wrote `vendor` and `model_code`, which no type
+    declared, which the API stores without complaint; both sides now pin the same list of keys.
+
+15. **DONE — `--infer-elements`: the pumps, magnets, supplies, cameras, BPMs, LLRF and
+    modulators the channels refer to (§9.5).** `backend/app/services/element_inference.py` holds
+    the rules as functions of the configuration alone; the import applies them behind an opt-in
+    (`--infer-elements`, and `infer_elements` on the API request). Checked against the SPARC, BTF,
+    EuAPS and ELI files, which found two patterns the first rules got wrong: a Libera Spectra is
+    one box with a BPM per channel, and a modulator IOC that lists channels has one modulator
+    each. 72 tests in `test_element_inference.py` and `test_epik8s_inference.py`, the first
+    running the rules over the real files when they are next to this repository.
+    **Extended to motors:** every motor channel is a `Motor Axis`; a flag is an `Actuator` and a
+    `Screen Station` composed of it and of the camera its name pairs it with; the axes of an EuAPS
+    mirror are one `Mirror`, named as the EuAPS Utility Matrix names it (new type, so a beamline
+    workspace seeded earlier needs `seed_asset_types.py beamline` run again).
 
 ---
 
@@ -1487,14 +1713,36 @@ Ordered by what blocks what. Items 1, 3 and 10–11 are done; the rest are open.
   to — the object create endpoint should refuse a non-concrete `schema_uid`.
 - **`unique` does not span subtypes.** A serial unique across all equipment needs either a
   check at the service layer or acceptance that it is advisory.
-- **What do `A`, `R` and `I` mean?** The `SYSTEM` column has no legend sheet, unlike the other
-  three code lists. Their meaning is inferable from the FAMILY correlation (§10.1) but should be
-  written down by the design team, not guessed at by an importer.
+- **What do `A`, `R` and `I` mean?** The `SYSTEM` column has no legend sheet, but
+  `2026-07-01 - Analysis of Utility Matrix.xlsx` groups the letters by sheet: `RF(A-R-I)` holds all
+  three, and the other letters have a sheet each (`M` magnets, `V` vacuum, `U` undulators,
+  `B` diagnostics, `A` plasma, `W` laser and optics, `X` experiments, `T` target). The members say
+  what the three RF letters are: `A` the accelerating structures (23 rows: gun, linearizer, S- and
+  X-band structures), `R` the RF power sources (57: modulators, loads) and `I` the waveguide
+  interconnections (99: couplers, hybrids, windows, attenuators, phase shifters). `A` is also the
+  plasma letter, so it reads as *accelerating*. That is a reading of the members, not a legend, and
+  the design team should still write it down.
+- **Should the sidebar tree show the shared types?** With global types a beamline's tree lists only
+  its own 45, not `Asset` and its leaves, though objects of them are searchable and can be created.
+  A "Shared catalogue" group is the fix (§8) and is a decision about what a workspace's tree is
+  for.
+- **Is the shared inventory meant to be readable everywhere?** It is what "global types" means, and
+  it is why costs are private. If some assets should not be, the alternative is the per-beamline
+  set for them, at the price of copies.
+- **`drives` and `acts on` to assets already in the inventory are still not made.** They need the
+  `asset:` resolution of §9.2. With `--infer-elements` they now reach the objects the import makes
+  itself; matching those to what the inventory already holds is the remaining link.
+- **Which of the channels no rule covers should be read?** Motor axes were the largest group and
+  are read (§9.5): an axis is an asset, and a flag or a mirror axis is also part of a screen
+  station or a mirror. What remains is the ICPDAS I/O (26 channels in SPARC, 25 in ELI: RTD
+  temperature sensors, relays, digital I/O), scope channels and chillers.
 - **Who composes?** Composition (`composed of`) is a statement about hardware that no file
   states outright. The PBS importer does write it, from the workbook's own `X-BAND STATION 3`
   label, because there the file says so in as many words. The control configuration only implies
-  it, with a naming convention (`AC1FLG01`, `AC101`), and that one should *propose*, not decide —
-  a review step, and someone has to own it.
+  it, with a naming convention (`AC1FLG01`, `AC101`). The import now composes a screen station
+  with the camera that convention pairs it with (22 of SPARC's 23), marked inferred like
+  everything else it makes; whether it should instead *propose* and wait for a review, and who
+  owns that review, is still open.
 - **The PBS import writes, and marks what it wrote.** A component approved in the PBS does not
   exist yet, so 179 planned components make the inventory describe the future. The importer sets
   `argus_lifecycle: Planned` and `argus_source: PBS workbook` on all of them, so "what is really
@@ -1515,8 +1763,8 @@ Ordered by what blocks what. Items 1, 3 and 10–11 are done; the rest are open.
 
 | | |
 |---|---|
-| Types | 103 (12 abstract), maximum depth 6 |
-| Roots | `Item` → Functional, Physical, Catalogue, Control, Engineering, Place |
+| Types | 104 (12 abstract), maximum depth 6: 59 shared (global), 45 a beamline's own (§8) |
+| Roots | `Item` → Functional, Physical, Catalogue, Control, Engineering, Location |
 | Relations | 5 existing, kept verbatim; 23 added |
 | Composites | `Screen Station`, `Spectrometer Station`, `Emittance Meter`, `RF Station`, `Machine Module`, via `composed of` |
 | Reserved keys honoured | `description`, `manufacturer`, `model`, `serial`; `argus_system`, `argus_subsystem`, `argus_facility`, `argus_keywords` |

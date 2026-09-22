@@ -55,9 +55,18 @@ currently valid* revision rather than to an arbitrary PDF.
 ## Design notes
 
 - [Object schema design for a large-scale accelerator](docs/asset-schema-design.md) — the
-  type catalogue (103 types over four planes), the relation vocabulary, composite elements such
+  type catalogue (104 types over four planes), the relation vocabulary, composite elements such
   as a screen station, and how a beamline's EPIK8s control configuration and a EuPRAXIA-style
   product breakdown both come in as equipment rather than as files.
+- [The knowledge graph for root-cause analysis](docs/knowledge-graph-design.md) — what each
+  relation means for a failure (which way it travels, and whether the dependent loses its readout,
+  its function, a permit or part of itself), impact and root-cause analysis over it
+  (`GET /v1/graph/impact`, `POST /v1/graph/root-cause`, `GET /v1/graph/blast-radius`, and the
+  `impact_analysis`, `root_cause_analysis` and `single_points_of_failure` MCP tools), what the
+  configurations give, and what the graph cannot yet do.
+- [The element panorama](docs/element-panorama.md) and [the IT model](docs/it-model-design.md) —
+  what the utility matrices say next to the control configurations, and where switches, hosts and
+  serial converters live.
 
 ## Development
 
@@ -78,9 +87,24 @@ address `http://localhost:8080` (plain `http`, the API does not speak TLS) and t
   script prints.
 - Something already on 8080 or 5173, such as a dev server started by hand? Move the published
   ports: `API_PORT=18080 WEB_PORT=15173 docker compose up -d --build --wait`.
-- Load the accelerator object types into the workspace:
-  `docker compose exec api python scripts/seed_asset_types.py dev`
-  (add `--dry-run` first to see what it would do).
+- Load the accelerator object types. In a hub with one workspace, `all` puts everything in it:
+  `docker compose exec api python scripts/seed_asset_types.py all dev`.
+  With several beamlines, the shared types go in one catalogue workspace, once, and each
+  beamline gets only its own, hanging from them:
+  `... seed_asset_types.py global catalogue`, then
+  `... seed_asset_types.py beamline sparc --catalogue catalogue`.
+  Each workspace has to exist first (`create_token.py <id> "<name>"` creates it), and
+  `--dry-run` shows what would happen without writing.
+- Read a beamline's control configuration into a workspace, as objects of those types:
+  `docker compose cp ../epik8-sparc/deploy/values.yaml api:/tmp/sparc.yaml`, then
+  `docker compose exec api python scripts/import_epik8s.py sparc /tmp/sparc.yaml`
+  (`--dry-run` reads it in full and keeps nothing). Add `--infer-elements` to also make what the
+  channels drive, which the file never lists: the ion pumps, magnets and their supplies, cameras,
+  BPM electronics, LLRF and modulator units, motor axes, screens (a flag and the camera its name
+  pairs it with) and mirrors. They are inferences, marked `inferred`, and a person's later edits
+  survive a re-read. The catalogue gained a `Mirror` type for this: run
+  `scripts/seed_asset_types.py beamline <workspace> --catalogue <catalogue>` again on a workspace
+  seeded before.
 - State lives in two named volumes and survives `docker compose down`;
   `docker compose down -v` wipes it.
 
