@@ -22,7 +22,12 @@ from app.models.document import Document, DocumentRevision
 from app.models.issue import Issue
 from app.models.llm_config import LLMConfig
 from app.models.schema import Schema
+from app.services import causal_model
 from app.services.knowledge_graph import graph_summary, traverse
+from app.services.alarm_symptoms import root_cause_from_alarms as _root_cause_from_alarms
+from app.services.root_cause import blast_radius as _blast_radius
+from app.services.root_cause import impact_of as _impact_of
+from app.services.root_cause import root_causes as _root_causes
 
 # Enough to answer with, small enough not to bury the model.
 DEFAULT_LIMIT = 20
@@ -301,6 +306,103 @@ def graph_neighbours(db: Session, workspace_id: str, kind: str, uid: str,
     }
 
 
+def _line(path: list) -> str:
+    """A path as one line an assistant can quote: `A --powers--> B --realized by--> C`."""
+    if not path:
+        return ""
+    return path[0]["provider"] + "".join(f" --{h['relation']}--> {h['dependent']}" for h in path)
+
+
+def _layer_list(layers: Optional[str]) -> Optional[list]:
+    return [x.strip() for x in layers.split(",") if x.strip()] if layers else None
+
+
+def impact_analysis(db: Session, workspace_id: str, uid_or_key: str, layers: Optional[str] = None,
+                    max_depth: int = 6, limit: int = 40) -> dict:
+    """This stopped: what does it take with it?"""
+    result = _impact_of(db, workspace_id, uid_or_key, layers=_layer_list(layers),
+                        max_depth=max(1, min(max_depth, 8)))
+    if result is None:
+        return {"found": False}
+    limit = max(1, min(limit, MAX_LIMIT))
+    return {
+        "found": True, "origin": result["origin"]["key"], "count": result["count"],
+        "by_type": result["by_type"], "by_loss": result["by_loss"],
+        "affected": [
+            {"key": a["key"], "type": a["type"], "loses": list(a["losses"]), "depth": a["depth"],
+             "path": _line(a["path"]), "inferred": a["via_inference"]}
+            for a in result["affected"][:limit]
+        ],
+        "shown": min(limit, result["count"]), "truncated": result["truncated"],
+        "unclassified_relations": result["unclassified_relations"],
+    }
+
+
+def root_cause_analysis(db: Session, workspace_id: str, symptoms: str, healthy: Optional[str] = None,
+                        layers: Optional[str] = None, control_symptoms: Optional[str] = None,
+                        max_depth: int = 6, top: int = 5) -> dict:
+    """These are misbehaving: what would explain them?"""
+    listed = lambda text: [x.strip() for x in (text or "").split(",") if x.strip()]
+    kinds = {s: causal_model.CONTROL for s in listed(control_symptoms)}
+    result = _root_causes(
+        db, workspace_id, listed(symptoms), healthy=listed(healthy), layers=_layer_list(layers),
+        max_depth=max(1, min(max_depth, 8)), top=max(1, min(top, 15)), symptom_kind=kinds)
+    return {
+        "not_found": result["not_found"],
+        "candidates": [
+            {"key": c["key"], "type": c["type"], "fit": c["fit"], "parsimony": c["parsimony"],
+             "explains": [{"symptom": e["key"], "loses": e["loss"], "path": _line(e["path"]),
+                           "inferred": e["via_inference"]} for e in c["explains"]],
+             "would_also_affect": c["would_also_affect"], "contradicted_by": c["contradicted_by"],
+             "earlier_tickets": c["history"]}
+            for c in result["candidates"]
+        ],
+        "fewest_causes": [
+            {"causes": [{"key": x["key"], "explains": x["explains"]} for x in h["causes"]],
+             "unexplained": h["unexplained"]}
+            for h in result["hypotheses"]
+        ],
+    }
+
+
+def root_cause_from_alarms(db: Session, workspace_id: str, alarms: list, layers: Optional[str] = None,
+                           max_depth: int = 6, top: int = 5) -> dict:
+    """A raw alarm feed in, a root-cause answer out. See `root_cause_analysis` for the fields on
+    each candidate; this additionally reports which alarms could not be placed on an object."""
+    result = _root_cause_from_alarms(db, workspace_id, alarms, layers=_layer_list(layers),
+                                     max_depth=max(1, min(max_depth, 8)), top=max(1, min(top, 15)))
+    if not result["candidates"]:
+        return {"placed": result["placed"], "unresolved": result["unresolved"], "candidates": [],
+                "fewest_causes": []}
+    return {
+        "placed": result["placed"], "unresolved": result["unresolved"],
+        "candidates": [
+            {"key": c["key"], "type": c["type"], "fit": c["fit"], "parsimony": c["parsimony"],
+             "explains": [{"symptom": e["key"], "loses": e["loss"], "path": _line(e["path"]),
+                           "inferred": e["via_inference"]} for e in c["explains"]],
+             "would_also_affect": c["would_also_affect"], "contradicted_by": c["contradicted_by"],
+             "earlier_tickets": c["history"]}
+            for c in result["candidates"]
+        ],
+        "fewest_causes": [
+            {"causes": [{"key": x["key"], "explains": x["explains"]} for x in h["causes"]],
+             "unexplained": h["unexplained"]}
+            for h in result["hypotheses"]
+        ],
+    }
+
+
+def single_points_of_failure(db: Session, workspace_id: str, layers: Optional[str] = None,
+                             top: int = 15) -> dict:
+    """What would take the most with it."""
+    result = _blast_radius(db, workspace_id, layers=_layer_list(layers), top=max(1, min(top, 50)))
+    return {"assets": [
+        {"key": a["key"], "type": a["type"], "loses_function": a["function"],
+         "loses_readout": a["control"], "degrades": a["degradation"]}
+        for a in result["assets"]
+    ], "considered": result["considered"]}
+
+
 def knowledge_summary(db: Session, workspace_id: str) -> dict:
     """How much of a graph this workspace actually has."""
     return graph_summary(db, workspace_id)
@@ -403,6 +505,95 @@ TOOLS: list[dict[str, Any]] = [
                 "max_nodes": {"type": "integer"},
             },
             "required": ["kind", "uid"],
+        },
+    },
+    {
+        "name": "impact_analysis",
+        "description": "This object stopped: what does it take with it? Follows what depends on what "
+                       "(power, cooling, control, timing, interlocks, composition) and says for each "
+                       "affected object what it loses — its readout ('control') or its function — and "
+                       "by which path. A lost IOC costs the readout of the pump behind it, not the "
+                       "pump. Objects are given by key or uid. layers narrows the walk, e.g. "
+                       "'power,cooling'.",
+        "handler": impact_analysis,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "uid_or_key": {"type": "string"},
+                "layers": {"type": "string", "description": "Comma-separated: control, power, cooling, "
+                           "vacuum, timing, interlock, function, composition, membership, beam, environment"},
+                "max_depth": {"type": "integer", "description": "1 to 8, default 6"},
+                "limit": {"type": "integer"},
+            },
+            "required": ["uid_or_key"],
+        },
+    },
+    {
+        "name": "root_cause_analysis",
+        "description": "These objects misbehave: what would explain them? Give the symptoms by key "
+                       "(comma-separated), and if known which objects still work (healthy) and which "
+                       "symptoms are only a lost readout (control_symptoms, e.g. a PV that "
+                       "disconnected). Returns candidates ranked by how well they fit, each with the "
+                       "path to every symptom, what it would also have broken, and earlier tickets "
+                       "that named it, plus the fewest causes that explain everything. Paths through "
+                       "inferred objects are marked. Rank is evidence to argue with, not a probability.",
+        "handler": root_cause_analysis,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symptoms": {"type": "string", "description": "Comma-separated object keys or uids"},
+                "healthy": {"type": "string", "description": "Comma-separated objects known to work"},
+                "control_symptoms": {"type": "string", "description": "Which symptoms are only a lost readout"},
+                "layers": {"type": "string"},
+                "max_depth": {"type": "integer"},
+                "top": {"type": "integer"},
+            },
+            "required": ["symptoms"],
+        },
+    },
+    {
+        "name": "root_cause_from_alarms",
+        "description": "The alarm-feed version of root_cause_analysis: give the PVs currently in "
+                       "alarm (and, if known, the ones reporting OK) and this resolves each to an "
+                       "object, reads whether it lost its readout or its function from the EPICS "
+                       "severity (INVALID -> readout, MINOR/MAJOR -> function; OK is evidence the "
+                       "object works), and ranks candidates the same way root_cause_analysis does. "
+                       "A lost permit is never guessed from a severity — pass kind: 'permit' on "
+                       "that alarm when you know one. Alarms are objects with pv (required), "
+                       "severity, status and an optional kind override; what cannot be placed on "
+                       "an object is reported under 'unresolved'.",
+        "handler": root_cause_from_alarms,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "alarms": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "pv": {"type": "string"},
+                            "severity": {"type": "string", "description": "OK, MINOR, MAJOR or INVALID"},
+                            "status": {"type": "string"},
+                            "kind": {"type": "string", "description": "control | function | permit"},
+                        },
+                        "required": ["pv"],
+                    },
+                },
+                "layers": {"type": "string"},
+                "max_depth": {"type": "integer"},
+                "top": {"type": "integer"},
+            },
+            "required": ["alarms"],
+        },
+    },
+    {
+        "name": "single_points_of_failure",
+        "description": "The objects whose failure would take the most with it: how many others lose "
+                       "their function, their readout, or are degraded.",
+        "handler": single_points_of_failure,
+        "inputSchema": {
+            "type": "object",
+            "properties": {"layers": {"type": "string"}, "top": {"type": "integer"}},
         },
     },
     {
