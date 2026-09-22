@@ -62,6 +62,14 @@ class Hub:
             "applies_to": "objects", "attributes": [],
         })
 
+    def relations(self) -> list[dict]:
+        return self._call("GET", "/v1/relations") or []
+
+    def create_relation(self, from_uid: str, to_uid: str, relation_type: str) -> dict:
+        return self._call("POST", "/v1/relations", {
+            "from_asset_uid": from_uid, "to_asset_uid": to_uid, "relation_type": relation_type,
+        })
+
     def create_asset(self, payload: dict) -> dict:
         return self._call("POST", "/v1/assets", payload)
 

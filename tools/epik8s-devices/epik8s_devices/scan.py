@@ -135,6 +135,10 @@ class Device:
     needs: list[str] = field(default_factory=list)
     source: str = ""
 
+    # An IOC that lists no devices is the only handle on what it drives, so it is
+    # the row. `push` writes it as an IOC, not as a device with the IOC's name.
+    ioc_only: bool = False
+
     def as_dict(self) -> dict:
         return {k: v for k, v in self.__dict__.items()}
 
@@ -236,6 +240,7 @@ def scan(values: dict, templates: Optional[dict] = None,
                 ioc=ioc_name,
                 name=device_name,
                 key=f"{tag}:{ioc_name}:{device_name}",
+                ioc_only=bool(device.get("_from_ioc")),
                 pv=_pv(merged, None if device.get("_from_ioc") else device_name),
                 device_class=kind.device_class,
                 vendor=kind.vendor,
