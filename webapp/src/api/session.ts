@@ -1,10 +1,13 @@
 import { getFreshIdToken } from "./firebase";
+import { getInfnIdToken } from "./infnAuth";
 
 const LEGACY_KEY = "assetmanagement.session";
 const PROFILES_KEY = "assetmanagement.profiles";
 const ACTIVE_KEY = "assetmanagement.activeProfileId";
 
 export type AuthType = "pat" | "oidc";
+/** Who signed an "oidc" profile in. A profile saved before there was a choice has none, and is Firebase's. */
+export type OidcProvider = "firebase" | "infn";
 
 /** A saved way to connect: a PAT tied to one workspace, or a signed-in identity
  * that can act as any workspace it has membership in (activeWorkspaceId picks
@@ -17,6 +20,7 @@ export interface Profile {
   authType: AuthType;
   token?: string; // "pat" only — a stored bearer token
   activeWorkspaceId?: string; // "oidc" only — which workspace this profile currently acts as
+  provider?: OidcProvider; // "oidc" only — whose token this is; absent means "firebase"
 }
 
 /** What a request actually needs: a base URL, a bearer token (fetched fresh for
@@ -92,13 +96,14 @@ export function updateProfile(id: string, patch: Partial<Profile>): void {
 }
 
 /** Used throughout api/client.ts — resolves the active profile into what a
- * request actually needs, fetching a fresh Firebase ID token for "oidc". */
+ * request actually needs, fetching a fresh ID token from whichever provider
+ * signed an "oidc" profile in. */
 export async function loadSession(): Promise<ResolvedSession | null> {
   const profile = getActiveProfile();
   if (!profile) return null;
 
   if (profile.authType === "oidc") {
-    const token = await getFreshIdToken();
+    const token = profile.provider === "infn" ? await getInfnIdToken() : await getFreshIdToken();
     if (!token) return null;
     return { baseUrl: profile.baseUrl, authType: "oidc", token, workspaceId: profile.activeWorkspaceId };
   }
@@ -115,9 +120,20 @@ export function addProfile(name: string, session: { baseUrl: string; token: stri
   return profile;
 }
 
-export function addOidcProfile(name: string, baseUrl: string): Profile {
+/** Where the API is, for an identity that signed in rather than being handed a
+ * token: set at build time for a deployment that knows, else a guess by host. */
+export function defaultApiBaseUrl(): string {
+  return (
+    import.meta.env.VITE_API_BASE_URL ||
+    (window.location.hostname.includes("localhost")
+      ? "http://localhost:8000"
+      : "https://assets-api.90.147.174.30.myip.cloud.infn.it")
+  );
+}
+
+export function addOidcProfile(name: string, baseUrl: string, provider: OidcProvider = "firebase"): Profile {
   const profiles = readProfiles();
-  const profile: Profile = { id: crypto.randomUUID(), name, authType: "oidc", baseUrl };
+  const profile: Profile = { id: crypto.randomUUID(), name, authType: "oidc", baseUrl, provider };
   writeProfiles([...profiles, profile]);
   setActiveProfileId(profile.id);
   return profile;

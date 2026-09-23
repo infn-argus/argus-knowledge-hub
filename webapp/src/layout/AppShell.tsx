@@ -2,8 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { workspacesApi } from "../api/client";
-import { firebaseSignOut } from "../api/firebase";
-import { clearSession } from "../api/session";
+import { signOut } from "../api/signOut";
 import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
 import { SchemaTree } from "../components/SchemaTree";
 import { WorkspaceSwitcher } from "../components/WorkspaceSwitcher";
@@ -265,11 +264,7 @@ export function AppShell() {
             <span />
           )}
           <button
-            onClick={async () => {
-              await firebaseSignOut().catch(() => {});
-              clearSession();
-              window.location.reload();
-            }}
+            onClick={() => void signOut()}
             className="rounded px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
           >
             Sign out

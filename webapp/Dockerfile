@@ -8,6 +8,17 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
+# Which identity provider the "INFN login" button talks to, and where the API is.
+# Baked in at build time (this is a static bundle); left unset, the button is
+# simply not offered, which is what the production build wants until it is told.
+ARG VITE_OIDC_AUTHORITY
+ARG VITE_OIDC_CLIENT_ID
+ARG VITE_OIDC_LABEL
+ARG VITE_API_BASE_URL
+ENV VITE_OIDC_AUTHORITY=$VITE_OIDC_AUTHORITY \
+    VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID \
+    VITE_OIDC_LABEL=$VITE_OIDC_LABEL \
+    VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
 FROM nginx:1.27-alpine

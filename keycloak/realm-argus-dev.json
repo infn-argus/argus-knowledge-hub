@@ -19,6 +19,7 @@
       "serviceAccountsEnabled": false,
       "redirectUris": ["http://localhost:5173/*"],
       "webOrigins": ["http://localhost:5173"],
+      "attributes": {"post.logout.redirect.uris": "http://localhost:5173/*"},
       "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"]
     }
   ],

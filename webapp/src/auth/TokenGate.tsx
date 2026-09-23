@@ -1,16 +1,45 @@
 import { ReactNode, useState } from "react";
 import { AddWorkspaceForm } from "../components/AddWorkspaceForm";
 import { signInWithGoogle } from "../api/firebase";
-import { addOidcProfile, getActiveProfile, Profile } from "../api/session";
+import { CALLBACK_PATH, infnLoginEnabled, infnLoginLabel, startInfnLogin } from "../api/infnAuth";
+import { addOidcProfile, defaultApiBaseUrl, getActiveProfile, Profile } from "../api/session";
+import { InfnCallback } from "./InfnCallback";
 import { WorkspacePicker } from "./WorkspacePicker";
+
+function InfnSignInButton() {
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const onClick = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await startInfnLogin(); // navigates away to the identity provider
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <button
+        onClick={onClick}
+        disabled={loading}
+        className="w-full rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+      >
+        {loading ? "Redirecting…" : infnLoginLabel}
+      </button>
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+    </div>
+  );
+}
 
 function GoogleSignInButton({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const baseUrl = window.location.hostname.includes("localhost")
-    ? "http://localhost:8000"
-    : "https://assets-api.90.147.174.30.myip.cloud.infn.it";
+  const baseUrl = defaultApiBaseUrl();
 
   const onClick = async () => {
     setError(null);
@@ -45,6 +74,11 @@ function GoogleSignInButton({ onSignedIn }: { onSignedIn: (profile: Profile) => 
 export function TokenGate({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState(() => getActiveProfile());
 
+  // Back from the identity provider with a one-time code to exchange.
+  if (infnLoginEnabled && window.location.pathname === CALLBACK_PATH) {
+    return <InfnCallback />;
+  }
+
   if (!profile) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
@@ -53,6 +87,7 @@ export function TokenGate({ children }: { children: ReactNode }) {
             <h1 className="text-xl font-semibold text-slate-900">ARGUS Asset Knowledge Hub</h1>
             <p className="mt-1 text-sm text-slate-500">Sign in to continue.</p>
           </div>
+          {infnLoginEnabled && <InfnSignInButton />}
           <GoogleSignInButton onSignedIn={setProfile} />
           <div className="flex items-center gap-3 text-xs text-slate-400">
             <div className="h-px flex-1 bg-slate-200" />

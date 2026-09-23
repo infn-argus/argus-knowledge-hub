@@ -1,7 +1,7 @@
 """Generic OIDC ID-token verification, independent of the identity provider.
 
 Configured entirely via env vars (issuer, JWKS URL, audience) so switching from
-Firebase to INFN's future Keycloak is a config change, not a rewrite: only these
+Firebase to INFN's Keycloak is a config change, not a rewrite: only these
 three values differ between providers, everything downstream (the User/Membership
 model, permission checks) reads the same decoded claims regardless of issuer.
 
@@ -9,7 +9,18 @@ Firebase example values:
   OIDC_ISSUER   = https://securetoken.google.com/<firebase-project-id>
   OIDC_JWKS_URI = https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com
   OIDC_AUDIENCE = <firebase-project-id>
+
+More than one provider can be trusted at once — Firebase for the accounts that
+already exist and INFN's own IdP beside it, say. The three variables above name
+the first; any others go in OIDC_EXTRA_PROVIDERS as a JSON list:
+
+  OIDC_EXTRA_PROVIDERS='[{"issuer": "...", "jwks_uri": "...", "audience": "..."}]'
+
+A token is checked against the provider whose issuer it names, never tried
+against each in turn: a token signed by one provider must not be accepted
+because another provider's key happened to verify it.
 """
+import json
 import os
 from functools import lru_cache
 
@@ -21,26 +32,54 @@ OIDC_JWKS_URI = os.environ.get("OIDC_JWKS_URI")
 OIDC_AUDIENCE = os.environ.get("OIDC_AUDIENCE")
 
 
-@lru_cache(maxsize=1)
-def _jwk_client() -> PyJWKClient:
+def load_providers() -> dict:
+    """{issuer: {"jwks_uri", "audience"}} for every fully configured provider.
+    A half-configured one (an issuer with no JWKS URL) is left out rather than
+    trusted with whatever is missing."""
+    found = {}
+    candidates = [{"issuer": OIDC_ISSUER, "jwks_uri": OIDC_JWKS_URI, "audience": OIDC_AUDIENCE}]
+    raw_extra = os.environ.get("OIDC_EXTRA_PROVIDERS")
+    if raw_extra:
+        try:
+            extra = json.loads(raw_extra)
+        except ValueError:
+            extra = []
+        candidates += [p for p in extra if isinstance(p, dict)]
+    for p in candidates:
+        if p.get("issuer") and p.get("jwks_uri") and p.get("audience"):
+            found[p["issuer"]] = {"jwks_uri": p["jwks_uri"], "audience": p["audience"]}
+    return found
+
+
+PROVIDERS = load_providers()
+
+
+@lru_cache(maxsize=8)
+def _jwk_client(jwks_uri: str) -> PyJWKClient:
     # A short timeout matters here: this runs inline while a request's DB
     # session is checked out (FastAPI dependency), so a slow/unreachable JWKS
     # endpoint would otherwise hold that connection for PyJWKClient's default
     # 30s timeout instead of failing fast.
-    return PyJWKClient(OIDC_JWKS_URI, timeout=5)
+    return PyJWKClient(jwks_uri, timeout=5)
 
 
 def oidc_configured() -> bool:
-    return bool(OIDC_ISSUER and OIDC_JWKS_URI and OIDC_AUDIENCE)
+    return bool(PROVIDERS)
 
 
 def verify_oidc_token(raw_token: str) -> dict:
     """Returns the decoded claims, or raises jwt.PyJWTError if invalid."""
-    signing_key = _jwk_client().get_signing_key_from_jwt(raw_token)
+    # The issuer is read unverified only to choose whose keys to check the
+    # signature against; nothing from these claims is trusted until it verifies.
+    issuer = jwt.decode(raw_token, options={"verify_signature": False}).get("iss")
+    provider = PROVIDERS.get(issuer)
+    if provider is None:
+        raise jwt.InvalidIssuerError("Token issuer is not a configured provider")
+    signing_key = _jwk_client(provider["jwks_uri"]).get_signing_key_from_jwt(raw_token)
     return jwt.decode(
         raw_token,
         signing_key.key,
         algorithms=["RS256"],
-        audience=OIDC_AUDIENCE,
-        issuer=OIDC_ISSUER,
+        audience=provider["audience"],
+        issuer=issuer,
     )

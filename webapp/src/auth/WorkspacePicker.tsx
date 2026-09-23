@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { workspacesApi } from "../api/client";
 import { MyWorkspace } from "../api/types";
-import { clearSession, Profile, updateProfile } from "../api/session";
-import { firebaseSignOut } from "../api/firebase";
+import { Profile, updateProfile } from "../api/session";
+import { signOut } from "../api/signOut";
 
 export function WorkspacePicker({
   profile,
@@ -27,11 +27,7 @@ export function WorkspacePicker({
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, [profile.id, onPicked]);
 
-  const signOutAndRetry = async () => {
-    await firebaseSignOut().catch(() => {});
-    clearSession();
-    window.location.reload();
-  };
+  const signOutAndRetry = () => void signOut();
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50">

@@ -1,8 +1,7 @@
 # A local Keycloak, for testing multi-workspace users before INFN's own IdP exists
 
 *What this stands up, what it deliberately does and doesn't simulate about GODiVA, six test
-users covering the permission model, and what's still needed before this is a login button
-rather than a curl recipe.*
+users covering the permission model, and the "INFN login" button that signs them in.*
 
 ---
 
@@ -55,8 +54,7 @@ for when GODiVA's actual claims are known, not something to guess at here.
 `docker compose up -d --build --wait` now also brings up a `keycloak` service: Keycloak 24.0.5, in
 its own dev mode, importing `keycloak/realm-argus-dev.json` at startup — a realm named `argus-dev`,
 one public client (`argus-webapp`, both Authorization Code+PKCE and the password grant enabled —
-the second exists purely so a token can be fetched by curl, for the CI/no-browser case, until §5's
-frontend flow exists), and the six users below. Nothing else in the stack requires it: a PAT login
+the second exists purely so a token can be fetched by curl, for the no-browser case), and the six users below. Nothing else in the stack requires it: a PAT login
 works with Keycloak stopped entirely, exactly as before.
 
 **A detail that will bite anyone changing this:** `KC_HOSTNAME`/`KC_HOSTNAME_PORT` are set so
@@ -114,24 +112,51 @@ Use the printed value as `Authorization: Bearer <id_token>` against `http://loca
 
 ---
 
-## 5. What this doesn't give you yet
+## 5. The "INFN login" button
 
-- **No login button.** `webapp/src/auth/TokenGate.tsx` signs in through Firebase's own SDK
-  (`signInWithPopup`, `GoogleAuthProvider`) — hardcoded to one Firebase project, not a generic
-  OIDC/Authorization-Code redirect. Standing up Keycloak doesn't make it appear in the browser;
-  that needs its own client-side work (an OIDC library such as `keycloak-js` or `oidc-client-ts`,
-  a redirect + PKCE + callback route, and a decision about whether it replaces the Firebase path or
-  sits beside it) — a separate, sizeable piece I haven't built and didn't want to start without
-  you weighing in on that decision.
+The sign-in screen offers **INFN login** (OpenID Connect, Authorization Code with PKCE, through
+`oidc-client-ts`) beside the existing Google/Firebase button and the API-token form. Nothing in the
+code says Keycloak: the button talks to whatever `VITE_OIDC_AUTHORITY` names, and the label is
+`VITE_OIDC_LABEL`. Locally that is this Keycloak; in production it is INFN's, by changing those
+build values.
+
+- **Build-time, not runtime.** The web app is a static bundle, so the provider is baked in at
+  build (`docker-compose.yml` passes `VITE_OIDC_AUTHORITY`, `VITE_OIDC_CLIENT_ID`,
+  `VITE_OIDC_LABEL`, `VITE_API_BASE_URL` as build args). A build with none set — today's
+  production deploy — simply doesn't show the button. For `npm run dev`, put the same four in an
+  untracked `webapp/.env.development`.
+- **The flow.** Click → Keycloak's own sign-in page → back to `/auth/callback` → the code is
+  exchanged, the person is saved as a profile (`provider: "infn"`) → the workspace picker, which
+  offers exactly the workspaces `GET /v1/me/workspaces` returns. The ID token is renewed with the
+  refresh token shortly before it lapses; the session lives in `localStorage`, so a reload or a new
+  tab does not mean signing in again.
+- **Sign out ends the provider's session too.** Otherwise Keycloak's single-sign-on cookie would sign
+  the same person straight back in and switching accounts would be impossible. The client registers
+  `post.logout.redirect.uris` for this.
+- **Both providers at once.** The API used to trust one issuer. `OIDC_EXTRA_PROVIDERS` (a JSON list
+  of `{issuer, jwks_uri, audience}`) adds more, so Firebase accounts keep working beside INFN's
+  IdP. A token is checked only against the provider whose issuer it names, never tried against each
+  in turn, so one provider's key cannot vouch for another's issuer (`tests/test_auth_oidc.py`). The
+  local compose trusts Keycloak only; add the Firebase project there if you want the Google button to
+  work locally too.
+
+Checked in a real browser, not just by API: INFN login → Keycloak → `contributor.test` →
+"Signed in as contributor.test@argus.test" offering exactly SPARC and EuAPS → SPARC's dashboard
+with its real data → Sign out → the sign-in screen → INFN login again asks for credentials.
+
+## 6. What this doesn't give you yet
+
 - **No group-based provisioning**, for the reason in §2: that is a directory sync, not an OIDC
   claim, and no directory is standing behind this Keycloak.
 - **`RoleBinding`s are hand-seeded**, standing in for whatever will eventually create them —
   an admin, an import, or a future GODiVA-group sync.
 
-## 6. Pointing this at the real thing, later
+## 7. Pointing this at the real thing, later
 
-Nothing above is Keycloak-specific in the backend. Swapping in a real identity provider — INFN's
-Keycloak, GODiVA-fed or not — is `OIDC_ISSUER`, `OIDC_JWKS_URI` and `OIDC_AUDIENCE` pointed at it
-instead, in whichever environment is being deployed. Everything downstream — `_resolve_oidc_user`,
+Nothing above is Keycloak-specific. Swapping in a real identity provider — INFN's, GODiVA-fed or
+not — is `OIDC_ISSUER`, `OIDC_JWKS_URI` and `OIDC_AUDIENCE` on the API (or `OIDC_EXTRA_PROVIDERS`
+to keep Firebase beside it), and `VITE_OIDC_AUTHORITY`/`VITE_OIDC_CLIENT_ID` when building the web
+app, in whichever environment is being deployed. The client must be registered there as a public
+client with `<web origin>/auth/callback` as a redirect URI. Everything downstream — `_resolve_oidc_user`,
 `RoleBinding`, `Membership`, the permission checks — reads only the decoded claims and doesn't
 know or care which provider signed them.
