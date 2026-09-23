@@ -55,7 +55,7 @@ currently valid* revision rather than to an arbitrary PDF.
 ## Design notes
 
 - [Object schema design for a large-scale accelerator](docs/asset-schema-design.md) — the
-  type catalogue (104 types over four planes), the relation vocabulary, composite elements such
+  type catalogue (115 types over four planes), the relation vocabulary, composite elements such
   as a screen station, and how a beamline's EPIK8s control configuration and a EuPRAXIA-style
   product breakdown both come in as equipment rather than as files.
 - [The knowledge graph for root-cause analysis](docs/knowledge-graph-design.md) — what each
@@ -110,6 +110,10 @@ address `http://localhost:8080` (plain `http`, the API does not speak TLS) and t
   survive a re-read. The catalogue gained a `Mirror` type for this: run
   `scripts/seed_asset_types.py beamline <workspace> --catalogue <catalogue>` again on a workspace
   seeded before.
+  Each Access Point also says what kind of endpoint it is, and each device on a port of a serial
+  converter is on a Serial Line. Add `--it-workspace it-infrastructure` (a workspace made with
+  `create_token.py`) to make the converters, servers and consoles the hostnames name, once, in that
+  site-wide workspace, flagged global; each beamline's Access Point is `implemented by` them.
 - State lives in two named volumes and survives `docker compose down`;
   `docker compose down -v` wipes it.
 

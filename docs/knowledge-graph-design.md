@@ -23,7 +23,7 @@ opposite directions of dependence, and nothing recorded which. Two more things w
 - **The physical plant was not in the graph.** Chillers, timing, and the pressure a conditioning IOC
   waits on are stated in the files and were not edges.
 
-So the work is not a bigger type hierarchy. The 104 types describe the accelerator well enough. It is
+So the work is not a bigger type hierarchy. The 115 types describe the accelerator well enough. It is
 **a meaning for each relation, a walk that respects it, and the edges the configurations were leaving
 out**.
 

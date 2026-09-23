@@ -118,7 +118,7 @@ Verified against the code, because the catalogue must fit the machinery that wil
 
 ## 4. The type catalogue
 
-**104 types, 12 of them abstract, maximum depth 6.** Abstract types are marked *(abstract)*.
+**115 types, 16 of them abstract, maximum depth 6.** (The IT model added 11 to the 104 before it: `IT Equipment` and its tree, `IT Record`, `Serial Line`.) Abstract types are marked *(abstract)*.
 
 ```
 Item (abstract)
@@ -656,7 +656,7 @@ noted in §15.
 **Two sets, seeded separately.** The types divide by what they describe, and each set goes
 where its objects should be readable.
 
-| | Global set — 59 types | Per-beamline set — 45 types |
+| | Global set — 69 types | Per-beamline set — 46 types |
 |---|---|---|
 | Where | one catalogue workspace, every type flagged global | each beamline's own workspace, not global |
 | What | `Item`, `Engineered Item`, the whole **`Asset`** branch, the **`Catalog Item`** branch (`Product Model`, `Vendor`), the **`Location`** branch | the **`Functional Element`** branch (facility, sections, modules, lattice elements, screen stations…), the **`Control Item`** branch (configuration, IOCs, devices, access points…), the **`Engineering Record`** branch (utilities, procurement, work packages) |
@@ -1586,7 +1586,7 @@ Ordered by what blocks what. Items 1, 3, 4, 9, 10, 11 and 12–15 are done; the 
    fix to 1 does not "tidy" it in the wrong direction.
 
 3. **DONE — the catalogue is seeded, in two sets.** `backend/app/services/asset_types.py` holds
-   all 104 types as data (`CATALOGUE`), of which 59 are global and 45 are a beamline's own
+   all 115 types as data (`CATALOGUE`), of which 69 are global and 46 are a beamline's own
    (§8), with `ensure_asset_types(db, workspace_id, scope, catalogue_workspace_id)`,
    `resolve_type_uids()` and `catalogue_of()`. Run with `scripts/seed_asset_types.py` in three
    modes: `global`, `beamline --catalogue`, and `all` for a hub with one workspace.
@@ -1766,7 +1766,7 @@ Ordered by what blocks what. Items 1, 3, 4, 9, 10, 11 and 12–15 are done; the 
 
 | | |
 |---|---|
-| Types | 104 (12 abstract), maximum depth 6: 59 shared (global), 45 a beamline's own (§8) |
+| Types | 115 (16 abstract), maximum depth 6: 69 shared (global), 46 a beamline's own (§8) |
 | Roots | `Item` → Functional, Physical, Catalogue, Control, Engineering, Location |
 | Relations | 5 existing, kept verbatim; 23 added |
 | Composites | `Screen Station`, `Spectrometer Station`, `Emittance Meter`, `RF Station`, `Machine Module`, via `composed of` |

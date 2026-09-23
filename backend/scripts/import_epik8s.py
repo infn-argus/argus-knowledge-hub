@@ -12,6 +12,7 @@ objects of the catalogue's types, each linked to what the file says it is tied t
   Control Network         a network an IOC is attached to
   Control Service         archiver, gateways, alarm server, logbook
   Storage Mount           an NFS mount or backup target
+  Serial Line             one serial port of a converter, with the devices on it
 
 Access Points are found in the inventory by address before any is made, so a Moxa
 that is already an object is linked, not duplicated; --no-create-missing reports
@@ -25,6 +26,17 @@ name code; a channel neither says anything about is counted and reported, not gu
 at. Each is marked `inferred` and says why, keeps anything a person adds to it, and
 needs the catalogue's types (seeded first).
 
+Each Access Point says what kind of endpoint it is (a serial converter, a host, an
+instrument, a camera), read from the class prefix of INFN's DNS naming convention and, for
+a bare IP, from a port in Moxa's 4001-4999 range, with the evidence beside it. Each device
+on a port of a converter is `on line` a Serial Line that is `port of` the converter's
+Access Point.
+
+--it-workspace <workspace> also makes the IT equipment the hostnames name, in that
+site-wide workspace: the converter behind a `sc…` host, a server behind `pl…`, a console
+behind `pw…co…`, flagged global and keyed by the fully qualified name, so two beamlines
+that reach one host share one object. Each Access Point is `implemented by` it.
+
 The types are seeded first if they are not there: with --catalogue the shared ones
 are used where they are and only this beamline's own are created here; a workspace
 already seeded against a catalogue keeps using it; any other gets the whole
@@ -33,7 +45,7 @@ leaves what has been added since.
 
 Usage (from anywhere, with the backend's virtualenv and DATABASE_URL set):
   python backend/scripts/import_epik8s.py <workspace_id> <values.yaml>
-      [--catalogue <catalogue_workspace>] [--no-create-missing] [--infer-elements] [--dry-run]
+      [--catalogue <catalogue_workspace>] [--no-create-missing] [--infer-elements] [--it-workspace <workspace>] [--dry-run]
 """
 import os
 import sys
@@ -44,16 +56,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def parse(argv: list) -> tuple:
-    """(workspace, path, catalogue, create_missing, dry_run, infer), or None."""
-    catalogue = argv[argv.index("--catalogue") + 1] if "--catalogue" in argv[:-1] else None
-    if "--catalogue" in argv and catalogue is None:
-        return None
+    """(workspace, path, catalogue, create_missing, dry_run, infer, it_workspace), or None."""
+    def option(name):
+        return argv[argv.index(name) + 1] if name in argv[:-1] else None
+
+    catalogue, it_workspace = option("--catalogue"), option("--it-workspace")
+    for name, value in (("--catalogue", catalogue), ("--it-workspace", it_workspace)):
+        if name in argv and value is None:
+            return None
     rest = [a for i, a in enumerate(argv)
-            if not a.startswith("--") and not (i and argv[i - 1] == "--catalogue")]
+            if not a.startswith("--") and not (i and argv[i - 1] in ("--catalogue", "--it-workspace"))]
     if len(rest) != 2:
         return None
     return (rest[0], rest[1], catalogue, "--no-create-missing" not in argv, "--dry-run" in argv,
-            "--infer-elements" in argv)
+            "--infer-elements" in argv, it_workspace)
 
 
 def main() -> None:
@@ -61,7 +77,7 @@ def main() -> None:
     if parsed is None:
         print(__doc__)
         sys.exit(1)
-    workspace_id, path, catalogue, create_missing, dry_run, infer = parsed
+    workspace_id, path, catalogue, create_missing, dry_run, infer, it_workspace = parsed
     if not os.path.exists(path):
         print(f"No such file: {path}")
         sys.exit(1)
@@ -100,7 +116,7 @@ def main() -> None:
         connection = outer = None
         db = SessionLocal()
     try:
-        for name in (workspace_id, catalogue):
+        for name in (workspace_id, catalogue, it_workspace):
             if name and db.get(Workspace, name) is None:
                 print(f"No workspace {name!r}.")
                 sys.exit(1)
@@ -118,7 +134,7 @@ def main() -> None:
                         source="epik8s")
         db.add(job)
         db.commit()
-        importer = _Importer(db, job, workspace_id, path, infer_elements=infer)
+        importer = _Importer(db, job, workspace_id, path, infer_elements=infer, it_workspace=it_workspace)
         try:
             importer.ensure_types()
             importer.run(values, create_missing)

@@ -398,14 +398,29 @@ _t("PLC", "Asset", "A programmable logic controller.")
 _t("Timing Module", "Asset", "Event generator, receiver or delay generator.")
 _t("Electronics Crate", "Asset", "A crate holding electronics boards.")
 _t("Electronics Board", "Asset", "A board in a crate.")
-_t("Network Device", "Asset", "A switch, terminal server or converter.", [
-    E("device_kind", "Device kind", ["Switch", "Terminal server", "Media converter", "Router"]),
-    I("n_ports", "Number of ports"), S("hostname", "Hostname", indexed=True),
-    S("ip", "IP address", indexed=True), S("fqdn", "FQDN"),
-    S("firmware_version", "Firmware version")])
-_t("Computing Node", "Asset", "A server or workstation.", [
-    S("hostname", "Hostname", indexed=True), S("ip", "IP address", indexed=True),
+_t("IT Equipment", "Asset", "Anything on the network: a switch, a converter, a server, a console. "
+   "Site-wide: one box is one object however many beamlines reach it.", abstract=True, attributes=[
+    S("hostname", "Hostname", indexed=True), S("fqdn", "FQDN", indexed=True),
+    S("ip", "IP address (primary)", indexed=True), S("mac", "MAC address", indexed=True),
+    S("firmware_version", "Firmware version"), S("management_url", "Management URL")])
+_t("Network Device", "IT Equipment", "A device that carries or converts network traffic.",
+   abstract=True)
+_t("Switch", "Network Device", "A network switch.", [
+    I("n_ports", "Number of ports"), B("is_managed", "Managed"), B("supports_poe", "Supplies PoE")])
+_t("Router", "Network Device", "A router.")
+_t("Serial Converter", "Network Device", "An Ethernet-to-serial converter (a Moxa NPort). "
+   "The serial lines behind it are objects of their own.", [
+    I("n_serial_ports", "Number of serial ports"),
+    S("serial_modes", "Serial modes (RS-232/422/485)", indexed=True, multi=True),
+    I("tcp_port_base", "TCP port of serial port 1")])
+_t("Media Converter", "Network Device", "A fibre/copper media converter.")
+_t("Computing Node", "IT Equipment", "A server or workstation.", abstract=True, attributes=[
     S("cpu", "CPU"), F("ram_gb", "RAM (GB)"), S("os", "Operating system"), S("role", "Role")])
+_t("Server", "Computing Node", "A physical or virtual server, or a container host.", [
+    B("is_virtual", "Virtual"), S("hypervisor", "Hypervisor")])
+_t("Workstation", "Computing Node", "A console or engineering workstation.", [
+    E("workstation_role", "Workstation role", ["Operator console", "Engineering", "Kiosk", "Test"]),
+    S("console_group", "Console group", indexed=True)])
 _t("Chiller", "Asset", "A water chiller.")
 _t("Cooling Circuit Component", "Asset", "A pump, exchanger or valve in a "
    "cooling circuit.")
@@ -489,7 +504,15 @@ _t("Access Point", "Control Item", "What control software reaches hardware throu
     S("address", "Address", indexed=True), S("ip", "IP address", indexed=True),
     S("hostname", "Hostname", indexed=True), S("fqdn", "FQDN"),
     X("argus_provenance", "Provenance", readonly=True), I("port_count", "Number of ports"),
-    S("network", "Network", indexed=True)])
+    S("network", "Network", indexed=True),
+    E("endpoint_kind", "Endpoint kind", ["Serial converter", "Host", "Instrument", "Camera", "Unknown"]),
+    S("endpoint_kind_source", "How the kind was read")])
+_t("Serial Line", "Control Item", "One serial port of a converter and the devices on it: the "
+   "cable whose failure takes those devices and no others.", [
+    I("tcp_port", "TCP port", indexed=True), I("serial_port", "Serial port"),
+    E("line_kind", "Line kind", ["Single device", "Multi-channel controller",
+                                 "Multi-axis controller", "Multi-drop bus"]),
+    S("serial_mode", "Serial mode"), I("baud", "Baud rate"), S("framing", "Framing")])
 _t("Control Service", "Control Item", "A shared control service: archiver, gateway, "
    "alarm server, logbook.", [
     S("service", "Service", indexed=True), S("chart_url", "Chart"),
@@ -566,6 +589,21 @@ _t("Rack", "Location", "An equipment rack.", [
     S("cooling", "Cooling")])
 _t("Storage Location", "Location", "A shelf or bin where spares are kept.", [
     S("shelf", "Shelf"), S("bin", "Bin"), B("climate_controlled", "Climate controlled")])
+
+# What the network registry says about equipment, kept apart from the equipment: the box is
+# bought, installed and swapped; its address is registered, leased and reassigned, by other people.
+_t("IT Record", "Item", "A fact the network registry holds about equipment or a place on the "
+   "network.", abstract=True)
+_t("Network Segment", "IT Record", "A VLAN or a subnet.", [
+    I("vlan_id", "VLAN id", indexed=True), S("cidr", "CIDR", indexed=True), S("gateway", "Gateway"),
+    E("purpose", "Purpose", ["Control", "Cameras", "Magnets", "Management", "Office", "Other"]),
+    B("is_dhcp", "Served by DHCP")])
+_t("Address Record", "IT Record", "One registered address: a registered node, a lease, a name.", [
+    E("record_kind", "Record kind", ["Registered node", "DHCP lease", "DNS name",
+                                     "Ethernet configuration"]),
+    S("hostname", "Hostname", indexed=True), S("ip", "IP address", indexed=True),
+    S("mac", "MAC address", indexed=True), D("registered_on", "Registered on"),
+    S("owner", "Owner")])
 
 BY_NAME: dict[str, TypeSpec] = {spec.name: spec for spec in CATALOGUE}
 
@@ -805,6 +843,16 @@ def ensure_asset_types(db: Session, workspace_id: str, scope: str = SCOPE_ALL,
         if share and not schema.is_global:
             schema.is_global = True
             touched = True
+        # A type this catalogue owns can move in its tree (Network Device went from under Asset
+        # to under IT Equipment) and can stop being concrete; a release that does so has to
+        # reach workspaces seeded before it. Only types it owns: somebody else's stay theirs.
+        if uid == type_uid(workspace_id, spec.name) or uid.startswith(f"{workspace_id}:{BASE_UID_SUFFIX}:"):
+            if schema.parent_schema_uid != parent_uid:
+                schema.parent_schema_uid = parent_uid
+                touched = True
+            if schema.is_concrete != (not spec.abstract):
+                schema.is_concrete = not spec.abstract
+                touched = True
         merged, changed = _merge(schema.attributes or [], wanted)
         if changed:
             schema.attributes = merged

@@ -65,6 +65,7 @@ from app.services.asset_types import resolve_type_uids
 from app.services.element_inference import (
     ASSET_TYPES, CAMERA, ELEMENT_TYPES, LATTICE_NAME, SCREEN_NAME, infer_device, infer_ioc,
 )
+from app.services import dns_convention
 from app.services.network_resolve import IPV4, NetworkIndex, short_host
 from app.services.relations import rebuild_asset_relations
 
@@ -85,7 +86,11 @@ TYPES: dict[str, str] = {
     "IOC Template": "An iocDefaults entry: the recipe an IOC is deployed from.",
     "Control Network": "A named network and its address range.",
     "Storage Mount": "An NFS mount or backup target.",
+    "Serial Line": "One serial port of a converter and the devices on it.",
 }
+
+# What the IT equipment the hostnames name is made of, in the catalogue.
+IT_TYPES = ("Serial Converter", "Switch", "Server", "Workstation")
 
 # Where a device's settings end up. Everything else on a device row is a
 # setpoint or a limit, kept as-is under `settings` so a change to one is
@@ -189,6 +194,13 @@ def _is_network_address(value: Any) -> bool:
     return bool(IPV4.match(text) or any(c.isalpha() for c in text))
 
 
+def _host_label(address: str) -> str:
+    """What to call a host in a name: its first label (`scelimxa16001` for
+    `scelimxa16001.int.eli-np.ro`), or the address itself if it is only an IP."""
+    text = (address or "").strip()
+    return text if IPV4.match(text) else dns_convention.short_name(text)
+
+
 def _endpoint_of(entry: dict, params: dict) -> tuple[Optional[str], Optional[str]]:
     """The address this IOC or device talks to, and the port on it.
 
@@ -208,6 +220,12 @@ def _endpoint_of(entry: dict, params: dict) -> tuple[Optional[str], Optional[str
         None,
     )
     port = params.get("port") or entry.get("port")
+    # A motor IOC that reaches its controllers through a converter says so in a `serial:` block
+    # (`serial: {ip: scelimxa16001…, port: 4005, baud: 9600}`) instead of an iocparam.
+    serial = entry.get("serial") if isinstance(entry.get("serial"), dict) else {}
+    if address is None and _is_network_address(serial.get("ip")):
+        address = serial.get("ip")
+        port = port or serial.get("port")
     address = str(address).strip() if address not in (None, "") else None
     port = str(port).strip() if port not in (None, "") else None
     return address, port
@@ -251,9 +269,17 @@ def _settings(entry: dict) -> dict:
 
 class _Importer:
     def __init__(self, db: Session, job: ImportJob, workspace_id: str, source_ref: str,
-                 infer_elements: bool = False):
+                 infer_elements: bool = False, it_workspace: Optional[str] = None):
         self.db = db
         self.infer = infer_elements
+        # The site-wide workspace that holds IT equipment, when there is one. A converter or a
+        # server is one box however many beamlines reach it, so it is made there, flagged global,
+        # and each beamline's Access Point is `implemented by` it.
+        self.it_workspace = it_workspace
+        self._it_seen: set = set()
+        # Serial lines seen while walking the devices: made once every device is known, because
+        # what a line is depends on everything on it.
+        self._lines: dict = {}
         self.job = job
         self.workspace_id = workspace_id
         self.source_ref = source_ref
@@ -310,6 +336,16 @@ class _Importer:
                     f"Inferring elements writes objects of the catalogue's types, and this "
                     f"workspace cannot use {len(missing)} of them (e.g. {', '.join(missing[:4])}). "
                     f"Seed the catalogue first: scripts/seed_asset_types.py.")
+        if self.it_workspace:
+            # The catalogue's IT types are global, so this beamline's own catalogue already names
+            # them; going through the IT workspace would pick whichever catalogue it happened to see.
+            missing = [n for n in IT_TYPES if n not in usable]
+            if missing:
+                raise ValueError(
+                    f"The IT workspace “{self.it_workspace}” cannot use the catalogue's IT types "
+                    f"({', '.join(missing)}). Seed the global set first: scripts/seed_asset_types.py global.")
+            for name in IT_TYPES:
+                self.schemas[f"it:{name}"] = self.db.get(Schema, usable[name])
         for name, description in TYPES.items():
             schema = self.db.get(Schema, usable[name]) if name in usable else None
             if schema is None:
@@ -499,6 +535,66 @@ class _Importer:
                 ioc.attributes = {**(ioc.attributes or {}), "permit_conditions": conditions}
         self.db.flush()
 
+    def _note_line(self, device: Asset, entry: dict, ioc: dict, access_point: Optional[Asset],
+                   address: Optional[str], port: Optional[str], tag: str) -> None:
+        """A device on a port of a serial converter is on a serial line. Whether an endpoint is a
+        converter is read from its name (the `sc` class) or, for a bare IP, from a port in Moxa's
+        range; an Ethernet-native instrument on port 502 is not on a line."""
+        if access_point is None or not address or not port or not str(port).isdigit():
+            return
+        kind, how = dns_convention.endpoint_kind(address, port)
+        if kind != "Serial converter":
+            return
+        key = f"{tag}:LINE:{_host_label(address).upper()}:{int(port)}"
+        line = self._lines.setdefault(key, {
+            "ap": access_point, "address": address, "port": int(port), "devices": [],
+            "keys": collections.Counter(), "baud": None, "how": how,
+        })
+        line["devices"].append(device)
+        for field_name in ("axid", "channel", "id", "addr"):
+            if entry.get(field_name) is not None:
+                line["keys"][field_name] += 1
+        serial = ioc.get("serial") if isinstance(ioc.get("serial"), dict) else {}
+        if isinstance(serial.get("baud"), int) and not isinstance(serial.get("baud"), bool):
+            line["baud"] = serial["baud"]
+
+    def _serial_lines(self, tag: str) -> None:
+        """Each serial line as an object: `port of` its converter's Access Point, with every device
+        on it `on line`. A line is what fails when one cable does, which the converter alone cannot
+        say: four pumps on port 4003 are not the fifteen behind the whole box.
+
+        What kind of line it is comes from the keys the file already uses on its devices (`axid`
+        for a multi-axis controller, `channel` for a multi-channel one, `id`/`addr` for a bus), and
+        is left unset where they say nothing rather than guessed."""
+        for key, line in self._lines.items():
+            devices = list({d.uid: d for d in line["devices"]}.values())
+            keys = line["keys"]
+            if len(devices) == 1:
+                line_kind = "Single device"
+            elif keys["axid"]:
+                line_kind = "Multi-axis controller"
+            elif keys["channel"]:
+                line_kind = "Multi-channel controller"
+            elif keys["id"] or keys["addr"]:
+                line_kind = "Multi-drop bus"
+            else:
+                line_kind = None
+            asset = self.upsert("Serial Line", key, f"{_host_label(line['address'])}:{line['port']}", _present({
+                "beamline": tag, "tcp_port": line["port"], "line_kind": line_kind,
+                "baud": line["baud"],
+            }))
+            self.counts["serial_lines"] = self.counts.get("serial_lines", 0) + 1
+            self.relate(asset, line["ap"], "port of")
+            for device in devices:
+                self.relate(device, asset, "on line")
+            # A bare IP that carries a port in Moxa's range is a converter by that evidence alone.
+            ap = line["ap"]
+            if ap.type == "Access Point" and ap.workspace_id == self.workspace_id \
+                    and not (ap.attributes or {}).get("endpoint_kind"):
+                ap.attributes = {**(ap.attributes or {}), "endpoint_kind": "Serial converter",
+                                 "endpoint_kind_source": line["how"]}
+        self.db.flush()
+
     def _pair_screens(self, tag: str) -> None:
         """A screen station is a flag, a camera and the optics between them, and the file lists
         the flag and the camera on two IOCs with nothing joining them. The names do: `AC1FLG01`
@@ -557,6 +653,7 @@ class _Importer:
                 self.counts["access_points_reused"] += 1
             else:
                 self.counts["access_points_linked"] += 1
+            self._describe_endpoint(match.asset, address)
             return match.asset
 
         if match.ambiguous:
@@ -597,7 +694,70 @@ class _Importer:
         self.index.add(asset, address)
         self.created_access_points.add(asset.uid)
         self.counts["access_points_created"] += 1
+        self._describe_endpoint(asset, address)
         return asset
+
+    def _describe_endpoint(self, asset: Asset, address: str) -> None:
+        """What kind of thing an Access Point is, read from its name, and the IT equipment behind it.
+
+        Only an Access Point of this workspace, and only what a person has not already said: a kind
+        somebody set stays. Marked with the evidence, so it can be believed or corrected."""
+        if asset.type != "Access Point" or asset.workspace_id != self.workspace_id:
+            return
+        attributes = dict(asset.attributes or {})
+        if not attributes.get("endpoint_kind"):
+            kind, how = dns_convention.endpoint_kind(address)
+            if kind != "Unknown":
+                asset.attributes = {**attributes, "endpoint_kind": kind, "endpoint_kind_source": how}
+                self.db.flush()
+        self._it_equipment(asset, address)
+
+    def _upsert_it(self, type_name: str, key: str, name: str, attributes: dict) -> Asset:
+        """An object in the site-wide IT workspace. Made once whichever beamline reaches it first;
+        what is on it stays, and this only fills what is missing, as for every inference."""
+        uid = _uid(self.it_workspace, key)
+        asset = self.db.get(Asset, uid)
+        provenance = {"argus_source": SOURCE, "argus_source_ref": self.source_ref}
+        if asset is None:
+            clash = self.db.scalar(select(Asset).where(Asset.key == key))
+            if clash is not None:
+                raise ValueError(
+                    f"“{key}” already exists in workspace “{clash.workspace_id}”, not the IT "
+                    f"workspace “{self.it_workspace}”.")
+            asset = Asset(uid=uid, workspace_id=self.it_workspace,
+                          schema_uid=self.schemas[f"it:{type_name}"].uid, key=key, name=name,
+                          type=type_name, is_global=True, attributes={**attributes, **provenance})
+            self.db.add(asset)
+        else:
+            asset.attributes = {**attributes, **(asset.attributes or {}), **provenance}
+        self.db.flush()
+        return asset
+
+    def _it_equipment(self, access_point: Asset, address: str) -> None:
+        """The converter, switch, server or console a hostname names, and the Access Point's
+        `implemented by` it. Keyed by the fully qualified name, which is site-unique, so two
+        beamlines reaching one host make one object."""
+        if not self.it_workspace or IPV4.match(address.strip()):
+            return
+        found = dns_convention.it_equipment(address)
+        if found is None:
+            return
+        type_name, extra, how = found
+        fqdn = address.strip().lower().rstrip(".")
+        equipment = self._upsert_it(
+            type_name, f"HOST:{fqdn}", dns_convention.short_name(address),
+            _present({
+                "hostname": dns_convention.short_name(address), "fqdn": fqdn, **extra,
+                "argus_keywords": ["inferred"],
+                "description": (f"Inferred by the control-configuration import: {fqdn} is reached by "
+                                f"a configuration, and {how} says it is a {type_name.lower()}. Nobody "
+                                f"has confirmed it, its model, serial number or where it is."),
+            }))
+        self.relate(access_point, equipment, "implemented by")
+        if equipment.uid not in self._it_seen:
+            self._it_seen.add(equipment.uid)
+            self.counts["it_equipment"] = self.counts.get("it_equipment", 0) + 1
+            self.counts[f"it {type_name}"] = self.counts.get(f"it {type_name}", 0) + 1
 
     # --- the walk -------------------------------------------------------
 
@@ -627,6 +787,7 @@ class _Importer:
         self._mounts(values, tag, facility)
         self._services(epics.get("services") or {}, facility, tag)
         self._iocs(ioc_entries, defaults, facility, tag, beamline, create_missing)
+        self._serial_lines(tag)
         if self.infer:
             self._pair_screens(tag)
             self._wire_plant(tag)
@@ -839,10 +1000,16 @@ class _Importer:
                       f"not say which physical unit it drives")
 
             ioc_access = None
+            merged["_resolved_address"], merged["_resolved_port"] = address, port
             if address:
                 ioc_access = self.access_point(address, tag, create_missing)
                 if ioc_access is not None:
                     self.relate(ioc, ioc_access, "connects to")
+                    # An IOC that names a `host:` runs on it; one that names a `server:` is
+                    # connected to it. Both stop when it does, but only the first says where the
+                    # software lives.
+                    if _text(merged.get("host")) and not params.get("server"):
+                        self.relate(ioc, ioc_access, "runs on")
 
             devices = merged.get("devices") or []
             if not devices:
@@ -923,12 +1090,16 @@ class _Importer:
                                  device_name, {**ioc, **device}, zones)
 
         # Addressed directly, or through whatever the IOC connects to.
+        line_ap, line_address, line_port = None, None, None
         if address:
             own = self.access_point(address, tag, create_missing)
             if own is not None:
                 self.relate(asset, own, "reached through")
+                line_ap, line_address, line_port = own, address, port
         elif ioc_access is not None:
             self.relate(asset, ioc_access, "reached through")
+            line_ap, line_address, line_port = ioc_access, ioc.get("_resolved_address"), ioc.get("_resolved_port")
+        self._note_line(asset, device, ioc, line_ap, line_address, line_port, tag)
 
     # --- what the configuration says depends on what ---------------------
 
@@ -993,6 +1164,7 @@ def run_epik8s_import(
     merge_strategy: str = "override",
     create_missing_nodes: bool = True,
     infer_elements: bool = False,
+    it_workspace: Optional[str] = None,
 ):
     """Read one beamline's values.yaml and mirror what it describes."""
     db = SessionLocal()
@@ -1009,7 +1181,7 @@ def run_epik8s_import(
             raise ValueError(f"{path} did not parse as a mapping — is that the right file?")
 
         importer = _Importer(db, job, workspace_id, f"{repo_url}@{branch}:{path}",
-                             infer_elements=infer_elements)
+                             infer_elements=infer_elements, it_workspace=it_workspace)
         importer.ensure_types()
 
         if merge_strategy == "remove_all_before":

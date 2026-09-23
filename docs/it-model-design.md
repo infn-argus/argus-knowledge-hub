@@ -1,8 +1,48 @@
 # IT and network model for the object catalogue
 
-*Design proposal. Nothing here is built. It answers: where do switches, hosts, consoles and
-Ethernet-to-serial converters (Moxa) live in the catalogue, and how do the control configurations
-reach them?*
+*Where do switches, hosts, consoles and Ethernet-to-serial converters (Moxa) live in the catalogue,
+and how do the control configurations reach them? §0 says what is built; the rest is the design
+it was built from.*
+
+---
+
+## 0. What is built
+
+The decisions in §9 were taken as recommended: a dedicated site workspace for IT, the serial line
+as an object, and IT equipment that the configuration import makes and marks as inferred.
+
+**Catalogue (115 types, was 104).** Under `Asset`: `IT Equipment` (hostname, FQDN, primary IP,
+MAC, firmware, management URL) → `Network Device` → `Switch`, `Router`, `Serial Converter`,
+`Media Converter`; and `Computing Node` → `Server`, `Workstation`. Under `Item`: `IT Record` →
+`Network Segment`, `Address Record`. Under `Control Item`: `Serial Line`. `Access Point` gains
+`endpoint_kind` and `endpoint_kind_source`. `Network Device` and `Computing Node`, which existed
+empty, moved into the tree in place (the seeder now follows a type that changed parent).
+
+**Import (`--it-workspace`).** For each Access Point:
+- its **kind** (serial converter, host, instrument, camera) is read from the class prefix of INFN's
+  DNS naming convention (`dns_convention.py`, §4.4), or, for a bare IP, from a port in Moxa's
+  4001–4999 range, and the evidence is written beside it;
+- a device on a port of a converter is `on line` a **Serial Line** that is `port of` the converter's
+  Access Point (a `serial:` block, which the import ignored, is now an endpoint too);
+- an IOC that names a `host:` `runs on` it;
+- with `--it-workspace`, the converter, server or console a hostname names is made **once, in that
+  workspace, flagged global**, keyed by its fully qualified name, and the Access Point is
+  `implemented by` it. Two beamlines that reach one host share one object.
+
+**Measured on the four configurations** (into a workspace `it-infrastructure`): 18 serial converters
+and 12 servers, and 104 serial lines (SPARC 39, EuAPS 28, ELI 17, BTF 20; BTF's are behind bare IPs).
+The converter `scsparcsipmxa001` reaches **41** objects when it stops (15 devices, 13 pumps, 6 IOCs,
+4 lines, 2 NEG, its Access Point) and its port-4003 line alone **9**: the answer the flat model
+could not give.
+
+**Not built, and why.** Address Records and Network Segments exist as types and nothing fills them:
+that needs the registry (Jira Insight or a DNS/DHCP export), whose real attributes I still have not
+seen. Consoles come from an Ansible inventory that no configuration mentions, and no reader exists.
+Switch topology (`uplinked to`) is IT's, not the configuration's. The resolver's local domains are
+unchanged (`.int.eli-np.ro` is still not one), because shortening ELI's names would re-key its
+Access Points. `--it-workspace` is a script option only: through the API it would let a caller write
+into a workspace it may not have rights to, and that check is not written.
+
 
 ---
 
