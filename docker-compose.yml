@@ -15,6 +15,15 @@
 #
 # State lives in two named volumes and survives "docker compose down"; add -v to
 # throw it away:   docker compose down -v
+#
+# A local Keycloak stands in for a real OIDC provider (production points the
+# same three env vars at INFN's own, GODiVA-fed one instead), for testing a
+# person who can hold different roles in more than one workspace — a PAT
+# never can, by design. See docs/oidc-dev-setup.md: what it does and doesn't
+# simulate, the six test users it seeds, and how to fetch each one a token.
+#
+#   docker compose up -d --build --wait
+#   docker compose exec api python scripts/seed_dev_users.py
 
 name: argus-knowledge-hub
 
@@ -47,6 +56,13 @@ services:
       # a saved import configuration.
       IMPORT_SECRETS_KEY: ${IMPORT_SECRETS_KEY:-yADxm1nk5JiTglldbDr6z-QsCFvuKVnRO-UVZgarSdc=}
       ATTACHMENTS_DIR: /data/attachments
+      # Points at the local Keycloak below. A PAT is checked first and still
+      # works with none of this running (see auth.py get_identity); these only
+      # matter once a bearer token isn't a known PAT. Swapping in INFN's real
+      # GODiVA-fed Keycloak later is changing these three values, nothing else.
+      OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/argus-dev
+      OIDC_JWKS_URI: http://keycloak:8080/realms/argus-dev/protocol/openid-connect/certs
+      OIDC_AUDIENCE: argus-webapp
     volumes:
       - attachments:/data/attachments
     ports:
@@ -65,6 +81,39 @@ services:
         condition: service_healthy
     ports:
       - "${WEB_PORT:-5173}:8080"
+
+  # A stand-in identity provider, not part of the default "docker compose up"
+  # story for anyone who only wants PAT logins — nothing above requires it to
+  # be running. KC_HOSTNAME pins the issuer to one fixed URL regardless of
+  # whether a request reaches it as "keycloak:8080" (from inside this compose
+  # network) or "localhost:8081" (from the host or a browser); without that,
+  # the two paths mint tokens with two different `iss` claims and only one of
+  # them would ever verify.
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.5
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      # A bare hostname, not a URL: this build's hostname provider (v24) takes
+      # KC_HOSTNAME + KC_HOSTNAME_PORT separately and composes the URL itself;
+      # handing it a scheme produces a mangled issuer ("http://http//...").
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: ${KEYCLOAK_PORT:-8081}
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
+    healthcheck:
+      # This build (24.0.5) serves /health on the main port; the separate
+      # management port is a later version's default, not this one's.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /health/ready HTTP/1.1\\r\\nhost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
 
 volumes:
   pgdata:

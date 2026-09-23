@@ -1,0 +1,81 @@
+{
+  "realm": "argus-dev",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "accessTokenLifespan": 1800,
+  "clients": [
+    {
+      "clientId": "argus-webapp",
+      "name": "ARGUS Knowledge Hub (dev)",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:5173/*"],
+      "webOrigins": ["http://localhost:5173"],
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin.test",
+      "email": "admin.test@argus.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Admin",
+      "credentials": [{"type": "password", "value": "argus-dev", "temporary": false}]
+    },
+    {
+      "username": "owner.test",
+      "email": "owner.test@argus.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Owner",
+      "credentials": [{"type": "password", "value": "argus-dev", "temporary": false}]
+    },
+    {
+      "username": "contributor.test",
+      "email": "contributor.test@argus.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Contributor",
+      "credentials": [{"type": "password", "value": "argus-dev", "temporary": false}]
+    },
+    {
+      "username": "viewer.test",
+      "email": "viewer.test@argus.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Viewer",
+      "credentials": [{"type": "password", "value": "argus-dev", "temporary": false}]
+    },
+    {
+      "username": "curator.test",
+      "email": "curator.test@argus.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Curator",
+      "credentials": [{"type": "password", "value": "argus-dev", "temporary": false}]
+    },
+    {
+      "username": "outsider.test",
+      "email": "outsider.test@argus.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Outsider",
+      "credentials": [{"type": "password", "value": "argus-dev", "temporary": false}]
+    }
+  ]
+}
