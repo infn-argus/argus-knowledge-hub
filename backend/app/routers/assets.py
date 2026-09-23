@@ -12,6 +12,7 @@ from app.db import get_db
 from app.models.asset import Asset, Relation
 from app.models.attachment import Attachment
 from app.models.schema import Schema
+from app.models.workspace import Workspace
 from app.schemas.asset import (
     AssetCreate,
     AssetOut,
@@ -24,6 +25,7 @@ from app.schemas.asset import (
 from app.services.attribute_validation import validate_attributes
 from app.services.current_user_attrs import stamp_current_user_attributes
 from app.services.relations import rebuild_asset_relations, rebuild_asset_relations_with_neighbors
+from app.services.visibility import asset_visible_in, visible_assets_clause
 
 router = APIRouter(prefix="/v1/assets", tags=["assets"])
 
@@ -36,21 +38,9 @@ def list_assets(
     workspace_id: str = Depends(require_permission("read")),
     db: Session = Depends(get_db),
 ):
-    # Visible if the asset's own workspace matches, the asset itself is
-    # flagged global, or its type (schema) is global — a global schema makes
-    # every one of its instances referenceable from any workspace without
-    # needing each asset individually flagged too.
-    stmt = (
-        select(Asset)
-        .join(Schema, Schema.uid == Asset.schema_uid)
-        .where(
-            or_(
-                Asset.workspace_id == workspace_id,
-                Asset.is_global.is_(True),
-                Schema.is_global.is_(True),
-            )
-        )
-    )
+    # This workspace's own objects, and any other workspace's that are flagged
+    # global. Being of a global *type* is not enough (see services/visibility).
+    stmt = select(Asset).where(visible_assets_clause(workspace_id))
     if schema_uid:
         stmt = stmt.where(Asset.schema_uid == schema_uid)
     return db.scalars(stmt).all()
@@ -68,7 +58,13 @@ def create_asset(
     schema = db.get(Schema, body.schema_uid)
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
     validate_attributes(db, schema, body.attributes, workspace_id, Asset)
-    asset = Asset(workspace_id=workspace_id, **body.model_dump())
+    data = body.model_dump()
+    # Made in a global workspace, an object is global unless it says otherwise —
+    # as its types and documents already are.
+    workspace = db.get(Workspace, workspace_id)
+    if "is_global" not in body.model_fields_set and workspace is not None and workspace.is_global:
+        data["is_global"] = True
+    asset = Asset(workspace_id=workspace_id, **data)
     db.add(asset)
     db.commit()
     db.refresh(asset)
@@ -89,10 +85,7 @@ def _get_visible_asset(uid: str, workspace_id: str, db: Session) -> Asset:
     asset = db.get(Asset, uid)
     if asset is None:
         raise HTTPException(status_code=404, detail="Asset not found")
-    if asset.workspace_id == workspace_id or asset.is_global:
-        return asset
-    schema = db.get(Schema, asset.schema_uid)
-    if schema is not None and schema.is_global:
+    if asset_visible_in(asset, workspace_id):
         return asset
     raise HTTPException(status_code=404, detail="Asset not found")
 

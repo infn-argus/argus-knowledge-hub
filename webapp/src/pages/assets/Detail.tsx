@@ -1,3 +1,4 @@
+import { OwnerBadge } from "../../components/OwnerBadge";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -219,6 +220,7 @@ export function AssetDetail() {
                   Global
                 </span>
               )}
+              <OwnerBadge workspaceId={a.workspace_id} />
             </h1>
             <p className="text-sm text-slate-500">
               {a.key} · {a.type} · schema:{" "}

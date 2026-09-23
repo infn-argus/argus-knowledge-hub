@@ -82,3 +82,10 @@ export async function infnSignOut(): Promise<boolean> {
   await m.signoutRedirect();
   return true;
 }
+
+/** Forgets the stored session without going to the provider: for when the
+ * provider has already ended it (its idle timeout) and there is nothing left
+ * to sign out of. */
+export async function infnForgetSession(): Promise<void> {
+  if (infnLoginEnabled) await getManager().removeUser();
+}

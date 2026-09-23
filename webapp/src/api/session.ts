@@ -1,5 +1,5 @@
 import { getFreshIdToken } from "./firebase";
-import { getInfnIdToken } from "./infnAuth";
+import { getInfnIdToken, infnForgetSession } from "./infnAuth";
 
 const LEGACY_KEY = "assetmanagement.session";
 const PROFILES_KEY = "assetmanagement.profiles";
@@ -104,7 +104,18 @@ export async function loadSession(): Promise<ResolvedSession | null> {
 
   if (profile.authType === "oidc") {
     const token = profile.provider === "infn" ? await getInfnIdToken() : await getFreshIdToken();
-    if (!token) return null;
+    if (!token) {
+      // The provider ended the session (its idle timeout, or the person was
+      // signed out elsewhere) and the refresh token went with it. Left alone
+      // this is an app that shows nothing and says nothing; the sign-in screen
+      // is the only useful place to be.
+      if (profile.provider === "infn") {
+        await infnForgetSession().catch(() => {});
+        removeProfile(profile.id);
+        window.location.reload();
+      }
+      return null;
+    }
     return { baseUrl: profile.baseUrl, authType: "oidc", token, workspaceId: profile.activeWorkspaceId };
   }
 

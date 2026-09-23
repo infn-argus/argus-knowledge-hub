@@ -814,18 +814,16 @@ def run_jira_import(
             # and rendered fine in the attribute list, but the object
             # showed "Inbound: none / Outbound: none". So the map spans
             # everything visible from here, by the same rule references
-            # use: own workspace, or a global asset, or an asset of a
-            # global type. Asset.key is unique across workspaces, so
+            # use: own workspace, or an asset flagged global (being of a
+            # global type is not enough). Asset.key is unique across workspaces, so
             # widening the map can't shadow a local object.
             key_to_uid = dict(
                 db.execute(
                     select(Asset.key, Asset.uid)
-                    .join(Schema, Asset.schema_uid == Schema.uid, isouter=True)
                     .where(
                         or_(
                             Asset.workspace_id == workspace_id,
                             Asset.is_global.is_(True),
-                            Schema.is_global.is_(True),
                         )
                     )
                 ).all()

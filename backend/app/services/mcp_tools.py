@@ -54,10 +54,7 @@ def _asset_visible(db: Session, asset: Asset, workspace_id: str) -> bool:
     them here too, or "what model is this camera" is unanswerable in the
     tool built to answer it.
     """
-    if asset.workspace_id == workspace_id or asset.is_global:
-        return True
-    schema = db.get(Schema, asset.schema_uid)
-    return bool(schema is not None and schema.is_global)
+    return asset.workspace_id == workspace_id or bool(asset.is_global)
 
 
 def _document_visible(workspace_id: str):

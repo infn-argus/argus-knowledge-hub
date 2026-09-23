@@ -102,8 +102,8 @@ class DependencyGraph:
                 self._by_key[asset.key] = asset.uid
 
 
-def _visible(asset: Asset, workspace_id: str, global_schemas: set) -> bool:
-    return asset.workspace_id == workspace_id or bool(asset.is_global) or asset.schema_uid in global_schemas
+def _visible(asset: Asset, workspace_id: str) -> bool:
+    return asset.workspace_id == workspace_id or bool(asset.is_global)
 
 
 def load_graph(db: Session, workspace_id: str, layers: Optional[Iterable[str]] = None) -> DependencyGraph:
@@ -118,9 +118,7 @@ def load_graph(db: Session, workspace_id: str, layers: Optional[Iterable[str]] =
     for chunk in _chunks(sorted(uids), 500):
         for asset in db.scalars(select(Asset).where(Asset.uid.in_(chunk), Asset.deleted_at.is_(None))):
             assets[asset.uid] = asset
-    global_schemas = set(db.scalars(select(Schema.uid).where(
-        Schema.uid.in_({a.schema_uid for a in assets.values()}), Schema.is_global.is_(True))))
-    visible = {u: a for u, a in assets.items() if _visible(a, workspace_id, global_schemas)}
+    visible = {u: a for u, a in assets.items() if _visible(a, workspace_id)}
 
     hops, unclassified = [], collections.Counter()
     for r in relations:

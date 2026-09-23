@@ -109,7 +109,7 @@ Verified against the code, because the catalogue must fit the machinery that wil
 | MCP object search matches the type **name** as a substring | `backend/app/services/mcp_tools.py:126` | Type names must be the words operators use. "Ion Pump", not "VacuumDevice". This is the strongest argument for a wide catalogue. |
 | Photo identification writes `manufacturer`, `model`, `serial`, `description`, and reads keys matching `^[A-Z][A-Z0-9]{1,9}-\d{1,8}$` | `backend/app/services/asset_vision.py:31` | Those four keys are **reserved**; the physical base must declare them unprefixed, and the key scheme must match that pattern. |
 | `argus_system` / `argus_subsystem` / `argus_facility` / `argus_keywords` already mean something on tickets and documents | `ticket_types.py:72`; `document_types.py:77` | Objects must spell them identically, or "everything about the vacuum system" cannot be answered across sections. |
-| A type flagged global is usable and inheritable from every workspace, and **the objects of a global type are readable in every workspace**, editable only in the one that made them | `backend/app/routers/assets.py:45-52`; `schemas.py:46` | The shared types live in one catalogue workspace (§8). Sharing a type shares its objects, and that is what decides what may be shared. |
+| A type flagged global is usable and inheritable from every workspace. **An object is readable outside its workspace only if it is itself flagged global**, and is editable only in the one that made it | `backend/app/services/visibility.py`; `schemas.py:46` | The shared types live in one catalogue workspace (§8). Sharing a type shares the *definition*; sharing an object is a separate, deliberate flag. (It used to be one rule, and every beamline's cameras appeared in every other beamline.) |
 | An enumeration is **stored as its label**: the edit form writes `opt.value`, and the validator compares against labels (`attribute_validation.py:137`). The read view resolves ids, then falls back to showing the raw value | `AttributeInput.tsx:260`; `AttributeValue.tsx:56` | Importers must write labels (`"Approved"`), not ids (`"approved"`), or the first human edit of the object fails validation. `argus_source: "epik8s"` passes only because the label `EPIK8s` lower-cases to it. |
 | Regex is `re.search`, not `fullmatch` | `attribute_validation.py:127` | Anchor every pattern `^…$`. |
 | `unique` is scoped to one exact `schema_uid`, not the subtree | `attribute_validation.py:163` | A serial unique on `Asset` is *not* unique across its leaves. Put `unique` on the leaf, or accept it as advisory. |
@@ -661,7 +661,7 @@ where its objects should be readable.
 | Where | one catalogue workspace, every type flagged global | each beamline's own workspace, not global |
 | What | `Item`, `Engineered Item`, the whole **`Asset`** branch, the **`Catalog Item`** branch (`Product Model`, `Vendor`), the **`Location`** branch | the **`Functional Element`** branch (facility, sections, modules, lattice elements, screen stations…), the **`Control Item`** branch (configuration, IOCs, devices, access points…), the **`Engineering Record`** branch (utilities, procurement, work packages) |
 | Meaning | what exists physically and can be bought: one inventory | how one machine is arranged, controlled and paid for |
-| Objects | readable in **every** workspace, editable only where they were made | stay in the workspace that made them |
+| Objects | stay in the workspace that made them, **unless flagged global** (a product model, a vendor, a person, a company, an inventory document: what is meant to be shared) | stay in the workspace that made them |
 
 A beamline type hangs from global parents (`Functional Element` from `Engineered Item`,
 `Control Item` from `Item`), and inherits their attributes across workspaces. **Dependencies
@@ -707,8 +707,9 @@ documents (14): a workspace that only holds tickets has no use for object types 
 Measured on the three real configurations and the PBS workbook, with the catalogue seeded once
 and each beamline seeded against it: SPARC's token sees **176 objects** of EuAPS's PBS import
 (156 RF loads, couplers, mode converters and other components of shared types, and 20 areas) and
-**none** of its control, structure or cost objects. That is the trade, and it is deliberate: a
-shared inventory is readable everywhere.
+**none** of its control, structure or cost objects. That was the trade under the old rule, in
+which an object of a shared type was readable everywhere. It is no longer: an object is shared
+only when flagged (below), and an object made in a global workspace is flagged as it is made.
 
 It is also why the engineering records are the beamline's own. They were first classed as shared,
 and the same measurement then showed SPARC reading 408 of EuAPS's objects, among them its 179
@@ -718,10 +719,14 @@ in `asset_types.py`) to move anything.
 
 ### What it does not do
 
-- **The sidebar tree shows only a workspace's own types.** Shared types, and the objects made
-  from them, are found by search, on the type's own page and in the type picker of the object
-  form, but they do not appear in a beamline's tree. A "Shared catalogue" group in the tree is the
-  natural fix and has not been built.
+- **Objects are private by default.** Sharing a *type* shares its definition; an object is visible in
+  another workspace only if it is flagged global, and that is meant for what is genuinely shared
+  (product models, vendors, people, companies, inventory documents) and not for a beamline's own
+  cameras and pumps. Objects made in a global workspace are flagged when they are made, and a
+  migration flagged those already there. Search opens on "This workspace only", with "shared" one
+  click away, and a shared object carries a badge naming the workspace that owns it.
+- **The sidebar tree has a "Shared" group** below a workspace's own types, one section per owning
+  workspace, and every count is the total for the type and everything beneath it.
 - **Document types are still seeded per workspace.** Creating a workspace makes its 14 document
   types (`ensure_document_types`). Sharing them means it stops doing that, which is a separate
   decision. Documents themselves are shared one at a time, or by flagging the catalogue workspace.
@@ -910,8 +915,8 @@ quadrupole.
 | …that is an axis of a mirror (`FI4-HMN-01`, `FI8-PRH-01`, `FI3-MMR-001`) | `Motor Axis` | a `Mirror` (`FI4-MMIR-001`), `composed of` its axes |
 
 The control device `acts on` what it drives; an IOC `drives` a unit. Assets are of shared types
-and elements of the beamline's own, so the elements stay in the beamline and the assets are
-readable everywhere (§8).
+and elements of the beamline's own; both stay in the beamline that imported them, and an asset
+becomes visible elsewhere only by being flagged global (§8).
 
 **The plant.** Chillers, timing and what gates RF are read as well (`docs/knowledge-graph-design.md`
 §5): a chiller channel is a `Chiller` and `cools` the gun, section or structure its name gives (ELI's
@@ -1596,8 +1601,9 @@ Ordered by what blocks what. Items 1, 3, 4, 9, 10, 11 and 12–15 are done; the 
    partition the catalogue and no shared type depends on a beamline type, that seeding is
    idempotent and additive, that the rename carries a seeded workspace across, that **every key
    the real importer writes is declared by the type it writes to**, and, through the REST API,
-   that an object of a shared type is readable from another workspace but not editable there,
-   and one of a beamline type is not readable at all.
+   that an object of a shared type is *not* readable from another workspace unless flagged global
+   (and then not editable there), that one made in a global workspace is flagged as it is made, and
+   that one of a beamline type is not readable at all.
 
 4. **DONE — seeding and importing, in either order.** `epik8s_import.ensure_types()` finds each
    type where the catalogue put it (a workspace's own, then the catalogue it hangs from, then any
@@ -1630,7 +1636,8 @@ Ordered by what blocks what. Items 1, 3, 4, 9, 10, 11 and 12–15 are done; the 
     It seeds the types it needs if they are not there (only the beamline's own when the workspace
     hangs from a catalogue, given or known; the whole catalogue in a hub with one workspace),
     reads every sheet with a `PBS-CODE` column, and writes per §10.2. In a split hub the
-    components of shared types (RF loads, couplers, areas) are readable everywhere, while the
+    components of shared types (RF loads, couplers, areas) stay in the workspace that imported them
+    unless flagged global, and the
     accelerating structures, modules and stations, and every utility, procurement and work-package
     record, stay in the beamline. Run on `2026-06-11 - EuPRAXIA PBS_ver2.xlsx` it produces **463 objects
     and 937 relations**:
@@ -1722,13 +1729,9 @@ Ordered by what blocks what. Items 1, 3, 4, 9, 10, 11 and 12–15 are done; the 
   interconnections (99: couplers, hybrids, windows, attenuators, phase shifters). `A` is also the
   plasma letter, so it reads as *accelerating*. That is a reading of the members, not a legend, and
   the design team should still write it down.
-- **Should the sidebar tree show the shared types?** With global types a beamline's tree lists only
-  its own 45, not `Asset` and its leaves, though objects of them are searchable and can be created.
-  A "Shared catalogue" group is the fix (§8) and is a decision about what a workspace's tree is
-  for.
-- **Is the shared inventory meant to be readable everywhere?** It is what "global types" means, and
-  it is why costs are private. If some assets should not be, the alternative is the per-beamline
-  set for them, at the price of copies.
+- **Which objects should be flagged global by default?** An object made in a global workspace is.
+  Whether the `Catalog Item` types (product models, vendors) should be global wherever they are made,
+  and whether people and companies belong in the catalogue's types at all, is not settled.
 - **`drives` and `acts on` to assets already in the inventory are still not made.** They need the
   `asset:` resolution of §9.2. With `--infer-elements` they now reach the objects the import makes
   itself; matching those to what the inventory already holds is the remaining link.

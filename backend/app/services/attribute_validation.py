@@ -55,10 +55,7 @@ def effective_attributes(db: Session, schema: Schema) -> list[dict]:
 
 
 def _is_reference_visible(db: Session, target: Asset, workspace_id: str) -> bool:
-    if target.workspace_id == workspace_id or target.is_global:
-        return True
-    target_schema = db.get(Schema, target.schema_uid)
-    return bool(target_schema and target_schema.is_global)
+    return target.workspace_id == workspace_id or bool(target.is_global)
 
 
 def _is_duplicate(

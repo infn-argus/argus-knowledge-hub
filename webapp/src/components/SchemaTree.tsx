@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { assetsApi, documentsApi, iconsApi, issuesApi, schemasApi } from "../api/client";
 import { AppSchema } from "../api/types";
 import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
+import { useWorkspaceNames } from "../api/useWorkspaceNames";
 import { AuthenticatedImage } from "./AuthenticatedImage";
 
 interface TreeNode {
@@ -44,6 +45,16 @@ function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
   return nodes.map(walk).filter((n): n is TreeNode => n !== null);
 }
 
+/** Objects of this type and of every type below it. A parent type such as
+ * "Asset" has none of its own, so counting only direct instances showed every
+ * branch of the tree as empty. */
+function subtreeCount(node: TreeNode, counts: Map<string, number>): number {
+  return (
+    (counts.get(node.schema.uid) ?? 0) +
+    node.children.reduce((sum, child) => sum + subtreeCount(child, counts), 0)
+  );
+}
+
 function TreeNodeRow({
   node,
   depth,
@@ -62,7 +73,8 @@ function TreeNodeRow({
   const [expandedState, setExpanded] = useState(depth < 1);
   const expanded = forceExpanded || expandedState;
   const hasChildren = node.children.length > 0;
-  const count = counts.get(node.schema.uid) ?? 0;
+  const direct = counts.get(node.schema.uid) ?? 0;
+  const count = subtreeCount(node, counts);
   const isSelected = node.schema.uid === selectedUid;
 
   return (
@@ -96,7 +108,18 @@ function TreeNodeRow({
           <span className="h-3.5 w-3.5 shrink-0 rounded-sm bg-slate-200" />
         )}
         <span className="truncate">{node.schema.name}</span>
-        {count > 0 && <span className="ml-auto shrink-0 text-slate-400">{count}</span>}
+        {count > 0 && (
+          <span
+            className="ml-auto shrink-0 text-slate-400"
+            title={
+              hasChildren
+                ? `${count} in all, ${direct} of this type itself and ${count - direct} of the types below it`
+                : undefined
+            }
+          >
+            {count}
+          </span>
+        )}
       </div>
       {hasChildren && expanded && (
         <div>
@@ -145,11 +168,11 @@ export function SchemaTree({
   });
 
   // /v1/schemas also returns every *global* type owned by another workspace,
-  // because references have to resolve across workspaces. That belongs in the
-  // reference pickers, not here: a workspace with 24 types of its own was
-  // listing 105 once a neighbouring workspace shared its catalogue. The tree
-  // shows what this workspace owns; a type whose parent lives elsewhere simply
-  // surfaces as a root.
+  // because references have to resolve across workspaces. Mixed into the tree
+  // they buried a workspace's own types (24 of its own, listed among 105 once a
+  // neighbour shared its catalogue), so the tree shows what this workspace owns
+  // and the shared ones sit apart, below, under a "Shared" group per owner. A
+  // type whose parent lives elsewhere simply surfaces as a root.
   const scopedSchemas = useMemo(
     () =>
       (schemas.data ?? []).filter(
@@ -159,6 +182,23 @@ export function SchemaTree({
       ),
     [schemas.data, appliesTo, currentWorkspaceId],
   );
+  const sharedGroups = useMemo(() => {
+    if (currentWorkspaceId === null) return [];
+    const byOwner = new Map<string, AppSchema[]>();
+    for (const s of schemas.data ?? []) {
+      if ((s.applies_to ?? "objects") !== appliesTo || s.workspace_id === currentWorkspaceId) continue;
+      byOwner.set(s.workspace_id, [...(byOwner.get(s.workspace_id) ?? []), s]);
+    }
+    return [...byOwner.entries()]
+      .map(([owner, list]) => ({ owner, count: list.length, tree: buildTree(list) }))
+      .sort((a, b) => a.owner.localeCompare(b.owner));
+  }, [schemas.data, appliesTo, currentWorkspaceId]);
+  const visibleShared = useMemo(
+    () => sharedGroups.map((g) => ({ ...g, tree: filterTree(g.tree, query) })).filter((g) => g.tree.length > 0),
+    [sharedGroups, query],
+  );
+  const nameOf = useWorkspaceNames();
+  const [sharedOpen, setSharedOpen] = useState(false);
   const tree = useMemo(() => buildTree(scopedSchemas), [scopedSchemas]);
   const visibleTree = useMemo(() => filterTree(tree, query), [tree, query]);
   const counts = useMemo(() => {
@@ -209,6 +249,39 @@ export function SchemaTree({
             forceExpanded={query.length > 0}
           />
         ))}
+        {visibleShared.length > 0 && (
+          <div className="mt-2 border-t border-slate-200 pt-2">
+            <button
+              type="button"
+              onClick={() => setSharedOpen((v) => !v)}
+              className="flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-xs font-medium text-sky-700 hover:bg-slate-100"
+              title="Types other workspaces have shared with this one. Their objects appear here too, and can be edited only where they live."
+            >
+              <span className="w-3 text-slate-400">{sharedOpen || query ? "▾" : "▸"}</span>
+              Shared
+              <span className="ml-auto text-slate-400">{visibleShared.reduce((n, g) => n + g.count, 0)}</span>
+            </button>
+            {(sharedOpen || query.length > 0) &&
+              visibleShared.map((group) => (
+                <div key={group.owner} className="ml-3">
+                  <p className="px-1.5 pt-1 text-[11px] uppercase tracking-wide text-slate-400">
+                    {nameOf(group.owner)}
+                  </p>
+                  {group.tree.map((node) => (
+                    <TreeNodeRow
+                      key={node.schema.uid}
+                      node={node}
+                      depth={0}
+                      counts={counts}
+                      selectedUid={selectedUid ?? null}
+                      onSelect={(uid) => navigate(`/schemas/${uid}`)}
+                      forceExpanded={query.length > 0}
+                    />
+                  ))}
+                </div>
+              ))}
+          </div>
+        )}
       </div>
     </div>
   );

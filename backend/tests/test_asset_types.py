@@ -615,8 +615,9 @@ def test_a_stale_catalogue_workspace_is_named_not_worked_around(db, workspace):
 
 # --- what "global" means to the people using a beamline --------------------------------
 
-def test_an_object_of_a_shared_type_is_seen_everywhere_and_one_of_a_beamline_type_is_not(db, catalogue):
-    """The trade this design accepts, written down so it stays deliberate."""
+def test_a_shared_type_is_usable_everywhere_but_its_objects_stay_where_they_are_unless_flagged(db, catalogue):
+    """Types are shared, objects are not. A beamline's cameras are its own; a product model or a
+    vendor is what is flagged global, and only that is seen elsewhere."""
     cat, _ = catalogue
     sparc, btf = f"bl-{secrets.token_hex(4)}", f"bl-{secrets.token_hex(4)}"
     headers = {}
@@ -629,22 +630,50 @@ def test_an_object_of_a_shared_type_is_seen_everywhere_and_one_of_a_beamline_typ
         db.commit()
         headers[ws] = {"Authorization": f"Bearer {raw}"}
 
-    def make_in(ws, type_uid, type_name, prefix):
+    def make_in(ws, type_uid, type_name, prefix, **extra):
         uid = f"{prefix}-{secrets.token_hex(4)}"
         resp = client.post("/v1/assets", headers=headers[ws], json={
             "uid": uid, "schema_uid": type_uid, "key": f"{prefix.upper()}-{secrets.randbelow(10**7) + 10**6}",
-            "name": type_name, "type": type_name, "attributes": {}})
+            "name": type_name, "type": type_name, "attributes": {}, **extra})
         assert resp.status_code == 201, resp.text
         return uid
 
-    pump = make_in(sparc, at.type_uid(cat, "Ion Pump"), "Ion Pump", "pump")       # a shared type
-    facility = make_in(sparc, at.type_uid(sparc, "Facility"), "Facility", "fac")  # SPARC's own
+    pump = make_in(sparc, at.type_uid(cat, "Ion Pump"), "Ion Pump", "pump")            # a shared type, not flagged
+    model = make_in(sparc, at.type_uid(cat, "Ion Pump"), "Ion Pump", "mdl", is_global=True)   # the same type, flagged
+    facility = make_in(sparc, at.type_uid(sparc, "Facility"), "Facility", "fac")         # SPARC's own type
 
-    seen_from_btf = {a["uid"] for a in client.get("/v1/assets", headers=headers[btf]).json()}
-    assert pump in seen_from_btf and facility not in seen_from_btf
+    def seen_from(ws):
+        return {a["uid"] for a in client.get("/v1/assets", headers=headers[ws]).json()}
+
+    assert pump not in seen_from(btf) and facility not in seen_from(btf)     # of a shared type is not enough
+    assert model in seen_from(btf)                                           # flagged: seen elsewhere
+    assert {pump, model, facility} <= seen_from(sparc)                       # and everything is seen at home
     # seen, not editable: the owning workspace is the only one that can change it
-    assert client.put(f"/v1/assets/{pump}", headers=headers[btf], json={"name": "x"}).status_code == 404
-    assert client.put(f"/v1/assets/{pump}", headers=headers[sparc], json={"name": "x"}).status_code == 200
+    assert client.get(f"/v1/assets/{pump}", headers=headers[btf]).status_code == 404
+    assert client.put(f"/v1/assets/{model}", headers=headers[btf], json={"name": "x"}).status_code == 404
+    assert client.put(f"/v1/assets/{model}", headers=headers[sparc], json={"name": "x"}).status_code == 200
+
+
+def test_an_object_made_in_a_global_workspace_is_global_unless_it_says_otherwise(db, catalogue):
+    cat, _ = catalogue
+    workspace = db.get(Workspace, cat)
+    workspace.is_global = True
+    db.commit()
+    raw = secrets.token_urlsafe(16)
+    db.add(ApiToken(workspace_id=cat, token_hash=hash_token(raw)))
+    db.commit()
+    headers = {"Authorization": f"Bearer {raw}"}
+
+    def make(prefix, **extra):
+        uid = f"{prefix}-{secrets.token_hex(4)}"
+        resp = client.post("/v1/assets", headers=headers, json={
+            "uid": uid, "schema_uid": at.type_uid(cat, "Ion Pump"), "key": f"{prefix.upper()}-{secrets.randbelow(10**7) + 10**6}",
+            "name": "x", "type": "Ion Pump", "attributes": {}, **extra})
+        assert resp.status_code == 201, resp.text
+        return client.get(f"/v1/assets/{uid}", headers=headers).json()["is_global"]
+
+    assert make("a") is True                       # made in a global workspace
+    assert make("b", is_global=False) is False     # unless it says otherwise
 
 
 def test_a_workspace_knows_which_catalogue_it_hangs_from(db, catalogue, workspace):

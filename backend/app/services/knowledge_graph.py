@@ -294,10 +294,7 @@ def _asset_visible(db: Session, asset: Asset, workspace_id: str) -> bool:
     and then vanishes from the one view built to show what connects to what
     — which is where an installation with a shared model layer needs it most.
     """
-    if asset.workspace_id == workspace_id or asset.is_global:
-        return True
-    schema = db.get(Schema, asset.schema_uid)
-    return bool(schema is not None and schema.is_global)
+    return asset.workspace_id == workspace_id or bool(asset.is_global)
 
 
 def load_node(db: Session, workspace_id: str, kind: str, uid: str) -> Optional[Node]:

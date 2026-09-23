@@ -163,7 +163,7 @@ export function AssetForm() {
             onChange={(e) => setIsGlobal(e.target.checked)}
           />
           <label htmlFor="is_global" className="text-sm text-slate-700">
-            Global (visible and referenceable from every workspace)
+            Global — visible and referenceable from every workspace (for what is meant to be shared: models, vendors, people, companies). Otherwise it stays in this workspace.
           </label>
         </div>
 

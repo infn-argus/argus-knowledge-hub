@@ -27,7 +27,8 @@ def _schema():
 
 def _setup_cross_workspace_camera(db, suffix):
     """A camera in EUAPS whose "Owner" attribute holds the Jira display label
-    of a workgroup owned by another workspace and shared via its type."""
+    of a workgroup owned by another workspace and shared by being flagged global (a type
+    being global shares the definition, not the objects)."""
     ws_shared, ws_own = f"divacc-{suffix}", f"euaps-{suffix}"
     workgroup_schema, camera_schema = f"wg-{suffix}", f"cam-{suffix}"
     workgroup_uid, camera_uid = f"wg-obj-{suffix}", f"cam-obj-{suffix}"
@@ -46,7 +47,7 @@ def _setup_cross_workspace_camera(db, suffix):
     db.flush()
     db.add(Asset(
         uid=workgroup_uid, workspace_id=ws_shared, schema_uid=workgroup_schema,
-        key=f"LNFT1-{suffix}", name="Servizio Laser", type="Workgroup",
+        key=f"LNFT1-{suffix}", name="Servizio Laser", type="Workgroup", is_global=True,
     ))
     db.add(Asset(
         uid=camera_uid, workspace_id=ws_own, schema_uid=camera_schema,

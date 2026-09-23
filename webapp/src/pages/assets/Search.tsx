@@ -5,12 +5,16 @@ import { assetsApi, schemasApi } from "../../api/client";
 import { AttributeFilterInput } from "../../components/AttributeFilterInput";
 import { activeFilterCount, defaultFilterFor, FilterState, matchesFilters } from "../../components/AttributeFilters";
 import { BulkActionsBar } from "../../components/BulkActionsBar";
+import { OwnerBadge } from "../../components/OwnerBadge";
+import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 
 export function AssetSearch() {
   const queryClient = useQueryClient();
   const [q, setQ] = useState("");
   const [schemaUid, setSchemaUid] = useState("");
+  const [owner, setOwner] = useState<"all" | "own" | "shared">("own");
+  const currentWorkspaceId = useCurrentWorkspaceId();
   const [filters, setFilters] = useState<FilterState>({});
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -41,12 +45,16 @@ export function AssetSearch() {
         return false;
       }
       if (schemaUid && a.schema_uid !== schemaUid) return false;
+      if (currentWorkspaceId !== null) {
+        if (owner === "own" && a.workspace_id !== currentWorkspaceId) return false;
+        if (owner === "shared" && a.workspace_id === currentWorkspaceId) return false;
+      }
       if (schema && Object.keys(filters).length > 0 && !matchesFilters(a.attributes, filters)) {
         return false;
       }
       return true;
     });
-  }, [assets.data, q, schemaUid, schema, filters]);
+  }, [assets.data, q, schemaUid, schema, filters, owner, currentWorkspaceId]);
 
   return (
     <div>
@@ -84,6 +92,16 @@ export function AssetSearch() {
               {s.name}
             </option>
           ))}
+        </select>
+        <select
+          value={owner}
+          onChange={(e) => setOwner(e.target.value as "all" | "own" | "shared")}
+          className="rounded border border-slate-300 px-3 py-2 text-sm"
+          aria-label="Whose objects"
+        >
+          <option value="own">This workspace only</option>
+          <option value="all">This workspace + shared</option>
+          <option value="shared">Shared from other workspaces</option>
         </select>
       </div>
 
@@ -188,7 +206,10 @@ export function AssetSearch() {
                       </Link>
                     </td>
                     <td className="px-4 py-2 text-slate-500">{a.key}</td>
-                    <td className="px-4 py-2 text-slate-500">{a.type}</td>
+                    <td className="px-4 py-2 text-slate-500">
+                      {a.type}
+                      <OwnerBadge workspaceId={a.workspace_id} />
+                    </td>
                   </tr>
                 ))}
                 {results.length === 0 && (

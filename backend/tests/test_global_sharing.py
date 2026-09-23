@@ -128,19 +128,21 @@ def test_a_private_object_still_does_not_load_from_elsewhere(world):
     db.close()
 
 
-# --- an object global only because its type is ---------------------------
+# --- an object of a global type is not global for that reason -----------
 
-def test_an_object_of_a_global_type_is_visible_like_the_rest(world):
-    """The REST API treats a global *type* as making its objects visible;
-    the graph has to agree, or the two views disagree about what exists."""
+def test_an_object_of_a_global_type_is_not_visible_elsewhere_unless_it_is_flagged(world):
+    """Types are shared; objects are shared only when flagged. The REST API, the graph and the tools
+    apply the same rule, or they disagree about what exists."""
     ids = world
     suffix = secrets.token_hex(4)
     db = SessionLocal()
-    stray = f"stray-{suffix}"
-    db.add(Asset(uid=stray, workspace_id=ids["global_ws"], schema_uid=f"sm-{ids['model'][6:]}",
-                 key=f"STRAY-{suffix}", name="Another model", type="Device Models"))
+    plain, flagged = f"plain-{suffix}", f"flagged-{suffix}"
+    for uid, is_global in ((plain, False), (flagged, True)):
+        db.add(Asset(uid=uid, workspace_id=ids["global_ws"], schema_uid=f"sm-{ids['model'][6:]}",
+                     key=f"{uid.upper()}", name="Another model", type="Device Models", is_global=is_global))
     db.commit()
-    assert load_node(db, ids["beamline"], "asset", stray) is not None
+    assert load_node(db, ids["beamline"], "asset", plain) is None
+    assert load_node(db, ids["beamline"], "asset", flagged) is not None
     db.close()
 
 
