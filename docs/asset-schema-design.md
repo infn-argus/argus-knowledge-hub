@@ -3,6 +3,10 @@
 *A type catalogue for the ARGUS Knowledge Hub, sized for a facility with thousands of
 devices, and for bringing the control configuration in as equipment rather than as a file.*
 
+> **Revised by [`asset-model-revision.md`](asset-model-revision.md).** Where the two disagree — provenance,
+> installation history, connectivity, relation governance, identity reconciliation, ownership and the
+> production type set — the revision states the intended model.
+
 ---
 
 ## 1. Why this document exists

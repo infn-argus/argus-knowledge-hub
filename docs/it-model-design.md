@@ -4,6 +4,10 @@
 and how do the control configurations reach them? §0 says what is built; the rest is the design
 it was built from.*
 
+> **Revised by [`asset-model-revision.md`](asset-model-revision.md).** Where the two disagree — provenance,
+> installation history, connectivity, relation governance, identity reconciliation, ownership and the
+> production type set — the revision states the intended model.
+
 ---
 
 ## 0. What is built
