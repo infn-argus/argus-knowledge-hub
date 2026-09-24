@@ -5,7 +5,7 @@ implements them, and a revised model that keeps their architecture and makes it 
 positions and installations, fact-level provenance, a governed relation registry, identity
 reconciliation, non-destructive retirement and a staged catalogue.*
 
-Status: **proposal, fourth revision**. Where this document and the two design notes disagree,
+Status: **proposal, fifth revision**. Where this document and the two design notes disagree,
 this one states the intended model. It refers to them by section (`AS §n` =
 `asset-schema-design.md`, `IT §n` = `it-model-design.md`).
 
@@ -92,6 +92,19 @@ No mechanism from the earlier revisions changes. This revision:
   time (§8.6), port safety (§9.3), identity binding (§10) and migration rollback (§12).
 
 §21 lists the decisions that only stakeholders can make, and §22 states the architectural policy.
+
+### 0.5 Final implementation clarifications
+
+The fifth revision closes four boundary cases found in the documentation review:
+
+- a source observation time is record-time evidence, not automatically an exact valid-time
+  endpoint; source-derived service changes are intervals until a person confirms the instant;
+- a confirmed port map resolves port identity but never bypasses hard electrical or configured-mode
+  compatibility;
+- the Moxa `4000 + N` convention is evidence only and cannot authorize an attachment unless a
+  Product Model rule, IT registry record, or person confirms it;
+- authority precedence compares `source_instance` and semantic `rule` at separate levels, and its
+  validator reruns when the policy vocabulary grows.
 
 ---
 
@@ -765,16 +778,17 @@ level by level. The first level at which two rules differ decides between them.
 
 | Level | Compares | Wins |
 |---|---|---|
-| L1 source identity | whether `source_instance` or `rule` is given | given |
-| L2 scope | how many of `owner_workspace`, `facility`, `domain` are given | more |
-| L3 predicate | exact, glob or absent | exact > glob > absent |
-| L4 object type | exact type, inherited (`+`) or absent | exact > inherited > absent |
-| L5 type depth | depth of the inherited type (only when L4 = inherited) | deeper |
-| L6 source kind | whether `source_kind` is given | given |
-| L7 priority | the explicit integer | larger |
+| L1 source instance | whether `source_instance` is given | given |
+| L2 semantic rule | whether `rule` is given | given |
+| L3 scope | how many of `owner_workspace`, `facility`, `domain` are given | more |
+| L4 predicate | exact, glob or absent | exact > glob > absent |
+| L5 object type | exact type, inherited (`+`) or absent | exact > inherited > absent |
+| L6 type depth | depth of the inherited type (only when L5 = inherited) | deeper |
+| L7 source kind | whether `source_kind` is given | given |
+| L8 priority | the explicit integer | larger |
 
 If no rule matches, `defaults` apply according to the claim's method. Two matching rules that
-are equal on L1 to L7 but have different effects make the policy invalid, and it is rejected at
+are equal on L1 to L8 but have different effects make the policy invalid, and it is rejected at
 load time (I-POL-1).
 
 **Example: why the precedence is lexicographic.**
@@ -793,8 +807,9 @@ gave the generic rule 6 and the source-instance rule 3, so a test branch would h
 authoritative for every PV. Under lexicographic precedence, `btf-test-branch` wins at L1.
 
 In the SPARC rules above, `sparc-control-from-sparc-main` (L1 given) beats
-`sparc-control-from-other-files` (L1 absent, L2 = 1), which in turn beats `config-owns-control`
-(L2 = 0).
+`sparc-control-from-other-files` (L1 absent, L3 = 1), which in turn beats `config-owns-control`
+(L3 = 0). A policy tied to a semantic inference rule is evaluated at L2 only after source-instance
+specificity has been considered, so the two forms of identity cannot tie accidentally.
 
 **Load-time validation.** `policy validate` runs in CI and before any activation. Every match
 dimension ranges over a finite vocabulary: declared predicates, catalogue types, workspaces,
@@ -807,7 +822,7 @@ enumeration.
 | unreachable | every tuple the rule matches is also matched by a higher-precedence rule | error (dead rule) |
 | shadowed | part of the rule's match set is taken by a higher-precedence rule with a different effect | warning, listing the overlap |
 | redundant | over its whole match set, the rule is outranked by rules with the same effect | warning |
-| dominant | an L1 or L2 rule matches a **protected predicate** for a source that is not among its owners; or it would change the effective value of more than 5 % of its source kind's facts in the current ledger | error, unless the rule carries `allow_dominant: <reason>` |
+| dominant | an L1, L2 or L3 rule matches a **protected predicate** for a source that is not among its owners; or it would change the effective value of more than 5 % of its source kind's facts in the current ledger | error, unless the rule carries `allow_dominant: <reason>` |
 
 Protected predicates are declared once per policy:
 
@@ -820,6 +835,10 @@ protected:
 **Impact report.** Validation also produces a report listing the facts whose effective value,
 rank or status would change, by predicate and workspace. An `activate_policy` decision must
 reference that report.
+
+The finite vocabulary is itself versioned. Registering a workspace, facility, domain, source
+stream, predicate, catalogue type, or semantic rule id invalidates the previous validation result.
+The policy must be validated again before claims in the new vocabulary can become effective.
 
 **Changing a policy** means issuing a new `policy_version`. The project stage then reruns, and
 every status that changes gets a `status_event` with `cause = policy:<version>`. A policy change
@@ -1160,17 +1179,23 @@ tickets, documents or service commitments must follow the address across positio
 - **Assignment.** `assigned to` → position is set at most once (I-AP-2). An Access Point may
   start unassigned, as a transitional state, and be assigned later, once.
 - **Service interval** [valid]: `in_service_from` and `in_service_until`, both temporal values.
-  - `in_service_from` defaults to the `observed_at` of the first published revision that states
-    the address, at the source's precision. Migrated Access Points use `before_records`.
-  - `in_service_until` defaults to `open`. On retirement it is set to the `observed_at` of the
-    published revision that stopped stating the address or reassigned it.
+  - `observed_at` is record-time evidence and never becomes an exact valid-time endpoint merely
+    because a source revision has instant precision.
+  - On first observation, `in_service_from` is `before_records` unless the source states an
+    operational activation time. Its bound is the first published observation.
+  - When a published revision first shows a disappearance or reassignment, the inferred handover
+    lies between the previous published observation and the new one. The two endpoints are stored
+    as a temporal value with that earliest/latest range, so historical queries return `possible`
+    during the uncertainty window.
+  - `in_service_until` otherwise defaults to `open`.
   - A person can confirm exact values.
 - **Reassignment.** When the address is claimed for a different position, or a person moves it,
   one atomic batch runs:
-  1. The old Access Point gets `in_service_until`, record status `Retired` and `successor` = the
-     new Access Point (record event).
+  1. The old Access Point gets the inferred handover interval as `in_service_until`, record status
+     `Retired` and `successor` = the new Access Point (record event).
   2. A new Access Point is created with the same address, assigned to the new position, with
-     `in_service_from` at the same instant.
+     `in_service_from` represented by the same uncertain handover interval. A confirmed service
+     action may replace both with the same exact instant.
   3. The source ref is rebound to the new Access Point (`identity_event: rebound`). The stream's
      path claims (`enters at`) therefore project onto it.
   4. The old Access Point's address label becomes inactive. Its key and uid stay resolvable.
@@ -1225,9 +1250,9 @@ Invariants:
   - `tcp_port`, `signal_level`, `termination`.
 - **Bus Segment:**
   - `required_port`: `{role | label, kind, mode, tcp_port, signal_level?, termination?}`. These
-    are claims. They are initially inferred from the configuration: for example, port 4003
-    implies role `serial-data#3`, `tcp_port` 4003 and mode TCP server. They stay advisory until
-    confirmed.
+    are claims. A source may state the TCP port, but a mapping such as `4003 → serial-data#3` is
+    only advisory evidence. It becomes an effective role requirement only when a Product Model's
+    versioned mapping rule, the IT registry, or a person confirms it.
   - `safety_class`: a governed enumeration, set by the owning steward and reviewed by Controls
     and the safety owners (D14). Values: `none`, `personnel_safety`, `machine_protection`,
     `interlock`, `critical_rf_permit`, `critical_actuator`, `damage_risk` (an incorrect mapping
@@ -1240,12 +1265,16 @@ Invariants:
 **Algorithm** (derive stage). It runs for a segment S whose path's Access Point is assigned to
 position P, where the current Installation I holds unit U:
 
-1. **Confirmed map.** If a confirmed `port_map` exists for I, check that the port belongs to U
-   and passes the kind check in step 3b. If so, attach. If not, create no edge and open a
-   `port_map_invalid` review item.
+1. **Confirmed map.** If a confirmed `port_map` exists for I, use it to resolve identity, then
+   apply every hard compatibility check in step 3: configured kind and mode, electrical level,
+   safety-critical termination, and ownership by U. A confirmation cannot override these. A
+   protocol or TCP mapping mismatch may be overridden only by a separate confirmed exception with
+   a reason, and never for a segment whose `safety_class` is not `none`. Otherwise create no edge
+   and open a `port_map_invalid` review item.
 2. **Confirmation required.** If `S.require_swap_confirmation` is set and there is no confirmed
    map for I, create no edge and open a `port_confirmation_required` review item.
-3. **Candidates.** Take the ports of U and filter them in order:
+3. **Candidates.** Take the ports of U and filter them in order. Identity criteria select a port;
+   all remaining criteria are compatibility constraints:
    a. **identity**: `port_role` equals the required role, including its index. If the
       requirement names no role, `port_label` must equal the required label.
    b. **kind**: `port_kind` is compatible with the segment's medium, per a compatibility table
@@ -1270,15 +1299,16 @@ position P, where the current Installation I holds unit U:
    *unattached*: its devices still depend on the path and the Access Point, and the port-level
    answer is shown as unknown rather than wrong.
 
-A port number alone is never a match criterion. The previous unit's attachment stays in history
-through its Installation interval.
+A TCP port number or the `4000 + N` convention alone is never a match criterion. The previous
+unit's attachment stays in history through its Installation interval.
 
 Invariants:
 
 - **I-PORT-1.** A derived `attached to` exists only if step 1 or step 4 holds for the current
-  Installation.
+  Installation and every hard compatibility constraint passes.
 - **I-PORT-2.** A confirmed port map applies only to its own Installation.
 - **I-PORT-3.** An unresolved mapping always has an open review item.
+- **I-PORT-4.** An inferred numeric mapping cannot by itself produce `attached to`.
 
 ### 9.4 Lifecycle example: a converter swap
 
@@ -1304,8 +1334,8 @@ the new unit:
 
   The gap closes in one of two ways. IT reconfigures the ports, a new registry revision
   publishes, and the next derive run attaches them. Or a person confirms port maps; this is
-  possible only once the configured kind is compatible, because step 1 also applies the kind
-  check.
+  possible only once every hard compatibility check passes. Confirmation identifies the intended
+  port; it does not authorize an electrically or operationally incompatible connection.
 
 ---
 
@@ -1663,19 +1693,19 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 
 | # | Given | When | Then | Validates |
 |---|---|---|---|---|
-| A17 | the AP fixture | revision r4, once published, states `192.168.0.28` for `SLICE:POS:GUNQSK01/PS` | one batch: the old AP is Retired with `successor` and `in_service_until` = r4's `observed_at`; a new `AP-<ULID>` is Active with the same address; the source ref is rebound; the path's `enters at` projects onto the new AP; the old AP's tickets stay on it | AP reassignment, rebinding |
-| A18 | A17 | query "who used 192.168.0.28" at a time before r4, and after | before: the old position and PS-1, `definite`. After: the new position and its unit. With r4's time at day precision, a query on that day returns both rows as `possible` | the address-at-time query, uncertainty |
+| A17 | the AP fixture | revision r4, once published, states `192.168.0.28` for `SLICE:POS:GUNQSK01/PS` | one batch: the old AP is Retired with `successor`; its end and the new AP's start span the previous and r4 observations; the source ref is rebound; the path's `enters at` projects onto the new AP; the old AP's tickets stay on it | AP reassignment, valid time vs record time |
+| A18 | A17 | query "who used 192.168.0.28" before the previous observation, inside the inferred handover range, and after r4; then confirm an exact service time | before: the old position and PS-1, `definite`. Inside: both rows, `possible`. After: the new position and its unit, `definite`. Confirmation replaces the uncertainty with a half-open exact handover | the address-at-time query, uncertainty |
 | A19 | the AP fixture | a direct decision to change `assigned to` on an assigned AP | fails with I-AP-2 | write-once assignment |
 | A20 | the IT fixture, segments attached to M-5531 P1–P4 | swap batch M-5531 → M-7702 at T | derived `attached to` → M-7702 `serial-data#1…#4`; the query at `T − 1 s` returns M-5531's ports | compatible replacement |
 | A21 | the IT fixture | swap M-5531 → M-8800 | no `attached to`; four `port_mapping_unresolved` items naming criterion 3b (kind); impact analysis shows the segments as unattached; `implemented by` M-8800 is intact. After an IT registry revision configures the ports as RS-485-2w, the next derive run attaches them | incompatible replacement, recovery |
-| A22 | the `interlock` segment, and A20 | the swap alone; then `confirm port_map`; then a second swap | no edge until the confirmation; attached after it; after the second swap, no edge again, because the map does not carry over | swap-time confirmation scope |
+| A22 | the `interlock` segment, and A20 | the swap alone; then `confirm port_map`; then make the selected port electrically incompatible; then perform a second swap | no edge until confirmation; attached after it; removed with `port_map_invalid` after incompatibility; after the second swap, no edge again because the map does not carry over | swap-time confirmation scope and hard compatibility |
 | A23 | the registry lists two ports of M-7702 with role `serial-data#3` | derive | no edge; the review item lists both ports | ambiguous candidates |
 | A24 | r1 published (at least 20 subjects) | r2 drops 50 % of the stream's subjects, at least 10 (held); then r3 restores them and passes the guard against r1 | r3 published, r2 `superseded`; zero status events for claims present in both r1 and r3; parsed head r3; the stream history still shows r2's `disappeared` events | net transition, superseded revisions |
 | A25 | r2 and r3 both held | `approve_revision` r3; separately, `approve_revision` r2 first | first case: H = r3, r2 superseded, net r1 → r3. Second case: H = r2, and r3's guard is re-evaluated against r2 | approval order |
 | A26 | r2 held | `reject_revision` r2; then r4 carries r2's facts and passes the guard against r1; then `rewind` to r1 | r2 is never projected; r4 publishes its facts; the rewind applies the net r4 → r1 transition, recorded as `rewound_to` | rejection vs claim rejection; rewind |
 | A27 | the config states zones `LINAC, GUN` on GUNSIP01's device | a person confirms `GUN` absent; re-import; then the person `retract`s; then confirms `GUN` present (`supersede`) and the config drops GUN | absent: zones = `LINAC`, with a `source_vs_confirmed` conflict, and the re-import keeps it absent. After the retract: `GUN` is back from the source. After the supersede: `GUN` is present although no source states it | negative facts, restoration |
 | A28 | two streams state `GUN` present | a reviewer `reject`s one stream's claim | `GUN` stays present through the other claim; its polarity is unchanged (I-NEG-1) | reject ≠ removal |
-| A29 | the §7.7 example policy | a `pv` claim from the BTF test branch; then load three bad policies | the effective rank is advisory (L1 wins). The validator rejects the ambiguous policy (equal keys, different effects), the one with an unreachable rule, and the one with a dominant L2 rule on `attr:serial` from a non-owner | lexicographic precedence, validation |
+| A29 | the §7.7 example policy | a `pv` claim from the BTF test branch; then load three bad policies; then register a new stream and rule id | the effective rank is advisory (L1 wins). The validator rejects the ambiguous policy (equal keys, different effects), the unreachable rule, and the unjustified dominant rule. Registration invalidates validation and claims in the new vocabulary stay ineffective until revalidation | lexicographic precedence, validation lifecycle |
 | A30 | installations of s/n 84321 and 90001 | confirm A until `2026-03` (month) with B from `2026-03-15T08:00Z`; confirm a definite overlap; confirm an exact handover | first: accepted, with a `possible_overlap` review item and both marked uncertain. Second: fails with I-INS-1. Third: accepted, no item | temporal classification |
 | A31 | T-1, T-2, T-3 | derive attribution; compute counts | T-1: `involved_equipment` 84321, definite. T-2: 84321 and 90001, both possible. T-3: a `migration-split` link. The position's ticket count is 3 (subjects). 84321's involved count is 1. The count for the vacuum group is 3 distinct tickets | ticket attribution, deduplication |
 | A32 | `infer.vac.sip/2` active | an `impl_version` bump with identical output; a fix changing one output; a switch to `/3`; a signature change without a new id | first: no claim events. Second: one `disappeared` and one `appeared` under `/2`. Third: all outputs are new `/3` claims and all `/2` claims disappear; attributes do not change; rejections carry over only with `carries_rejections`. Fourth: CI fails | rule identity and versions |
@@ -1715,7 +1745,7 @@ part of the vertical slice.
 | I-REL-2 | a `composed of` target has at most one composite; components have no `part of` of their own; `part of` never targets a Location |
 | I-INS-1…7 | §8.3 |
 | I-AP-1…5 | §9.2 |
-| I-PORT-1…3 | §9.3 |
+| I-PORT-1…4 | §9.3 |
 | I-TKT-1…3 | §8.6 |
 | I-ID-1 | at most one active record per strong identifier. A Merged record has a `merged_into_uid` that resolves to an active record |
 | I-ID-2 | every source ref has at most one binding at a time; rebinding writes an `identity_event` |

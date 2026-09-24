@@ -3,9 +3,23 @@
 *A type catalogue for the ARGUS Knowledge Hub, sized for a facility with thousands of
 devices, and for bringing the control configuration in as equipment rather than as a file.*
 
-> **Revised by [`asset-model-revision.md`](asset-model-revision.md).** Where the two disagree — provenance,
-> installation history, connectivity, relation governance, identity reconciliation, ownership and the
-> production type set — the revision states the intended model.
+> **Baseline and evidence document — not the current production specification.**
+> [`asset-model-revision.md`](asset-model-revision.md) is normative. Where the two disagree —
+> provenance, installation history, connectivity, relation governance, identity reconciliation,
+> ownership, Jira/Insight, or the production type set — the revision wins. The measurements and
+> source analysis below remain evidence for that revision.
+
+The current model makes four corrections that are essential when reading this document:
+
+1. A configuration name denotes a stable **Position**, not a serialised physical unit. Physical
+   **Equipment** is created and maintained in ARGUS inventory, and valid-time **Installations** join
+   it to Positions.
+2. Imported, inferred, resolved, and manual facts enter the append-only fact ledger. Attributes and
+   asserted edges are projections; shortcuts such as `realized by` are derived.
+3. The initial production catalogue is the governed core in the revision. The 122-type tree below
+   is a target ontology whose extensions are activated only with a source, owner, and query.
+4. ARGUS replaces Jira and Insight as the system of record. Their identifiers and history are
+   migrated as aliases and evidence; they are not continuing authorities after domain cutover.
 
 ---
 
@@ -881,6 +895,12 @@ worth fixing in the configuration too.
 
 ### 9.5 Inferring what the channels drive
 
+> **Current target behavior:** the rules in this section infer Positions and functional topology,
+> not authoritative physical Equipment. Each result is a ledger claim with a semantic rule id and
+> evidence. Advisory relations such as screen–camera pairing enter review. Equipment comes from
+> ARGUS inventory, and a confirmed Installation joins it to the Position. The paragraphs below
+> describe the implementation baseline from which the migration starts.
+
 A values.yaml lists control channels. It never lists the ion pump behind `GUNSIP01`, the
 quadrupole and its power supply behind `QUATB002`, the camera at `AC101` or the electronics of a
 BPM, and each of those is what fails, gets replaced and turns up in a report. With
@@ -1709,6 +1729,11 @@ Ordered by what blocks what. Items 1, 3, 4, 9, 10, 11 and 12–15 are done; the 
 
 ## 15. Open questions
 
+This is the baseline document's original question list. The normative revision resolves ownership,
+Position/Equipment separation, global visibility, strong-identifier uniqueness, review queues, and
+Jira/Insight migration. Items about source meaning and missing source data remain valid until their
+named stakeholders answer them.
+
 - **Who owns the lattice?** `s_position`, `gradient` and `k1` really live in a MAD-X or elegant
   file. Typing them by hand here will produce a second, wrong copy. The alternative is an
   importer that reads the lattice file, which is the same argument `tools/epik8s-devices`
@@ -1767,6 +1792,10 @@ Ordered by what blocks what. Items 1, 3, 4, 9, 10, 11 and 12–15 are done; the 
 ---
 
 ## 16. Summary
+
+This table summarizes the baseline design and measurements. It is not the production acceptance
+manifest. The current core hierarchy, governed relations, and recomputation of disputed counts are
+specified by [`asset-model-revision.md`](asset-model-revision.md).
 
 | | |
 |---|---|

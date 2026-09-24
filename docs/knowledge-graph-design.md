@@ -3,6 +3,12 @@
 *What the object hierarchy has to be for a failure to be traced through it, what the EPIK8s
 configurations already give, what was built to walk it, and what the graph cannot yet do.*
 
+> **Current implementation and causal evidence.** The normative data model is
+> [`asset-model-revision.md`](asset-model-revision.md). In particular, functional topology connects
+> Positions, physical Equipment joins through valid-time Installations, every asserted edge has
+> ledger provenance, and the governed relation registry replaces free-form relation semantics. The
+> algorithms and measured examples below remain the basis for causal behavior.
+
 ---
 
 ## 1. The question, and what was missing
@@ -23,9 +29,9 @@ opposite directions of dependence, and nothing recorded which. Two more things w
 - **The physical plant was not in the graph.** Chillers, timing, and the pressure a conditioning IOC
   waits on are stated in the files and were not edges.
 
-So the work is not a bigger type hierarchy. The 122 types describe the accelerator well enough. It is
-**a meaning for each relation, a walk that respects it, and the edges the configurations were leaving
-out**.
+So the work is not a bigger type hierarchy. The staged core and extensions in the normative revision
+describe the accelerator well enough. It is **a meaning for each relation, a walk that respects it,
+and the edges the configurations were leaving out**.
 
 ---
 
@@ -35,9 +41,9 @@ The catalogue (`asset-schema-design.md`) has four planes under one root, and for
 they are not four kinds of object but **four layers a failure crosses**:
 
 ```
-  UTILITIES       chiller ─cools→ structure        supply ─powers→ magnet         (physical → physical)
-  CONTROL         host ─▶ IOC ─▶ device ─acts on→ asset                            (control → physical)
-  PHYSICAL        asset ─realized by→ element                                     (physical → functional)
+  UTILITIES       chiller position ─cools→ structure       supply position ─powers→ magnet
+  CONTROL         host position ─▶ IOC ─▶ device ─acts on→ functional position
+  INSTALLATION    position ─realized by [derived]→ equipment unit
   FUNCTIONAL      element ─part of→ section ─upstream of→ element                  (beam)
   PERMITS         IOC ─enabled by→ pump, gauge                                     (physical → control)
 ```
@@ -72,7 +78,7 @@ it stops.
 
 ---
 
-## 3. What a failure carries: `causal_model.py`
+## 3. What a failure carries: `causal_model.py` and the relation registry
 
 Every relation type has three facts (`backend/app/services/causal_model.py`, served at
 `GET /v1/graph/relation-semantics`):
@@ -100,9 +106,19 @@ gauge it cannot read). This one rule is the difference between an analysis that 
 broke the whole machine" and one that says "the converter blinded 34 objects and stopped RF
 conditioning from checking two pumps".
 
-Every relation type any importer writes must be classified. A test runs the four real configurations
-through the importers and fails on an unclassified one, because an unclassified relation is ignored by
-every walk, which is how a graph goes wrong quietly.
+Every relation type any importer writes must be classified. In the target model these declarations
+live in the relation registry; `causal_model.py` reads them instead of maintaining a second
+vocabulary. A test runs the four real configurations through the importers and fails on an
+unclassified edge, because an unclassified relation is ignored by every walk, which is how a graph
+goes wrong quietly.
+
+Two graph views are required during migration and whenever valid time is uncertain:
+
+- **confirmed**: active asserted edges and derived edges supported by definitely current
+  Installations only; safe for automation and ordinary impact counts;
+- **investigative**: the confirmed graph plus proposed edges and possible temporal dependencies,
+  each labelled with confidence and provenance; useful to operators, never used silently for an
+  automated decision.
 
 ---
 
@@ -189,8 +205,9 @@ does across them:
 
 Objects: SPARC 1 002, BTF 279, EuAPS 311, ELI 405. Relations: 1 915, 466, 673, 908.
 
-What was added in this round, all from what the files say and every one marked by an inferred object at
-one end:
+What was added in this baseline round came from the files and was marked through an inferred object
+at one end. In the target pipeline, each of these becomes an asserted relation claim with its own
+method, semantic rule id, evidence, and review status; trust no longer depends on an endpoint marker:
 
 - **RF conditioning gates.** An RF conditioning IOC lists the pumps and gauges whose pressure it
   watches, and the level above which it will not raise power. That is the file saying RF depends on
@@ -253,10 +270,10 @@ generator, which is the largest by *function*: 17.
 - **The RF chain is not linked.** The modulator, the RF unit, the waveguides and the structure are
   not related to one another, so a modulator fault does not reach a structure. The ELI matrix names
   the units and the configuration names the modulators, and nothing joins them.
-- **Edges carry no provenance.** A relation cannot be marked inferred, so the analysis says a path is
-  inferred when an *object* on it is. Every relation the inference makes has an inferred object at one
-  end, which is why this holds, but a stated edge between two stated objects that someone should not
-  trust cannot be flagged.
+- **The baseline edges carry no provenance.** The normative ledger fixes this: asserted relation
+  claims carry method, rule, evidence, authority, and status; derived edges name their rule and input
+  watermark. Until that migration lands, the current analyzer can only infer path trust from endpoint
+  objects.
 - **No probabilities.** The ranking orders hypotheses by evidence and says why. Prior failure rates,
   and a calibrated likelihood, need history the hub does not hold. Earlier tickets are returned as
   evidence, not weighed.
@@ -276,8 +293,9 @@ generator, which is the largest by *function*: 17.
    symptoms have a path.
 4. **A `Utility Service` type** so cooling loops, compressed air and mains feeders are nodes with
    consumers.
-5. **The IT layer** (`it-model-design.md`): serial lines, converters as equipment, switches. It
-   deepens the control layer where most failures start.
+5. **The IT layer** (`it-model-design.md`): Communication Paths, Bus Segments, Equipment Ports,
+   Access Point assignments, IT Positions and Installations. It deepens the control layer where most
+   failures start without confusing a hostname or port with a physical unit.
 6. **Weigh history**: once the hub holds enough tickets with a stated cause, a per-object prior.
 
 **Decisions for you.** Whether the analysis should treat the symptom object itself as a candidate

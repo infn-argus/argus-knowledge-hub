@@ -3,6 +3,11 @@
 *What this stands up, what it deliberately does and doesn't simulate about GODiVA, six test
 users covering the permission model, and the "INFN login" button that signs them in.*
 
+> ARGUS is intended to replace Jira/Insight for assets, documents, and tickets. This setup tests
+> authentication and workspace roles only. It does not yet prove the record- and field-level grants,
+> steward groups, protected-predicate approvals, or restricted-ticket/document behavior required by
+> [`asset-model-revision.md`](asset-model-revision.md) §§18–19.
+
 ---
 
 ## 1. Why this exists
@@ -150,6 +155,11 @@ with its real data → Sign out → the sign-in screen → INFN login again asks
   claim, and no directory is standing behind this Keycloak.
 - **`RoleBinding`s are hand-seeded**, standing in for whatever will eventually create them —
   an admin, an import, or a future GODiVA-group sync.
+- **No domain-steward or protected-data fixtures.** Before a Jira-replacement cutover, tests must
+  cover Inventory, IT, Controls, Operations, Document Control, Safety, and Accelerator Physics
+  groups; record- and field-level restrictions; review-queue ownership; and approval of protected
+  predicates. The six users above remain useful for basic workspace enforcement but are not the
+  production authorization acceptance suite.
 
 ## 7. Pointing this at the real thing, later
 

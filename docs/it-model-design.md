@@ -4,13 +4,30 @@
 and how do the control configurations reach them? §0 says what is built; the rest is the design
 it was built from.*
 
-> **Revised by [`asset-model-revision.md`](asset-model-revision.md).** Where the two disagree — provenance,
-> installation history, connectivity, relation governance, identity reconciliation, ownership and the
-> production type set — the revision states the intended model.
+> **Implementation baseline and evidence document — not the current production specification.**
+> [`asset-model-revision.md`](asset-model-revision.md) is normative. The measurements, hostname
+> analysis, and source mappings below remain useful; its former ownership and connectivity model is
+> superseded.
+
+In the current target model:
+
+- ARGUS IT inventory, not Jira Insight, is the system of record after the IT domain cutover;
+  Insight is a migration source and temporary archive, while DNS/DHCP remain continuing operational
+  inputs for live addressing;
+- a stable IT **Position** represents the host or converter role, physical **Equipment** is installed
+  there through a valid-time **Installation**, and an Access Point is assigned to that Position;
+- the old `Serial Line` splits into `Communication Path`, `Bus Segment`, and `Equipment Port`;
+- Access Points remain beamline or IT control-plane records and are never reused as Equipment;
+- DNS prefixes and the Moxa `4000 + N` convention are advisory evidence until their owners confirm
+  them; neither can establish physical identity or a port attachment by itself;
+- IT imports, people, and resolvers write ledger claims. They do not overwrite attribute bags.
 
 ---
 
 ## 0. What is built
+
+This section is a snapshot of the pre-revision implementation. It is the migration starting point,
+not the desired end state.
 
 The decisions in §9 were taken as recommended: a dedicated site workspace for IT, the serial line
 as an object, and IT equipment that the configuration import makes and marks as inferred.
@@ -334,22 +351,22 @@ measurements above are the evidence that the class prefix is what people actuall
 
 ## 5. Ownership, scope and keys
 
-- **Types.** `IT Equipment` and `IT Record` are global (nothing in them is a machine's own);
-  `Serial Line` is a beamline type. A global type must not depend on a beamline one (a test already
-  enforces this), so `IT Equipment` refers to nothing beamline-side.
-- **Objects.** IT equipment and address records live in **one site workspace** (a dedicated
-  `it-infrastructure`, recommended over the catalogue workspace, because the people who edit them
-  are different). They are of global types, so every beamline reads them and only IT edits them.
-  Beamline workspaces hold the Access Points, Serial Lines and Control Devices, which link *to* them
-  (a relation's target only needs to be visible, not owned).
-- **Keys.** Objects from the registry keep their own (`LNFMAC-…`). Others use the fully qualified
-  name, `HOST:scsparcsipmxa001.lnf.infn.it`, which is site-unique and carries the domain that
-  separates LNF from ELI. Matching is by hostname, IP and MAC, never by key.
-- **Serial lines**: `SPARC:LINE:<endpoint>:<port>`, the same scheme as the other beamline keys.
-- **Convention-conformant names are stable keys.** A name such as `scsparcsipmxa001` is unique
-  inside its domain by construction (facility + family + sequential), which is why the fully
-  qualified name is a safe key. A name that does not fit the convention is still usable as a key,
-  but its class is then unknown, not guessed.
+- **Types.** IT Equipment, Equipment Port, IT Record, and the shared parent types are global.
+  Communication Path, Bus Segment, and Access Point belong to the workspace whose configuration
+  names them.
+- **Objects.** `it-infrastructure` owns IT Positions, IT Equipment, Equipment Ports, Address
+  Records, and IT Installations. IT staff maintain them directly in ARGUS. Beamline workspaces own
+  their Access Points, Paths, and Segments and may link to the visible IT Position.
+- **Authority.** After the IT cutover, ARGUS is authoritative for the inventory record. DNS and
+  DHCP remain operational authorities for live addressing and feed ARGUS. Insight is frozen at the
+  migration watermark and retained only as an archive.
+- **Identity.** ARGUS records use opaque stable uids and keys appropriate to their class. Insight
+  object ids, `LNFMAC-…` keys, FQDNs, MACs, and former keys are labels and aliases. Matching is by
+  governed strong identifiers, never by a mutable display key alone.
+- **Paths and segments.** Paths use `<FAC>:PATH:<ioc>:<endpoint>[:<port>]`; shared downstream
+  segments use `<FAC>:SEG:<endpoint>:<port>`. Equipment Ports belong to the installed unit.
+- **Naming convention.** A conforming hostname supports an advisory classification claim. It is
+  not physical identity and does not authorize a merge or an Installation.
 
 ---
 
@@ -357,22 +374,24 @@ measurements above are the evidence that the class prefix is what people actuall
 
 | Object | Source | Kind | When |
 |---|---|---|---|
-| Serial Line, `on line`, `port of`, `line_kind` | `values.yaml` | stated | **default** in the configuration import |
+| Communication Path, Bus Segment, `on path`, `enters at`, `continues on` | `values.yaml` | stated | default in the configuration import |
 | Access Point | `values.yaml` | stated | already built |
-| `Access Point.endpoint_kind` | the class prefix of the DNS name (section 4.4); the structure of the endpoint for bare IPs | inferred | attribute, marked; never replaces a known value |
+| Access Point `assigned to` | resolver or configuration evidence | resolved or inferred | asserted once; reassignment retires the AP and creates a successor |
+| endpoint kind or provisional IT Position | the class prefix of the DNS name; the structure of the endpoint for bare IPs | inferred | advisory ledger claim pending policy or review |
 | IOC `runs on` | `host:`, else the cluster | stated | default |
-| `implemented by`, `described by` | resolver against the IT workspace | resolved | default, when the inventory is present |
-| Serial Converter, Server, Switch | the IT registry (Jira Insight, or a DNS/DHCP export) | external | site import, before the configurations |
-| Address Record, Network Segment | the registry / DHCP scopes | external | site import |
+| `implemented by`, `attached to` | derived through the AP's Position, the current Installation, and a compatible port match | derived | after the required facts are effective |
+| Serial Converter, Server, Switch, IT Position, Installation | ARGUS IT inventory; initially migrated from Insight | manual or migration | owned by IT; Insight freezes at cutover |
+| Address Record, later Network Segment | ARGUS IT inventory fed by DNS/DHCP | external continuing input | owned by IT |
 | Workstation (consoles) | `hosts.yml` in each beamline's repository | external | a small reader for Ansible inventories |
 | Switch topology, `uplinked to` | IT (LLDP, port tables) | external | not from any file here |
 
 Two behaviour changes the model needs:
 
-1. **The Access Point is always made.** Today, when an address matches equipment in the inventory,
+1. **The Access Point is always made.** In the baseline, when an address matches equipment in the inventory,
    the importer reuses the equipment *as* the Access Point and creates none (`access_points_linked`).
    The model wants the Access Point (beamline) and the equipment (site) as two objects joined by
-   `implemented by`, so a beamline keeps its wiring even if IT re-records the box.
+   `assigned to` an IT Position. `implemented by` is derived from that Position's current
+   Installation, so a beamline keeps its wiring across equipment swaps.
 2. **The resolver looks across workspaces.** `NetworkIndex` reads only the importing workspace's
    own objects. It has to read the objects of global types visible from it, or the IT workspace is
    invisible to every import.
@@ -381,7 +400,8 @@ Two behaviour changes the model needs:
 
 ## 7. Mapping from the existing Insight types
 
-Proposed, to be confirmed against the real schemas (section 9):
+This table is a **migration mapping**, to be confirmed against the exported schemas. It is not an
+ongoing synchronization contract:
 
 | Insight type | Becomes | Note |
 |---|---|---|
@@ -391,43 +411,40 @@ Proposed, to be confirmed against the real schemas (section 9):
 | Registered Nodes, DHCP Nodes, DNS, Ethernet Configuration | `Address Record`, by `record_kind` | the resolver already treats them as records, not equipment |
 | IP | `Address Record` or `Network Segment` | depends on what it holds |
 
-The Jira import creates a type per Insight object type. It should adopt the catalogue type of the
-same name where there is one, as the EPIK8s importers already do.
+The migration importer adopts the governed ARGUS catalogue type, preserves every Insight object id
+and key as an alias, and produces a reconciliation report. After the IT cutover watermark, the
+Insight stream is frozen and no longer authoritative.
 
 ---
 
 ## 8. What has to change in the code
 
-In the order that unblocks the rest:
+The normative sequence is `asset-model-revision.md` §13. For the IT slice it means:
 
-1. **Catalogue**: the `IT Equipment` tree, the `IT Record` branch, `Serial Line`, the new
-   `Access Point` attributes; migrate `Network Device` and `Computing Node` in place (both are
-   seeded and unused, so nothing points at them yet). Tests: the partition and dependency checks,
-   and that every attribute the import writes is declared.
-2. **Configuration import**: Serial Lines and their relations, `line_kind`, `runs on`; the Access
-   Point always created (behaviour change 1).
-3. **Resolver**: read visible global objects across workspaces; make the local domains
-   configurable (`.int.eli-np.ro` for ELI); add `Address Record` to the record types; a small
-   parser for the class prefix (section 4.4) that returns nothing for a name that does not fit.
-4. **Ansible inventory reader** for Workstations.
-5. **Jira import**: adopt catalogue types by name.
+1. land the fact ledger, relation registry, Positions, Installations, and governed identity labels;
+2. migrate `Serial Line` into Communication Path and Bus Segment, always create the Access Point,
+   and assign it to a Position rather than reusing Equipment;
+3. import Equipment Ports from the IT registry and derive `attached to` only from a unique,
+   registry-backed, fully compatible match or a confirmed Installation-scoped port map;
+4. make local domains configurable and keep DNS classification advisory until IT approves the
+   convention;
+5. migrate Insight IT schemas with aliases and reconciliation reports, then freeze them at the IT
+   cutover watermark; DNS/DHCP and later LLDP remain continuing inputs;
+6. add the Ansible inventory reader for Workstations when the consoles extension is activated.
 
 ---
 
 ## 9. Decisions for you, and what I don't know
 
-**Decisions**
+**Resolved by the normative revision**
 
-1. **A dedicated IT workspace, or the catalogue workspace?** I recommend dedicated: different
-   editors, and the catalogue workspace should hold definitions and product data.
-2. **Serial Line as an object.** I recommend yes: it is the only way to hold a port's properties
-   and to ask which devices share a cable. The cost is 141 objects for these four beamlines.
-3. **Always make the Access Point** (behaviour change 1). I recommend yes.
+1. **Workspace:** dedicated `it-infrastructure`, staffed by IT; the catalogue holds definitions.
+2. **Connectivity:** Communication Path + Bus Segment + Equipment Port replace `Serial Line`.
+3. **Access Point:** always a separate control-plane record; its Position assignment is write-once.
 4. **A `Compute Cluster` object?** The configuration gives only `k8sda.lnf.infn.it` and a
    namespace, today held as text on `Control Configuration`. Promoting it lets "the cluster is
    down" reach every IOC. Optional; I left it out of the model above.
-5. **Do you want the console workstations at all?** They come from a file outside `values.yaml`
-   and need their own reader.
+5. **Consoles:** deferred extension, activated when the Ansible reader has an owner and query.
 
 **Not verified**
 

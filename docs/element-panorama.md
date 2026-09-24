@@ -5,6 +5,12 @@ configuration, family by family; sums up which elements the import already turns
 objects; and says, for each type, which attributes a configuration can fill and which someone has
 to complete by hand.*
 
+> **Evidence document.** The measured joins and source gaps below remain valid. The normative model
+> is [`asset-model-revision.md`](asset-model-revision.md): configuration-derived equipment-like
+> records become Positions, physical units are Equipment in ARGUS inventory, and Installations join
+> them over valid time. Jira/Insight links are migration evidence and aliases, not continuing
+> authority after cutover.
+
 ---
 
 ## 1. Sources
@@ -81,14 +87,14 @@ What `--infer-elements` makes, across the SPARC, BTF, EuAPS and ELI configuratio
 
 | Element | Type (plane) | Read from | Facilities |
 |---|---|---|---|
-| Ion pump, NEG, turbo, primary pump, vacuum gauge | `Ion Pump`… (asset) | `vac` group and function; the name (`SIP`, `NEG`, `TRB`, `PRY`, `VGA`) | all four |
-| Magnet supply | `Power Supply` (asset) | `mag` group; limits from `ps:` | SPARC 81, BTF 44, ELI 24 |
+| Ion pump, NEG, turbo, primary pump, vacuum gauge | equipment-class **Position**; the installed unit is separate Equipment | `vac` group and function; the name (`SIP`, `NEG`, `TRB`, `PRY`, `VGA`) | all four |
+| Magnet supply | `Power Supply` Position; limits remain on its Control Device | `mag` group; limits from `ps:` | SPARC 81, BTF 44, ELI 24 |
 | Magnet | `Quadrupole`, `Dipole`, `Corrector`, `Solenoid`, `Sextupole` (element) | the name (`QUA`, `DPL`, `DIP`, `HCR`, `SOL`…) | SPARC, BTF, ELI |
-| Camera | `Camera` (asset) | `cam` group; not a simulator | SPARC 26, BTF 3, EuAPS 15, ELI 6 |
-| BPM electronics | `Digitizer` and `Beam Position Monitor` | Libera templates | SPARC, ELI |
-| LLRF, modulator | `Low-Level RF Unit`, `Modulator` (asset) | Libera LLRF, ScandiNova templates | SPARC, ELI |
-| Motor axis | `Motor Axis` (asset) | `motor` template | SPARC 42, BTF 14, EuAPS 52, ELI 6 (plus flags below) |
-| Flag | `Actuator` and `Screen Station` composed of it and of its camera | `FLG` in the name; camera by name | SPARC 23, BTF 1 |
+| Camera | Camera Position; the serialised camera is Equipment | `cam` group; not a simulator | SPARC 26, BTF 3, EuAPS 15, ELI 6 |
+| BPM electronics | Digitizer Position serving `Beam Position Monitor` elements | Libera templates | SPARC, ELI |
+| LLRF, modulator | equipment-class Positions | Libera LLRF, ScandiNova templates | SPARC, ELI |
+| Motor axis | installable `Motion Axis` Position when independently replaceable; otherwise a Control Device acting on its parent Position | `motor` template | SPARC 42, BTF 14, EuAPS 52, ELI 6 (plus flags below) |
+| Flag | actuator Position and `Screen Station`; camera composition is an advisory relation pending review | `FLG` in the name; camera by name | SPARC 23, BTF 1 |
 | Mirror | `Mirror` composed of its axes | EuAPS name codes, as its Utility Matrix names them | EuAPS 19 |
 
 **Not treated, by size** (from the import's own report): ICPDAS I/O, 26 channels in SPARC and 25
@@ -104,16 +110,17 @@ The catalogue's types are established, and several are still empty: `Digitizer`,
 `Low-Level RF Unit`, `Chiller`, `Timing Module`, `PLC`, `Instrument`, `I/O Module`,
 `Electronics Crate`, `RF Amplifier`. The sources below say what could go in them.
 
-Three feeders write to the same objects, each with its own authority:
+Three feeders assert facts about related records, each under a versioned authority policy:
 
-1. **The configuration states** (structure): the IOC, the device, its channel, axis, address,
-   template, zones, limits. Written by default.
-2. **The configuration implies** (inference): what a channel *is*. Written behind
-   `--infer-elements`, every object marked `argus_keywords: inferred`, and never over what a
-   person has entered.
-3. **A person completes**: serial, location, model, the numbers no file holds. Or a matrix, read
-   as a third feeder and treated like a person's word: it fills what is empty and does not
-   overwrite.
+1. **The configuration states** control structure: IOC, Control Device, channel, axis, address,
+   template, zones, and limits. These become stated claims.
+2. **The configuration implies** Positions and topology. Each inference is a claim with a
+   semantic rule id, evidence, and authority status; low-confidence composition is proposed.
+3. **A person or matrix contributes** design, model, place, and engineering values. Conflicts are
+   resolved by policy and explicit decisions rather than “fill blanks” or last-writer-wins.
+
+Physical Equipment is created and maintained in ARGUS inventory. A matrix row or migrated Insight
+record may identify that unit; the configuration never manufactures it from a channel name.
 
 Per type, for the elements treated (*written* is what the import puts on the object today;
 *available* is what a source holds that nothing writes yet):
@@ -148,12 +155,13 @@ schema changes before anything is built:
    type, cable labels, who connectorised it). The catalogue has `Cable Run` and a `Rack` location;
    nothing feeds them, and nothing relates a device to its rack.
 
-**The inventory link the configurations already carry.** The four configurations (259 IOCs) hold
-91 `asset:` links into the existing inventory (Service Desk Insight) that name a `typeId`:
+**The legacy inventory link the configurations already carry.** The four configurations (259 IOCs)
+hold 91 `asset:` links into Service Desk Insight that name a `typeId`:
 40 on vacuum controllers (`2505`), 14 and 10 on cameras (`3799`, `2748`), 13 on magnet supplies
-(`2457`), and a handful on instruments, timing, BPM electronics and motion controllers. The import stores the link as `inventory_url`. Resolving it to an object
-already in the hub is the still-open step of §9.2 in the design document, and it is the natural
-way to bring in the serial numbers the configurations never state.
+(`2457`), and a handful on instruments, timing, BPM electronics and motion controllers. During
+migration the object id binds to ARGUS Equipment and remains an alias after cutover. On an IOC or
+device the link is evidence for a proposed Installation at the inferred Position; on a template it
+is evidence for a Product Model. It is not a permanent call back to Jira.
 
 ---
 
@@ -161,13 +169,12 @@ way to bring in the serial numbers the configurations never state.
 
 None of this is built. Each step stands on its own.
 
-1. **Give the empty schemas the attributes the matrices show they need**: the magnet numbers on
-   `Magnet Assembly`, the RF power unit's numbers on `Modulator` or a new type, and a `rack`
-   reference on `Asset`. This is a catalogue change and touches no importer.
-2. **Read a matrix as a feeder.** A CSV or workbook reader like the PBS importer, keyed by the
-   normalised name (ELI) or the PBS code (EuAPS), that fills blanks on the objects the
-   configuration import already made, marks what it wrote, and never overwrites a person's value.
-   For ELI the join is exact for magnets, pumps, gauges, cameras, motion boxes and BPMs.
+1. **Add only the extension attributes justified by the matrices**: magnet and RF-unit values and
+   governed location references. Activate a new type only with a source, owner, and query.
+2. **Read a matrix into the fact ledger.** A CSV or workbook reader like the PBS importer, keyed by
+   the normalized name (ELI) or PBS code (EuAPS), writes source claims with cell evidence. Authority
+   policy and explicit decisions handle conflicts. For ELI the join is exact for magnets, pumps,
+   gauges, cameras, motion boxes and BPMs.
 3. **Add the ELI screen rule.** `SCN01` is the parent of `SCN01:CAM01` and `SCN01:MOT01`, and the
    matrix says the screen is the camera, illuminator and motion box. This is the same composition
    the SPARC flags already get, with a stated parent instead of a paired name.
