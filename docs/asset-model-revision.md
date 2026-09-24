@@ -2,39 +2,54 @@
 
 *A review of `asset-schema-design.md` and `it-model-design.md`, checked against the code that
 implements them, and a revised model that keeps their architecture and makes it operable:
-provenance, installation history, connectivity, relation governance, identity reconciliation and
-ownership.*
+positions and installations, fact-level provenance, a governed relation registry, identity
+reconciliation, non-destructive retirement and a staged catalogue.*
 
-Status: **proposal**. Where this document and the two design notes disagree, this one states the
-intended model. It does not repeat what they get right; it refers to them by section
-(`AS §n` = `asset-schema-design.md`, `IT §n` = `it-model-design.md`).
+Status: **proposal, second revision**. Where this document and the two design notes disagree,
+this one states the intended model. It refers to them by section (`AS §n` =
+`asset-schema-design.md`, `IT §n` = `it-model-design.md`).
 
 ---
 
 ## 0. Summary
 
-The model's central idea is sound and is kept. It separates **what the machine does**
-(functional), **what is installed** (physical), **what kind of thing it is** (catalogue) and **how
-it is controlled** (control), with place, IT and engineering records beside them. The weaknesses
-lie in the joints between those planes. Links that change over time are stored as if they never
-change. Facts from five sources end up in one attribute bag, where the last writer wins. Inferred
-objects cannot be confirmed, rejected or merged. The relation vocabulary is a convention that
-nothing checks.
+### 0.1 The model in one paragraph
 
-The revision adds **three mechanisms** and **one concept**, and removes more types than it adds:
+A **Position** is a stable place in the machine's function: `GUNSIP01`, a quadrupole slot, the
+electronics slot that serves two BPMs. **Equipment** is a physical unit with a serial number. An
+**Installation** records that one unit occupied one position over a half-open time interval, and
+a unit occupies at most one place at a time. Functional topology (`powers`, `served by`,
+`composed of`, `acts on`) runs between positions, so it survives swaps. Every attribute value and
+every asserted edge is a **projection** of an append-only **ledger**. The ledger holds three
+kinds of record: immutable source **claims**, **claim events** that record when a stream starts
+or stops stating a claim, and human or policy **decisions**. A **pipeline** of independently
+versioned stages turns sources into current state: parse, infer, resolve, project, derive and
+reconcile. **Authority policies** and **multi-value policies** decide how several sources
+combine. The **relation registry** governs every edge. Legacy data is **classified** before it
+is converted. Each object gets a dry-run decision report, and the migration is reversible and
+resumable.
 
-| | What | Replaces |
+### 0.2 What changed since the first revision
+
+| # | Change | Section |
 |---|---|---|
-| Mechanism | **Fact ledger**: a provenance record for every imported, resolved, inferred or manual fact, keyed to a **source revision** | `argus_keywords: inferred`, `argus_source` / `argus_source_ref` (last writer wins), `argus_provenance` free text, `endpoint_kind_source` |
-| Mechanism | **Relation registry**: canonical names, direction, domain and range, cardinality, derivation, lifecycle and causal semantics in one declaration, enforced at write time | free-form `relation_type`, `causal_model.SEMANTICS`, the edge naming that `relink_workspace` takes from attribute display names |
-| Mechanism | **Identity reconciliation**: provisional records, match candidates, confirm or reject, merge with aliases and tombstones | inferred duplicates of inventory equipment "for whoever merges them" (AS §9.5) |
-| Concept | **Position** (functional location) + **Installation** (an asset at a position, for a time interval) | timeless `realized by`, `installed_on` / `removed_on`, `replaced`, inferred "assets" keyed by control channel |
+| 1 | Installation is strictly physical: one unit is in one place at a time. The `multi_position` exception is removed; shared equipment serves several positions through functional relations | §5.4, §8 |
+| 2 | The ledger now separates immutable **claims**, append-only **claim events**, **decisions** and **status events**, and keeps projections apart from all of them. An unchanged revision writes no claims | §7.1–§7.3 |
+| 3 | Parsing idempotency is separate from resolution. Six stages each have their own version, inputs and rerun rule | §7.6 |
+| 4 | A confirmed fact changes only through explicit supersession or retraction. Competing confirmations open a blocking conflict | §7.4 |
+| 5 | Authority is selected by predicate × object type × owning workspace × facility/domain × source instance, with specificity, fallback and load-time validation | §7.7 |
+| 6 | Every multi-value fact declares a mode: replace set, members, delta or ordered list | §7.8 |
+| 7 | Legacy migration classifies each object into one of six outcomes, with a decision report per object | §12 |
+| 8 | An Access Point is `assigned to` a position; `implemented by` is derived through the current Installation, which preserves endpoint history | §9.2 |
+| 9 | Installation carries only a workflow status. Planned, Future, Current and Ended are derived from the interval | §8.2 |
+| 10 | Installation keys are opaque. The display name is a projection, and source identifiers are kept as aliases | §8.1 |
+| 11 | Migration safety: plans, per-item pre-images, rollback, resumption, invariant checks and a permanent traceability map | §12.3–§12.6 |
+| 12 | `Other Equipment` gets a governed `equipment_class`, periodic reports and promotion thresholds | §5.5 |
+| 13 | The implementation plan starts with one end-to-end vertical slice and its acceptance tests | §13, §14 |
 
-With these, the connectivity model splits cleanly. **Communication Path** is the logical path
-from an IOC to a device. **Bus Segment** is the downstream serial, GPIB or CAN medium.
-**Equipment Port** is the converter's physical port. **Hops** are cables and switch ports. The
-first production release uses **54 concrete types**, not 122. The rest of the 122-type catalogue
-is a target ontology, delivered in extensions as sources and owners appear.
+**Renames and scope changes.** The work-package relation is renamed `in work package`, which
+frees `assigned to` for the Access Point relation. Positions and Installations may now be owned
+by `it-infrastructure` as well as by beamlines.
 
 ---
 
@@ -42,161 +57,163 @@ is a target ontology, delivered in extensions as sources and owners appear.
 
 ### 1.1 What is right and is kept
 
-- **Planes kept apart.** Keep functional, physical, catalogue, control, location and engineering
-  as separate planes. The rest of this revision depends on it.
-- **Configuration as objects** (AS §9). The configuration's own edges (`provided by`,
-  `reached through`, `enabled by`) are the ones root-cause analysis needs.
-- **Access points in the control plane** (AS §9, IT §4). 319 of 509 devices sit behind a shared
-  address, and that address is the thing that fails.
-- **Site-owned IT equipment** (IT §5): a converter is one object however many beamlines reach it.
-- **Composite functional elements** (AS §4): a screen station is one element with parts.
-- **Secret filtering** (AS §9.4), **idempotent imports** (AS §14), and the distinction between
-  **stated, resolved, inferred and manually confirmed** (IT §3, §6).
-- **Honest reporting**: importers report odd source data and keep the original words. They do
-  not guess.
-- **Semantics for failure propagation** (`causal_model.py`). This is the seed of the relation
-  registry (§6), not something to replace.
+- **Planes kept apart.** Functional, physical, catalogue, control, location and engineering
+  remain separate.
+- **Existing strengths.** Configuration as objects (AS §9), Access Points in the control plane
+  (IT §4), site-owned IT equipment (IT §5) and composite functional elements (AS §4).
+- **Secret filtering** (AS §9.4) and **honest reporting** of odd source data.
+- **Stated, resolved, inferred, manually confirmed.** These are now the `method` of a claim,
+  combined with the decisions made about it (§7.3).
+- **Causal semantics** (`causal_model.py`) move into the relation registry.
 
-### 1.2 Structural problems
+### 1.2 Structural problems (the target of this design)
 
-1. **Physical identity comes from control addressing.** Inferred assets are keyed by channel,
-   for example `SPARC:AST:vac-gunvpc:GUNSIP01`. Renaming the IOC creates a new "pump". Swapping
-   the pump creates nothing. The object is really a **position** (the slot that `GUNSIP01`
-   names), but it is typed and treated as a serialised box.
-2. **Time is missing from the plane joints.** `realized by` has no interval. The asset has one
-   `installed_on` / `removed_on` pair, and `replaced` runs Asset → Asset. That is three partial
-   history mechanisms, and none of them answers "what was at GUNSIP01 on 3 March".
-3. **Provenance is one attribute deep.** `argus_source` and `argus_source_ref` hold a single
-   value, and the last importer to touch an object overwrites it. `inferred` is a user keyword
-   that nothing ever removes. Confirmation cannot be recorded, and a rejection cannot be
-   remembered.
-4. **Relations are ungoverned.** The same verb takes different domains in different importers
-   (`part of` → Section, Area or Module; `composed of` → Asset or element). Direction is implicit.
-   Cardinality is never checked. Derived edges carry display names.
-5. **One link has two representations.** `product_model` and `instance of`, `argus_location` and
-   `located in`, `wbs_code` and `assigned to`, `spare_for` and `spare for`, `is_spare` and
-   `Spare Part`. Nothing defines which form wins.
-6. **No retirement.** A re-import adds and never removes. The only alternative, `remove_all_before`,
-   hard-deletes and cascades to ticket links, relations and history.
-7. **Ownership is implicit.** Physical assets live in whichever workspace inferred them. The
-   `--it-workspace` path writes into another workspace without a permission check (IT §0).
-8. **The catalogue is wider than its sources.** 122 types exist, and fewer than half have a
-   source that fills them or an owner that maintains them.
+1. **Identity from control addressing.** Physical identity is derived from IOC and channel
+   names (`SPARC:AST:vac-gunvpc:GUNSIP01`).
+2. **No time at the plane joints.** `realized by` has no interval, and three partial history
+   mechanisms compete.
+3. **Thin provenance.** It is one last-writer-wins attribute plus a keyword.
+4. **Ungoverned relations.** The same verb takes different domains, and nothing checks
+   cardinality.
+5. **Two representations of one link**, for example `product_model` and `instance of`.
+6. **No retirement.** The only alternative to keeping stale records is a cascading hard delete.
+7. **Implicit ownership**, including a cross-workspace write path that nothing checks.
+8. **Types without support.** 122 types exist, and fewer than half have a source, an owner and
+   a query.
 
-### 1.3 Contradictions found
+### 1.3 Contradictions in the existing notes and code
 
 | # | Contradiction | Where |
 |---|---|---|
-| C1 | `Spare Part` must not carry PBS/WBS keys, yet it inherits them through `Asset → Engineered Item` | AS §4 tree vs §5.1 |
-| C2 | `composed of` is defined as "Functional Element → its Asset parts", but the catalogue also lists an Asset composite (`Magnet Assembly` composed of a Power Supply), element→element composites (`RF Station` → Accelerating Structures, `Spectrometer Station` → Dipole), and inference writes `Mirror` → Motor Axis assets | AS §4, §6, §9.5 |
-| C3 | `part of` is defined as membership in a section or system, but it is also written to **locations**: `zones:` → Area, and PBS `AREA/ZONE` → "Section or Area" (`pbs_import.py:494`), although `located in` exists | AS §9.1, §10.2 |
-| C4 | `composed of` implies "removing a part breaks the whole", yet an X-band modulator shared by stations is composed into one of them | AS §4 vs §11.5 |
-| C5 | Swap history is held three ways, none of them complete: `installed_on`/`removed_on` (one pair), `replaced` (Asset→Asset), and re-pointing `powers` edges | AS §5.3, §6, §11.1 |
-| C6 | The worked example says `Power Supply → powers → Magnet Assembly` and `Quadrupole → realized by → Magnet Assembly`. Inference writes `Power Supply → powers → Quadrupole` and never creates a Magnet Assembly | AS §11.1 vs `element_inference.py:355` |
-| C7 | "Beamline imports link to IT equipment; they do not create it", but the import does create it | IT §3 vs IT §0, `_it_equipment` |
-| C8 | "The Access Point is always made" is listed as decided, but `access_point()` still returns matched equipment *as* the Access Point | IT §0, §6 vs `epik8s_import.py` `access_point` |
-| C9 | "A person outranks it" holds only for inferred objects. `upsert()` replaces the whole attribute bag of every **stated** object on each re-import, so manual edits to IOCs, devices and access points are silently lost | AS §9.5 vs `epik8s_import.py` `upsert` |
-| C10 | `argus_source_ref` is labelled "Source revision" but holds `repo@branch:path`. `Control Configuration` is "one values.yaml at one git revision" but is a single object updated in place | AS §5.1, §5.6 |
-| C11 | "Nothing is deleted when it comes out" contradicts `merge_strategy=remove_all_before`, which hard-deletes and cascades | AS §5.3 vs `run_epik8s_import` |
-| C12 | Spares are held four ways: `is_spare`, the `Spare Part` type, the `spare_for` attribute and the `spare for` relation | AS §5.3, §6 |
-| C13 | `drives` is "the link to the physical asset" from `asset:`, but one `asset:` URL on an IOC that lists devices of several kinds cannot name one box per device | AS §9.2 |
-| C14 | 156 planned PBS components (RF loads, couplers…) are created as `Asset`, defined as "the serialised box, with a purchase order". They have not been built and have no serial number | AS §10, §14.10 |
-| C15 | Figures disagree: 141 serial lines measured vs 104 made, with BTF 16 vs 20; 17 abstract types vs "8"; 76/46 global/beamline types vs 59/44 in the diagram; 45 seeder tests vs 27 | IT §1 vs §0; AS §4, §8, §15, §14.3, §16 |
-
-C15 probably reflects different counting rules, but the figures must be reconciled before they
-are quoted as acceptance criteria.
+| C1 | `Spare Part` inherits PBS/WBS keys that it must not have | AS §4 vs §5.1 |
+| C2 | `composed of` is Functional → Asset in one place, but Asset → Asset and element → element elsewhere | AS §4, §6, §9.5 |
+| C3 | `part of` is used for locations (`zones:` → Area, PBS AREA → Area) | AS §9.1, §10.2; `pbs_import.py:494` |
+| C4 | A modulator shared by several stations is modelled as a component of one of them | AS §4 vs §11.5 |
+| C5 | Swap history is held in three places, none of them complete | AS §5.3, §6, §11.1 |
+| C6 | The design says the power supply `powers` a Magnet Assembly; the code has it `powers` the Quadrupole, and never creates a Magnet Assembly | AS §11.1 vs `element_inference.py:355` |
+| C7 | "Imports do not create IT equipment", yet the import does | IT §3 vs §0 |
+| C8 | "The Access Point is always made", yet `access_point()` reuses matched equipment instead | IT §6 vs `epik8s_import.py` |
+| C9 | `upsert()` replaces the whole attribute bag of stated objects on every re-import | `epik8s_import.py` `upsert` |
+| C10 | `argus_source_ref` records a branch, not a revision | AS §5.1 |
+| C11 | "Nothing is deleted", yet `remove_all_before` deletes with a cascade | AS §5.3 vs `run_epik8s_import` |
+| C12 | Spares are represented in four different ways | AS §5.3, §6 |
+| C13 | A single `asset:` URL on a multi-device IOC cannot name one box per device | AS §9.2 |
+| C14 | 156 planned PBS components are stored as serialised assets | AS §10, §14.10 |
+| C15 | Published counts disagree: 141 vs 104 serial lines, 17 vs 8 abstract types, 76/46 vs 59/44 types, 45 vs 27 tests | IT §0–§1; AS §4, §8, §14–§16 |
 
 ### 1.4 Where the platform forces an intermediate object
 
-`Relation` rows carry only `from`, `to` and `type`. The table below says, for each link that
-carries information of its own, where that information goes.
+A `Relation` row carries only `from`, `to` and `type`. A link that has information of its own
+therefore becomes an object:
 
-| Link carries… | Example | Resolution | Why not a platform change |
+- **Installation**: interval and workflow status.
+- **Communication Path**: protocol and transport.
+- **Bus Segment**: medium and line parameters.
+- **Equipment Port**: port number and mode.
+
+System metadata (provenance, derivation, edge status) goes into platform tables and columns,
+not objects (§3.3). Ordered hops and permit thresholds remain deferred (§9.1, AS §9.3).
+
+---
+
+## 2. Principles and terminology
+
+### 2.1 Principles
+
+1. **Positions vs equipment.** Functional topology connects positions. A physical unit attaches
+   to a position only through an Installation.
+2. **Installation is physical occupancy.** A unit is in at most one place at any instant. A unit
+   that serves several functions does so through functional relations from its one position.
+3. **Configuration names positions, not boxes.** An LNF device name is a functional tag.
+4. **Claims are immutable; state is projected.** A source's statement is never edited. The
+   current value of every attribute and asserted edge is recomputed from claims, decisions and
+   policy.
+5. **Confirmation is sticky.** A confirmed fact stays until a person explicitly supersedes or
+   retracts it. Sources and other confirmations can only raise conflicts against it.
+6. **Stages are versioned independently.** Unchanged bytes skip parsing. They never skip
+   resolution or projection when those stages' inputs have changed.
+7. **Authority is policy, not code.** Which source wins is declared, versioned and validated
+   data.
+8. **One authoritative form per link.** A link is held as an attribute, an asserted edge or an
+   intermediate object. Every other form of it is derived.
+9. **Owners create; others propose.** Records are retired, never deleted. Duplicates are merged
+   into tombstones, never dropped.
+10. **Classify before converting.** Legacy data is sorted by evidence into explicit outcomes,
+    with a reviewable report, before anything moves.
+11. **Types follow sources and questions.** Fallback categories are governed and promoted when
+    they cross a threshold.
+
+### 2.2 Terms
+
+| Term | Meaning |
+|---|---|
+| **Position** | a Functional Element of an *installable* type (registry `installable = true`): Equipment Position, Motion Axis, Mirror, and the Beam Element subtypes. Facilities, Sections and pure composites (Machine Module, RF Station, Screen Station) are not positions |
+| **Equipment** | a physical, individually tracked unit: any subtype of `Equipment`, including IT Equipment |
+| **Installation** | a domain record placing one Equipment at one Position over `[valid_from, valid_until)` |
+| **Source stream** | one source instance read repeatedly, for example `epik8s:epik8-sparc#deploy/values.yaml@main`, `insight:schema=44` or `person:<user>` |
+| **Source ref** | the name a source gives a subject, for example `epik8s:SPARC:device:vac-gunvpc/GUNSIP01` or `insight:object:129573`. Resolution binds it to a record uid |
+| **Fact** | what is being claimed: `(subject, predicate)` for a single value, `(subject, predicate, member)` for a set member |
+| **Claim** | one source stream's statement of one fact value, with its method and rule. Immutable |
+| **Claim event** | a record that a claim *appeared in*, *disappeared from* or *changed evidence in* a stream revision. Append-only |
+| **Decision** | a judgement by a person or by a declared policy about a fact, claim, identity, conflict or revision. Append-only |
+| **Status event** | a change in a fact's projected status, with its cause. Append-only |
+| **Projection** | current state computed from the above: fact state, `assets.attributes`, asserted edges, record status, identity bindings, conflicts, the review queue. Mutable and rebuildable |
+| **Derived edge** | a `relations` row computed by a registry rule from projections, for example `realized by`, `implemented by` or `instance of`. It is never claimed or edited |
+| **Record status** | the record's own state: `Provisional`, `Active`, `Retired` or `Merged`. It is separate from `argus_lifecycle`, which describes the equipment's operational state |
+
+---
+
+## 3. Metamodel
+
+### 3.1 Domain records and how they connect
+
+```
+ FUNCTIONAL (beamline or it-infrastructure)                       CATALOGUE (catalogue ws)
+ Facility ◄─part of─ Section ◄─part of─ Beam Position Monitor A ─┐       Product Model ─supplied by▶ Vendor
+                                        Beam Position Monitor B ─┤ served by        ▲ instance of [derived]
+                                                                 ▼                  │
+ Control Device ─acts on─▶ Equipment Position SPARC:POS:LIBERA-01 (class Digitizer) │
+      │                          ▲ installed at                                     │
+      │ on path                  │                  PHYSICAL (inventory / it-infrastructure)
+      ▼                     Installation INS-01J9… ─installation of─▶ Digitizer s/n 2217
+ Communication Path          [2024-05-02, open) · Confirmed          │ located in [derived]
+      │ enters at                                                    ▼
+      ▼                                                         Rack B12 ─within▶ Area ─within▶ Building
+ Access Point ─assigned to─▶ Equipment Position IT:POS:scsparcsipmxa001 (it-infrastructure)
+      │   ╲                        ▲ installed at
+      │    ╲ implemented by        │
+      │     ╲ [derived]       Installation ─installation of─▶ Serial Converter Moxa s/n M-5531
+      │      ╲──────────────────────────────────────────────────▶      ▲ port of
+      │                                                                 │
+ Communication Path ─continues on─▶ Bus Segment ─attached to [derived]─▶ Equipment Port P3
+
+ [derived] = computed by the derive stage from projections; never claimed or edited
+```
+
+### 3.2 Four classes of stored data
+
+| Class | Mutability | What it holds | Stored in |
 |---|---|---|---|
-| a time interval, evidence, a work order | asset at a position | **`Installation` object** | It is a business entity. It gets tickets, documents, search and permissions from the object machinery at no extra cost |
-| protocol, transport, TCP port | IOC → device | **`Communication Path` object** | Same reason; it is also what fails |
-| baud, framing, medium, topology | the RS-485 run behind a Moxa port | **`Bus Segment` object** | Several devices share one segment |
-| port number, port kind, mode | converter port 3 | **`Equipment Port` object** | The port is a physical thing that cables plug into |
-| hop order along a path | cable → switch port → converter | not stored. Hops form an unordered series set (§9.4) | Order does not change impact analysis. If troubleshooting needs it, add a `Path Hop` object in a later extension |
-| a bus address or channel | device 5 on a bus | on the **Control Device** (`address`, `channel`), where the configuration states it | It is already there |
-| a permit threshold | RF conditioning enabled by GUNSIP01 at 3E-7 | stays in the source device's `settings` (AS §9.3); an `Interlock Condition` object only if thresholds must be queried | Deferred |
-| **provenance of any fact** | "stated by epik8-sparc@6bca015, path …" | **platform table** (§7), not objects | There are tens of thousands of facts. Objects would flood search and the graph |
-| derivation and status of an edge | derived, retired | **platform columns** on `relations` (§6.1) | System metadata, not domain data |
+| **Domain record** | identity (`uid`) is stable; type, key and record status change only through record events | Position, Equipment, Installation, Access Point, Communication Path… | `assets` row (uid, key, type, workspace, record_status) |
+| **Immutable audit data** | append-only; never updated or deleted | source revisions, claims, claim events, decisions, status events, record events, identity events, conflict events, migration events, job runs | ledger tables (§7) |
+| **Current-state projection** | rewritten by the project stage; rebuildable from audit data at any time | fact state, `assets.attributes`, `assets.record_status`, asserted `relations` rows, identity bindings, open conflicts, the review queue | projection tables and the existing columns |
+| **Derived graph edge** | rewritten by the derive stage from projections and the registry | `realized by`, `implemented by` (derived form), `attached to`, `reached through`, `connects to`, `drives`, `instance of`, `located in`, `within`, `supplied by`, `in work package` | `relations` rows with `derivation = derived` |
 
----
+After the cut-over, nothing writes `assets.attributes` or `relations` directly: not the
+importers, the UI or the API. A UI edit becomes a claim from the stream `person:<user>` plus a
+`confirm` decision by the same person, which the project stage then applies.
 
-## 2. Revised principles
+### 3.3 Platform additions
 
-The existing principles in IT §3 remain. These are added or sharpened:
-
-1. **Functional location vs equipment.** A *position* is the stable place in the machine where a
-   function is performed. An *asset* is the unit currently doing it. Control, supply and
-   composition topology is recorded between positions, so it survives swaps. Physical units
-   attach to positions only through `Installation`.
-2. **Configuration names positions, not boxes.** An LNF device name such as `GUNSIP01` or
-   `AC1FLG01` is a functional tag. It keys a position. It never keys a physical asset.
-3. **Every fact has a source.** The attribute bag and the relation table hold the *current
-   effective state*. The fact ledger holds *why*. No importer writes an attribute or an edge
-   without a ledger record.
-4. **One authoritative form per link.** Each form is either an attribute, a relation or an
-   intermediate object (§6.3). The other forms are derived, marked as derived, and never
-   edited directly.
-5. **Owners create; others propose.** A workspace creates only the object classes it owns
-   (§4). It links to visible objects it does not own. It changes them only by proposing facts.
-6. **Nothing that other records point at is deleted.** Stale objects are *retired*, duplicates
-   are *merged* into a tombstone, and history stays queryable.
-7. **Types follow sources and questions.** A type enters production when a source fills it,
-   an owner maintains it and a query needs it.
-
----
-
-## 3. Revised core metamodel
-
-### 3.1 The planes and their joints
-
-```
-                               FUNCTIONAL  (beamline)                       CATALOGUE (catalogue ws)
-                 Facility ◄─part of─ Section ◄─part of─ Screen Station          Product Model ──supplied by──▶ Vendor
-                                                     │ composed of                     ▲
-                                                     ▼                                 │ instance of (derived from attribute)
-   Control Device ──acts on──▶ Equipment Position  SPARC:POS:AC101 (Camera)            │
-        │                            ▲                                                 │
-        │ on path                    │ installed at            PHYSICAL (inventory / it ws)
-        ▼                            │                                                 │
-   Communication Path          Installation ──installation of──▶ Camera  s/n 22817 ────┘
-        │ enters at             valid_from 2024-05-02                 │
-        ▼                       valid_until —                         │ located in (derived from attribute)
-   Access Point ──implemented by──▶ Serial Converter (it)             ▼
-        (beamline)                     ▲ port of                  Rack B12 ─within─▶ Area LNT ─within─▶ Building
-                                       │
-   Communication Path ──continues on──▶ Bus Segment ──attached to──▶ Equipment Port 3
-
-   FACT LEDGER (platform table): every attribute value, relation and object above
-        → source revision · method · rule · evidence · confidence · status · confirmation
-```
-
-### 3.2 Metamodel elements
-
-| Element | Kind | Purpose |
-|---|---|---|
-| **Item** | abstract type | Shared keys that join objects to tickets and documents (`argus_*`, `description`) |
-| **Functional Element** | abstract type | A place in the machine's function, including breakdown (PBS/WBS) keys. Its subtypes include **Equipment Position**, the generic slot |
-| **Physical Asset** | abstract type | Anything physical and trackable. **Equipment** (serialised unit) and **Equipment Port** sit under it |
-| **Catalog Item** | abstract type | Product Model, Vendor |
-| **Control Item** | abstract type | Configuration as objects, including Communication Path and Bus Segment |
-| **IT Record** | abstract type | Address Record (later Network Segment) |
-| **Record** | abstract type | **Installation**, and the Engineering Records |
-| **Location** | abstract type | Building, Area, Rack |
-| **Source Revision** | platform table | One input to one import run: source, revision, hash |
-| **Assertion** | platform table | One fact from one source, with method, rule, evidence, status and confirmation |
-| **Relation Type** | platform table, seeded from code | The registry |
-| **Identity Candidate** | platform table | A proposed "these two records are the same thing" |
-| **Asset Label** (existing) | platform table | External identifiers and aliases: serial, MAC, FQDN, Insight objectId, former key |
-| `assets.record_status` | new column | `Provisional`, `Active`, `Retired`, `Merged`: the record's state, separate from `argus_lifecycle` (the equipment's operational state) |
-| `relations.derivation`, `.status` | new columns | `authored`, `imported`, `inferred` or `derived`; `active`, `proposed` or `retired` |
-
-`record_status` is a column, not an attribute, because constraints and every default query
-filter on it (`Active` only). It is system state, not domain data.
+| Addition | Class |
+|---|---|
+| `source_revision`, `claim`, `claim_event`, `decision`, `status_event`, `record_event`, `identity_event`, `conflict_event`, `migration_event`, `job_run` | audit data. Append-only is enforced by database grants: the application role has only `INSERT` and `SELECT` |
+| `fact_state`, `identity_binding`, `conflict`, `review_item`, `v_installation` | projections |
+| `authority_rule`, `multivalue_rule`, `relation_type` (each keyed by policy or registry version) | versioned configuration, seeded from reviewed files in the repository |
+| `assets.record_status`, `assets.merged_into_uid` | projection columns |
+| `relations.derivation` (`asserted` / `derived`), `.status` (`active` / `proposed` / `retired`), `.retired_at`, `.rule`; unique `(workspace_id, from, to, type)` | projection columns and a constraint |
+| partial unique index on active strong identifiers in `asset_labels` | constraint |
+| `migration_plan`, `migration_item`, `migration_map` | migration (§12) |
 
 ---
 
@@ -204,825 +221,954 @@ filter on it (`Active` only). It is system state, not domain data.
 
 ### 4.1 Workspaces
 
-| Workspace | Owns (creates, edits, retires) | Authoritative sources | Objects visible elsewhere |
+| Workspace | Owns | Authoritative sources |
+|---|---|---|
+| `catalogue` | shared types; Product Model, Vendor; the `equipment_class` vocabulary | catalogue editors, vendor data |
+| `inventory` | non-IT Equipment, Location | Jira Insight asset schemas; inventory staff |
+| `it-infrastructure` | IT Equipment and its Equipment Ports; Address Records; **IT positions** (the rack slot or role a converter or server fills) and **their Installations** | IT registry, DNS/DHCP; IT staff |
+| beamline | functional elements and positions; control items (including Communication Paths, Bus Segments and Access Points); **their Installations**; engineering records | its configuration repository, PBS matrix and operators |
+
+**An Installation belongs to the workspace that owns its position.** A beamline records the
+swaps on its machine, and IT records the swaps behind its hostnames. Positions and Installations
+are readable from every workspace (decision D6), so the inventory team can see where its units
+are. The owner of a piece of equipment can **propose** decisions about any Installation of it
+(§4.3).
+
+### 4.2 What each source may create
+
+| Source | Creates in its own workspace | Proposes | Never creates |
 |---|---|---|---|
-| `catalogue` | all shared **types**; Product Model, Vendor | vendor data, catalogue editors | all (flagged global) |
-| `inventory` (site) | **Physical Assets that are not IT**, Location | Jira Insight asset schemas; inventory staff | all (flagged global) |
-| `it-infrastructure` (site) | IT Equipment, their Equipment Ports, Address Records, later Network Segments | IT registry (Insight IT schemas, DNS/DHCP), IT staff | all (flagged global) |
-| beamline (`sparc`, `btf`, …) | Functional Elements and Positions, Control Items (incl. Paths, Bus Segments, Access Points), **Installations**, Engineering Records | its configuration repository, its PBS matrix, its operators | positions, elements and installations flagged global (read-only elsewhere); engineering records never |
+| EPIK8s configuration | control items, Access Points, Communication Paths, Bus Segments; the positions it infers (`Provisional` until a policy or a person accepts them) | Installations from `asset:` evidence; edges from naming rules; Access Point assignments | Equipment, Locations, Product Models |
+| PBS matrix | functional elements and positions (lifecycle Planned); modules, stations, sections; engineering records | Areas | Equipment |
+| Inventory (Insight) | Equipment, Locations | Product Models; Installations where Insight records a slot | positions |
+| IT registry | IT Equipment, Equipment Ports, Address Records, IT positions and their Installations | — | Access Points |
+| Person | anything their workspace owns | decisions on records in other workspaces | — |
 
-**Answer to "which workspace is authoritative for physical assets?"** `inventory`, or
-`it-infrastructure` for IT equipment. A beamline never owns a physical asset. It owns the
-*positions* those assets are installed at, and the *installations* that say so. The beamline
-owns installations because its operators perform and witness swaps. The inventory team
-reaches them because installations are global-readable, and can propose changes to them
-(§4.4).
+Provisional IT Equipment may be created only when all four conditions from the first revision
+hold:
 
-### 4.2 What each import may create
+1. the run uses a service identity with the `it-contributor` role;
+2. the domain is IT-approved and its registry export is fresh;
+3. resolution finds no identifier candidate;
+4. the DNS class prefix names equipment.
 
-| Import | Creates (own workspace) | Proposes (review queue) | Never creates |
-|---|---|---|---|
-| EPIK8s configuration | Control Configuration, IOC Template, IOC, Control Device, Control Service, Control Network, Storage Mount, Access Point, Communication Path, Bus Segment | Positions and elements it infers (created as `Provisional`); Installations from `asset:` evidence; `acts on`, `composed of` and `served by` edges from name rules; Product Model links from template `asset:` | Physical Assets; Locations; Product Models; IT equipment, except under §4.3 |
-| PBS matrix | Functional Elements and Positions (lifecycle *Planned*), Machine Module, RF Station, Section, Work Package, Procurement Record, Utility Requirement | Areas it names (to `inventory`) | Physical Assets (a planned component has no serial yet) |
-| Inventory (Insight) | Physical Assets, Locations | Product Models (to `catalogue`); Installations when Insight records where a unit is | Positions |
-| IT registry | IT Equipment, Equipment Ports, Address Records | — | Access Points (these are the beamline's) |
-| Person (UI) | anything the workspace owns | facts on objects in other workspaces | — |
-
-### 4.3 When inferred IT equipment may be created
-
-The import may create a **provisional** IT equipment object in `it-infrastructure` only when
-all of the following hold:
-
-1. The run uses a service identity with the `it-contributor` role in `it-infrastructure`. The
-   script's `--it-workspace` bypass is removed, and the same check applies through the API.
-2. The FQDN is in a domain that IT has listed as *provisional-allowed*. Before a registry import
-   exists, IT opts in per domain. After one exists, a domain is provisional-allowed only while
-   that registry export is fresher than a set age. Absence from a fresh registry is evidence;
-   absence from a stale one is not.
-3. No identifier match exists. The FQDN, IP and MAC labels of all active IT records produce no
-   candidate.
-4. The DNS class prefix names equipment (`sc`, `sw`, `pl`/`vl`/`dl`, `pw`/`vw`/`dw`, `ns`), not
-   an instrument or an `il` management interface.
-
-Such an object is `record_status = Provisional` and keyed `PROV:HOST:<fqdn>`. It carries the
-FQDN as a label and appears in IT's review queue. §10 describes how it is later merged into the
-registry's record. Otherwise the Access Point keeps an inferred `endpoint_kind` and no box.
-
-### 4.4 Visibility vs editing authority
-
-These are four separate permissions:
+### 4.3 Read, edit, link, propose
 
 | Permission | Rule |
 |---|---|
-| **Read** | owner workspace; or anyone, if the *object* is flagged global. Type globality shares the definition only (unchanged) |
-| **Edit / retire** | members of the owner workspace with an editor role; importers only through their service identity in that workspace |
-| **Link** | any workspace may create a relation *from its own object* to any object it can read, if the registry allows the relation to cross workspaces. The edge belongs to the source's workspace |
-| **Propose** | any workspace may add an assertion with status `proposed` to any object it can read. The owner accepts or rejects it. This is how a beamline reports a serial number seen on a photograph of an inventory asset |
+| Read | the owner workspace; or anyone, if the record is flagged global |
+| Edit | editors in the owner workspace. Their edits are recorded as claims plus `confirm` decisions |
+| Link | an asserted edge *from* a record you own *to* any record you can read, if the registry allows that relation to cross workspaces |
+| Propose | a claim or a `propose` decision on any readable record. It lands in the owner's review queue, and only the owner can confirm it |
 
-Two platform gaps must be closed for this to hold. `create_asset` must check that the type is
-usable from the workspace (AS §8). Toggling a global type must not cascade the flag into
-beamline child types.
-
-### 4.5 Retiring stale objects
-
-See §11. In short, each import run is a source revision. A fact the new revision no longer
-states is *retracted*. An object with no remaining active support is *retired*, never deleted.
-Retirement has a threshold that stops the run for approval when too much would retire.
+Two platform gaps must be closed: `create_asset` must check that the type is usable from the
+workspace, and the unchecked `--it-workspace` script path is removed.
 
 ---
 
-## 5. Minimum viable type hierarchy (first production release)
+## 5. Type hierarchy for the first production release
 
-### 5.1 Rules for the core
-
-A type is in the core only if (a) a source that exists today fills it, or it is the join
-without which the plane model fails, (b) a named owner maintains it, and (c) a query in
-§8–§10 or in the root-cause walk needs it. Everything else is an **extension** with a trigger
-(§5.4).
-
-### 5.2 The core: 54 concrete types, 12 abstract
+### 5.1 The core: 54 concrete, 12 abstract
 
 ```
-Item (abstract)                         description, argus_facility, argus_system, argus_subsystem,
-│                                       argus_keywords, argus_lifecycle, argus_criticality, argus_responsible
-│
-├── Functional Element (abstract)       [beamline]  + argus_beamline, zone, argus_location (→ Location),
-│   │                                   pbs_code…sequence_index, design_status, work_package (→ Work Package)
-│   ├── Facility
-│   ├── Section
-│   ├── Machine Module                  composite
-│   ├── RF Station                      composite
-│   ├── Screen Station                  composite
-│   ├── Mirror                          composite (its axes)
-│   ├── Beam Element (abstract)         lattice_name, s_position, length, family, design_value, polarity
-│   │   ├── Dipole  ├── Quadrupole  ├── Sextupole  ├── Corrector  ├── Solenoid
-│   │   ├── Accelerating Structure      ├── RF Gun
-│   │   └── Beam Position Monitor
-│   ├── Motion Axis                     was Motor Axis (an Asset): axis_id, travel, resolution, velocity_max
-│   └── Equipment Position              position_class (indexed), role, expected_product_model (→ Product Model)
-│
-├── Physical Asset (abstract)           [inventory | it-infrastructure]  argus_location (→ Location)
-│   ├── Equipment (abstract)            manufacturer, model, serial (reserved), product_model (→ Product Model),
-│   │   │                               inventory_number, condition, warranty_until, is_designated_spare
-│   │   ├── Power Supply   ├── Magnet Assembly
-│   │   ├── Ion Pump   ├── NEG Cartridge   ├── Turbo Pump   ├── Primary Pump   ├── Vacuum Gauge
-│   │   ├── Camera   ├── Actuator   ├── Digitizer   ├── Low-Level RF Unit   ├── Modulator   ├── Chiller
-│   │   ├── Other Equipment             equipment_class (indexed): the fallback, so no inventory row is refused
-│   │   └── IT Equipment (abstract)     hostname, fqdn, firmware_version, management_url
-│   │       ├── Serial Converter        n_serial_ports, serial_modes
-│   │       ├── Switch                  n_ports, is_managed
-│   │       └── Server                  is_virtual, os, role
-│   └── Equipment Port                  port_number, port_kind, tcp_port, operating_mode
-│
-├── Catalog Item (abstract)             [catalogue]
-│   ├── Product Model   └── Vendor
-│
-├── Control Item (abstract)             [beamline]
-│   ├── Control Configuration           one per repository + path (revisions are Source Revisions)
-│   ├── IOC Template   ├── IOC   ├── Control Device   ├── Control Service
-│   ├── Control Network   ├── Storage Mount   ├── Access Point
-│   ├── Communication Path              was Serial Line (the logical part)
-│   └── Bus Segment                     was Serial Line (the physical medium)
-│
-├── IT Record (abstract)                [it-infrastructure]
-│   └── Address Record
-│
-├── Record (abstract)
-│   ├── Installation                    [beamline]  see §8
-│   └── Engineering Record (abstract)   [beamline, private]
-│       ├── Work Package   ├── Procurement Record   └── Utility Requirement
-│
-└── Location (abstract)                 [inventory]  parent_location (→ Location), access_rule
-    ├── Building   ├── Area   └── Rack
+Item (abstract)
+├── Functional Element (abstract)        breakdown keys (pbs_*, design_status, work_package), argus_location
+│   ├── Facility · Section · Machine Module · RF Station · Screen Station        (not installable)
+│   ├── Mirror                            composite of its axes; installable (the optic itself)
+│   ├── Beam Element (abstract)           installable
+│   │   ├── Dipole · Quadrupole · Sextupole · Corrector · Solenoid
+│   │   ├── Accelerating Structure · RF Gun · Beam Position Monitor
+│   ├── Motion Axis                       installable
+│   └── Equipment Position                installable; position_class, expected_product_model
+├── Physical Asset (abstract)            argus_location
+│   ├── Equipment (abstract)             manufacturer, model, serial, product_model, inventory_number,
+│   │   │                                condition, warranty_until, is_designated_spare
+│   │   ├── Power Supply · Magnet Assembly · Ion Pump · NEG Cartridge · Turbo Pump · Primary Pump
+│   │   ├── Vacuum Gauge · Camera · Actuator · Digitizer · Low-Level RF Unit · Modulator · Chiller
+│   │   ├── Other Equipment               equipment_class (governed, §5.5)
+│   │   └── IT Equipment (abstract) → Serial Converter · Switch · Server
+│   └── Equipment Port
+├── Catalog Item (abstract) → Product Model · Vendor
+├── Control Item (abstract) → Control Configuration · IOC Template · IOC · Control Device · Control Service
+│                             · Control Network · Storage Mount · Access Point · Communication Path · Bus Segment
+├── IT Record (abstract) → Address Record
+├── Record (abstract) → Installation · Engineering Record (abstract) → Work Package · Procurement Record
+│                                                                      · Utility Requirement
+└── Location (abstract) → Building · Area · Rack
 ```
 
-Counts: 16 functional, 18 physical (14 equipment, 3 IT, plus Equipment Port), 2 catalogue,
-10 control, 1 IT record, 4 records, 3 locations, which gives **54 concrete** and **12
-abstract** types.
+This revision adds no types. `Engineered Item` stays removed, and its breakdown keys live on
+Functional Element. That fixes C1 and C14: a planned PBS component is a position, and a spare
+unit is Equipment with no current Installation. The extensions keep the triggers set in the
+first revision: RF distribution, diagnostics, magnets and undulators, cabling, network
+topology, consoles, stores, safety, plant and electronics, and engineering. Each one enters
+when it has a source, an owner and a query.
 
-### 5.3 The `Engineered Item` fix (C1)
+### 5.2 Installation attributes
 
-`Engineered Item` is removed. The breakdown keys (`pbs_*`, `component_id`, `module_code`,
-`station_name`, `design_status`, `unit_count`, `sequence_index`, `work_package`) move to
-**`Functional Element`**. A PBS row describes a *slot in the design*, and that slot is a
-position. Consequences:
+§8.1 replaces the first revision's list. Installation has no `role` field and no temporal
+status field.
 
-- `Equipment` carries no PBS keys. A spare pump on a shelf is an `Equipment` with no active
-  Installation. `is_designated_spare` records *intent* (this unit is held as a spare), while
-  *availability* is derived (no active Installation, lifecycle not Faulty or Scrapped). The
-  `Spare Part` type is deferred as `Stock Item` (§5.4), for non-serialised stock counted by
-  quantity. That removes all four spare representations of C12 except these two, and each of
-  those has a distinct meaning.
-- The 156 PBS components of physical types (C14) become `Equipment Position` objects with
-  `position_class = "RF Load"` (and so on). When a load is delivered, it is an `Equipment` in
-  `inventory`, installed at that position. Cost and procurement stay on the position, where the
-  design put them. The delivered unit's purchase order can reference the same Procurement
-  Record.
-- `Machine System` objects are deferred. `argus_system` (the string shared with tickets and
-  documents) is the one form of system membership in the core (§6.3).
+### 5.3 Equipment Position
 
-**Equipment Position vs typed functional elements.** Use a typed subtype only where the element
-has its own functional attributes (lattice physics, composites, motion ranges). Everything else
-is one generic `Equipment Position` with an indexed `position_class`. This keeps the hierarchy
-from mirroring every equipment type in the functional plane. The cost is that MCP search, which
-matches on type name (AS §3), must also match `position_class`. That is a one-line change in
-`mcp_tools.py` and is part of Phase 2.
+`position_class` uses the same governed vocabulary as `equipment_class` (§5.5), so the
+compatibility check in §8.3 compares like with like. `expected_product_model` records design
+intent, taken from an IOC template's `asset:` or from the PBS. If it differs from the installed
+unit's `product_model`, that is a report item, not an error.
 
-### 5.4 Extensions: the rest of the target ontology
+### 5.4 Equipment that serves several positions
 
-The deferred types stay designed (AS §4–§5 remain the reference). Each one enters production
-when its trigger is met.
+A unit with several channels is installed once, at one position. The positions it serves point
+to that position:
 
-| Extension | Types (from the 122) | Trigger: source, owner, query |
-|---|---|---|
-| RF distribution | Waveguide Component tree (10 leaves), RF Amplifier | serialised RF components delivered into `inventory`; WP-04 owner; "which coupler serial is in station 3" |
-| Diagnostics | Beam Charge Monitor, Faraday Cup, Wire Scanner, Emittance Meter, Spectrometer Station, Beam Loss / Arrival / Bunch Length Monitor, Diagnostic Element (abstract), Scintillator Screen, Optical Assembly | the WP-08 PBS matrix, or a diagnostics inventory |
-| Magnets and undulators | Undulator, Plasma Module, Collimator, Beam Stopper, Vacuum Sector, Vacuum Valve, Vacuum Chamber | the WP-07 matrix; the lattice importer (AS §15) |
-| Cabling | Cable Run tree | a cabling database or matrix |
-| Network topology | Network Segment, Router, Media Converter, Network Device (abstract) | the IT registry, LLDP or port tables; IT owner |
-| Consoles | Workstation, Computing Node (abstract) | Ansible inventory reader (IT §8.4) |
-| Stores | Stock Item (was Spare Part), Storage Location | a stores or spares system and its owner |
-| Safety | Interlock Unit, Radiation Monitor, Interlock Condition | PSS/MPS owners. Safety data needs its own review policy |
-| Plant and electronics | I/O Module, PLC, Timing Module, Electronics Crate/Board, Instrument, Motion Controller, Cooling Circuit Component, Cryogenic Device, Laser System, Mechanical Support | per system, when an inventory or matrix lists them. Until then they go into `Other Equipment` with `equipment_class` |
-| Engineering | Machine System (object), Section-level budgets | a system owner who maintains responsibilities |
+```
+Digitizer (Libera Spectra, s/n 2217) ─installation─▶ Equipment Position SPARC:POS:LIBERA-01
+Beam Position Monitor BPM-A ─served by─▶ SPARC:POS:LIBERA-01        (read: LIBERA-01 serves BPM-A)
+Beam Position Monitor BPM-B ─served by─▶ SPARC:POS:LIBERA-01
 
-The seeder gains tiers (`core`, `ext:<name>`). Extension types are seeded only on request.
-Types already seeded in a workspace are kept but marked `metadata.tier` and hidden from creation
-menus while they hold no objects.
+Power Supply (4 channels) ─installation─▶ Equipment Position SPARC:POS:PS-RACK3-01
+SPARC:POS:PS-RACK3-01 ─powers─▶ Corrector HCOR01, Corrector VCOR01, …
+```
+
+Per-channel facts, such as the channel number or a current limit, stay on the Control Devices
+that address them, where the configuration states them. The derived chain
+`BPM-A → served by → LIBERA-01 → realized by → s/n 2217` answers "which unit is behind this BPM".
+The unit itself has exactly one Installation.
+
+### 5.5 Governing `Other Equipment`
+
+- **The vocabulary.** `equipment_class` is an enumeration owned by `catalogue`. It starts with
+  the classes the sources already name (I/O Module, Scope, Timing Module, PLC, Motion
+  Controller, Laser System, Cryogenic Device, Cable, Rack PDU, …) plus `Unclassified`. Adding a
+  value is a catalogue decision.
+- **Mapping.** Importers map source classes through a versioned mapping table. An unmapped
+  source class becomes `Unclassified`, is reported, and its raw class is kept as a claim.
+- **Monthly report**, also available on demand. It covers:
+  - active objects per class, per workspace and per source;
+  - the share of `Unclassified`;
+  - classes whose objects appear in tickets or root-cause walks;
+  - free-text attributes that people keep adding in `description`.
+- **Promotion thresholds.** Any one of these opens a promotion review for a class:
+  - at least 25 active objects;
+  - objects in at least 2 workspaces;
+  - at least 3 class-specific attributes requested;
+  - a query or dashboard that filters on the class;
+  - a causal role that the root-cause walk needs.
+
+  Separately, `Unclassified` above 5 % of Equipment, or above 50 objects, raises a catalogue
+  alert.
+- **Promotion** creates a child type of `Equipment`. The class's objects are retyped in place,
+  keeping their uids, and each retype writes a `record_event: retyped`. The old class value is
+  deprecated: kept for history, no longer assignable (I-CAT-1).
 
 ---
 
 ## 6. Relation registry
 
-### 6.1 Registry fields
+### 6.1 Fields
 
-One declaration per relation type, in code (`services/relation_registry.py`, which absorbs
-`causal_model.SEMANTICS`). It is seeded into a `relation_types` table so the API and UI can read
-it, and a test pins every `relate()` call site to it.
+The fields are unchanged from the first revision: `name`, `inverse_name`, `source_types`,
+`target_types`, `card_source`, `card_target`, `acyclic`, `transitive`, `cross_workspace`,
+`derivation` (`asserted` / `derived`), `derived_from`, `on_source_retire`, `on_target_retire`,
+`on_merge`, `temporal`, `causal` and `mode` (`warn` / `enforce`).
 
-| Field | Meaning |
-|---|---|
-| `name` | canonical forward name, as stored in `relations.relation_type` |
-| `inverse_name` | display name read from the target (`composed of` ↔ `component of`) |
-| `source_types`, `target_types` | allowed schema names; `+` means including subtypes |
-| `card_source` | maximum edges of this type *from* one source (`1` or `n`) |
-| `card_target` | maximum edges of this type *into* one target (`1` = exclusive) |
-| `unique` | always `(from, to, type)`, enforced by a DB constraint; the registry can add a scope such as "one active per source" |
-| `acyclic`, `transitive` | graph constraints; queries may use the transitive closure |
-| `cross_workspace` | may the target live in another workspace |
-| `derivation` | `authored` (people), `imported`, `inferred`, or `derived` (computed from another authoritative form; read-only) |
-| `derived_from` | for derived relations: the attribute key, intermediate object or path rule |
-| `on_source_retire`, `on_target_retire` | `retire` the edge, `flag` for review, or `keep` |
-| `on_merge` | always `repoint` to the survivor (§10) |
-| `temporal` | `current` (history through the ledger) or `via Installation` (valid time) |
-| `causal` | layer, flow and carried loss, as in `causal_model.py` today |
-| `mode` | `warn` (log and report) or `enforce` (reject). All start in `warn` |
+This revision adds two:
 
-Two new columns on `relations` make this operable. `derivation` lets a sync job rebuild derived
-edges without touching authored ones. `status` (`active`, `proposed`, `retired`) plus
-`retired_at` let edges be proposed and retired without deletion. Add a unique constraint on
-`(workspace_id, from_asset_uid, to_asset_uid, relation_type)`.
+- **`multivalue`**: the contribution mode for asserted n-valued relations (§7.8).
+- **`installable`**: a flag on target types, used by `installed at`.
 
-**Direction.** Existing verbs keep their stored direction, so re-imports do not churn. Direction
-is never read from a name. The registry's `causal.flow` says which way a failure travels, as it
-does today.
+### 6.2 Registry entries
 
-### 6.2 The registry, core relations
+Entries changed or added in this revision are marked ●. Abbreviations: `FE` = Functional
+Element, `Pos` = installable position, `Eq` = Equipment (including IT Equipment), `AP` = Access
+Point. Cardinality is written `source / target`. For derived edges it applies **at any
+instant**.
 
-`FE` = Functional Element, `EP` = Equipment Position, `Eq` = Equipment.
-
-| name | inverse | source → target | card (src/tgt) | derivation | lifecycle | causal |
+| name | inverse | source → target | card | derivation | multivalue | notes |
 |---|---|---|---|---|---|---|
-| **part of** | contains | FE+ → Facility, Section | 1 / n; acyclic, transitive | imported, authored | target retired → flag | membership, weak |
-| **composed of** | component of | composite FE (Machine Module, RF Station, Screen Station, Mirror) → FE+ | n / **1** (exclusive); acyclic | imported, inferred (proposed), authored | source retired → flag parts; target retired → retire edge | composition, reverse, degradation |
-| **served by** | serves | FE+ → FE+ | n / n | imported, inferred, authored | retire with either end | function, reverse, function |
-| **realized by** | realizes | FE+ → Eq+ | 1 per role / 1 (unless multi-position) | **derived** from active Installations | follows Installation | function, reverse, function |
-| **installed at** | has installation | Installation → FE+ | 1 / n | authored, imported, proposed | position retired → flag | none |
-| **installation of** | installations | Installation → Eq+ | 1 / n | authored, imported, proposed | asset merged → repoint | none |
-| **acts on** | acted on by | Control Device, IOC* → FE+; Eq+ only when the asset has no position | n / n | inferred, authored (review), imported where stated | retire with source | control, forward |
-| **drives** | driven by | IOC → Eq+ | n / n | **derived**: IOC ← provided by ← device → acts on → FE → realized by → Eq | recomputed | control, forward |
-| **implemented by** | implements | Access Point → IT Equipment+, EP | 1 / n; cross-workspace | resolved, inferred, authored | target merged → repoint; AP retired → retire | control, reverse |
-| **provided by** | provides | Control Device → IOC | 1 / n | imported | retire with source | control, reverse |
-| **declared in** | declares | Control Item+ → Control Configuration | 1 / n | imported | — | none |
-| **templated from** | template of | IOC → IOC Template | 1 / n | imported | — | none |
-| **deployed on** | hosts | IOC, Control Service → Facility | 1 / n | imported | — | none |
-| **configures** | configured by | Control Configuration → Facility | 1 / n | imported | — | none |
-| **on network** | network of | IOC, Access Point → Control Network | n / n | imported | — | control, reverse |
-| **mounts** | mounted by | IOC, Control Service → Storage Mount | n / n | imported | — | control, reverse |
-| **runs on** | runs | IOC → Server, EP, Eq+ | 1 / n; cross-workspace | imported, resolved | — | control, reverse |
-| **uses path** | used by | IOC → Communication Path | n / 1 | imported | retire with either | control, reverse |
-| **on path** | carries | Control Device → Communication Path | 1 / n | imported | retire with either | control, reverse |
-| **enters at** | entry of | Communication Path → Access Point | 1 / n | imported | retire with source | control, reverse |
-| **continues on** | continuation of | Communication Path → Bus Segment | 1 / n | imported | retire with source | control, reverse |
-| **attached to** | attachment | Bus Segment → Equipment Port | 1 / 1; cross-workspace | resolved, authored (inferred port → proposed) | port retired → flag | control, reverse |
-| **port of** | ports | Equipment Port → Eq+ | 1 / n | imported (registry) | **retire with target** | control, reverse |
-| **traverses** | traversed by | Communication Path, Bus Segment → Equipment Port, Switch, (ext: Cable Run) | n / n; unordered series | authored, imported (cabling) | retire with target → flag path | control, reverse |
-| **reached through** | reaches | Control Device → Access Point | 1 / n | **derived**: on path → enters at | recomputed | control, reverse |
-| **connects to** | connected from | IOC → Access Point | n / n | **derived**: uses path → enters at | recomputed | control, reverse |
-| **enabled by** | enables | Control Device, IOC → Control Device | n / n | imported | — | interlock, reverse, permit |
-| **powers** | powered by | EP, FE+ → FE+ | n / n | inferred, authored | — | power, forward, function |
-| **cools** | cooled by | EP → FE+ | n / n | inferred, authored | — | cooling, forward, function |
-| **triggers** / **timed by** | as today | EP → FE+ / EP → EP | n / n | inferred | — | timing |
-| **upstream of** | downstream of | Beam Element → Beam Element | n / n; acyclic | imported (lattice) | — | beam, forward |
-| **measures** | measured by | Beam Position Monitor, Screen Station → Beam Element, Section | n / n | authored | — | none |
-| **instance of** | instances | Eq+ → Product Model | 1 / n; cross-workspace | **derived** from `product_model` | recomputed | none |
-| **located in** | contains (place) | Physical Asset+, FE+ → Location+ | 1 / n; cross-workspace | **derived** from `argus_location` | recomputed | environment, reverse |
-| **within** | contains (place) | Location → Location | 1 / n; acyclic | **derived** from `parent_location` | recomputed | environment |
-| **supplied by** | supplies | Product Model → Vendor | 1 / n | **derived** from `vendor_ref` | recomputed | none |
-| **assigned to** | assigned | FE+ → Work Package | 1 / n | **derived** from `work_package` | recomputed | none |
-| **requires** | required by | FE+ → Utility Requirement | 1 / **1** | imported | **source retired → retire target** (owned dependent) | none |
-| **procured under** | procures | FE+, Eq+ → Procurement Record | n / n | imported, authored | — | none |
-| **described by** | describes | IT Equipment+ → Address Record | n / n; cross-workspace | resolved, imported | — | none |
+| ● **installed at** | has installation | Installation → Pos | 1 / n | asserted | — | immutable once the Installation is Confirmed |
+| ● **installation of** | installed as | Installation → Eq | 1 / n | asserted | — | immutable once Confirmed |
+| ● **realized by** | realizes | Pos → Eq | **1 / 1** at any instant | derived from the Current, Confirmed Installation | — | no multi-position exception |
+| ● **served by** | **serves** | FE → Pos, FE | n / n | asserted | replace set per stream | shared providers (electronics, modulators); causal: function, reverse |
+| **powers** | powered by | Pos → FE | n / n | asserted | replace set per stream | covers multi-channel supplies |
+| **measures** | measured by | Beam Position Monitor, Screen Station → Beam Element, Section | n / n | asserted | members | |
+| **part of** | contains | FE → Facility, Section | 1 / n, acyclic | asserted | — | never points to a Location; components inherit their composite's |
+| **composed of** | component of | composite FE → FE | n / **1**, acyclic | asserted | replace set per stream | exclusive; shared providers use `served by` |
+| **acts on** | acted on by | Control Device, device-less IOC → Pos, FE; Eq only if it has no position | n / n | asserted | replace set (config), members (review tool) | |
+| **drives** | driven by | IOC → Eq | n / n | derived | — | via `provided by`, `acts on` and `realized by` |
+| ● **assigned to** | has address | AP → Pos | 1 / n | asserted | — | the endpoint belongs to this place in the machine or in IT |
+| ● **implemented by** | implements | AP → Eq | 1 / n at any instant | **derived** when the AP is assigned; otherwise **asserted** (resolver, transitional) | — | §9.2 |
+| **provided by**, **declared in**, **templated from**, **deployed on**, **configures** | as before | control plane | as before | asserted | — | |
+| **on network**, **mounts** | as before | IOC, AP / IOC, Service → … | n / n | asserted | replace set per stream | |
+| **runs on** | runs | IOC → Pos, Server | 1 / n | asserted | — | an IOC on an instrument runs on that instrument's position |
+| **uses path**, **on path**, **enters at**, **continues on** | as before | connectivity | as before | asserted | — | |
+| ● **attached to** | attachment | Bus Segment → Equipment Port | 1 / 1 at any instant | **derived**: the segment's `port_number` on the unit currently implementing its path's AP | — | needs no re-pointing after a swap |
+| **port of** | ports | Equipment Port → Eq | 1 / n | asserted (IT registry) | — | retired with the unit |
+| **traverses** | traversed by | Path, Segment → Equipment Port, Switch | n / n, unordered | asserted | members | |
+| **reached through**, **connects to** | as before | | | derived | — | |
+| **enabled by**, **cools**, **triggers**, **timed by**, **upstream of** | as before | positions and control | as before | asserted | replace set per stream | |
+| **instance of**, **located in**, **within**, **supplied by** | as before | | | derived from reference attributes | — | |
+| ● **in work package** | work package of | FE → Work Package | 1 / n | derived from `work_package` | — | renamed from `assigned to` |
+| **requires**, **procured under**, **described by** | as before | | | asserted | members | |
 
-`IOC*`: only for an IOC that lists no devices and is itself the unit (AS §9.5, the "modulator
-IOC"). **Deprecated verbs**, migrated in §12: `replaced` (derived from Installation
-succession), `carried by` (→ `traverses`), `on line` (→ `on path`), `port of` from a Serial Line
-(→ `enters at`), and `spare for` (deferred with Stock Item).
+§12 migrates the deprecated verbs: `replaced`, `carried by`, `on line`, the Serial Line's
+`port of`, `spare for`, and the old `assigned to` → Work Package. Once the registry is in
+`enforce` mode, it rejects them.
 
-### 6.3 The six relations that need care
+---
 
-**`part of` vs `composed of`.** These answer different questions and must not overlap.
+## 7. The fact ledger
 
-- `part of` is the **breakdown tree**. Each element has one parent (Facility or Section), the
-  tree is acyclic, and the closure answers "what is in the injector". It never points at a
-  Location (C3: use `argus_location` → `located in`) or at a Machine Module.
-- `composed of` is **assembly**. The part is exclusive to one composite (`card_target = 1`),
-  and a composite without its part is degraded. A Machine Module is an assembly, so the PBS
-  `MODULES` column produces `composed of`, not `part of`.
-- **Mutual exclusion.** A component has no `part of` of its own. It inherits its composite's
-  membership. So "what is in the injector" returns the screen station, not its camera
-  position, until the query expands composites. This is the behaviour AS §4 asked for, and it
-  is now enforced.
-- **Shared providers are not parts** (C4). A modulator feeding two stations is `served by` from
-  each station (or `powers`, when the dependency is electrical). Exclusivity rejects it as a
-  component of two composites. The PBS importer reports such rows instead of writing them.
-- **Physical containment** (a board in a crate) is not composition in the functional plane. In
-  the core it is not modelled. When electronics extensions arrive, it is an Installation of the
-  board at a slot position in the crate.
+### 7.1 Schemas
 
-**`realized by`** becomes **derived**. It holds exactly when an Installation with status
-`Active` and an interval covering *now* links the asset to the position. It is materialized
-(`derivation = derived`) so the graph walk and the causal model keep working unchanged. Nobody
-edits it; you edit the Installation. C5 and C6 are resolved: the supply is installed at the
-supply position, which `powers` the quadrupole position, which is realized by the magnet
-assembly installed there.
+**Audit tables** (append-only):
 
-**`acts on`** points at **positions**. The control channel acts on whatever is installed at
-GUNSIP01, and the current asset follows through `realized by`. Its polymorphism (AS §4) is no
-longer a design goal. It survives only for equipment with no position (lab and IT equipment),
-and the registry reports those cases.
+```
+source_revision                  one row per stream revision read
+  id, stream_id, revision (commit SHA | file SHA-256 | export timestamp), content_hash,
+  observed_at, retrieved_at,
+  ordering ('head' | 'historical'), state ('published' | 'held' | 'approved'), parse_job_id
 
-**`drives`** is **derived**. The `asset:` URL on an IOC or device (AS §9.2) is **evidence for
-an Installation** (§8.4), not an edge. That resolves C13: one URL on a multi-device IOC
-produces a candidate list, not a wrong edge.
+claim                            immutable; content-addressed; one row per distinct statement
+  claim_id = hash(stream_id, source_ref, predicate, polarity, canonical(value), method, rule_id)
+  stream_id, source_ref, predicate,
+  polarity ('present' | 'absent'),
+  value           canonical JSON; relation targets are source refs
+  method ('stated' | 'resolved' | 'inferred' | 'manual'), rule_id,
+  derived_from    claim_ids an inference or resolution read; empty for stated and manual
 
-**`implemented by`** has **one active target per Access Point** and may cross workspaces. For
-an Ethernet-native instrument (BTF's Modbus TCP supplies), the target is the instrument's
-**position**. The IP belongs to the place in the machine, and the unit behind it follows the
-Installation. For a converter or a host, the target is site IT equipment. Swapping an IT box
-behind an unchanged hostname is a service operation: it retires one assertion, proposes the
-next, and re-attaches Bus Segments to ports of the same number. History comes from the ledger
-(§7.5).
+claim_event                      written only when presence or evidence changes
+  seq (global bigserial), claim_id, stream_id, source_revision_id,
+  kind ('appeared' | 'disappeared' | 'evidence_changed'),
+  rule_version, evidence (JSONB), confidence, at
 
-### 6.4 One authoritative form per link
+decision                         judgements by people and by declared policies
+  seq, decision_id, kind,
+  actor ('user:<id>' | 'policy:<rule>@<version>' | 'migration:<plan>'),
+  workspace_id, target (see §7.4), value, effective_at,
+  supersedes (decision_ids), reason, at
 
-| Form | Authoritative when | Other forms |
+status_event                     every change in a fact's projected status
+  seq, fact_key, claim_id | decision_id, from_status, to_status,
+  cause ('claim_event:<seq>' | 'decision:<seq>' | 'policy:<version>' |
+         'registry:<version>' | 'identity:<seq>'),
+  projector_version, at
+
+record_event    seq, uid, kind ('created' | 'retyped' | 'rekeyed' | 'status' | 'merged' | 'unmerged'),
+                before, after, cause, at
+identity_event  seq, source_ref, uid, kind ('bound' | 'unbound' | 'rebound'), cause, resolver_version, at
+conflict_event  seq, conflict_id, kind ('opened' | 'updated' | 'resolved' | 'dismissed'),
+                conflict_type, fact_key, detail, cause, at
+job_run         id, stage, stage_version, input_digest, input_watermarks, output_watermark,
+                status, counts, started, finished
+```
+
+**Projection tables** (mutable, rebuildable):
+
+```
+fact_state        one row per contributing claim or decision:
+                  fact_key, subject_uid, predicate, member, claim_id | decision_id,
+                  status, rank, is_effective, since_seq
+identity_binding  source_ref → uid, since_seq
+conflict          conflict_id, type, fact_key, severity ('blocking' | 'non-blocking'), opened_seq, state
+materialized      assets.attributes, asserted relations rows, assets.record_status
+```
+
+### 7.2 Why this is auditable without duplication
+
+- **A claim is written once.** Its id is a hash of its content, so a value that a stream keeps
+  stating is the same claim row in every revision.
+- **An event is written only on change.** An unchanged revision writes one `source_revision`
+  row and one `job_run` row. It writes **zero** claims and **zero** claim events.
+- **What a stream said is recoverable.** What stream S said at revision R is the set of claims
+  whose last event in S at or before R is `appeared`.
+- **Evidence changes are cheap.** If only the evidence moves (for example, a YAML index shifts),
+  the stream writes one `evidence_changed` event and no new claim.
+- **History is never overwritten.** Every acceptance, rejection, confirmation, retraction and
+  supersession is a `decision` or a `status_event`. Automatic ones are included: their actor or
+  cause names the policy version.
+- **Any past state can be replayed.** Replaying events up to a sequence number reproduces the
+  state of any fact at that point. The test suite checks that a replay from zero equals the
+  incremental projection (A16).
+- **Older revisions do not rewind the present.** A revision older than the stream's head, by
+  commit ancestry or `observed_at`, is stored with `ordering = historical`. It produces no
+  presence events unless a person issues a `rewind` decision.
+
+### 7.3 Fact statuses (projection)
+
+Each claim or decision that contributes to a fact has one of these statuses:
+
+| Status | Meaning | Entered by |
 |---|---|---|
-| **(a) reference attribute** | the link is N:1, the target is a master or classifier record (product model, location, vendor, work package), and it is edited on the object's form | relation **derived** by the sync job, keyed by `attribute.relationType` (a new attribute property naming the registry entry), **add and remove** |
-| **(b) relation** | many-to-many, part of a tree or topology, or the link needs its own provenance or confirmation (anything inferred) | no mirror attribute. A form that needs it shows a computed, read-only field |
-| **(c) intermediate object** | the link has attributes or valid time | relations to and from it are authoritative; shortcut relations are **derived** |
+| `proposed` | shown in the review queue; not effective | a policy that requires confirmation |
+| `accepted` | eligible to be effective; not signed by a person | a policy with `auto_accept`, or an `accept` decision |
+| `confirmed` | signed by a person | a `confirm` decision on the fact value |
+| `rejected` | never effective, and blocks re-proposal | a `reject` decision. Its scope is either the claim or its fingerprint (stream kind, rule, source ref, predicate, value) |
+| `withdrawn` | the stream no longer states it | `claim_event: disappeared` |
+| `superseded` | replaced by an explicit decision, or by a newer value from the same stream | a `supersede` decision, or a same-stream disappearance plus appearance |
+| `outranked` | valid, but a higher-ranked value is effective | projection |
 
-Applied:
+The four-way distinction from the design notes survives. Stated, resolved and inferred are the
+claim's `method`. Manually confirmed means a `confirm` decision exists, whatever the method.
 
-| Semantic link | Authoritative | Derived | Retired |
+### 7.4 Decisions and the confirmation rules
+
+| Kind | Target | Effect |
+|---|---|---|
+| `accept` / `reject` | a claim or a fingerprint | makes it eligible, or blocks it |
+| `confirm` | a fact value (`subject, predicate[, member], value`) | makes it confirmed. `basis` may list the supporting claims |
+| `supersede` | one or more earlier `confirm` decisions, plus a new value | ends the old confirmations and confirms the new value, in a single decision |
+| `retract` | an earlier `confirm` decision | the fact is no longer confirmed, because it was wrong or has stopped being true |
+| `revoke` | any earlier decision | undoes a decision made in error. Both decisions stay on record |
+| `bind`, `merge`, `unmerge`, `confirm_new`, `reject_candidate` | identities (§10) | |
+| `approve_revision`, `rewind` | a held or historical source revision (§11) | |
+| `resolve_conflict` | a conflict | must carry, or reference, the supersede, retract or reject decisions that remove the conflict's cause |
+
+Several decisions can be submitted as one **atomic batch**, for example ending one Installation
+and starting another. The batch's invariants are checked once, after all of its decisions apply.
+
+Invariants:
+
+- **I-LED-1.** A `confirm` stays effective until a later `supersede`, `retract` or `revoke`
+  names it. Nothing else ends it: not a source withdrawal, not a newer source value, not a
+  policy change.
+- **I-LED-2.** Suppose a single-valued fact already has an effective confirmation, and a new
+  `confirm` of a different value does not name it in `supersedes`. The new decision **does not
+  replace** the old one. It opens a **blocking conflict** (`confirmed_vs_confirmed`), and the
+  earlier confirmed value remains the projected value until the conflict is resolved.
+- **I-LED-3.** A source that stops stating a confirmed fact, or contradicts it, opens a
+  **non-blocking conflict** (`source_vs_confirmed`). The confirmed value stays.
+- **I-LED-4.** Claims, events and decisions are never updated or deleted. A correction is a new
+  decision that names the old one.
+- **I-LED-5.** Every status change has a `status_event`. Its cause resolves to exactly one claim
+  event, decision, policy version, registry version or identity event.
+
+### 7.5 Projecting a single-valued fact
+
+The project stage picks the effective value in this order:
+
+1. **Confirmed.** Effective confirmations (§7.4) win. If there are two or more values, I-LED-2
+   applies and the oldest confirmation remains in effect.
+2. **Authoritative.** Otherwise, accepted claims ranked `authoritative` (§7.7) apply.
+   - One distinct value: it is effective.
+   - Several distinct values from different streams: a **blocking** conflict
+     (`authority_vs_authority`) opens. The previously projected value stays if it is among
+     them. If not, the fact is left unset.
+3. **Contributory.** Otherwise, accepted claims ranked `contributory` apply. A disagreement
+   opens a **non-blocking** conflict, and the newest `observed_at` wins, unless the rule's
+   `tie_break` is `conflict`.
+4. **Advisory.** Otherwise, accepted claims ranked `advisory` apply, but only if the rule sets
+   `auto_accept`, and only while nothing ranks higher. Advisory claims never open conflicts;
+   the UI shows them as alternatives.
+5. **Same stream.** Within one stream, a newer revision's value supersedes that stream's older
+   value.
+
+### 7.6 Pipeline stages and their versions
+
+| Stage | Inputs | Outputs | Version |
 |---|---|---|---|
-| asset → product | `Equipment.product_model` (a) | `instance of` | — ; `manufacturer` and `model` stay as *observed* strings (photo identification, as found), and a mismatch with the product model is a report item |
-| asset or position → place | `argus_location` (a) | `located in` | `part of` → Area |
-| place → place | `Location.parent_location` (a) | `within` | — |
-| element → work package | `work_package` (a) | `assigned to` | `wbs_code` becomes a read-only projection |
-| product → vendor | `Product Model.vendor_ref` (a) | `supplied by` | `vendor` string kept as *as found* |
-| element → section / facility | `part of` (b) | — | `module_code`, `station_name` and `pbs_area` stay as **source identifiers**, read-only; the importer resolves the relation from them, and divergence is reported, not silently fixed |
-| system membership | `argus_system` string | — | `Machine System` objects deferred |
-| position ↔ asset | `Installation` (c) | `realized by`, `drives` | `installed_on`, `removed_on`, `replaced` |
-| device → access point | `Communication Path` (c) | `reached through`, `connects to` | `Serial Line` |
-| spare stock | Stock Item (extension) | — | `Spare Part`, `spare_for`, `spare for`; `is_spare` becomes `is_designated_spare` |
+| **parse** | source bytes | stated claims; claim events for the stream | `parser@v` |
+| **infer** | the stream's current stated claims; the ruleset | inferred claims in the stream `inference:<stream>`; claim events | `ruleset@v`, plus `rule_version` per rule |
+| **resolve** | source refs of all claims; labels and aliases; latest inventory and IT revisions; the resolver policy | identity events; provisional records (as record events); resolved claims (`method = resolved`, e.g. `asset:` URL → inventory uid); identity candidates | `resolver@v` |
+| **project** | bound claims; decisions; authority, multi-value and registry versions | fact state; attributes; asserted edges; record status; conflicts; status events | `projector@v` + `policy@v` + `registry@v` |
+| **derive** | projections; the registry | derived edges; `v_installation`; display names | `registry@v` + `deriver@v` |
+| **reconcile** | projections; identity candidates; the reconciliation policy | candidates; review items; merges the policy authorizes (recorded as decisions with `actor = policy:…`) | `reconciler@v` |
 
-**Sync semantics.** The sync job replaces `relink_workspace`'s edge step. For each reference
-attribute that has a `relationType`, it computes the desired derived edges and diffs them
-against edges with `derivation = derived` and the same source attribute. It then adds or
-retires edges and **never touches authored edges**. Edges are labelled with the registry
-name, not the attribute's display name, so renaming the attribute "Instance of" no longer
-renames its edges. It runs on write, and in bulk after imports.
+When each stage skips or reruns:
 
----
-
-## 7. Provenance
-
-### 7.1 Source Revision
-
-One row per input that one import run reads:
-
-```
-source_revision
-  id
-  source_kind        epik8s | pbs | insight | it-registry | ansible | lattice | photo | manual-batch
-  source_locator     "https://baltig.infn.it/epik8s/epik8-sparc.git#deploy/values.yaml"
-                     | "docs/2026-06-11 - EuPRAXIA PBS_ver2.xlsx" | "insight:schema=44"
-  revision           git commit SHA (resolved at fetch, never a branch name) | file SHA-256 | export timestamp
-  content_hash       SHA-256 of the bytes read
-  observed_at        commit time / file mtime / export time: when the source said it
-  retrieved_at       when the hub read it
-  importer           "epik8s_import@3.0" (code version)
-  import_job_uid     → import_jobs
-```
-
-If a run finds the same `content_hash` and the same `importer` as the last revision of its
-locator, it is a no-op. That is idempotency by construction.
-
-### 7.2 Assertion
-
-One row per fact per source:
-
-```
-assertion
-  id
-  subject_uid          the object the fact is about
-  predicate            "exists" | "attr:<key>" | "rel:<relation_type>"
-  value                JSONB: the attribute value, or {"to": <uid>} for a relation
-  method               stated | resolved | inferred | manual | derived
-  rule                 "epik8s.device@3" | "infer.vac.sip@2" | "resolve.jira_object_id@1" | null
-  source_revision_id   null for manual
-  asserting_workspace  who asserted it (a proposal across workspaces is an assertion like any other)
-  evidence             JSONB: {"path": "epicsConfiguration.iocs.vac-gunvpc.devices[1]",
-                                "excerpt": "{name: GUNSIP01, channel: 146}",
-                                "matched_on": "name pattern SIP", …}
-  confidence           0..1 for resolved and inferred; null for stated and manual
-  status               proposed | accepted | confirmed | rejected | retracted | superseded
-  first_seen_revision, last_seen_revision, first_seen_at, last_seen_at
-  decided_by, decided_at, decision_note
-  fingerprint          hash(source_kind, rule, subject key, predicate, value): suppresses re-proposal after rejection
-```
-
-**Method** and **status** are separate axes, and together they preserve the four-way distinction
-the notes rely on:
-
-| The notes say | Here |
-|---|---|
-| stated | `method = stated` (the source says it in as many words) |
-| resolved | `method = resolved` (joined to another record by an identifier: objectId, hostname, IP) |
-| inferred | `method = inferred` (a rule read it from a name or a convention) |
-| manually confirmed | `status = confirmed`, `decided_by` set, whatever the method. A person typing a value is `method = manual, status = confirmed` |
-
-Statuses: **proposed** (in the review queue, not in effective state); **accepted** (in
-effective state, not signed by a person); **confirmed** (signed); **rejected** (never applied,
-and its fingerprint suppresses re-proposal); **retracted** (the source no longer states it);
-**superseded** (the same source now states a different value).
-
-Each rule declares its default. Stated and resolved-by-strong-identifier facts are `accepted`.
-Name-rule inferences that today create objects (pumps, supplies, magnets) are `accepted`, which
-keeps current behaviour: the objects exist and are visibly unconfirmed. Composition by name
-pairing (the camera of a screen) and anything with `confidence < 0.8` is `proposed`, as AS
-§11.4 argued.
-
-### 7.3 Effective state
-
-`assets.attributes` and active `relations` rows are the **projection** of the ledger. A single
-service, the FactWriter, computes them. No importer writes attributes directly again. For each
-`(subject, predicate)`:
-
-1. a `confirmed` assertion wins; the newest confirmed one if there are several;
-2. otherwise an `accepted` assertion from the **authoritative source for that predicate** (§4.2:
-   Insight for `serial`, the configuration for `pv`, the PBS for `pbs_code`);
-3. otherwise any other `accepted` stated or resolved assertion, then inferred;
-4. ties break by `observed_at`.
-
-When two accepted assertions at the top applicable tier disagree, the object is flagged with a
-**conflict** and goes to the review queue. The projection keeps the previous value until
-someone decides. This replaces both `upsert` behaviours (C9). A stated re-import no longer
-erases a manual edit, because the manual edit is `confirmed` and outranks it. An inferred value
-still fills only what is empty, because inferred ranks last.
-
-### 7.4 What replaces the keyword
-
-- `argus_keywords: inferred` is removed by the migration. `argus_keywords` returns to users.
-- Every object view and the API show a **provenance summary**: sources, methods, and the count
-  of unconfirmed and conflicting facts. Filters include "provisional records", "has
-  unconfirmed inferred facts" and "conflicts". These are ledger queries, not keywords.
-- `argus_source` and `argus_source_ref` remain for one release as read-only projections (the
-  source of the object's `exists` assertion with the earliest `first_seen`) and are then
-  dropped.
-
-### 7.5 Examples
-
-A device, stated:
-```json
-{"subject": "SPARC:DEV:vac-gunvpc:GUNSIP01", "predicate": "attr:channel", "value": 146,
- "method": "stated", "rule": "epik8s.device@3", "status": "accepted",
- "source_revision": "epik8-sparc@6bca015:deploy/values.yaml",
- "evidence": {"path": "epicsConfiguration.iocs.vac-gunvpc.devices[1]"}}
-```
-
-A position, inferred:
-```json
-{"subject": "SPARC:POS:GUNSIP01", "predicate": "exists", "value": {"type": "Equipment Position",
- "position_class": "Ion Pump"}, "method": "inferred", "rule": "infer.vac.sip@2", "confidence": 0.9,
- "status": "accepted", "evidence": {"devgroup": "vac", "name_token": "SIP", "template": "agilent-vac"}}
-```
-
-An Access Point's implementation, resolved and later confirmed:
-```json
-{"subject": "NET:sparc:SCSPARCSIPMXA001", "predicate": "rel:implemented by",
- "value": {"to": "it:LNFMAC-00417"}, "method": "resolved", "rule": "resolve.fqdn@1",
- "confidence": 0.95, "status": "confirmed", "decided_by": "…", "decided_at": "2026-10-02T09:12Z"}
-```
-
-`implemented by` history is read from this record's `first_seen_at` / `last_seen_at` and its
-`superseded` successors. That is **record time** (when a source said it). It is not valid time.
-Only Installations carry valid time (§8.2).
-
----
-
-## 8. Installation history
-
-### 8.1 The Installation object
-
-`Installation` (a `Record`) is owned by the workspace that owns the position and flagged global.
-
-| key | type | notes |
+| Stage | Skips when | Must rerun when |
 |---|---|---|
-| `valid_from` | datetime, nullable | null means "before records began" (a back-filled installation) |
-| `valid_from_precision` | enum | Exact, Day, Month, Year, Unknown |
-| `valid_until` | datetime, nullable | null means still installed |
-| `installation_status` | enum | Proposed, Planned, Active, Ended, Rejected |
-| `role` | string, indexed | disambiguates positions with several slots, and multi-position units (a Libera channel `A`) |
+| parse | `(stream, content_hash, parser@v)` was already parsed. The revision row is still written, with no claims | new bytes; a parser version bump |
+| infer | the digest of `(input claim set, ruleset@v)` is unchanged | input claims changed; a ruleset bump |
+| resolve | the digest of `(source refs, label watermark, inventory watermarks, merge-decision watermark, resolver@v)` is unchanged | a label or alias changed; a merge or bind decision; an inventory or IT import; a resolver bump |
+| project | the ledger watermark and all versions are unchanged | any new ledger event; any version bump |
+| derive | the projection watermark is unchanged | any projection change; a scheduled clock tick that crosses an Installation boundary |
+| reconcile | the input digest is unchanged | after resolve runs; on a schedule; a policy bump |
+
+Every run writes a `job_run`. Each stage records the ledger `seq` it has consumed, so it resumes
+from that watermark. As a result, re-importing identical bytes **skips parse but still reruns
+resolve and project** if an alias, an inventory revision, a policy or a decision has changed
+since the last run.
+
+### 7.7 Authority policies
+
+Policies are YAML files in the repository. They are reviewed like code, loaded as a versioned
+`authority_rule` set, and validated at load time.
+
+```yaml
+policy_version: 2026.10.1
+defaults:                       # used when no rule matches, by claim method
+  manual: authoritative         # always paired with a confirm decision, which the UI issues
+  stated: contributory
+  resolved: contributory
+  inferred: advisory
+rules:
+  - id: insight-identity
+    match: {predicate: [attr:serial, attr:inventory_number, attr:manufacturer, attr:model],
+            object_type: Equipment+, owner_workspace: inventory, source_kind: insight}
+    rank: authoritative
+  - id: it-registry-addressing
+    match: {predicate: [attr:ip, attr:mac, attr:fqdn], object_type: IT Equipment+, source_kind: it-registry}
+    rank: authoritative
+    exclusive_set: true
+  - id: config-owns-control
+    match: {object_type: Control Item+, source_kind: epik8s}
+    rank: authoritative
+  - id: sparc-control-from-other-files       # a test branch or another beamline's file
+    match: {facility: SPARC, object_type: Control Item+, source_kind: epik8s}
+    rank: advisory                           # …cannot overwrite SPARC's control records
+  - id: sparc-control-from-sparc-main
+    match: {facility: SPARC, object_type: Control Item+,
+            source_instance: "epik8s:epik8-sparc#deploy/values.yaml@main"}
+    rank: authoritative
+  - id: photo-serial
+    match: {predicate: attr:serial, source_kind: photo}
+    rank: advisory
+    auto_accept: false                       # proposed: a person confirms what a photograph read
+  - id: pbs-design-wp04
+    match: {predicate: "attr:pbs_*", object_type: Functional Element+, source_kind: pbs, domain: WP-04}
+    rank: authoritative
+  - id: screen-camera-pairing
+    match: {predicate: "rel:composed of", source_kind: inference, rule: infer.screen.camera_pair}
+    rank: advisory
+    auto_accept: false
+```
+
+**Match dimensions:** `predicate` (exact or glob), `object_type` (a trailing `+` includes
+subtypes), `owner_workspace`, `facility` (`argus_facility`), `domain` (`argus_system` or work
+package), `source_kind`, `source_instance`, and `rule` (for inferred claims).
+
+**Effects:**
+
+- `rank`: `authoritative`, `contributory`, `advisory` or `ignored`;
+- `auto_accept`: defaults to true for authoritative and contributory, false for advisory;
+- `exclusive_set`: for multi-value facts (§7.8);
+- `tie_break`: `conflict` (the default) or `newest_observed`.
+
+**Selecting the rule for a claim:**
+
+1. Collect every rule that matches.
+2. The most specific rule wins. Specificity is the sum of per-dimension scores:
+
+   | Dimension | Score |
+   |---|---|
+   | `source_instance` | 3 |
+   | `source_kind` | 1 |
+   | `predicate`, exact | 2 |
+   | `predicate`, glob | 1 |
+   | `object_type` | 1 + its depth in the hierarchy |
+   | `owner_workspace`, `facility`, `domain`, `rule` | 1 each |
+
+   In the example above, `sparc-control-from-sparc-main` scores 6, `sparc-control-from-other-files`
+   scores 4 and `config-owns-control` scores 3. So SPARC's own file is authoritative for SPARC's
+   control records, and any other EPIK8s file is only advisory there.
+3. A tie in score is broken by an explicit `priority`.
+4. If two rules still tie with different effects, **the policy is rejected at load time**
+   (I-PROJ-3). There is no ambiguity at runtime.
+5. If no rule matches, `defaults` apply according to the claim's method.
+
+**Changing a policy** means issuing a new `policy_version`. The project stage then reruns, and
+every status that changes gets a `status_event` with `cause = policy:<version>`. A policy change
+never affects a confirmation (I-LED-1).
+
+### 7.8 Multi-value facts
+
+Every multi-valued attribute and every n-valued asserted relation declares a **mode** per source
+kind, in `multivalue_rule`. Each set member is its own fact, `(subject, predicate, member)`, so
+an unchanged member writes nothing.
+
+| Mode | What a source revision asserts | How a member leaves | Combining several sources |
+|---|---|---|---|
+| **replace set** | its complete set | a member missing from the stream's next revision is marked `disappeared`, *for that stream only* | the union of accepted members from all streams. If an authoritative rule sets `exclusive_set`, the effective set is that stream's set plus any confirmed members; members from other streams outside it appear as non-blocking conflicts |
+| **members** | individual members, with no claim of completeness | only through an explicit absence claim or a decision. Absence from a snapshot means nothing | the union of accepted members |
+| **delta** | add operations (`polarity = present`) and remove operations (`polarity = absent`) | an `absent` claim | per member, the highest-ranked polarity wins. An authoritative `present` against a person's `absent` is a `source_vs_confirmed` conflict |
+| **ordered list** | the whole list, as one value | the list is replaced as a whole | treated as single-valued (§7.5): the list is one value |
+
+**People editing sets.** A person who removes a member that a source states issues a `reject`
+decision on that member, which confirms its absence. The member stays suppressed while the
+source keeps stating it, and a non-blocking conflict is recorded. A person who adds a member
+issues a `delta` claim plus a `confirm`.
+
+Core declarations:
+
+| Predicate | Mode by source |
+|---|---|
+| `zone` (FE, Control Device) | epik8s: replace set · person: delta |
+| `networks` (IOC), `rel:on network`, `rel:mounts` | epik8s: replace set · person: delta |
+| `argus_keywords` | person: delta · other sources: members |
+| `insertion_positions`, `position_labels` | epik8s: ordered list · person: ordered list |
+| `ip`, `mac` (IT Equipment) | it-registry: replace set, `exclusive_set` · others: members |
+| `serial_modes` (Serial Converter) | it-registry: replace set |
+| `connectivity` (Utility Requirement) | pbs: replace set |
+| `rel:acts on` | epik8s and inference: replace set · review tool (epik8s-devices): members · person: delta |
+| `rel:served by`, `rel:powers`, `rel:composed of`, `rel:cools` | inference and pbs: replace set · person: delta |
+| `rel:traverses`, `rel:measures`, `rel:described by` | members · person: delta |
+
+---
+
+## 8. Installation
+
+### 8.1 The record
+
+| Field | Kind | Notes |
+|---|---|---|
+| `uid` | opaque UUIDv7 | never derived from other keys |
+| `key` | `INS-<ULID>` | opaque, stable and globally unique; independent of position and asset keys |
+| display name | projection | `"<asset> @ <position> [from → until]"`, recomputed whenever either end is renamed or re-keyed |
+| `installed at` → Pos, `installation of` → Eq | asserted relations | exactly one each, and **immutable once Confirmed**. If the asset or position was wrong, reject this Installation and record a new one |
+| `valid_from` | timestamptz or null | inclusive |
+| `valid_from_kind` | `date` · `before_records` · `unscheduled` | |
+| `valid_until` | timestamptz or null | exclusive |
+| `valid_until_kind` | `open` · `date` · `unknown_past` | `unknown_past` requires `valid_until_bound`, no later than the time the end was recorded |
+| `precision_from`, `precision_until` | `instant` · `day` · `month` · `year` | the stored value is the start of the bucket |
 | `removal_reason` | enum | Failure, Maintenance, Upgrade, Relocation, Decommissioning, Unknown |
-| `work_reference` | string | ticket or work-order key; the ticket link itself is the existing `asset_tickets` row |
-| `evidence_summary` | text, read-only | projection of the ledger's evidence for `exists` |
-| `confirmed_by`, `confirmed_at` | user, datetime, read-only | projection of the ledger's confirmation |
+| `work_reference` | string | ticket or work order |
+| **workflow status** | projection of decisions | `Proposed`, `Confirmed` or `Rejected` |
+| aliases | `asset_labels` | Insight installation id, work-order id, legacy key, legacy uid |
 
-Relations: `installation of` → Equipment (exactly one), `installed at` → Functional Element
-(exactly one). Key: `<position key>@<asset key>#<n>`, for example
-`SPARC:POS:GUNSIP01@INV:ICP-23-0032#1`.
+Every field is a fact in the ledger, so its history is the history of its claims and decisions.
 
-**Service-level constraints**, since the platform cannot express them:
+### 8.2 Temporal state is derived at a query time *t*
 
-- no two `Active` installations at the same `(position, role)` with overlapping intervals;
-- no two `Active` installations of the same asset with overlapping intervals, unless the
-  asset's type is flagged `multi_position` (a Digitizer serving several BPMs), in which case
-  `role` is required;
-- `valid_until ≥ valid_from`; setting `valid_until` in the past moves the status to `Ended`;
-- the asset's type should be compatible with the position's `position_class` or typed element.
-  A mismatch is a warning, not an error, because it is sometimes a genuine substitute.
+These states apply to Confirmed Installations:
 
-### 8.2 Two time axes
-
-- **Valid time**: when the unit was physically there. Only Installation carries it.
-- **Record time**: when a source or a person said so. The ledger holds it for every fact.
-
-A back-filled Installation for a pump that has been in place for years has `valid_from = null`,
-`precision = Unknown`, and record time = today. The model states what is known without
-inventing a date.
-
-### 8.3 Queries
-
-Current state goes through derived `realized by`:
-```sql
-SELECT a.* FROM relations r JOIN assets a ON a.uid = r.to_asset_uid
-WHERE r.from_asset_uid = :position AND r.relation_type = 'realized by' AND r.status = 'active';
-```
-
-Historical state goes through a view over Installation objects (`v_installation`: uid,
-position_uid, asset_uid, role, valid_from, valid_until, status), maintained from the object and
-its two relations:
-```sql
--- what was at GUNSIP01 on 2025-03-03
-SELECT asset_uid FROM v_installation
-WHERE position_uid = :pos AND status IN ('Active','Ended')
-  AND coalesce(valid_from, '-infinity') <= :t AND :t < coalesce(valid_until, 'infinity');
-
--- where has serial 84321 been (chronic-failure view, joined with asset_tickets)
-SELECT * FROM v_installation WHERE asset_uid = :asset ORDER BY valid_from NULLS FIRST;
-
--- which positions were served by a unit that later failed
-SELECT i.position_uid FROM v_installation i
-JOIN v_installation later ON later.asset_uid = i.asset_uid AND later.removal_reason = 'Failure';
-```
-
-### 8.4 Where installations come from
-
-| Evidence | Proposal |
+| State | Condition |
 |---|---|
-| a person records a swap (UI "replace unit" action: end one, start one, one ticket) | Active, confirmed |
-| `asset:` Insight URL on an IOC or device → `asset_labels` `jiraObjectId` → inventory asset | Proposed, at the positions the IOC's devices act on. A single compatible position gives `confidence` 0.9; several give a candidate list |
-| serial or inventory number in an IOC name (`ocem-dvl644-ser23001`, AS §11.3) | Proposed, if an inventory asset carries that serial or number |
-| Insight records a unit's location as a rack, and exactly one compatible position in that rack is empty | Proposed, low confidence |
-| PBS delivery or Procurement Record references a delivered serial | Planned, then Active on commissioning |
+| **Planned** | `valid_from_kind = unscheduled` |
+| **Future** | `valid_from > t` |
+| **Current** | the start has passed (`valid_from ≤ t`, or `valid_from_kind = before_records`), and the end has not: `valid_until_kind = open`, or `t < valid_until`, or `unknown_past` with `t < valid_until_bound` (flagged *uncertain*) |
+| **Ended** | `valid_until ≤ t`, or `unknown_past` with `valid_until_bound ≤ t` |
 
-The configuration never *states* an installation, so config-derived installations are always
-proposals.
+Intervals are **half-open**: `[valid_from, valid_until)`. So a handover where A ends at `T` and B
+starts at `T` is valid and leaves no gap. `before_records` is treated as −∞ and `open` as +∞.
+
+### 8.3 Validation invariants
+
+These apply to **Confirmed** Installations. Define the effective bounds as:
+
+- `lo = valid_from`, or −∞ for `before_records`;
+- `hi = valid_until`, or `valid_until_bound` for `unknown_past`, or +∞ for `open`.
+
+| Id | Invariant |
+|---|---|
+| **I-INS-1 (one place per unit)** | for any Equipment, no two Confirmed Installations have overlapping `[lo, hi)` |
+| **I-INS-2 (one unit per position)** | for any position, no two Confirmed Installations have overlapping `[lo, hi)` |
+| **I-INS-3** | `lo < hi` wherever both are known; an `unscheduled` Installation has no `valid_until` |
+| **I-INS-4** | `installed at` targets an installable type and `installation of` targets Equipment. Both are immutable after confirmation |
+| **I-INS-5** | the Installation belongs to its position's workspace |
+| **I-INS-6 (uncertain overlap)** | if the precision buckets overlap but the stored values do not, the Installation is accepted with a warning, not an error |
+| **I-INS-7** | Proposed Installations may overlap anything. A decision that would confirm an overlap fails, unless the same atomic batch also ends or corrects the other Installation |
+
+**Compatibility check.** The Equipment's type or class should match the position's
+`position_class` or typed element. A mismatch is only a warning, because substitute units
+happen.
+
+### 8.4 Corrections and backdating
+
+- **Corrections.** A correction is a `supersede` decision on `valid_from` or `valid_until` that
+  names the earlier confirmation.
+- **Backdating.** A backdated value is checked against I-INS-1 and I-INS-2 across every
+  Confirmed Installation. A swap recorded late is therefore a two-decision batch: end A at T,
+  start B at T.
+- **Recomputation.** After a correction, the derive stage recomputes the current `realized by`
+  and `v_installation`.
+- **Past beliefs.** The old values stay in the ledger. "What did we believe on 1 June about what
+  was installed in March?" is answered by replaying up to 1 June.
+
+### 8.5 Lifecycle example: GUNSIP01
+
+| Ledger seq | Event | Projected result |
+|---|---|---|
+| 1 001 | parse `epik8-sparc@6bca015`: device `GUNSIP01` appears | Control Device, Active |
+| 1 002 | infer `infer.vac.sip@2`: position `SPARC:POS:GUNSIP01`, class Ion Pump | Position, Provisional → Active (the policy auto-accepts it) |
+| 2 100 | inventory import: Ion Pump s/n 84321, Insight object 129573 | Equipment, Active (in `inventory`) |
+| 2 101 | resolve: the IOC's `asset:` URL → object 129573 → a resolved installation claim | Installation INS-01J9…, **Proposed** |
+| 2 150 | decision: operator `confirm`s, `valid_from = before_records` | **Confirmed** and Current; derived `realized by` → 84321 |
+| 3 010 | re-import of the same bytes | parse skipped; resolve and project run; no events |
+| 3 400 | batch: `supersede` INS-01J9… with `valid_until = 2026-03-03T09:00Z`, reason Failure; `confirm` INS-01JB… (s/n 90001) from the same instant | 84321 Ended, 90001 Current; the derived edge moves to 90001 |
+| 3 401 | query at `2026-03-02` → 84321; at `2026-03-03T09:00Z` → 90001 | |
+| 4 000 | revision `epik8-sparc@a41f…` drops GUNSIP01 | the device claims `disappeared`, and the device becomes Retired. The position still has a Confirmed Installation, so it is **flagged**, not retired, and the Installation is **not** ended |
 
 ---
 
-## 9. Connectivity
+## 9. Connectivity and Access Points
 
-### 9.1 The four things a "Serial Line" was
+### 9.1 Paths, segments and ports
 
-```
-IOC vac-gunvpc ─uses path─▶ Communication Path  SPARC:PATH:vac-gunvpc:scsparcsipmxa001:4003
-                             protocol Modbus RTU · transport Ethernet→Serial · tcp_port 4003
-Control Device GUNSIP01 ─on path─┘   │ enters at                        │ continues on
-                                     ▼                                  ▼
-                   Access Point NET:sparc:SCSPARCSIPMXA001      Bus Segment SPARC:SEG:scsparcsipmxa001:4003
-                                     │ implemented by           medium RS-485 · topology multi-drop
-                                     ▼                          baud 9600 · framing 8N1
-                   Serial Converter (it) Moxa NPort 5650-16     serial_port_hint 3 (inferred, 4000+N)
-                                     ▲ port of                          │ attached to (once the box is known)
-                                     └────────── Equipment Port P3 ◄────┘   port_kind RS-485-2w · tcp_port 4003
-Communication Path ─traverses─▶ Switch port, Ethernet cable…   (added by IT or from a cabling source)
-```
+These are as described in the first revision:
 
-| Object | Plane / owner | Is | Keyed |
-|---|---|---|---|
-| **Communication Path** | control / beamline | the end-to-end logical path from one IOC to one endpoint, with protocol and transport | `<FAC>:PATH:<ioc>:<endpoint>[:<port>]` |
-| **Access Point** (unchanged) | control / beamline | the network entry: address and port as the configuration names them | as today |
-| **Bus Segment** | control / beamline | the physical medium downstream of the entry, shared by the devices on it | `<FAC>:SEG:<endpoint>:<port>` |
-| **Equipment Port** | physical / the box's owner | one physical port of one box | `<asset key>:P<n>` |
-| hop | physical | a switch port (an Equipment Port of a Switch) or, in the cabling extension, a Cable Run | — |
+- a **Communication Path** runs from one IOC to one endpoint and carries the protocol and
+  transport;
+- an **Access Point** is the endpoint as the configuration names it;
+- a **Bus Segment** is the medium downstream of the endpoint. It holds the line parameters and a
+  stated or inferred `port_number`;
+- an **Equipment Port** is one physical port of one unit;
+- **hops** (`traverses`) form an unordered series set.
 
-Two IOCs on one `endpoint:port` produce **two paths and one segment**, which is the
-distinction the old model could not make. Where the configuration gives `line_kind` (IT
-§4.1), it becomes the segment's `topology`.
+The generalization table from the first revision (Ethernet native, Ethernet→Serial, GPIB, CAN,
+fieldbus, IOC on the instrument) is unchanged.
 
-### 9.2 Attributes
+### 9.2 Access Point semantics
 
-- **Communication Path**: `protocol` (indexed: Modbus RTU, Modbus TCP, StreamDevice ASCII,
-  SCPI, GigE Vision, CANopen, IEEE-488, EtherCAT, vendor TCP…), `transport` (enum: Ethernet
-  native, Ethernet→Serial, Ethernet→GPIB, Ethernet→CAN, Local bus, Fieldbus), `endpoint`
-  (stated `host:port`), `tcp_port`.
-- **Bus Segment**: `medium` (enum: RS-232, RS-422, RS-485 2-wire, RS-485 4-wire, GPIB, CAN,
-  EtherCAT, Other), `topology` (Point-to-point, Multi-drop, Daisy chain, Line, Ring), `baud` or
-  `bitrate`, `framing`, `termination`, `serial_port_hint` (inferred, never used as a link).
-- **Equipment Port**: `port_number`, `port_kind`, `tcp_port` (as configured on the box),
-  `operating_mode` (Real COM, TCP server, RFC 2217…).
+An Access Point is an address in the control plane. A position does not implement an address; a
+unit does. So the model separates the two links:
 
-Line parameters (baud, framing) live **only** on the Bus Segment, because both ends must agree
-on them. The port holds only the box's mapping and mode.
+- **`assigned to`** (AP → position) is asserted. It says the address belongs to a place: the
+  BTF supply's position for `192.168.192.40:502`, or the IT position `IT:POS:scsparcsipmxa001`
+  for a converter hostname. Three sources can claim it:
+  - the IT registry;
+  - resolution (hostname or IP → IT position);
+  - inference from the device that the configuration puts at that address.
 
-### 9.3 Generalization
+  One position may have several addresses, for example data and management.
+- **`implemented by`** (AP → Equipment) is **derived** when the AP is assigned. Its target is the
+  Equipment of the Current, Confirmed Installation at the assigned position. If there is no such
+  Installation, there is no edge, and the gap is visible.
+- **Unassigned Access Points.** A resolver may still *assert* `implemented by`, by MAC or FQDN,
+  as a transitional claim. Its history is record time only. Once the AP gets an assignment, any
+  asserted `implemented by` is treated as an expectation: agreement is silent, and disagreement
+  opens a non-blocking conflict (**I-AP-2**).
+- **History across swaps.** "Which unit answered at this address at time *t*" is the
+  Installation at the assigned position at *t* (valid time), bounded by the assignment's
+  record-time history in the ledger. Nothing is re-pointed, so nothing is lost.
+- **Ports follow the unit.** A Bus Segment's `attached to` is derived from its `port_number` on
+  the unit now implementing the path's AP. After a converter swap, each segment attaches to the
+  new unit's port with the same number. If the new unit has no such port, the gap is shown.
 
-| Case | Path transport | Entry (Access Point) | Downstream | Device address |
-|---|---|---|---|---|
-| Moxa + RS-485 bus (SPARC vacuum) | Ethernet→Serial | converter host:port | Bus Segment RS-485 → converter Equipment Port | `channel` / `id` on Control Device |
-| Ethernet-native Modbus TCP (BTF, 28 devices) | Ethernet native | the device's IP:502, `implemented by` its **position** | none | Modbus unit id on Control Device |
-| GigE camera | Ethernet native (GigE Vision) | camera IP | none | — |
-| Ethernet–GPIB gateway | Ethernet→GPIB | gateway host | Bus Segment GPIB (daisy chain) → gateway's GPIB port | GPIB address on Control Device |
-| GPIB card in the IOC host | Local bus | none; IOC `runs on` the host | Bus Segment GPIB → host's card port | GPIB address |
-| CAN via gateway or card | Ethernet→CAN / Local bus | gateway host / none | Bus Segment CAN (bitrate, termination) | node id |
-| EtherCAT or other fieldbus | Fieldbus | none | Bus Segment EtherCAT (line/ring) → master port on host | slave position |
-| IOC on the instrument (`host:` over ssh) | Local bus | none; IOC `runs on` the instrument's position | none | — |
-| Soft or simulated IOC | no path | — | — | — |
+Invariants:
 
-### 9.4 Hops and impact
+- **I-AP-1.** An AP has at most one active `assigned to`.
+- **I-AP-2.** An assigned AP has no effective asserted `implemented by`.
+- **I-AP-3.** An AP belongs to the beamline or IT workspace that owns the configuration naming
+  it. Its assignment may point across workspaces.
 
-`traverses` holds an **unordered** set of hops. Every hop is in series, so any one failing cuts
-the path. This is all impact and root-cause analysis need. Order would need an intermediate
-`Path Hop` object (§1.4). It is deferred until a troubleshooting query needs it. Switch ports
-and cables are added by IT or from a cabling source, never inferred from a configuration.
+### 9.3 Lifecycle example: a converter swap
 
-The IT §4.3 case now resolves at three levels:
+Setup:
 
-- **Box** (`scsparcsipmxa001`) down: 4 paths, 15 devices.
-- **Port 3** down (Equipment Port P3, or its segment): 1 path, 4 devices.
-- **Switch port** upstream: every path that traverses it, across beamlines.
+- `IT:POS:scsparcsipmxa001` is an IT-owned Equipment Position of class Serial Converter.
+- Moxa M-5531 is installed there from `before_records`.
+- SPARC's AP `NET:sparc:SCSPARCSIPMXA001` is assigned to that position.
+- Four Bus Segments carry `port_number` 1 to 4.
+
+IT swaps in M-7702 at time T with one decision batch. The derive stage then produces
+`implemented by` → M-7702 and attaches each segment to M-7702's ports P1 to P4. For any
+`t < T`, the answer is still M-5531. The root-cause walk reaches the right box both before and
+after T.
 
 ---
 
 ## 10. Identity reconciliation
 
-### 10.1 Where duplicates come from, and how to prevent them
+**Identity** is the binding `source_ref → uid`, a projection of `identity_event`s. Three
+mechanisms keep duplicates out:
 
-The biggest source of duplicates is removed at the root. **Configuration imports create
-positions, not physical assets** (§4.2). The inventory's pump and the configuration's GUNSIP01
-are different kinds of object, joined by an Installation, so they cannot be duplicates. What
-remains are provisional records created under §4.3 or by hand, and records that two sources
-create for the same thing (for example, an Area that both the PBS and the inventory name).
+1. **Configuration imports never create Equipment.**
+2. **A partial unique index** on active strong identifier labels: serial per manufacturer,
+   inventory number, Insight objectId, MAC.
+3. **Alias-aware resolution.** The resolver tries the key, then labels, then aliases, and
+   creates a record only where §4.2 allows it.
 
-Prevention:
+**Candidates.** Each identity candidate carries a score and its evidence. The reconciliation
+policy may auto-merge on a strong identifier when there is exactly one type-compatible
+candidate, and the policy is recorded as the decision's actor. Everything else is proposed.
 
-1. **Strong identifier labels.** `asset_labels` rows with `namespace` (`serial:<manufacturer>`,
-   `insight`, `mac`, `fqdn`, `inventory`) and a partial unique index over active records
-   `(namespace, type, value)`. A second active record with the same serial or MAC cannot exist.
-2. **Alias lookup in every importer**: key, then alias label, then create. A merged record's
-   old key resolves to the survivor, so a re-import never recreates it.
-3. **Provisional records age out**: flagged after 30 days in review; excluded from inventory
-   counts throughout.
+**Decisions:** `merge`, `reject_candidate`, `confirm_new`, `unmerge`. A merge:
 
-### 10.2 Workflow
+- keeps the survivor's uid;
+- re-points relations, ticket links, document relations, labels, comments and attachments to the
+  survivor;
+- rebinds the loser's source refs (`identity_event: rebound`), so the loser's claims now project
+  onto the survivor, where the authority policy decides whether they win;
+- adds `former_key` and `former_uid` labels to the survivor;
+- marks the loser `Merged`, with `merged_into_uid` pointing to the survivor, and keeps it as a
+  tombstone.
 
-```
-            ┌──────────── candidates computed on create and on every source update ───────────┐
-            ▼                                                                                  │
- Provisional ──confirm match──▶ Merged (tombstone) ──▶ survivor Active, with aliases           │
-     │        ──reject candidate──▶ stays Provisional; rejection remembered ───────────────────┘
-     │        ──confirm as new────▶ Active (moved to the owning workspace if created elsewhere)
-     └─────── ──discard──────────▶ Retired; rule fingerprint rejected, so no re-inference
-```
+`unmerge` reverses a merge from the identity and record events. A rejected candidate is not
+proposed again unless new strong evidence appears.
 
-**Candidates** (`identity_candidate`: provisional_uid, candidate_uid, score, evidence, status,
-decided_by, decided_at). Blocking and scoring:
+**Merges and Installations.** A merge leaves Installations unchanged, with one exception. If
+both merged units were installed somewhere at overlapping times, the merge opens an I-INS-1
+conflict for review.
 
-| Evidence | Strength | Policy |
+---
+
+## 11. Retirement and held revisions
+
+- **Guard at parse.** A new revision is stored with `state = held` if either of these holds:
+  - more than 10 % of the stream's subjects would disappear;
+  - it would withdraw the last support of any record that has tickets, documents or a Confirmed
+    Installation.
+
+  A held revision's claim events are written, but projection does not consume them until an
+  `approve_revision` decision. The earlier list-vs-mapping bug (AS §14.1) would have stopped
+  here.
+- **Retirement is a projection.** A record becomes `Retired` (`record_event: status`) when all
+  of its `exists` facts are withdrawn, rejected or superseded and nothing confirmed supports it.
+  Its asserted edges follow the registry's `on_source_retire` rule, and its derived edges are
+  recomputed.
+- **Positions are an exception.** A position with a Current, Confirmed Installation is
+  **never** retired because a source withdrew it. It is flagged for review instead, because the
+  hardware may still be in place.
+- **Nothing is deleted.** Retired records stay reachable from their tickets and documents. They
+  are hidden from default views.
+
+---
+
+## 12. Legacy migration
+
+### 12.1 Evidence gathered per legacy object
+
+| Code | Evidence | Read from |
 |---|---|---|
-| Insight objectId, inventory number, serial + manufacturer, MAC | strong | auto-merge allowed if it is the only candidate and the types are compatible; otherwise propose |
-| FQDN (IT) | strong for the *address record*, medium for the box (hostnames survive box swaps) | propose; auto-merge only into the registry's Address Record |
-| IP only | weak (DHCP, reuse) | propose |
-| type-compatible + same location + name similarity | weak | propose |
+| E-SER | `serial` or `inventory_number` is present, and **who wrote it**: the importer, a person or photo identification | attributes, `asset_history.author`, `asset_labels.issuer` |
+| E-LBL | strong identifier labels (Insight `jiraObjectId`, `qrcode`), and whether each is `verified` | `asset_labels` |
+| E-URL | `inventory_url` contains a resolvable `objectId`, and whether it resolves to exactly one inventory record | attributes, labels |
+| E-ATT | attachments, and whether photo identification produced labels from them | `attachments`, `asset_labels` |
+| E-TKT | linked tickets, with dates and summaries | `asset_tickets` |
+| E-DOC | document relations and comments | `document_relations`, `asset_comments` |
+| E-EDIT | fields that differ from what the importer would write today (found by re-running inference in dry mode). Split into **physical** fields (serial, location, condition, warranty, installed_on, manufacturer, model) and **functional** fields (description, zone, name) | attributes vs the dry-run output |
+| E-HIST | human entries in the object's history; whether the importer or a person created it; the `inferred` keyword | `asset_history`, attributes |
+| E-RULE | whether the current rules still produce this object from the current source | dry-run inference |
+| E-COLL | identifier collisions with other active records | labels, attributes |
 
-**Merge** (one transaction, logged in `asset_history` on both records):
+### 12.2 Outcomes
 
-1. Choose the survivor: the record in the owning workspace, normally the authoritative source's.
-2. Re-point every relation, ticket link, document relation, label, comment and attachment from
-   the loser to the survivor. The unique constraint deduplicates.
-3. Re-assert the loser's attribute values on the survivor as **proposed** assertions, never
-   silent overwrites. A value is accepted automatically only where the survivor has none and
-   the predicate's authority allows it.
-4. Add the loser's key and uid to the survivor as `former_key` / `former_uid` labels.
-5. Set the loser to `record_status = Merged`, `merged_into_uid = survivor`. Keep it as a
-   tombstone (its key stays reserved, its URL redirects). The ledger keeps its facts, so an
-   administrator can undo the merge.
+The first matching row, from top to bottom, decides the outcome:
 
-Rejected candidates are stored and never re-proposed for the same pair unless new strong
-evidence appears.
+| Outcome | Criteria | Result |
+|---|---|---|
+| **M-BLOCK** (blocked) | E-COLL: the object's strong identifier is already held by another active record with conflicting data; or the object changed after planning | nothing moves; the object is listed for manual resolution |
+| **M-FUNC** (already functional) | a legacy inferred *element* (Quadrupole, BPM, Screen Station, Mirror…) | kept, and re-keyed only if needed. Its edges to assets are handled by the rows below |
+| **M-POS** (pure control identity) | created by the importer; no E-SER, no E-LBL, no E-URL objectId; no physical E-EDIT; no E-ATT that produced an identifier | the legacy row **becomes the Position**, retyped in place with the same uid. All dependents stay |
+| **M-PHYS** (confirmed physical identity) | at least one of: E-SER written by a person; a verified E-LBL; an E-URL resolving to exactly one inventory record. And no contradicting identifier | the legacy row becomes the Position. The Equipment is either the matched inventory record, or is created in `inventory` as Active. The Installation is Confirmed, with `actor = migration:<plan>` and the history entry as `basis`. `valid_from` is `installed_on` if a person set it, otherwise `before_records` |
+| **M-MIXED** (mixed or ambiguous) | physical evidence that is unverified or conflicting: a photo-read serial never verified; a physical E-EDIT with no identifier; an E-URL that matches several records or none; attachments with no serial | the legacy row becomes the Position. **Provisional Equipment** is created and the Installation is **Proposed**. A review item carries the evidence |
+| **M-RETIRE** (stale inference) | E-RULE is false, and there is no E-TKT, E-DOC, E-ATT, E-EDIT or E-HIST from a person | `Retired`, not deleted |
 
----
+Anything that matches no row is treated as **M-MIXED**. The algorithm never guesses in favour of
+physical identity.
 
-## 11. Import lifecycle: idempotence and retirement
+### 12.3 Algorithm
 
-Each run:
+```
+plan(workspace, plan_id):
+  snapshot every legacy record in the workspace: attributes, labels, attachments, tickets,
+      documents, comments, relations, history → a pre-image, with updated_at
+  dry-run parse + infer + resolve on the current sources (no writes)
+  for each legacy record r:
+      ev      = gather_evidence(r)                      # §12.1
+      outcome = classify(ev)                            # §12.2, first match
+      actions = actions_for(outcome, r, ev)             # new records, retypes, relation moves,
+                                                        # dependent routing, decisions to write
+      write migration_item(plan_id, r.uid, outcome, ev, actions,
+                           pre_image_hash, status='planned')
+  write the decision report (§12.5); stop               # nothing is applied
 
-1. **Register** a Source Revision. Resolve the commit SHA at fetch time. If the hash and
-   importer version are unchanged, stop.
-2. **Parse to facts.** Turn the input into a fact set (objects, attributes, relations, each with
-   rule and evidence), as a pure function. `element_inference.py` already works this way; the
-   configuration walk is refactored to match.
-3. **Plan** against this locator's previous revision: new, unchanged (bump `last_seen`),
-   changed (supersede), missing (retract). Drop facts whose fingerprint was rejected.
-4. **Guard.** If more than a set share would retire (default 10 % of this source's objects),
-   or if any object with tickets or documents would retire, the run stops in *needs approval*
-   and shows the plan. This guard would have caught the list-vs-mapping bug (AS §14.1), in
-   which a production file silently read as zero IOCs.
-5. **Apply** through the FactWriter (§7.3).
-6. **Retire.** An object whose `exists` assertions are all retracted or rejected, and that has
-   no confirmed or other-source support, becomes `Retired`. Its derived edges are retired, and
-   edges with `on_source_retire = retire` follow. A retired **position** with an `Active`
-   Installation is flagged, not ended. The device may have left the configuration while the
-   hardware is still in the tunnel.
-7. **Report**: counts per status, conflicts, candidates, proposals.
+review:
+  owners inspect the report. They may override an outcome per item with a
+  `migration_override` decision, which is recorded; the affected items are re-planned.
 
-`merge_strategy = remove_all_before` is removed (C11). `override` is replaced by the precedence
-rules in §7.3. Retired records are hidden from default views and remain reachable from their
-tickets and documents.
+apply(plan_id):                                         # resumable; idempotent per item
+  for each item with status in ('planned', 'failed'), in dependency order:
+      if hash(current pre-image) != item.pre_image_hash:
+          mark 'stale'; continue
+      begin transaction
+          perform item.actions through the ledger and record events
+          write migration_map rows, and migration_event('applied', inverse_actions)
+          run item-level invariants (§12.6)
+          on failure: roll back the transaction; mark 'failed' with the reason
+      commit; mark 'applied'
+  run workspace-level invariants; mark the plan 'verified' or 'needs_attention'
 
----
+rollback(plan_id [, items]):                            # allowed until the plan is finalized
+  for each applied item, in reverse order:
+      refuse if a created record has since gained dependents not covered by the item's actions
+      apply inverse_actions: restore the pre-image, move dependents back, mark created records
+          Retired with cause rollback, revoke the migration's decisions
+      write migration_event('rolled_back')
 
-## 12. Migration implications
+finalize(plan_id):
+  after sign-off, rollback is no longer available; later corrections use normal decisions
+```
 
-### 12.1 Platform (Alembic)
+**Dependency order:**
 
-| Change | Notes |
+1. M-BLOCK and M-FUNC;
+2. M-POS;
+3. M-PHYS and M-MIXED, which create Equipment and Installations;
+4. relation rewrites: `powers`, `composed of`, `acts on`, and `served by` in place of
+   `realized by` for shared electronics;
+5. M-RETIRE last.
+
+### 12.4 Routing dependents when one legacy object becomes a Position and Equipment
+
+| Dependent | Goes to | Rule |
+|---|---|---|
+| uid, key history | the **Position** keeps the legacy uid and gets the new key `FAC:POS:<tag>`, with a `former_key` label | the legacy object's relations are mostly control and functional, and it is what tickets were raised against |
+| tickets | the Position. For M-PHYS they are **also** linked to the Equipment, with the link labelled `origin=migration-split` | the unit's failure history must include them, and the duplication is declared |
+| documents, comments | the Position | |
+| attachments | the Equipment, if photo identification produced a label from them or a person tagged them as a photo of the unit; otherwise the Position | |
+| labels | strong identifiers (serial, qrcode, jiraObjectId, inventory) go to the Equipment; everything else stays | |
+| attributes | physical fields become claims on the Equipment (`method = manual` if a person wrote them, with a `confirm` decision for M-PHYS and none for M-MIXED). Functional fields stay on the Position | |
+| relations | the registry's domains decide: `located in` and `instance of` go to the Equipment (as attributes); `acts on`, `provided by`, `powers`, `composed of` and `served by` go to the Position | |
+| legacy markers | `argus_keywords: inferred`, `argus_source*`, `argus_provenance` and `endpoint_kind_source` become claims in a `legacy:<workspace>` stream with `revision = unknown` | the first real re-import supersedes them |
+
+The table `migration_map(legacy_uid → new_uid, role ∈ {position, equipment, installation},
+plan_id)` is permanent. Every legacy reference, including external links and bookmarks, therefore
+resolves to all of the records it became.
+
+### 12.5 The decision report
+
+One row per legacy object, written as both CSV and JSON:
+
+```
+legacy_uid, legacy_key, legacy_type, workspace, outcome, confidence,
+evidence            codes + values
+planned_records     [(role, uid, key, type, workspace, record_status)]
+planned_installation (valid_from, kind, workflow status)
+dependents_moved    {tickets, docs, attachments, labels, comments, relations: counts by destination}
+warnings, reviewer_required, override
+```
+
+Examples:
+
+```
+SPARC:AST:vac-gunvpc:GUNSIP01   Ion Pump   M-PHYS   0.95
+   evidence   E-SER(serial=84321, author=user:rossi), E-URL(objectId=129573 → 1 match)
+   records    position SPARC:POS:GUNSIP01 (same uid) · equipment INV:… (matched)
+              · installation INS-… Confirmed from before_records
+   dependents tickets 3 → position (+3 split-linked to equipment)
+
+SPARC:AST:histar:GUNQUA01       Power Supply   M-POS   1.0
+   evidence   no identifiers, no physical edits
+   records    position SPARC:POS:GUNQUA01/PS (same uid)
+   relations  powers → Quadrupole kept
+
+SPARC:AST:accameras:AC101       Camera   M-MIXED   0.5
+   evidence   E-ATT(2 photos, no label), E-EDIT(location=Rack C3)
+   records    position SPARC:POS:AC101 · equipment PROV:… Provisional · installation Proposed
+   reviewer   diagnostics
+```
+
+### 12.6 Migration invariants and validation reports
+
+Invariants are checked per item and per workspace. A failure fails the item or blocks
+finalization.
+
+| Id | Invariant |
 |---|---|
-| `source_revisions`, `assertions`, `identity_candidates`, `relation_types` tables | new |
-| `assets.record_status` (default `Active`), `assets.merged_into_uid` | backfill: every object `Active` |
-| `relations.derivation`, `.status`, `.retired_at`; unique `(workspace_id, from, to, type)` | deduplicate first (the importers deduplicate in code, `POST /v1/relations` does not); backfill `derivation` from the relation type (registry) and `imported` for importer-made rows |
-| `asset_labels` partial unique index on active strong identifiers | report collisions before enforcing |
-| attribute definition property `relationType` | on every reference attribute |
+| **I-MIG-1 (nothing lost)** | for each kind of dependent, the count before equals the count after, summed over the records in `migration_map`. Declared split duplicates are counted separately |
+| **I-MIG-2 (traceable)** | every legacy uid appears in `migration_map`, and every legacy key resolves through labels |
+| **I-MIG-3** | no relation references a Retired or Merged record, except as the registry's retire rules allow |
+| **I-MIG-4** | I-INS-1 to I-INS-7, I-AP-1 to I-AP-3 and identifier uniqueness all hold |
+| **I-MIG-5** | the number of registry violations in the workspace does not increase (warn-mode report, before vs after) |
+| **I-MIG-6** | rebuilding the projection from the ledger gives exactly the post-migration state |
+| **I-MIG-7 (behaviour)** | on a golden set of past incidents, root-cause walks return the same causes or more precisely resolved ones (equipment instead of channel, never fewer) |
 
-### 12.2 Code
-
-| File | Change |
-|---|---|
-| `services/relation_registry.py` (new) | registry; `causal_model.py` reads semantics from it |
-| `services/fact_writer.py` (new) | the only writer of attributes and relations for importers; precedence, conflicts, ledger |
-| `services/epik8s_import.py` | `upsert` / `upsert_inferred` → FactWriter (fixes C9); `_fetch` returns the commit SHA; `access_point()` always creates the Access Point and relates `implemented by` (fixes C8); Serial Lines → Paths and Segments; positions instead of assets; the §4.3 IT policy; remove `remove_all_before`; retirement |
-| `services/element_inference.py` | rules unchanged; the output type changes to position and element; every rule gets an id and a version; screen–camera pairing emits a proposal |
-| `services/pbs_import.py` | components of physical types → `Equipment Position`; `part of` → Area becomes `argus_location`; module → `composed of` from the module; station exclusivity check with `served by` for shared providers; `wbs_code` → `work_package` |
-| `services/integrity.py` (`relink_workspace`) | edges named by registry, add-and-retire derived edges only |
-| `routers/assets.py` | relation create/delete validated by registry (warn, then enforce); `create_asset` checks the type is usable from the workspace |
-| `services/asset_types.py` | the §5.2 hierarchy, tiers, removal of `Engineered Item` as an in-place re-parent (the seeder already follows changed parents) |
-| `services/network_resolve.py` | read visible global objects across workspaces; match through labels and aliases |
-| `services/root_cause.py`, `knowledge_graph.py` | walk only `status = active` edges, optionally `proposed` at a lower weight; skip `Retired` and `Merged` records |
-| `services/mcp_tools.py` | type search also matches `position_class` and `equipment_class` |
-| `services/jira_import.py` | inventory objects into `inventory`; identifiers as labels; adopt catalogue types by name (IT §8.5) |
-| `scripts/import_epik8s.py` | drop the unchecked `--it-workspace` path in favour of a service identity |
-
-### 12.3 Data
-
-Run per workspace, with a dry-run report first. The figures below are the ones the notes
-publish (AS §9.5, IT §0).
-
-| Current | Becomes |
-|---|---|
-| 492 inferred "assets" (SPARC 249, BTF 62, EuAPS 94, ELI 87), keyed `FAC:AST:<ioc>:<chan>` | `Equipment Position` (`position_class` = old type) or `Motion Axis`, keyed `FAC:POS:<tag>`, `record_status = Provisional`; old key as a `former_key` label; tickets and documents carried over (they are about the channel name, which is the position) |
-| `Power Supply --powers--> Quadrupole` | supply **position** `powers` the Quadrupole (same verb) |
-| `Element --realized by--> inferred Digitizer` | BPM `served by` the electronics position (shared Liberas are not exclusive) |
-| `Screen Station / Mirror --composed of--> asset` | `composed of` the actuator, camera or axis **position**; camera pairings re-asserted as `proposed` |
-| `Control Device --acts on--> asset`, `IOC --drives--> asset` | `acts on` the position; `drives` dropped (derived) |
-| 104 Serial Lines, `on line`, `port of`, `carried by` | 104 Communication Paths + Bus Segments; `on path`, `enters at`, `continues on`; `carried by` → converter dropped (redundant with `enters at` → `implemented by`) |
-| 30 inferred IT objects (`HOST:<fqdn>`) | `Provisional`; FQDN label; candidates computed once the registry is imported |
-| Access Points that are really equipment (`access_points_linked`) | a proper Access Point + `implemented by` |
-| 156 PBS components of physical types (Assets) | `Equipment Position`, lifecycle Planned; Procurement and Utility edges unchanged |
-| 383 PBS `part of` | → Area: `argus_location`; → module: `composed of` (module as source); → Section: kept |
-| `argus_keywords: inferred`, `argus_source`, `argus_source_ref`, `argus_provenance`, `endpoint_kind_source` | ledger assertions with `source_revision` = "legacy import, revision unknown", `method` from the marker; markers removed |
-| `installed_on` / `removed_on` / `is_spare` with values | an Installation where a position exists, otherwise an `asset_history` note; `is_spare` → `is_designated_spare` |
-| types outside the core with zero objects | tier `ext:*`, hidden; with objects: kept and listed in the migration report |
-
-The legacy ledger rows are honest about what is not known: "imported before provenance
-existed; the revision is unknown". The first re-import of each source then supersedes them with
-real revisions.
+The migration runs first on a restored copy of production. It then runs per workspace in
+production, after a database backup, with a rollback window until finalization (decision D11).
 
 ---
 
 ## 13. Implementation plan
 
-Ordered by harm: data loss first, then trust, then duplicates, then new capability.
+Each step proves something before the next step depends on it.
 
-| Phase | Work | Exit criterion |
-|---|---|---|
-| **0. Stop the bleeding** (small, now) | stated `upsert` merges instead of replacing, keeping values edited since the last import; remove `remove_all_before`; resolve the commit SHA into `argus_source_ref`; permission check on `--it-workspace`; `create_asset` type check; fix the C15 figures in both notes | re-import leaves a hand-edited IOC description intact (test) |
-| **1. Ledger and registry** | tables and columns (§12.1); FactWriter; registry in `warn` mode with a report of every violating edge in each workspace; legacy provenance backfill | every importer writes through the FactWriter; the registry report is empty or triaged |
-| **2. Positions and Installations** | core hierarchy and tiers; data migration of inferred assets and PBS components; Installation type, constraints, `v_installation`, derived `realized by`; "replace unit" action; MCP `position_class` search | "what was at GUNSIP01 on date t" and "where has serial s been" answered by tests over migrated data |
-| **3. Attribute/relation sync** | `relationType` on references; add-and-retire sync; derived `instance of`, `located in`, `within`, `assigned to`, `supplied by`; PBS `part of` corrections | no reference attribute and derived edge disagree (integrity report) |
-| **4. Reconciliation and inventory** | labels as strong identifiers; candidates; review queue UI (proposals, conflicts, candidates, retirements); Insight import into `inventory`; `asset:` resolution → Installation proposals; §4.3 IT policy | provisional → merged round trip with alias resolution on re-import (test); SPARC `asset:` URLs produce proposals |
-| **5. Connectivity** | Paths, Segments, Ports; migration of Serial Lines; IT registry ports; derived `reached through` / `connects to`; root-cause walk through ports | the IT §4.3 box / port / switch impact figures reproduced from the new objects |
-| **6. Retirement** | plan/guard/retire (§11); registry `enforce` mode | a re-import with a device removed retires exactly that device; a broken parse stops at the guard |
-| **7. Extensions** | per §5.4, each when its trigger is met | owner named, source importer written, query in the test suite |
+```
+P0 safety fixes ──────────────────────────────────────────────┐
+S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─▶ S4 migration apply ─▶ S5 cut-over ─▶ S6 connectivity ─▶ S7 enforce
+                                       └─▶ S3a classification dry-run reports (read-only) ─┘            └─▶ S8 extensions
+                     S3b registry warn + derived edges (after S2) ─┘
+```
 
-Phases 2 and 3 can overlap. Phase 5 depends on 1 but not on 4.
+| Step | Scope | Depends on | Exit criterion |
+|---|---|---|---|
+| **P0 safety fixes** | stated `upsert` keeps values edited since the last import; remove `remove_all_before`; record the commit SHA; permission checks on `--it-workspace` and `create_asset`; correct the C15 figures | — | a re-import leaves a hand-edited IOC description intact |
+| **S1 vertical slice** | the ledger tables; the six stages, only for the slice's predicates; authority and multi-value loaders with validators; the Installation type, its validation and the derived `realized by`; a minimal Insight fixture importer; the review API (list items, post decisions) | P0 | acceptance tests A1–A16 (§14) pass; replay equals incremental projection |
+| **S2 shadow pipeline** | all EPIK8s and PBS predicates through the pipeline, on copies of production workspaces. It writes to shadow projections while the legacy importers keep writing | S1 | the diff report between shadow and legacy is empty or every difference is explained |
+| **S3a classification** | the §12 plan and report on real workspaces, with no writes | S1 (for the resolver) | owners have reviewed the reports and recorded any overrides |
+| **S3b registry and derivation** | registry in `warn` mode; derived edges; attribute → edge sync | S2 | the violation report has been triaged |
+| **S4 migration apply** | per workspace, with rollback | S2, S3a, S3b | I-MIG-1 to I-MIG-7 hold; plan finalized |
+| **S5 cut-over** | importers and the UI write only through the ledger; legacy fields become read-only; `equipment_class` governance and its reports go live | S4 | nothing writes `attributes` or `relations` directly (enforced by DB grants) |
+| **S6 connectivity** | Communication Paths, Bus Segments, Equipment Ports; AP assignments; derived `implemented by` and `attached to` | S5 | the IT §4.3 box, port and switch impact figures are reproduced |
+| **S7 enforce** | registry in `enforce` mode; retirement guard live on all streams | S5 | — |
+| **S8 extensions** | one per trigger | S5 | an owner, a source and a query in the test suite |
 
 ---
 
-## 14. Decisions needed from stakeholders
+## 14. Acceptance tests for the vertical slice
 
-1. **System of record for physical assets.** Does the hub mirror Jira Insight (read-only
-   assets, with Installations held in the hub), or does it become the record? This decides
-   whether Installations are ever written back.
-2. **Inventory workspace staffing.** Is it one `inventory` workspace for non-IT equipment and a
-   separate `it-infrastructure`, or one site workspace? Who holds the editor role in each?
-3. **Review owners.** Who confirms inferred facts and candidate matches per domain (vacuum,
-   magnets, diagnostics, IT)? Without named reviewers, the proposal queues grow and nobody
-   empties them.
-4. **Auto-merge policy.** Is a single strong-identifier match (serial + manufacturer, Insight
-   objectId, MAC) allowed to merge without a person?
-5. **Position granularity.** Does every configured channel get a position, or only equipment
-   that is swapped as a unit? For example, is each motor axis a position, or only its stage?
-6. **Visibility of beamline structure.** May positions, functional elements and Installations
-   be global-readable, so that the inventory team sees where its assets are? Engineering records
-   stay private either way.
-7. **Retirement thresholds** (default 10 %), and whether retired objects with tickets stay
-   listed in default searches.
-8. **The DNS convention's status.** It is still titled *PROPOSAL* (IT §4.4), and §4.3 relies on
-   its class prefixes to allow provisional IT equipment.
-9. **Lattice ownership** (AS §15). It decides whether `Beam Element` attributes are imported or
-   left empty, and who may assert `upstream of`.
-10. **The counting disagreements** (C15). Which serial-line count (141 or 104) and which type
-    counts are authoritative for acceptance tests?
+**Fixture.**
+
+- Workspaces: `slice-sparc` (beamline), `slice-inventory` and `slice-it`.
+- Configuration source: a trimmed `values.yaml` with IOC `vac-gunvpc`, devices `GUNSIP00` to
+  `GUNSIP02` on `scsparcsipmxa001:4003`, and the IOC's `asset:` URL with `objectId=129573`.
+- Insight fixture: Ion Pump s/n 84321 (objectId 129573, Rack B12) and Ion Pump s/n 90001
+  (objectId 130004, Storage).
+
+| # | Given | When | Then | Validates |
+|---|---|---|---|---|
+| A1 | an empty ledger | import revision r1 | device claims appear; Control Devices Active; position `SLICE:POS:GUNSIP01` inferred and made Active by policy; its `status_event` has cause `policy:<v>` | parse, infer, project; automatic acceptance is recorded |
+| A2 | A1 | import the Insight fixture | two Equipment records in `slice-inventory`; the resolve stage produces the resolved claim `asset:` → 84321; an Installation is **Proposed** | resolution; reconciliation proposal |
+| A3 | A2 | an operator `confirm`s the Installation with `valid_from = before_records` | workflow status Confirmed, temporal state Current; derived edge `GUNSIP01 realized by 84321`; key `INS-<ULID>`; display name computed | Installation; derived edges |
+| A4 | A3 | re-import the unchanged bytes of r1 | `job_run(parse)` skipped; **0** claims and **0** claim events; resolve and project `job_run`s recorded; no status events | parse idempotency |
+| A5 | A4 | add an alias label that makes a previously unresolved source ref resolvable; re-import r1 unchanged | parse skipped; **resolve reruns** and binds the ref; projection updates | resolution independent of parsing |
+| A6 | A3 | an operator edits the device description; re-import r1 | the description is kept, because a confirmed manual value outranks a stated one. A non-blocking `source_vs_confirmed` conflict opens only if the source states a different value | precedence; I-LED-3 |
+| A7 | A3 | swap batch: `supersede` INS-a with `valid_until = T` (Failure); `confirm` INS-b (90001) from `T` | 84321 Ended, 90001 Current; `realized by` re-derived; 84321's `argus_location` is not changed by the Installation | swap; half-open handover |
+| A8 | A7 | historical queries at `T − 1 s` and at `T` | 84321, then 90001 | temporal model |
+| A9 | A7 | try to confirm 90001 at `SLICE:POS:GUNSIP02` from `T + 1 d` while INS-b is still open | the decision fails with I-INS-1; nothing is written except the audit record of the rejected attempt | overlap validation |
+| A10 | A7 | backdated correction: `supersede` INS-b with `valid_from = T − 2 h` without ending INS-a earlier | fails with I-INS-2. The same correction batched with INS-a `valid_until = T − 2 h` succeeds. Replaying to a point before the correction shows the old belief | backdating; atomic batches |
+| A11 | A3 | one person confirms `argus_location = Rack B13` on 84321; a second person confirms `Rack B14` without `supersedes` | a blocking `confirmed_vs_confirmed` conflict opens; the projected value stays B13 | I-LED-2 |
+| A12 | A11 | a reviewer issues a `supersede` naming the B13 confirmation, with value B14, and a `resolve_conflict` | B14 is effective and the conflict is resolved; both confirmations and the resolution remain in the ledger | explicit supersession |
+| A13 | A12 | a new Insight revision states `Rack B12` | a non-blocking `source_vs_confirmed` conflict opens; B14 stays | sticky confirmation |
+| A14 | A3 | revision r2 removes `GUNSIP02` (in this small fixture, above the 10 % guard) | r2 is `held` and nothing retires. After `approve_revision`, the GUNSIP02 Control Device is Retired, its edges are retired and its tickets still resolve; its position, which has no Installation, retires; `GUNSIP01`'s position is untouched | retraction; guard; non-destructive retirement |
+| A15 | A1 | a reviewer `reject`s the inferred position `SLICE:POS:GUNSIP00` by fingerprint; re-import r1, then r2 | the position is not proposed again, and its status stays `rejected` | rejection memory |
+| A16 | A1–A15 | drop every projection and rebuild from the ledger; then publish a new `policy_version` that changes one rule | the rebuild yields identical attributes, edges, record statuses, conflicts and `v_installation`; the policy change writes status events that cite the new version | auditability; policy versioning |
+
+---
+
+## 15. Invariants (collected)
+
+| Id | Invariant |
+|---|---|
+| I-LED-1…5 | §7.4: sticky confirmations; conflicting confirmations; source vs confirmed; append-only; every status change has a cause |
+| I-PROJ-1 | `assets.attributes` and the asserted `relations` rows equal the projection of the ledger at the project stage's watermark. Only the project stage writes them |
+| I-PROJ-2 | a derived edge exists exactly when its registry rule holds on the current projections. Nothing else writes derived edges |
+| I-PROJ-3 | an authority policy with two equally specific rules of different effect cannot be loaded |
+| I-REL-1 | every `relations` row's type is in the registry at the recorded registry version, and its domain, range, cardinality and acyclicity hold (warn first, then enforce) |
+| I-REL-2 | a `composed of` target has at most one composite; components have no `part of` of their own; `part of` never targets a Location |
+| I-INS-1…7 | §8.3 |
+| I-AP-1…3 | §9.2 |
+| I-ID-1 | at most one active record per strong identifier. A Merged record has a `merged_into_uid` that resolves to an active record |
+| I-ID-2 | every source ref has at most one binding at a time; rebinding writes an `identity_event` |
+| I-RET-1 | no record referenced by a ticket, a document or a Confirmed Installation is ever deleted |
+| I-RET-2 | a position with a Current, Confirmed Installation is not retired because a source withdrew it |
+| I-MIG-1…7 | §12.6 |
+| I-CAT-1 | every `Other Equipment` has an `equipment_class` from the current vocabulary; deprecated classes cannot be assigned |
+
+---
+
+## 16. Decisions needed from stakeholders
+
+- **D1. System of record for physical assets.** Does the hub mirror Jira Insight, or become the
+  record? This decides whether Installations are written back to Insight.
+- **D2. Inventory and IT staffing.** Who staffs these workspaces, and who owns **IT positions**
+  (rack slots or host roles) and records IT swaps?
+- **D3. Review owners** for each domain (vacuum, magnets, diagnostics, IT). They handle
+  proposals, conflicts and migration items.
+- **D4. Auto-merge policy.** May a single strong-identifier match merge records without a
+  person?
+- **D5. Position granularity.** Is every configured channel a position, or only equipment that
+  is swapped as a unit?
+- **D6. Visibility.** May positions and Installations be readable from every workspace?
+  Engineering records stay private either way.
+- **D7. Thresholds.** The retirement guard (10 %) and the `Other Equipment` promotion values
+  (25 objects, 2 workspaces, 5 % Unclassified).
+- **D8. Split tickets.** In M-PHYS, may legacy tickets be linked to both the Position and the new
+  Equipment?
+- **D9. Initial authority policy.** Who signs the first `policy_version`, and who may change it?
+- **D10. Projection latency.** Must the UI show a user's own edit immediately (projection inside
+  the request), or is a delay of a few seconds acceptable?
+- **D11. Migration rollback window** before finalization. The proposal is 30 days per workspace.
+- **D12. Carried over from the first revision:** the status of the DNS naming convention;
+  ownership of the lattice; and which of the C15 counts are authoritative for tests.
