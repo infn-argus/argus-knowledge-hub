@@ -432,10 +432,29 @@ _t("Radiation Monitor", "Asset", "Measures radiation.", [
     S("detector_kind", "Detector kind"), F("alarm_threshold", "Alarm threshold"),
     D("calibration_due", "Calibration due")])
 _t("Laser System", "Asset", "A laser and its delivery.")
-_t("Cable Run", "Asset", "A cable between two connectors.", [
-    S("cable_type", "Cable type"), F("length_m", "Length (m)"),
-    S("from_connector", "From connector"), S("to_connector", "To connector"),
+_t("Cable Run", "Asset", "A cable between two pieces of hardware. Classified by what it carries; "
+   "a logical line (a serial line, a network path) is composed of cables and the active "
+   "equipment between them, and is `carried by` them.", abstract=True, attributes=[
+    S("cable_label", "Cable label", indexed=True), S("cable_type", "Cable type (as specified)"),
+    F("length_m", "Length (m)"),
+    R("from_asset", "From", "Asset", children=True), S("from_connector", "From connector"),
+    R("to_asset", "To", "Asset", children=True), S("to_connector", "To connector"),
     S("signal", "Signal")])
+_t("Ethernet Cable", "Cable Run", "A copper Ethernet cable.", [
+    E("ethernet_category", "Category", ["Cat5e", "Cat6", "Cat6a", "Cat7"])])
+_t("Serial Cable", "Cable Run", "A serial cable between a converter and an instrument, or between "
+   "instruments on a bus.", [
+    E("serial_standard", "Standard", ["RS-232", "RS-422", "RS-485"])])
+_t("Fibre Cable", "Cable Run", "An optical fibre.", [
+    E("fibre_mode", "Mode", ["Multimode", "Single mode"])])
+_t("Power Cable", "Cable Run", "A mains or DC supply cable.", [
+    F("rated_current_a", "Rated current (A)"), F("rated_voltage_v", "Rated voltage (V)")])
+_t("HV Cable", "Cable Run", "A high-voltage cable, such as an ion pump's.", [
+    F("rated_voltage_kv", "Rated voltage (kV)")])
+_t("RF Cable", "Cable Run", "A coaxial cable carrying RF or a fast signal.", [
+    F("impedance_ohm", "Impedance (Ω)")])
+_t("Signal Cable", "Cable Run", "A multi-conductor cable for analogue or digital signals.", [
+    I("n_conductors", "Number of conductors")])
 _t("Mechanical Support", "Asset", "A stand, girder or support.")
 _t("Spare Part", "Asset", "Held on a shelf for a product model.", [
     R("spare_for", "Spare for", "Product Model"), I("quantity", "Quantity"),

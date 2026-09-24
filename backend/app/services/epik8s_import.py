@@ -277,6 +277,7 @@ class _Importer:
         # and each beamline's Access Point is `implemented by` it.
         self.it_workspace = it_workspace
         self._it_seen: set = set()
+        self._ap_equipment: dict = {}        # Access Point uid -> the IT equipment it is implemented by
         # Serial lines seen while walking the devices: made once every device is known, because
         # what a line is depends on everything on it.
         self._lines: dict = {}
@@ -585,6 +586,12 @@ class _Importer:
             }))
             self.counts["serial_lines"] = self.counts.get("serial_lines", 0) + 1
             self.relate(asset, line["ap"], "port of")
+            # A line is carried by the converter it is a port of: the first element of the path that
+            # the file states. The cables and switches between are not in any configuration; a person
+            # adds them (`carried by`), and the walk then goes through them too.
+            converter = self._ap_equipment.get(line["ap"].uid)
+            if converter is not None:
+                self.relate(asset, converter, "carried by")
             for device in devices:
                 self.relate(device, asset, "on line")
             # A bare IP that carries a port in Moxa's range is a converter by that evidence alone.
@@ -754,6 +761,7 @@ class _Importer:
                                 f"has confirmed it, its model, serial number or where it is."),
             }))
         self.relate(access_point, equipment, "implemented by")
+        self._ap_equipment[access_point.uid] = equipment
         if equipment.uid not in self._it_seen:
             self._it_seen.add(equipment.uid)
             self.counts["it_equipment"] = self.counts.get("it_equipment", 0) + 1

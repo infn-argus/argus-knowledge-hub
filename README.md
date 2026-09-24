@@ -55,7 +55,7 @@ currently valid* revision rather than to an arbitrary PDF.
 ## Design notes
 
 - [Object schema design for a large-scale accelerator](docs/asset-schema-design.md) — the
-  type catalogue (115 types over four planes), the relation vocabulary, composite elements such
+  type catalogue (122 types over four planes), the relation vocabulary, composite elements such
   as a screen station, and how a beamline's EPIK8s control configuration and a EuPRAXIA-style
   product breakdown both come in as equipment rather than as files.
 - [The knowledge graph for root-cause analysis](docs/knowledge-graph-design.md) — what each

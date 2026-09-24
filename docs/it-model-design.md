@@ -11,7 +11,7 @@ it was built from.*
 The decisions in §9 were taken as recommended: a dedicated site workspace for IT, the serial line
 as an object, and IT equipment that the configuration import makes and marks as inferred.
 
-**Catalogue (115 types, was 104).** Under `Asset`: `IT Equipment` (hostname, FQDN, primary IP,
+**Catalogue (122 types, was 104).** Under `Asset`: `IT Equipment` (hostname, FQDN, primary IP,
 MAC, firmware, management URL) → `Network Device` → `Switch`, `Router`, `Serial Converter`,
 `Media Converter`; and `Computing Node` → `Server`, `Workstation`. Under `Item`: `IT Record` →
 `Network Segment`, `Address Record`. Under `Control Item`: `Serial Line`. `Access Point` gains
@@ -218,10 +218,19 @@ device a single line. It is not a guess.
 
 ### 4.2 Relations
 
+A **Serial Line** is a logical line, end to end: `Ethernet Cable` + `Switch` + `Serial Converter` +
+`Serial Cable` (RS-232/422/485). It is `carried by` each hop (a series path, not `composed of`: one
+hop stopping cuts the line, none merely degrades it). A configuration only names the converter, so
+the importer relates the line to that; the cables and switches are added by hand or from a cabling
+matrix, and the impact and root-cause walks then go through them. A switch carrying two lines is a
+single explanation for symptoms on both. All cables are `Cable Run` children, with `from_asset` and
+`to_asset` ends.
+
 | Relation | From → to | Source |
 |---|---|---|
 | `on line` | Control Device → Serial Line | stated (`server` + `port`) |
 | `port of` | Serial Line → Access Point | stated |
+| `carried by` | Serial Line → each hop it passes through: `Serial Cable`, `Ethernet Cable`, `Switch`, `Serial Converter` | the converter from the config; the cables and switches added by a person |
 | `implemented by` | Access Point → IT Equipment | resolved by hostname, IP or MAC |
 | `described by` | IT Equipment, or any Asset with a network presence → Address Record | resolved, or from the registry |
 | `on segment` | IT Equipment, Access Point, Control Network → Network Segment | registry or IT, not the config |

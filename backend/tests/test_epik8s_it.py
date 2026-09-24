@@ -296,7 +296,7 @@ def test_every_relation_the_it_layer_writes_means_something_to_a_failure(db, wor
     _, it, (ws, _) = world
     run(db, ws, tag, it=it)
     written = {t for _, t, _ in edges(db, ws)}
-    assert {"on line", "port of", "implemented by", "runs on"} <= written
+    assert {"on line", "port of", "carried by", "implemented by", "runs on"} <= written
     assert not [t for t in written if classify(t) is None], written
 
 
@@ -321,3 +321,33 @@ def test_two_lost_readouts_on_one_line_point_at_the_line_before_the_converter_wh
     assert f"{tag}:LINE:SCSPARCSIPMXA001:4003" in ranked or f"{tag}:IOC:vac-gunvpc" in ranked
     refuted = {c["key"] for c in result["candidates"] if c["contradicted_by"]}
     assert "HOST:scsparcsipmxa001.lnf.infn.it" in refuted or f"NET:{ws}:SCSPARCSIPMXA001" in refuted
+
+
+def test_a_line_is_carried_by_the_converter_and_by_the_hops_a_person_adds(db, world, tag):
+    _, it, (ws, _) = world
+    run(db, ws, tag, it=it)
+    conv = "HOST:scsparcsipmxa001.lnf.infn.it"
+    line3, line1 = f"{tag}:LINE:SCSPARCSIPMXA001:4003", f"{tag}:LINE:SCSPARCSIPMXA001:4001"
+    e = edges(db, ws)
+    assert (line3, "carried by", conv) in e and (line1, "carried by", conv) in e
+
+    # a switch and a cable that no configuration names, added by hand: both lines pass the switch
+    by_key = {a.key: a for a in db.query(Asset).filter(Asset.workspace_id.in_([ws, it]))}
+    template = by_key[conv]
+    hops = {}
+    for name, kind in (("SW", "Switch"), ("CAB", "Ethernet Cable")):
+        hops[name] = Asset(uid=f"{tag}-{name}", key=f"{tag}:{name}", workspace_id=ws, type=kind,
+                           schema_uid=template.schema_uid, attributes={}, name=f"{tag} {name}")
+        db.add(hops[name])
+    db.flush()
+    for line in (line3, line1):
+        for hop in hops.values():
+            db.add(Relation(workspace_id=ws, from_asset_uid=by_key[line].uid, to_asset_uid=hop.uid,
+                            relation_type="carried by"))
+    db.flush()
+    reached = {a["key"] for a in impact_of(db, ws, hops["SW"].key)["affected"]}
+    assert {line3, line1, f"{tag}:DEV:vac-gunvpc:GUNSIP01", f"{tag}:DEV:vac-kly01:W1KSIP03"} <= reached
+    assert f"{tag}:DEV:diag-tml:SCN01:MOT01" not in reached
+    one, two = f"{tag}:DEV:vac-gunvpc:GUNSIP01", f"{tag}:DEV:vac-kly01:W1KSIP03"
+    top = root_causes(db, ws, [one, two], symptom_kind={one: "control", two: "control"})["candidates"]
+    assert [c["key"] for c in top if c["fit"] == 1.0][0] in {conv, hops["SW"].key, hops["CAB"].key}

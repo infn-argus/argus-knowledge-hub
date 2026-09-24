@@ -82,6 +82,9 @@ SEMANTICS: dict = {
     "runs on": RelationSemantics("control", REVERSE, CONTROL, note="IOC → the host that runs it"),
     "on line": RelationSemantics("control", REVERSE, CONTROL, note="device → serial line"),
     "port of": RelationSemantics("control", REVERSE, CONTROL, note="serial line → access point"),
+    "carried by": RelationSemantics("control", REVERSE, CONTROL,
+                                    note="a logical line → each thing it passes through: cable, switch, "
+                                         "converter. A series path: any of them stopping cuts the line"),
     "acts on": RelationSemantics("control", FORWARD, CONTROL,
                                  note="device → what it drives: it loses control, not function"),
     "drives": RelationSemantics("control", FORWARD, CONTROL, note="IOC → the unit it is"),
