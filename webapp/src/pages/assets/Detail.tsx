@@ -20,6 +20,7 @@ import { LabelScanner } from "../../components/LabelScanner";
 import { RelationGraph } from "../../components/RelationGraph";
 import { TransferItemAction } from "../../components/TransferItemAction";
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
+import { AssetContextPanel } from "../../components/hub/ContextPanels";
 
 function SectionCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
@@ -86,11 +87,6 @@ export function AssetDetail() {
   const comments = useQuery({
     queryKey: ["asset-comments", uid],
     queryFn: () => assetSubresourcesApi.comments(uid!),
-    enabled: !!uid,
-  });
-  const tickets = useQuery({
-    queryKey: ["asset-tickets", uid],
-    queryFn: () => assetSubresourcesApi.tickets(uid!),
     enabled: !!uid,
   });
   const labels = useQuery({
@@ -249,6 +245,8 @@ export function AssetDetail() {
           </button>
         </div>
       </div>
+
+      <AssetContextPanel assetUid={a.uid} />
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SectionCard title="Attributes">
@@ -444,56 +442,6 @@ export function AssetDetail() {
             })}
             {visibleAttachments.length === 0 && (
               <p className="text-slate-400">No attachments.</p>
-            )}
-          </ul>
-        </SectionCard>
-
-        <SectionCard
-          title="Linked tickets"
-          action={
-            <Link
-              to={`/tickets/new?asset_uid=${a.uid}`}
-              className="text-xs text-indigo-600 hover:text-indigo-800"
-            >
-              + Raise a ticket
-            </Link>
-          }
-        >
-          <ul className="space-y-1 text-sm">
-            {tickets.data?.map((t) => (
-              <li key={t.uid} className="flex items-baseline justify-between gap-3">
-                <span className="min-w-0">
-                  {/* A ticket raised here has no source key, so ticket_key
-                      is its uid — a uuid tells nobody anything, so show it
-                      only when it's a real key from the source system. */}
-                  {t.ticket_key !== t.issue_uid && (
-                    <span className="font-mono text-xs text-slate-400">{t.ticket_key}</span>
-                  )}{" "}
-                  {/* A row from the asset import names a key that may since
-                      have been imported as a ticket here; link to it when so,
-                      and to the source system otherwise. */}
-                  {t.issue_uid ? (
-                    <Link to={`/tickets/${t.issue_uid}`} className="hover:underline">
-                      {t.summary}
-                    </Link>
-                  ) : t.backend_url ? (
-                    <a
-                      href={t.backend_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="hover:underline"
-                    >
-                      {t.summary} ↗
-                    </a>
-                  ) : (
-                    t.summary
-                  )}
-                </span>
-                <span className="shrink-0 text-xs text-slate-400">{t.status}</span>
-              </li>
-            ))}
-            {tickets.data?.length === 0 && (
-              <p className="text-slate-400">No linked tickets.</p>
             )}
           </ul>
         </SectionCard>

@@ -35,6 +35,12 @@ currently valid* revision rather than to an arbitrary PDF.
 
 ## Main capabilities
 
+- **One application for assets, service and knowledge.** Every asset shows its tickets and the
+  documents that apply to it (its own, its product model's and its type's); every ticket shows its
+  equipment, the relevant procedures and what else is open on that equipment; every document shows
+  where it applies and what is broken there. A single search (Ctrl/⌘ K) covers all three, and the
+  operations cockpit opens on what needs attention. Served by `/v1/hub` (`search`, `overview`,
+  `assets|tickets|documents/{uid}/context`), which fills each section only for callers who may read it.
 - **Workspaces** with per-user, per-resource permissions (read/create/modify/delete/approve),
   OIDC sign-in (Firebase today, Keycloak-ready) plus API tokens for automation.
 - **Types (schemas)** with inheritance: attributes are inherited down the hierarchy, and a type
@@ -47,13 +53,18 @@ currently valid* revision rather than to an arbitrary PDF.
   levels, authority levels and relations to assets/types/other documents.
 - **Global values**: shared enumerations (status, priority, …) scoped per context.
 - **Imports** from Jira Insight/Assets and from Git repositories, with saved, re-runnable
-  import configurations and merge strategies (override / don't override / update-if-newer /
-  wipe-and-reimport).
+  import configurations and merge strategies (override / don't override / update-if-newer).
+  Imports never delete: a re-import keeps values people edited since the last run (import
+  snapshots) and records the commit it read. The old wipe-and-reimport strategy is retired.
 - **Data integrity tools**: relink of unresolved references, and a report of missing
   references, dangling links and orphaned objects, with targeted cleanup actions.
 
 ## Design notes
 
+- [The asset model revision](docs/asset-model-revision.md) — positions and installations, the fact
+  ledger, the relation registry, identity reconciliation, and ARGUS as the system of record that
+  replaces Jira/Insight domain by domain. The implementation follows its plan (§13); the unified
+  hub and the P0 import fixes are the first increment.
 - [Object schema design for a large-scale accelerator](docs/asset-schema-design.md) — the
   type catalogue (122 types over four planes), the relation vocabulary, composite elements such
   as a screen station, and how a beamline's EPIK8s control configuration and a EuPRAXIA-style

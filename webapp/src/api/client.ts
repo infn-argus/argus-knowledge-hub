@@ -77,6 +77,13 @@ import type {
   WorkspaceIdRule,
   WorkspaceIdSuggestion,
 } from "./types";
+import type {
+  AssetContext,
+  DocumentContext,
+  HubOverview,
+  HubSearchResult,
+  TicketContext,
+} from "./hubTypes";
 
 export class ApiError extends Error {
   status: number;
@@ -718,4 +725,15 @@ export const aiApi = {
       method: "POST",
       body: json({ ids }),
     }),
+};
+
+/** The unified knowledge layer: one object's whole context, one search across
+ * assets, tickets and documents, and the operations cockpit. */
+export const hubApi = {
+  search: (q: string, limit = 8) =>
+    request<HubSearchResult>(`/v1/hub/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  overview: () => request<HubOverview>("/v1/hub/overview"),
+  assetContext: (uid: string) => request<AssetContext>(`/v1/hub/assets/${uid}/context`),
+  ticketContext: (uid: string) => request<TicketContext>(`/v1/hub/tickets/${uid}/context`),
+  documentContext: (uid: string) => request<DocumentContext>(`/v1/hub/documents/${uid}/context`),
 };

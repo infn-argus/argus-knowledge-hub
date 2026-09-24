@@ -1,0 +1,205 @@
+"""The unified knowledge layer: an asset, its tickets and its documents in one answer.
+
+The case is an ion pump. A procedure is written for every *Vacuum Pump* (its
+parent type), a manual for its product model, and a note for this very unit.
+Two tickets are raised on it (one open, one closed), and a third is linked to
+it after the fact. Every view of the pump, of the ticket and of the procedure
+has to show the other two.
+"""
+import secrets
+from datetime import date, datetime, timedelta, timezone
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.auth import hash_token
+from app.db import Base, SessionLocal, engine
+from app.main import app
+from app.models.api_token import ApiToken
+from app.models.asset import Asset, Relation
+from app.models.asset_subresources import AssetTicket
+from app.models.document import Document, DocumentRelation, DocumentRevision
+from app.models.issue import Issue
+from app.models.schema import Schema
+from app.models.workspace import Workspace
+from app.services import knowledge_hub as hub
+
+client = TestClient(app)
+NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _schema():
+    Base.metadata.create_all(engine)
+    yield
+
+
+@pytest.fixture()
+def world():
+    ws = f"hub-{secrets.token_hex(4)}"
+    t = secrets.token_hex(3)
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name="Hub"))
+    db.flush()
+    db.add(Schema(uid=f"{ws}:pump", workspace_id=ws, name="Vacuum Pump", applies_to="objects"))
+    db.flush()
+    db.add(Schema(uid=f"{ws}:ion", workspace_id=ws, name="Ion Pump", applies_to="objects",
+                  parent_schema_uid=f"{ws}:pump"))
+    db.add(Schema(uid=f"{ws}:pm", workspace_id=ws, name="Product Model", applies_to="objects"))
+    db.flush()
+    db.add(Asset(uid=f"{ws}-model", workspace_id=ws, schema_uid=f"{ws}:pm", key=f"PM{t}-1",
+                 name="Agilent IPCMini", type="Product Model", attributes={}))
+    db.add(Asset(uid=f"{ws}-pump", workspace_id=ws, schema_uid=f"{ws}:ion", key=f"SP{t}-12",
+                 name="GUNSIP01", type="Ion Pump",
+                 attributes={"serial": f"SN-{t}-84321", "product_model": f"{ws}-model",
+                             "argus_system": "Vacuum"}))
+    db.add(Asset(uid=f"{ws}-moxa", workspace_id=ws, schema_uid=f"{ws}:pm", key=f"MX{t}-1",
+                 name="scsparcsipmxa001", type="Serial Converter", attributes={}))
+    db.flush()
+    db.add(Relation(workspace_id=ws, from_asset_uid=f"{ws}-pump", to_asset_uid=f"{ws}-moxa",
+                    relation_type="reached through"))
+    db.add(Issue(uid=f"{ws}-t1", workspace_id=ws, title="GUNSIP01 pressure spikes", state="new",
+                 asset_uid=f"{ws}-pump", priority="high"))
+    db.add(Issue(uid=f"{ws}-t2", workspace_id=ws, title="GUNSIP01 controller replaced", state="closed",
+                 asset_uid=f"{ws}-pump", closed_at=NOW))
+    db.add(Issue(uid=f"{ws}-t3", workspace_id=ws, title="Vacuum readback frozen", state="new"))
+    db.flush()
+    db.add(AssetTicket(uid=f"{ws}-at3", asset_uid=f"{ws}-pump", ticket_key=f"{ws}-t3",
+                       summary="Vacuum readback frozen", type="affects", status="new",
+                       created=NOW, updated=NOW))
+    db.add(AssetTicket(uid=f"{ws}-atj", asset_uid=f"{ws}-pump", ticket_key="SPARC-77",
+                       summary="Old Jira ticket", type="Incident", status="Done",
+                       created=NOW, updated=NOW, backend_url="https://jira.example/browse/SPARC-77"))
+    docs = [
+        ("proc", f"PRC-{t}-1", "Ion pump bake-out procedure", ("schema", f"{ws}:pump")),
+        ("manual", f"MAN-{t}-1", "IPCMini controller manual", ("asset", f"{ws}-model")),
+        ("note", f"NOTE-{t}-1", "GUNSIP01 installation note", ("asset", f"{ws}-pump")),
+        ("other", f"OTH-{t}-1", "Magnet cycling", None),
+    ]
+    for key, code, title, target in docs:
+        db.add(Document(uid=f"{ws}-{key}", workspace_id=ws, code=code, title=title))
+        db.flush()
+        rev = DocumentRevision(uid=f"{ws}-{key}-r1", document_uid=f"{ws}-{key}", revision_number=1,
+                               state="published",
+                               next_review_due=date.today() - timedelta(days=3) if key == "proc" else None)
+        db.add(rev)
+        db.flush()
+        db.get(Document, f"{ws}-{key}").current_revision_uid = rev.uid
+        if target:
+            db.add(DocumentRelation(workspace_id=ws, from_document_uid=f"{ws}-{key}",
+                                    to_type=target[0], to_uid=target[1], relation_type="describes"))
+    # The note is already linked to ticket 1, so it is not "suggested" there.
+    db.add(DocumentRelation(workspace_id=ws, from_document_uid=f"{ws}-note", to_type="issue",
+                            to_uid=f"{ws}-t1", relation_type="documents"))
+    raw = secrets.token_urlsafe(16)
+    db.add(ApiToken(workspace_id=ws, token_hash=hash_token(raw)))
+    db.commit()
+    db.close()
+    return {"ws": ws, "t": t, "headers": {"Authorization": f"Bearer {raw}"}}
+
+
+def test_an_asset_shows_its_tickets_documents_and_connections(world):
+    ws = world["ws"]
+    resp = client.get(f"/v1/hub/assets/{ws}-pump/context", headers=world["headers"])
+    assert resp.status_code == 200, resp.text
+    ctx = resp.json()
+    assert ctx["type_path"] == ["Vacuum Pump", "Ion Pump"]
+    tickets = {t["uid"]: t for t in ctx["tickets"]}
+    # Its subject tickets and the one linked afterwards; the open ones first.
+    assert set(tickets) == {f"{ws}-t1", f"{ws}-t2", f"{ws}-t3"}
+    assert ctx["tickets"][-1]["uid"] == f"{ws}-t2" and not ctx["tickets"][-1]["open"]
+    assert ctx["stats"]["open_tickets"] == 2
+    # The Jira ticket that has no native counterpart is listed as external.
+    assert [e["key"] for e in ctx["external_tickets"]] == ["SPARC-77"]
+    via = {d["uid"]: d["via"] for d in ctx["documents"]}
+    assert via == {f"{ws}-note": "asset", f"{ws}-manual": "product", f"{ws}-proc": "type"}
+    proc = next(d for d in ctx["documents"] if d["uid"] == f"{ws}-proc")
+    assert proc["via_label"] == "Vacuum Pump" and proc["review_overdue"]
+    assert ctx["stats"]["documents_overdue"] == 1
+    assert ctx["relations"]["items"][0]["name"] == "scsparcsipmxa001"
+
+
+def test_a_section_the_caller_cannot_read_comes_back_empty(world):
+    db = SessionLocal()
+    pump = db.get(Asset, f"{world['ws']}-pump")
+    ctx = hub.asset_context(db, world["ws"], pump, hub.Access(assets=True, tickets=False, documents=True))
+    db.close()
+    assert ctx["tickets"] == [] and ctx["external_tickets"] == []
+    assert ctx["access"]["tickets"] is False
+    assert ctx["documents"]
+
+
+def test_a_ticket_shows_its_equipment_and_the_knowledge_for_it(world):
+    ws = world["ws"]
+    resp = client.get(f"/v1/hub/tickets/{ws}-t1/context", headers=world["headers"])
+    assert resp.status_code == 200, resp.text
+    ctx = resp.json()
+    assert [a["uid"] for a in ctx["assets"]] == [f"{ws}-pump"]
+    suggested = {d["uid"] for d in ctx["suggested_documents"]}
+    # Everything that applies to the pump, except what is already linked.
+    assert suggested == {f"{ws}-proc", f"{ws}-manual"}
+    assert [t["uid"] for t in ctx["concurrent_tickets"]] == [f"{ws}-t3"]
+
+
+def test_a_document_shows_where_it_applies_and_what_is_open_there(world):
+    ws = world["ws"]
+    ctx = client.get(f"/v1/hub/documents/{ws}-proc/context", headers=world["headers"]).json()
+    assert ctx["types"] == [{"uid": f"{ws}:pump", "name": "Vacuum Pump", "assets": 1}]
+    manual = client.get(f"/v1/hub/documents/{ws}-manual/context", headers=world["headers"]).json()
+    # A manual for a product model covers every instance of it.
+    assert [a["uid"] for a in manual["instances"]] == [f"{ws}-pump"]
+    assert {t["uid"] for t in manual["open_tickets"]} == {f"{ws}-t1", f"{ws}-t3"}
+
+
+def test_one_search_finds_equipment_tickets_and_documents(world):
+    ws, t = world["ws"], world["t"]
+    by_serial = client.get(f"/v1/hub/search?q=SN-{t}-84321", headers=world["headers"]).json()
+    assert [a["uid"] for a in by_serial["assets"]] == [f"{ws}-pump"]
+    mixed = client.get("/v1/hub/search?q=GUNSIP01", headers=world["headers"]).json()
+    assert mixed["assets"][0]["name"] == "GUNSIP01"
+    assert {i["uid"] for i in mixed["tickets"]} >= {f"{ws}-t1", f"{ws}-t2"}
+    assert [d["uid"] for d in mixed["documents"]] == [f"{ws}-note"]
+    assert client.get("/v1/hub/search?q=x", headers=world["headers"]).json()["assets"] == []
+
+
+def test_the_cockpit_shows_what_needs_attention(world):
+    ov = client.get("/v1/hub/overview", headers=world["headers"]).json()
+    ws = world["ws"]
+    assert ov["tickets"]["open"] == 2 and ov["tickets"]["total"] == 3
+    assert ov["tickets"]["hotspots"][0]["uid"] == f"{ws}-pump"
+    assert ov["tickets"]["hotspots"][0]["open_tickets"] == 1
+    assert ov["tickets"]["without_asset"] == 1
+    assert [d["uid"] for d in ov["documents"]["review_overdue"]] == [f"{ws}-proc"]
+    assert ov["documents"]["not_linked_to_assets"] == 1
+    assert ov["assets"]["own"] == 3
+
+
+def test_another_workspaces_private_records_are_not_reachable(world):
+    other = client.get(f"/v1/hub/assets/{world['ws']}-pump/context", headers={
+        "Authorization": world["headers"]["Authorization"] + "x"})
+    assert other.status_code == 401
+    missing = client.get("/v1/hub/tickets/nope/context", headers=world["headers"])
+    assert missing.status_code == 404
+
+
+def test_an_object_cannot_be_made_with_another_workspaces_private_type(world):
+    db = SessionLocal()
+    foreign = f"foreign-{secrets.token_hex(4)}"
+    db.add(Workspace(id=foreign, name="Foreign"))
+    db.flush()
+    db.add(Schema(uid=f"{foreign}:secret", workspace_id=foreign, name="Secret", applies_to="objects"))
+    db.commit()
+    db.close()
+    resp = client.post("/v1/assets", headers=world["headers"], json={
+        "uid": f"{world['ws']}-x", "schema_uid": f"{foreign}:secret", "key": f"X{world['t']}-9",
+        "name": "x", "type": "Secret", "attributes": {}})
+    assert resp.status_code == 422
+
+
+def test_looking_at_an_object_does_not_mark_it_changed(world):
+    """Reading an object resyncs its relation cache; that must not bump
+    updated_at, or "recent activity" lists whatever somebody merely opened."""
+    uid = f"{world['ws']}-pump"
+    first = client.get(f"/v1/assets/{uid}", headers=world["headers"]).json()["updated_at"]
+    second = client.get(f"/v1/assets/{uid}", headers=world["headers"]).json()["updated_at"]
+    assert first == second

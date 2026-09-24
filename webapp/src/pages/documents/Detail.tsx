@@ -21,6 +21,7 @@ import { MarkdownView } from "../../components/MarkdownView";
 import { TransferItemAction } from "../../components/TransferItemAction";
 import { StepsEditor } from "../../components/StepsEditor";
 import { DocumentStep } from "../../api/types";
+import { DocumentContextPanel } from "../../components/hub/ContextPanels";
 
 const STATE_STYLES: Record<string, string> = {
   draft: "bg-slate-100 text-slate-600",
@@ -355,6 +356,8 @@ export function DocumentDetail() {
           </button>
         </div>
       </div>
+
+      <DocumentContextPanel documentUid={doc.uid} />
 
       {/* Revision selector */}
       <div className="mt-6 flex flex-wrap gap-2">

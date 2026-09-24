@@ -19,6 +19,7 @@ import { TicketPicker } from "../../components/TicketPicker";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage";
 import { TransferItemAction } from "../../components/TransferItemAction";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
+import { TicketContextPanel } from "../../components/hub/ContextPanels";
 
 const STATE_STYLES: Record<string, string> = {
   new: "bg-slate-100 text-slate-600",
@@ -709,6 +710,7 @@ export function IssueDetail() {
         </div>
 
         <div className="space-y-4">
+          <TicketContextPanel ticketUid={i.uid} />
           <Panel title="People">
             <dl>
               <FieldRow label="Assignee">

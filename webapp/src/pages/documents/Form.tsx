@@ -13,6 +13,7 @@ export function DocumentForm() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const relateAsset = searchParams.get("relate_asset");
   const schemas = useQuery({ queryKey: ["schemas"], queryFn: schemasApi.list });
   const documentSchemas = (schemas.data ?? []).filter((s) => s.applies_to === "documents");
 
@@ -108,7 +109,15 @@ export function DocumentForm() {
         attributes,
       });
     },
-    onSuccess: (doc) => {
+    onSuccess: async (doc) => {
+      // Opened from an asset ("Write a document"): the new document applies
+      // to that asset, so it appears in the asset's Knowledge tab at once.
+      if (relateAsset && doc) {
+        await documentsApi
+          .addRelation(doc.uid, { to_type: "asset", to_uid: relateAsset, relation_type: "describes" })
+          .catch(() => undefined);
+        queryClient.invalidateQueries({ queryKey: ["hub-asset", relateAsset] });
+      }
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       navigate(`/documents/${doc!.uid}`);
     },

@@ -13,12 +13,19 @@ def rebuild_asset_relations(db: Session, asset_uid: str) -> None:
     asset = db.get(Asset, asset_uid)
     if asset is None:
         return
-    asset.outbound_relations = list(
+    outbound = list(
         db.scalars(select(Relation.to_asset_uid).where(Relation.from_asset_uid == asset_uid))
     )
-    asset.inbound_relations = list(
+    inbound = list(
         db.scalars(select(Relation.from_asset_uid).where(Relation.to_asset_uid == asset_uid))
     )
+    # Assign only on change: this runs on every read of an object, and an
+    # unconditional write bumps updated_at, so merely looking at an object
+    # made it "recently changed" everywhere activity is shown.
+    if list(asset.outbound_relations or []) != outbound:
+        asset.outbound_relations = outbound
+    if list(asset.inbound_relations or []) != inbound:
+        asset.inbound_relations = inbound
 
 
 def rebuild_asset_relations_with_neighbors(db: Session, asset_uid: str) -> None:
