@@ -3,7 +3,9 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
-MergeStrategy = Literal["override", "no_override", "update_if_newer", "remove_all_before"]
+# "remove_all_before" is retired (services/import_merge.RETIRED_STRATEGIES): a new
+# import may not ask for it; a stored configuration that names it runs as override.
+MergeStrategy = Literal["override", "no_override", "update_if_newer"]
 
 
 class JiraImportRequest(BaseModel):

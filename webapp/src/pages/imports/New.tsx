@@ -60,7 +60,10 @@ export function ImportConfigForm() {
     if (!existing.data) return;
     setName(existing.data.name);
     setSource(existing.data.source);
-    setMergeStrategy(existing.data.merge_strategy);
+    // A configuration saved with the retired "remove all before" runs as
+    // override on the server; saving it again records that.
+    const stored = existing.data.merge_strategy as string;
+    setMergeStrategy(stored === "remove_all_before" ? "override" : (stored as MergeStrategy));
     if (existing.data.source === "jira") {
       setBaseUrl(param("base_url"));
       setJiraSchemaId(param("jira_schema_id"));
@@ -436,12 +439,10 @@ export function ImportConfigForm() {
           <p className="mt-1 text-xs text-slate-400">
             {MERGE_STRATEGIES.find((s) => s.value === mergeStrategy)?.description}
           </p>
-          {mergeStrategy === "remove_all_before" && (
-            <p className="mt-1 text-xs font-medium text-red-600">
-              Deletes everything previously imported from this source in this workspace before
-              every run. This cannot be undone.
-            </p>
-          )}
+          <p className="mt-1 text-xs text-slate-400">
+            Imports never delete records: values people edited are kept, and anything the source
+            no longer contains is left for review.
+          </p>
         </div>
 
         {saveMutation.isError && (

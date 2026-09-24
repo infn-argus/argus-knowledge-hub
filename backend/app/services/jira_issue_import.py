@@ -18,7 +18,7 @@ from app.models.asset import Asset
 from app.models.asset_subresources import AssetTicket
 from app.models.import_job import ImportJob
 from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
-from app.services.import_merge import should_write
+from app.services.import_merge import effective_strategy, should_write
 from app.services.ticket_types import (
     ensure_ticket_types,
     migrate_legacy_attributes,
@@ -533,15 +533,9 @@ def run_jira_issue_import(
             _set_progress(db, job, f"Jira API found at {resolved_base}")
         base_url = resolved_base
 
-        if merge_strategy == "remove_all_before":
-            removed = 0
-            for issue in db.scalars(
-                select(Issue).where(Issue.workspace_id == workspace_id)
-            ):
-                db.delete(issue)
-                removed += 1
-            db.commit()
-            _set_progress(db, job, f"Removed {removed} existing ticket(s)")
+        merge_strategy, retired = effective_strategy(merge_strategy)
+        if retired:
+            _set_progress(db, job, retired)
 
         # Built once: the importer resolves asset keys mentioned in ticket
         # text, and rebuilding this per issue would dominate the run.

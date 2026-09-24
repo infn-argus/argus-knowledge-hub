@@ -56,6 +56,11 @@ def create_asset(
     if db.get(Asset, body.uid) is not None:
         raise HTTPException(status_code=409, detail="Asset uid already exists")
     schema = db.get(Schema, body.schema_uid)
+    # A type is usable here if this workspace owns it or it is shared. Without
+    # this check a token could attach objects to another workspace's private
+    # type (asset-model-revision §4.3).
+    if schema is None or (schema.workspace_id != workspace_id and not schema.is_global):
+        raise HTTPException(status_code=422, detail="Unknown object type for this workspace")
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
     validate_attributes(db, schema, body.attributes, workspace_id, Asset)
     data = body.model_dump()

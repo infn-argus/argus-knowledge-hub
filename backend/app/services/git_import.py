@@ -16,7 +16,7 @@ from app.db import SessionLocal
 from app.models.asset import Asset, Relation
 from app.models.import_job import ImportJob
 from app.models.schema import Schema
-from app.services.import_merge import should_write
+from app.services.import_merge import effective_strategy, should_write
 
 
 def _parse_repo(repo_url: str) -> tuple[str, str]:
@@ -148,17 +148,9 @@ def run_git_import(
         job.started_at = datetime.now(timezone.utc)
         db.commit()
 
-        if merge_strategy == "remove_all_before":
-            wiped = (
-                db.query(Schema)
-                .filter(
-                    Schema.workspace_id == workspace_id,
-                    Schema.metadata_json["source"].astext == "git",
-                )
-                .delete(synchronize_session=False)
-            )
-            db.commit()
-            job.progress = f"Removed {wiped} previously-imported type(s) before reimporting"
+        merge_strategy, retired = effective_strategy(merge_strategy)
+        if retired:
+            job.progress = retired
             db.commit()
 
         session = requests.Session()

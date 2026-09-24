@@ -311,7 +311,9 @@ export interface ImportJob {
   completed_at: string | null;
 }
 
-export type MergeStrategy = "override" | "no_override" | "update_if_newer" | "remove_all_before";
+/** "remove_all_before" is retired: imports never delete what people attached to
+ * a record. A stored configuration that still names it runs as "override". */
+export type MergeStrategy = "override" | "no_override" | "update_if_newer";
 
 export type TransferMode = "copy" | "move";
 
@@ -359,11 +361,6 @@ export const MERGE_STRATEGIES: { value: MergeStrategy; label: string; descriptio
     value: "update_if_newer",
     label: "Update if source is more recent",
     description: "Overwrite a matched object only if the source's version is newer.",
-  },
-  {
-    value: "remove_all_before",
-    label: "Remove all before importing",
-    description: "Delete everything previously imported from this source first, then import fresh.",
   },
 ];
 

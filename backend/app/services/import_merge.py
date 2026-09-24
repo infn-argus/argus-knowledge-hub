@@ -1,7 +1,27 @@
 from datetime import datetime
 from typing import Optional
 
-MERGE_STRATEGIES = ("override", "no_override", "update_if_newer", "remove_all_before")
+MERGE_STRATEGIES = ("override", "no_override", "update_if_newer")
+
+# Strategies that used to exist and are no longer honoured. "remove_all_before"
+# deleted every previously imported record before re-importing, which cascaded
+# to ticket links, relations and history: an import must never destroy what
+# people attached to a record (docs/asset-model-revision.md, §11). A stored
+# configuration that still names it runs as "override" and says so.
+RETIRED_STRATEGIES = {
+    "remove_all_before": (
+        "The \"remove all before\" strategy is retired: nothing was deleted. "
+        "This run updated records in place (override); records the source no "
+        "longer contains are left for review instead of being removed."
+    ),
+}
+
+
+def effective_strategy(strategy: str) -> tuple[str, Optional[str]]:
+    """The strategy a run actually uses, and a note when it differs from the
+    one requested because that one is retired."""
+    note = RETIRED_STRATEGIES.get(strategy)
+    return ("override", note) if note else (strategy, None)
 
 
 def should_write(
@@ -22,6 +42,5 @@ def should_write(
             # dropping data we can't prove is stale.
             return True
         return source_updated_at > local_updated_at
-    # "override" and "remove_all_before" (everything is new right after the
-    # wipe, but this also covers any row that manages to survive it).
+    # "override".
     return True

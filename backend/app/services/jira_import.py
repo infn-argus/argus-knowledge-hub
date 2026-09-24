@@ -25,7 +25,7 @@ from app.models.import_job import ImportJob
 from app.models.schema import Schema
 from app.models.workspace import Workspace
 from app.services.attribute_validation import _descendant_schema_uids, check_attributes
-from app.services.import_merge import should_write
+from app.services.import_merge import effective_strategy, should_write
 from app.services.integrity import relink_workspace
 from app.services.relations import rebuild_asset_relations
 
@@ -544,17 +544,9 @@ def run_jira_import(
         job.started_at = datetime.now(timezone.utc)
         db.commit()
 
-        if merge_strategy == "remove_all_before":
-            wiped = (
-                db.query(Schema)
-                .filter(
-                    Schema.workspace_id == workspace_id,
-                    Schema.metadata_json["source"].astext == "jira",
-                )
-                .delete(synchronize_session=False)
-            )
-            db.commit()
-            _set_progress(db, job, f"Removed {wiped} previously-imported type(s) before reimporting")
+        merge_strategy, retired = effective_strategy(merge_strategy)
+        if retired:
+            _set_progress(db, job, retired)
 
         jira = _TimeoutSession()
         jira.headers.update({"Authorization": f"Bearer {pat}"})

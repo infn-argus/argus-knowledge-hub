@@ -53,7 +53,9 @@ from sqlalchemy.orm import Session
 from app.db import SessionLocal
 from app.models.asset import Asset, Relation
 from app.models.import_job import ImportJob
+from app.models.import_snapshot import ImportSnapshot
 from app.models.schema import Schema
+from app.services.import_merge import effective_strategy
 from app.services.git_import import (
     _get_file_github,
     _get_file_gitlab,
@@ -403,14 +405,68 @@ class _Importer:
                 attributes=stamped,
             )
             self.db.add(asset)
+            self.db.flush()
         else:
-            asset.name = name
             asset.type = type_name
             asset.schema_uid = self.schemas[type_name].uid
-            asset.attributes = stamped
+            asset.name, asset.attributes = self._merge_stated(asset, name, stamped)
+        self._snapshot(asset, name, stamped)
         self.db.flush()
         self.assets[key] = asset
         return asset
+
+    # Keys the importer owns outright: provenance, which a person never edits.
+    _STAMP_KEYS = frozenset({"argus_facility", "argus_source", "argus_source_ref"})
+
+    def _merge_stated(self, asset: Asset, name: str, incoming: dict) -> tuple[str, dict]:
+        """What a re-import writes on an object it already made.
+
+        The configuration states these values, but a person may have corrected
+        one since the last import. Comparing the object with what the importer
+        wrote last time (the snapshot) tells the two apart: a value that no
+        longer matches the snapshot was edited here, and is kept. A key the
+        importer wrote before and no longer writes is removed only if nobody
+        changed it; a key a person added is never touched."""
+        snap = self.db.get(ImportSnapshot, (asset.uid, SOURCE))
+        previous = snap.values if snap is not None else None
+        current = dict(asset.attributes or {})
+        merged = dict(current)
+        kept = 0
+        for key, value in incoming.items():
+            edited = (
+                previous is not None
+                and key not in self._STAMP_KEYS
+                and key in current
+                and current.get(key) != previous.get(key)
+                and current.get(key) != value
+            )
+            if edited:
+                kept += 1
+                continue
+            merged[key] = value
+        if previous is not None:
+            for key, old_value in previous.items():
+                if key.startswith("__") or key in incoming:
+                    continue
+                if current.get(key) == old_value:
+                    merged.pop(key, None)
+        new_name = name
+        if previous is not None and asset.name != previous.get("__name__") and asset.name != name:
+            new_name = asset.name
+            kept += 1
+        if kept:
+            self.counts["manual_edits_kept"] = self.counts.get("manual_edits_kept", 0) + kept
+        return new_name, merged
+
+    def _snapshot(self, asset: Asset, name: str, written: dict) -> None:
+        snap = self.db.get(ImportSnapshot, (asset.uid, SOURCE))
+        values = {**written, "__name__": name}
+        if snap is None:
+            self.db.add(ImportSnapshot(asset_uid=asset.uid, source=SOURCE, values=values,
+                                       source_ref=self.source_ref))
+        else:
+            snap.values = values
+            snap.source_ref = self.source_ref
 
     def upsert_inferred(self, type_name: str, key: str, name: str, attributes: dict) -> Asset:
         """An object the configuration implies rather than states. A person's word outranks a
@@ -1161,6 +1217,32 @@ def _fetch(provider: str, repo_url: str, pat: Optional[str], branch: str, path: 
     return _get_file_gitlab(session, f"{owner}/{repo}", path, branch, gitlab_api(repo_url))
 
 
+def _resolve_commit(provider: str, repo_url: str, pat: Optional[str], branch: str) -> Optional[str]:
+    """The commit a branch points at, or None if it cannot be read.
+
+    Best effort: the import still runs, and records the branch, when the
+    forge does not answer; a revision it cannot name is not a reason to stop."""
+    try:
+        owner, repo = _parse_repo(repo_url)
+        headers = {}
+        if provider == "github":
+            if pat:
+                headers["Authorization"] = f"Bearer {pat}"
+            resp = requests.get(f"{github_api(repo_url)}/repos/{owner}/{repo}/commits/{branch}",
+                                headers=headers, timeout=10)
+            return resp.json().get("sha") if resp.ok else None
+        if pat:
+            headers["PRIVATE-TOKEN"] = pat
+        from urllib.parse import quote
+        project = quote(f"{owner}/{repo}", safe="")
+        resp = requests.get(
+            f"{gitlab_api(repo_url)}/projects/{project}/repository/commits/{quote(branch, safe='')}",
+            headers=headers, timeout=10)
+        return resp.json().get("id") if resp.ok else None
+    except Exception:
+        return None
+
+
 def run_epik8s_import(
     job_uid: str,
     workspace_id: str,
@@ -1188,25 +1270,16 @@ def run_epik8s_import(
         if not isinstance(values, dict):
             raise ValueError(f"{path} did not parse as a mapping — is that the right file?")
 
-        importer = _Importer(db, job, workspace_id, f"{repo_url}@{branch}:{path}",
+        # The revision, not the branch: a branch names whatever is newest, so
+        # "which revision said so" needs the commit it pointed at when read.
+        revision = _resolve_commit(provider, repo_url, pat, branch) or branch
+        importer = _Importer(db, job, workspace_id, f"{repo_url}@{revision}:{path}",
                              infer_elements=infer_elements, it_workspace=it_workspace)
         importer.ensure_types()
 
-        if merge_strategy == "remove_all_before":
-            beamline = str(values.get("beamline") or "").strip().upper()
-            removed = 0
-            for asset in db.scalars(
-                select(Asset).where(
-                    Asset.workspace_id == workspace_id,
-                    Asset.attributes["argus_source"].astext == SOURCE,
-                )
-            ):
-                if not beamline or (asset.key or "").startswith(f"{beamline}:") \
-                        or asset.key == beamline:
-                    db.delete(asset)
-                    removed += 1
-            db.commit()
-            _progress(db, job, f"Removed {removed} previously-imported object(s)")
+        merge_strategy, retired = effective_strategy(merge_strategy)
+        if retired:
+            _progress(db, job, retired)
 
         _progress(db, job, "Walking the configuration")
         importer.run(values, create_missing_nodes)

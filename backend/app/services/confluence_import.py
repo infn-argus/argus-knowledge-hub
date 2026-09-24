@@ -26,6 +26,7 @@ from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation, DocumentRevision
 from app.models.import_job import ImportJob
 from app.services.document_types import ensure_document_types, type_uid
+from app.services.import_merge import effective_strategy
 from app.services.jira_import import (
     _TimeoutSession,
     _describe_error,
@@ -535,17 +536,9 @@ def run_confluence_import(
         ) if link_assets else {}
         key_pattern = re.compile(r"\b[A-Z][A-Z0-9]*-\d+\b")
 
-        if merge_strategy == "remove_all_before":
-            removed = 0
-            for document in db.scalars(
-                select(Document).where(
-                    Document.workspace_id == workspace_id, Document.source == "confluence"
-                )
-            ):
-                db.delete(document)
-                removed += 1
-            db.commit()
-            _set_progress(db, job, f"Removed {removed} previously imported document(s)")
+        merge_strategy, retired = effective_strategy(merge_strategy)
+        if retired:
+            _set_progress(db, job, retired)
 
         imported = updated = skipped = links = 0
         attachments_copied = 0

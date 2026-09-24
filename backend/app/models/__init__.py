@@ -16,6 +16,7 @@ from app.models.group import Group, GroupMember
 from app.models.icon import Icon
 from app.models.import_config import ImportConfig
 from app.models.import_job import ImportJob
+from app.models.import_snapshot import ImportSnapshot
 from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
 from app.models.membership import Membership
 from app.models.role import Role, RoleBinding
@@ -45,6 +46,7 @@ __all__ = [
     "Icon",
     "ImportConfig",
     "ImportJob",
+    "ImportSnapshot",
     "Issue",
     "IssueComment",
     "IssueHistory",
