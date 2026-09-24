@@ -5,7 +5,7 @@ implements them, and a revised model that keeps their architecture and makes it 
 positions and installations, fact-level provenance, a governed relation registry, identity
 reconciliation, non-destructive retirement and a staged catalogue.*
 
-Status: **proposal, second revision**. Where this document and the two design notes disagree,
+Status: **proposal, third revision**. Where this document and the two design notes disagree,
 this one states the intended model. It refers to them by section (`AS §n` =
 `asset-schema-design.md`, `IT §n` = `it-model-design.md`).
 
@@ -50,6 +50,30 @@ resumable.
 **Renames and scope changes.** The work-package relation is renamed `in work package`, which
 frees `assigned to` for the Access Point relation. Positions and Installations may now be owned
 by `it-infrastructure` as well as by beamlines.
+
+### 0.3 What the third revision decides
+
+The third revision closes eight implementation ambiguities without changing the architecture.
+Each topic has one rule.
+
+| # | Topic | Decision | Section |
+|---|---|---|---|
+| 1 | Access Point over time | An Access Point's position assignment is **write-once**. Moving an address to another position retires the old Access Point and creates a new one. There is no Endpoint Assignment object | §9.2 |
+| 2 | Port mapping after a swap | `attached to` is derived only from a **unique compatible port match** (role or label, kind, mode, protocol, electrical level) or from a **confirmed port map** scoped to one Installation. A numeric port alone never matches. If neither holds, there is no edge and a review item opens | §9.3 |
+| 3 | Held revisions | Each stream has a **parsed head** and a **published head**. A new revision is parsed against the parsed head, but guarded and projected against the published head. Publishing applies the **net** transition, and skipped held revisions become `superseded` without ever being projected | §11 |
+| 4 | Negative facts | A human removal is a **confirmed `absent`** member fact. `reject` only disqualifies claims | §7.8 |
+| 5 | Authority precedence | **Lexicographic** precedence with explicit priority as the last tie-break. Load-time validation catches ambiguous, unreachable, shadowed, redundant and dominant rules | §7.7 |
+| 6 | Temporal precision | Every valid-time value has a nominal, an **earliest** and a **latest** instant. Comparisons are **definite**, **possible** or **no** overlap. A definite overlap fails; a possible overlap goes to review | §8.2–§8.3 |
+| 7 | Ticket attribution | Each ticket has **one canonical subject**. Involved equipment is **derived** from the Installation at incident time. Aggregates count distinct tickets, and migration links are labelled and excluded from them | §8.6 |
+| 8 | Claim identity and rules | A **semantic rule id** (for example `infer.vac.sip/2`) is part of claim identity; an **implementation version** is recorded only on events. A change of meaning requires a new rule id | §7.9 |
+
+Each mechanism below is labelled with its data class where that matters:
+
+- **[audit]**: immutable audit data;
+- **[proj]**: current-state projection;
+- **[derived]**: derived state;
+- **[valid]**: valid time, when something was true in the world;
+- **[record]**: record time, when the ledger learned it.
 
 ---
 
@@ -160,6 +184,12 @@ not objects (§3.3). Ordered hops and permit thresholds remain deferred (§9.1, 
 | **Projection** | current state computed from the above: fact state, `assets.attributes`, asserted edges, record status, identity bindings, conflicts, the review queue. Mutable and rebuildable |
 | **Derived edge** | a `relations` row computed by a registry rule from projections, for example `realized by`, `implemented by` or `instance of`. It is never claimed or edited |
 | **Record status** | the record's own state: `Provisional`, `Active`, `Retired` or `Merged`. It is separate from `argus_lifecycle`, which describes the equipment's operational state |
+| **Valid time** | when something was true in the world: Installation intervals, Access Point service intervals, ticket incident times. Stored as temporal values (§8.2) |
+| **Record time** | when the ledger learned something: `observed_at` of a source revision, the `at` and `seq` of events and decisions |
+| **Temporal value** | a valid-time endpoint `{kind, nominal, precision, bound}`, with computed `earliest` and `latest` instants (§8.2) |
+| **Parsed head / published head** | per stream: the latest revision parsed, and the latest revision consumed by projection (§11) |
+| **Semantic rule id / implementation version** | the immutable meaning of a parser or inference rule (`infer.vac.sip/2`, part of claim identity), and the code revision that ran it (on events only) (§7.9) |
+| **Canonical subject** | the one object a ticket is about (§8.6) |
 
 ---
 
@@ -214,6 +244,11 @@ importers, the UI or the API. A UI edit becomes a claim from the stream `person:
 | `relations.derivation` (`asserted` / `derived`), `.status` (`active` / `proposed` / `retired`), `.retired_at`, `.rule`; unique `(workspace_id, from, to, type)` | projection columns and a constraint |
 | partial unique index on active strong identifiers in `asset_labels` | constraint |
 | `migration_plan`, `migration_item`, `migration_map` | migration (§12) |
+| `revision_event` | audit data (§11) |
+| `stream_head` (parsed head and published head per stream) | projection (§11) |
+| `rule_catalog` (semantic rule id, meaning, output signature, `supersedes`, `carries_rejections`) | versioned configuration (§7.9) |
+| `asset_tickets.role`, `.certainty`, `.origin`, `.derivation`; `ticket_time` (incident time as a temporal value) | projection. `involved_*` rows are derived (§8.6) |
+| temporal value columns with computed `earliest` / `latest` on Installation and Access Point | domain data (valid time) with projected bounds (§8.2) |
 
 ---
 
@@ -396,13 +431,13 @@ instant**.
 | **composed of** | component of | composite FE → FE | n / **1**, acyclic | asserted | replace set per stream | exclusive; shared providers use `served by` |
 | **acts on** | acted on by | Control Device, device-less IOC → Pos, FE; Eq only if it has no position | n / n | asserted | replace set (config), members (review tool) | |
 | **drives** | driven by | IOC → Eq | n / n | derived | — | via `provided by`, `acts on` and `realized by` |
-| ● **assigned to** | has address | AP → Pos | 1 / n | asserted | — | the endpoint belongs to this place in the machine or in IT |
+| ● **assigned to** | has address | AP → Pos | 1 / n | asserted, **write-once** | — | set at most once per Access Point. A different position means a new Access Point (§9.2) |
 | ● **implemented by** | implements | AP → Eq | 1 / n at any instant | **derived** when the AP is assigned; otherwise **asserted** (resolver, transitional) | — | §9.2 |
 | **provided by**, **declared in**, **templated from**, **deployed on**, **configures** | as before | control plane | as before | asserted | — | |
 | **on network**, **mounts** | as before | IOC, AP / IOC, Service → … | n / n | asserted | replace set per stream | |
 | **runs on** | runs | IOC → Pos, Server | 1 / n | asserted | — | an IOC on an instrument runs on that instrument's position |
 | **uses path**, **on path**, **enters at**, **continues on** | as before | connectivity | as before | asserted | — | |
-| ● **attached to** | attachment | Bus Segment → Equipment Port | 1 / 1 at any instant | **derived**: the segment's `port_number` on the unit currently implementing its path's AP | — | needs no re-pointing after a swap |
+| ● **attached to** | attachment | Bus Segment → Equipment Port | 1 / 1 at any instant | **derived** only from a confirmed port map for the current Installation, or a unique compatible port match (§9.3) | — | absent, with a review item, when compatibility is not established |
 | **port of** | ports | Equipment Port → Eq | 1 / n | asserted (IT registry) | — | retired with the unit |
 | **traverses** | traversed by | Path, Segment → Equipment Port, Switch | n / n, unordered | asserted | members | |
 | **reached through**, **connects to** | as before | | | derived | — | |
@@ -426,21 +461,29 @@ instant**.
 ```
 source_revision                  one row per stream revision read
   id, stream_id, revision (commit SHA | file SHA-256 | export timestamp), content_hash,
-  observed_at, retrieved_at,
-  ordering ('head' | 'historical'), state ('published' | 'held' | 'approved'), parse_job_id
+  observed_at [record], retrieved_at,
+  parent_revision_id   the parsed head this revision was diffed against (§11)
+  ordering ('head' | 'historical'), parse_job_id
+  -- the revision's lifecycle state is a projection of revision_event
+
+revision_event                   the lifecycle of a source revision (§11)
+  seq, source_revision_id,
+  kind ('parsed' | 'held' | 'published' | 'rejected' | 'superseded' | 'rewound_to'),
+  cause (decision | guard | job_run), at
 
 claim                            immutable; content-addressed; one row per distinct statement
   claim_id = hash(stream_id, source_ref, predicate, polarity, canonical(value), method, rule_id)
   stream_id, source_ref, predicate,
   polarity ('present' | 'absent'),
   value           canonical JSON; relation targets are source refs
-  method ('stated' | 'resolved' | 'inferred' | 'manual'), rule_id,
+  method ('stated' | 'resolved' | 'inferred' | 'manual'),
+  rule_id         semantic rule id, e.g. 'infer.vac.sip/2' (§7.9); never an implementation version
   derived_from    claim_ids an inference or resolution read; empty for stated and manual
 
 claim_event                      written only when presence or evidence changes
   seq (global bigserial), claim_id, stream_id, source_revision_id,
   kind ('appeared' | 'disappeared' | 'evidence_changed'),
-  rule_version, evidence (JSONB), confidence, at
+  impl_version, evidence (JSONB), confidence, at
 
 decision                         judgements by people and by declared policies
   seq, decision_id, kind,
@@ -470,6 +513,7 @@ fact_state        one row per contributing claim or decision:
                   fact_key, subject_uid, predicate, member, claim_id | decision_id,
                   status, rank, is_effective, since_seq
 identity_binding  source_ref → uid, since_seq
+stream_head       stream_id, parsed_head, published_head                         (§11)
 conflict          conflict_id, type, fact_key, severity ('blocking' | 'non-blocking'), opened_seq, state
 materialized      assets.attributes, asserted relations rows, assets.record_status
 ```
@@ -503,7 +547,7 @@ Each claim or decision that contributes to a fact has one of these statuses:
 | `proposed` | shown in the review queue; not effective | a policy that requires confirmation |
 | `accepted` | eligible to be effective; not signed by a person | a policy with `auto_accept`, or an `accept` decision |
 | `confirmed` | signed by a person | a `confirm` decision on the fact value |
-| `rejected` | never effective, and blocks re-proposal | a `reject` decision. Its scope is either the claim or its fingerprint (stream kind, rule, source ref, predicate, value) |
+| `rejected` | never effective, and blocks re-proposal | a `reject` decision. Its scope is either the claim or its fingerprint (stream kind, semantic rule id, source ref, predicate, polarity, value). It disqualifies claims; it never makes a fact false or a member absent (§7.8.1) |
 | `withdrawn` | the stream no longer states it | `claim_event: disappeared` |
 | `superseded` | replaced by an explicit decision, or by a newer value from the same stream | a `supersede` decision, or a same-stream disappearance plus appearance |
 | `outranked` | valid, but a higher-ranked value is effective | projection |
@@ -515,13 +559,14 @@ claim's `method`. Manually confirmed means a `confirm` decision exists, whatever
 
 | Kind | Target | Effect |
 |---|---|---|
-| `accept` / `reject` | a claim or a fingerprint | makes it eligible, or blocks it |
-| `confirm` | a fact value (`subject, predicate[, member], value`) | makes it confirmed. `basis` may list the supporting claims |
+| `accept` / `reject` | a claim or a fingerprint | makes it eligible, or disqualifies it |
+| `confirm` | a fact value (`subject, predicate, value`), or a member with its polarity (`subject, predicate, member, present | absent`) | makes it confirmed. `basis` may list the supporting claims |
 | `supersede` | one or more earlier `confirm` decisions, plus a new value | ends the old confirmations and confirms the new value, in a single decision |
 | `retract` | an earlier `confirm` decision | the fact is no longer confirmed, because it was wrong or has stopped being true |
 | `revoke` | any earlier decision | undoes a decision made in error. Both decisions stay on record |
 | `bind`, `merge`, `unmerge`, `confirm_new`, `reject_candidate` | identities (§10) | |
-| `approve_revision`, `rewind` | a held or historical source revision (§11) | |
+| `approve_revision`, `reject_revision`, `rewind` | a source revision (§11) | move or keep the published head |
+| `activate_policy` | a validated policy version and its impact report (§7.7) | |
 | `resolve_conflict` | a conflict | must carry, or reference, the supersede, retract or reject decisions that remove the conflict's cause |
 
 Several decisions can be submitted as one **atomic batch**, for example ending one Installation
@@ -568,7 +613,7 @@ The project stage picks the effective value in this order:
 | Stage | Inputs | Outputs | Version |
 |---|---|---|---|
 | **parse** | source bytes | stated claims; claim events for the stream | `parser@v` |
-| **infer** | the stream's current stated claims; the ruleset | inferred claims in the stream `inference:<stream>`; claim events | `ruleset@v`, plus `rule_version` per rule |
+| **infer** | the stream's stated claims as of its parsed head; the ruleset | inferred claims in the stream `inference:<stream>`; claim events | `ruleset@v` (the active semantic rule ids), plus `impl_version` per rule (§7.9) |
 | **resolve** | source refs of all claims; labels and aliases; latest inventory and IT revisions; the resolver policy | identity events; provisional records (as record events); resolved claims (`method = resolved`, e.g. `asset:` URL → inventory uid); identity candidates | `resolver@v` |
 | **project** | bound claims; decisions; authority, multi-value and registry versions | fact state; attributes; asserted edges; record status; conflicts; status events | `projector@v` + `policy@v` + `registry@v` |
 | **derive** | projections; the registry | derived edges; `v_installation`; display names | `registry@v` + `deriver@v` |
@@ -579,7 +624,7 @@ When each stage skips or reruns:
 | Stage | Skips when | Must rerun when |
 |---|---|---|
 | parse | `(stream, content_hash, parser@v)` was already parsed. The revision row is still written, with no claims | new bytes; a parser version bump |
-| infer | the digest of `(input claim set, ruleset@v)` is unchanged | input claims changed; a ruleset bump |
+| infer | the digest of `(input claim set, ruleset@v, impl_versions)` is unchanged | input claims changed; a ruleset or implementation bump. A run that would change more than 10 % of effective facts is held like a source revision (§11) |
 | resolve | the digest of `(source refs, label watermark, inventory watermarks, merge-decision watermark, resolver@v)` is unchanged | a label or alias changed; a merge or bind decision; an inventory or IT import; a resolver bump |
 | project | the ledger watermark and all versions are unchanged | any new ledger event; any version bump |
 | derive | the projection watermark is unchanged | any projection change; a scheduled clock tick that crosses an Installation boundary |
@@ -634,60 +679,137 @@ rules:
     auto_accept: false
 ```
 
-**Match dimensions:** `predicate` (exact or glob), `object_type` (a trailing `+` includes
-subtypes), `owner_workspace`, `facility` (`argus_facility`), `domain` (`argus_system` or work
-package), `source_kind`, `source_instance`, and `rule` (for inferred claims).
+**Match dimensions:**
+
+- `predicate`: exact or glob;
+- `object_type`: an exact type, or a trailing `+` to include subtypes;
+- `owner_workspace`, `facility`, `domain`;
+- `source_kind`, `source_instance`;
+- `rule`: a semantic rule id, for inferred claims.
 
 **Effects:**
 
 - `rank`: `authoritative`, `contributory`, `advisory` or `ignored`;
 - `auto_accept`: defaults to true for authoritative and contributory, false for advisory;
 - `exclusive_set`: for multi-value facts (§7.8);
-- `tie_break`: `conflict` (the default) or `newest_observed`.
+- `tie_break`: `conflict` (the default) or `newest_observed`;
+- `priority`: an integer, default 0.
 
-**Selecting the rule for a claim:**
+**Precedence is lexicographic.** For a claim, collect the matching rules and compare their keys
+level by level. The first level at which two rules differ decides between them.
 
-1. Collect every rule that matches.
-2. The most specific rule wins. Specificity is the sum of per-dimension scores:
+| Level | Compares | Wins |
+|---|---|---|
+| L1 source identity | whether `source_instance` or `rule` is given | given |
+| L2 scope | how many of `owner_workspace`, `facility`, `domain` are given | more |
+| L3 predicate | exact, glob or absent | exact > glob > absent |
+| L4 object type | exact type, inherited (`+`) or absent | exact > inherited > absent |
+| L5 type depth | depth of the inherited type (only when L4 = inherited) | deeper |
+| L6 source kind | whether `source_kind` is given | given |
+| L7 priority | the explicit integer | larger |
 
-   | Dimension | Score |
-   |---|---|
-   | `source_instance` | 3 |
-   | `source_kind` | 1 |
-   | `predicate`, exact | 2 |
-   | `predicate`, glob | 1 |
-   | `object_type` | 1 + its depth in the hierarchy |
-   | `owner_workspace`, `facility`, `domain`, `rule` | 1 each |
+If no rule matches, `defaults` apply according to the claim's method. Two matching rules that
+are equal on L1 to L7 but have different effects make the policy invalid, and it is rejected at
+load time (I-POL-1).
 
-   In the example above, `sparc-control-from-sparc-main` scores 6, `sparc-control-from-other-files`
-   scores 4 and `config-owns-control` scores 3. So SPARC's own file is authoritative for SPARC's
-   control records, and any other EPIK8s file is only advisory there.
-3. A tie in score is broken by an explicit `priority`.
-4. If two rules still tie with different effects, **the policy is rejected at load time**
-   (I-PROJ-3). There is no ambiguity at runtime.
-5. If no rule matches, `defaults` apply according to the claim's method.
+**Example: why the precedence is lexicographic.**
+
+```yaml
+  - id: control-device-pv           # exact predicate, exact deep type, generic over EPIK8s files
+    match: {predicate: attr:pv, object_type: Control Device, source_kind: epik8s}
+    rank: authoritative
+  - id: btf-test-branch
+    match: {source_instance: "epik8s:epik8s-btf#deploy/values.yaml@test"}
+    rank: advisory
+```
+
+A `pv` claim from the BTF test branch matches both rules. The second revision's additive scores
+gave the generic rule 6 and the source-instance rule 3, so a test branch would have become
+authoritative for every PV. Under lexicographic precedence, `btf-test-branch` wins at L1.
+
+In the SPARC rules above, `sparc-control-from-sparc-main` (L1 given) beats
+`sparc-control-from-other-files` (L1 absent, L2 = 1), which in turn beats `config-owns-control`
+(L2 = 0).
+
+**Load-time validation.** `policy validate` runs in CI and before any activation. Every match
+dimension ranges over a finite vocabulary: declared predicates, catalogue types, workspaces,
+facilities, domains, registered streams and rule ids. Match sets can therefore be computed by
+enumeration.
+
+| Check | Condition | Result |
+|---|---|---|
+| ambiguous | two rules whose match sets overlap, with equal precedence keys and different effects | error |
+| unreachable | every tuple the rule matches is also matched by a higher-precedence rule | error (dead rule) |
+| shadowed | part of the rule's match set is taken by a higher-precedence rule with a different effect | warning, listing the overlap |
+| redundant | over its whole match set, the rule is outranked by rules with the same effect | warning |
+| dominant | an L1 or L2 rule matches a **protected predicate** for a source that is not among its owners; or it would change the effective value of more than 5 % of its source kind's facts in the current ledger | error, unless the rule carries `allow_dominant: <reason>` |
+
+Protected predicates are declared once per policy:
+
+```yaml
+protected:
+  - {predicate: [attr:serial, attr:inventory_number], object_type: Equipment+, owners: [insight, person]}
+  - {predicate: [attr:ip, attr:mac], object_type: IT Equipment+, owners: [it-registry, person]}
+```
+
+**Impact report.** Validation also produces a report listing the facts whose effective value,
+rank or status would change, by predicate and workspace. An `activate_policy` decision must
+reference that report.
 
 **Changing a policy** means issuing a new `policy_version`. The project stage then reruns, and
 every status that changes gets a `status_event` with `cause = policy:<version>`. A policy change
 never affects a confirmation (I-LED-1).
 
-### 7.8 Multi-value facts
+### 7.8 Multi-value facts and negative facts
 
 Every multi-valued attribute and every n-valued asserted relation declares a **mode** per source
-kind, in `multivalue_rule`. Each set member is its own fact, `(subject, predicate, member)`, so
-an unchanged member writes nothing.
+kind. Each set member is its own fact, `(subject, predicate, member)`, and each claim about it
+carries a **polarity**: `present` or `absent`.
 
-| Mode | What a source revision asserts | How a member leaves | Combining several sources |
+| Mode | What a source revision asserts | When a member leaves the stream's view | Across streams |
 |---|---|---|---|
-| **replace set** | its complete set | a member missing from the stream's next revision is marked `disappeared`, *for that stream only* | the union of accepted members from all streams. If an authoritative rule sets `exclusive_set`, the effective set is that stream's set plus any confirmed members; members from other streams outside it appear as non-blocking conflicts |
-| **members** | individual members, with no claim of completeness | only through an explicit absence claim or a decision. Absence from a snapshot means nothing | the union of accepted members |
-| **delta** | add operations (`polarity = present`) and remove operations (`polarity = absent`) | an `absent` claim | per member, the highest-ranked polarity wins. An authoritative `present` against a person's `absent` is a `source_vs_confirmed` conflict |
-| **ordered list** | the whole list, as one value | the list is replaced as a whole | treated as single-valued (§7.5): the list is one value |
+| **replace set** | its complete set of present members | when it is missing from the stream's next *published* revision: `disappeared` for that stream only. A missing member is a withdrawal, not an `absent` claim | §7.8.2 |
+| **members** | individual present members, with no claim of completeness | only through an explicit `absent` claim from the same stream, or a decision | §7.8.2 |
+| **delta** | `present` claims (add) and `absent` claims (remove) | a later claim of the opposite polarity from the same stream supersedes | §7.8.2 |
+| **ordered list** | the whole list, as one value | the list is replaced as a whole | single-valued rules (§7.5) |
 
-**People editing sets.** A person who removes a member that a source states issues a `reject`
-decision on that member, which confirms its absence. The member stays suppressed while the
-source keeps stating it, and a non-blocking conflict is recorded. A person who adds a member
-issues a `delta` claim plus a `confirm`.
+`exclusive_set` on an authoritative rule makes members that are present only in lower-ranked
+streams `outranked`. They are shown as non-blocking conflicts.
+
+#### 7.8.1 Removal, rejection and restoration
+
+- **A person removes a member** by making an `absent` claim (stream `person:<user>`) and
+  confirming it: `confirm (subject, predicate, member, absent)`. The result is a **confirmed
+  negative fact**.
+- **`reject` is not removal.** `reject` disqualifies one claim, or a fingerprint of claims, as
+  wrong. The member can still be present through other claims. Use `reject` to say "this
+  inference is wrong"; use a confirmed absence to say "this member must not be in the set".
+- **Restoring a member** has two forms:
+  - `supersede` the absence confirmation with a confirmed `present`. The member is then present
+    whatever the sources say.
+  - `retract` the absence confirmation. The override ends, and the sources decide again.
+
+  Both are explicit (I-LED-1).
+
+#### 7.8.2 Effective polarity of a member
+
+1. **Confirmed.** Active confirmations decide. If `present` and `absent` are both confirmed and
+   neither supersedes the other, a blocking `confirmed_vs_confirmed` conflict opens (I-LED-2)
+   and the older confirmation holds.
+2. **Highest rank.** Otherwise, the highest rank with any eligible claim decides (authoritative,
+   then contributory, then advisory with `auto_accept`). Within that rank:
+   - one polarity: it is effective;
+   - both polarities at authoritative rank: a blocking `authority_vs_authority` conflict opens,
+     and the previous effective polarity holds (absent if there was none);
+   - both polarities at contributory rank: the newest `observed_at` wins, and a non-blocking
+     conflict opens.
+3. **Nothing eligible.** With no eligible claim, the member is absent. This default absence is
+   not a fact and opens no conflict.
+
+**Confirmed absence against source presence.** A confirmed `absent` against a source still
+stating `present` opens a non-blocking `source_vs_confirmed` conflict. The UI shows the member
+struck through: "removed by <person> on <date>; still stated by <streams>". The member is
+excluded from the effective set, from derived edges and from exports.
 
 Core declarations:
 
@@ -698,11 +820,77 @@ Core declarations:
 | `argus_keywords` | person: delta · other sources: members |
 | `insertion_positions`, `position_labels` | epik8s: ordered list · person: ordered list |
 | `ip`, `mac` (IT Equipment) | it-registry: replace set, `exclusive_set` · others: members |
-| `serial_modes` (Serial Converter) | it-registry: replace set |
+| `serial_modes` (Serial Converter), `supported_modes` (Equipment Port) | it-registry: replace set |
 | `connectivity` (Utility Requirement) | pbs: replace set |
 | `rel:acts on` | epik8s and inference: replace set · review tool (epik8s-devices): members · person: delta |
 | `rel:served by`, `rel:powers`, `rel:composed of`, `rel:cools` | inference and pbs: replace set · person: delta |
 | `rel:traverses`, `rel:measures`, `rel:described by` | members · person: delta |
+
+Invariants:
+
+- **I-NEG-1.** A member's effective polarity is determined only by §7.8.2. A `reject` affects it
+  only by disqualifying claims.
+- **I-NEG-2.** An effective confirmed `absent` excludes the member from every projection, derived
+  edge and export.
+
+### 7.9 Rule identity and versions
+
+- **Semantic rule id.** It names a meaning and is immutable. For example, `infer.vac.sip/2`
+  means "a vacuum channel whose name contains SIP or IONP denotes an Equipment Position of class
+  Ion Pump". The `/n` suffix is part of the id. Parser mappings have ids too, for example
+  `epik8s.device/1`.
+- **Implementation version.** `impl_version` is the code revision that ran the rule. It is
+  recorded on claim events and job runs, and never in claim identity.
+- **`claim_id` includes the semantic rule id** (§7.1). Therefore:
+
+| Change | Rule id | Effect on claims |
+|---|---|---|
+| refactor, performance or logging; outputs identical | unchanged | none. The `job_run` records the new `impl_version` |
+| bug fix within the declared meaning; some outputs differ | unchanged | only the changed outputs: `disappeared` / `appeared` events under the same rule id, carrying the new `impl_version` |
+| evidence or confidence computed differently; same values | unchanged | `evidence_changed` events |
+| a change of meaning: output predicate, subject or target type, class or value domain, or the conditions for drawing the conclusion | **new**, e.g. `infer.vac.sip/3` | every output is a new claim, even when the value is identical. Every `/2` claim disappears once `/2` leaves the ruleset |
+
+**Rule catalogue** (`rules.yaml`, versioned configuration). Each rule records:
+
+- `rule_id`;
+- `meaning`, as text;
+- `output_signature`: predicates, subject and target types, value domain;
+- `supersedes`: an earlier rule id (optional);
+- `carries_rejections`: bool.
+
+**CI enforcement.**
+
+- The output signature is computed from the code's declarations and hashed. A signature change
+  without a new rule id fails the build.
+- Running the ruleset on the golden corpus prints the output diff. A diff under an unchanged
+  rule id requires a `fix:` entry in that rule's changelog.
+
+**Withdrawing old-version claims.**
+
+- For each input stream, the infer stage emits the complete output of the active ruleset. The
+  inference stream therefore has replace-set semantics over all its claims.
+- A rule id removed from the ruleset produces `disappeared` for all its claims in the next infer
+  run.
+- In the same run, the new version's claims usually support the same fact values. Effective
+  state then does not change, and only claim-level status events are written.
+
+**Decisions across versions.**
+
+- Confirmations are made on fact values, so a rule change does not affect them.
+- `accept` and `reject` target claims or fingerprints, which include the rule id, so they do not
+  carry over by default.
+- They do carry over when the new rule declares `supersedes: infer.vac.sip/2` and
+  `carries_rejections: true`. The reconcile stage then re-issues the matching rejections as
+  `policy` decisions citing both rule ids.
+
+**Guard.** A ruleset change whose infer run would change the effective value of more than 10 %
+of a stream's facts is held like a source revision (§11).
+
+Invariants:
+
+- **I-RULE-1.** Claims with different semantic rule ids never share a `claim_id`. A rule's output
+  signature is fixed for its id.
+- **I-RULE-2.** Every claim event records the `impl_version` that produced it.
 
 ---
 
@@ -716,11 +904,8 @@ Core declarations:
 | `key` | `INS-<ULID>` | opaque, stable and globally unique; independent of position and asset keys |
 | display name | projection | `"<asset> @ <position> [from → until]"`, recomputed whenever either end is renamed or re-keyed |
 | `installed at` → Pos, `installation of` → Eq | asserted relations | exactly one each, and **immutable once Confirmed**. If the asset or position was wrong, reject this Installation and record a new one |
-| `valid_from` | timestamptz or null | inclusive |
-| `valid_from_kind` | `date` · `before_records` · `unscheduled` | |
-| `valid_until` | timestamptz or null | exclusive |
-| `valid_until_kind` | `open` · `date` · `unknown_past` | `unknown_past` requires `valid_until_bound`, no later than the time the end was recorded |
-| `precision_from`, `precision_until` | `instant` · `day` · `month` · `year` | the stored value is the start of the bucket |
+| `valid_from` [valid] | temporal value (§8.2) | kinds: `date`, `before_records`, `unscheduled`. Inclusive |
+| `valid_until` [valid] | temporal value (§8.2) | kinds: `date`, `open`, `unknown_past`. Exclusive |
 | `removal_reason` | enum | Failure, Maintenance, Upgrade, Relocation, Decommissioning, Unknown |
 | `work_reference` | string | ticket or work order |
 | **workflow status** | projection of decisions | `Proposed`, `Confirmed` or `Rejected` |
@@ -728,40 +913,72 @@ Core declarations:
 
 Every field is a fact in the ledger, so its history is the history of its claims and decisions.
 
-### 8.2 Temporal state is derived at a query time *t*
+### 8.2 Temporal values, comparison and derived state [valid]
 
-These states apply to Confirmed Installations:
+Every valid-time endpoint is stored as a temporal value `{kind, nominal, precision, bound}`. This
+covers Installation intervals, Access Point service intervals and ticket incident times. The
+projection computes two instants, `earliest` and `latest`: the true instant lies in the closed
+range `[earliest, latest]`. `nominal` is used only for display and sorting. **No comparison uses
+it** (I-TIME-1).
 
-| State | Condition |
-|---|---|
-| **Planned** | `valid_from_kind = unscheduled` |
-| **Future** | `valid_from > t` |
-| **Current** | the start has passed (`valid_from ≤ t`, or `valid_from_kind = before_records`), and the end has not: `valid_until_kind = open`, or `t < valid_until`, or `unknown_past` with `t < valid_until_bound` (flagged *uncertain*) |
-| **Ended** | `valid_until ≤ t`, or `unknown_past` with `valid_until_bound ≤ t` |
+| Kind | Used for | `earliest` | `latest` |
+|---|---|---|---|
+| `date`, precision `instant` | from, until | nominal | nominal |
+| `date`, precision `day` / `month` / `year` | from, until | the start of the bucket (= nominal) | the last instant of the bucket |
+| `before_records` | from | −∞ | `bound`: the latest instant by which the unit is known to have been there (default: `effective_at` of the first confirming decision) |
+| `unscheduled` | from | not placed on the timeline | — |
+| `open` | until | +∞ | +∞ |
+| `unknown_past` | until | the `from` value's `earliest` | `bound`, no later than the record time at which the end was reported |
 
-Intervals are **half-open**: `[valid_from, valid_until)`. So a handover where A ends at `T` and B
-starts at `T` is valid and leaves no gap. `before_records` is treated as −∞ and `open` as +∞.
+**Comparing intervals A and B** (each is `[from, until)`):
+
+- **No overlap**: `A.until.latest ≤ B.from.earliest`, or `B.until.latest ≤ A.from.earliest`.
+- **Definite overlap**: `max(A.from.latest, B.from.latest) < min(A.until.earliest, B.until.earliest)`.
+- **Possible overlap**: neither of the above.
+
+`unscheduled` intervals are never compared on the timeline. Two unscheduled Installations of the
+same asset, or at the same position, give a warning.
+
+Examples:
+
+| A | B | Result |
+|---|---|---|
+| until `2026-03-03T09:00Z` (instant) | from `2026-03-03T09:00Z` (instant) | no overlap: an exact handover |
+| until `2026-03` (month) | from `2026-03-15T08:00Z` (instant) | possible: A may have ended before or after B started |
+| from `before_records` (bound `2025-06-01`), `open` | from `2025-01` (month), `open` | definite: both are certainly in place from `2025-06-01` onwards |
+| from `2024-05-02`, until `unknown_past` (bound `2025-02-10`) | from `2025-03-01` (day) | no overlap: A ended by 2025-02-10 at the latest |
+
+**Derived state at query time t** (Confirmed Installations; the same rules apply to Access Point
+service intervals):
+
+| State | Definite when | Possible when |
+|---|---|---|
+| Planned | `from` is `unscheduled` | — |
+| Future | `t < from.earliest` | `from.earliest ≤ t < from.latest` |
+| Current | `from.latest ≤ t < until.earliest` | `from.earliest ≤ t < until.latest`, and not definite |
+| Ended | `until.latest ≤ t` | `until.earliest ≤ t < until.latest` |
+
+Every query returns a certainty: `definite` or `possible`. "What was at P at t" returns the
+definite unit, or every possible unit marked as possible.
+
+Derived current-state edges (`realized by`, `implemented by`, `drives`, `attached to`) exist only
+for a **definitely** Current Installation. A possibly current one produces no edge; instead, its
+open `possible_overlap` review item (I-INS-6) records the gap.
 
 ### 8.3 Validation invariants
 
-These apply to **Confirmed** Installations. Define the effective bounds as:
-
-- `lo = valid_from`, or −∞ for `before_records`;
-- `hi = valid_until`, or `valid_until_bound` for `unknown_past`, or +∞ for `open`.
-
 | Id | Invariant |
 |---|---|
-| **I-INS-1 (one place per unit)** | for any Equipment, no two Confirmed Installations have overlapping `[lo, hi)` |
-| **I-INS-2 (one unit per position)** | for any position, no two Confirmed Installations have overlapping `[lo, hi)` |
-| **I-INS-3** | `lo < hi` wherever both are known; an `unscheduled` Installation has no `valid_until` |
+| **I-INS-1 (one place per unit)** | for any Equipment, no two Confirmed Installations are in **definite** overlap |
+| **I-INS-2 (one unit per position)** | for any position, no two Confirmed Installations are in **definite** overlap |
+| **I-INS-3** | a definitely inverted interval (`until.latest ≤ from.earliest`) fails; a possibly inverted one warns; an `unscheduled` Installation has `until = open` |
 | **I-INS-4** | `installed at` targets an installable type and `installation of` targets Equipment. Both are immutable after confirmation |
 | **I-INS-5** | the Installation belongs to its position's workspace |
-| **I-INS-6 (uncertain overlap)** | if the precision buckets overlap but the stored values do not, the Installation is accepted with a warning, not an error |
-| **I-INS-7** | Proposed Installations may overlap anything. A decision that would confirm an overlap fails, unless the same atomic batch also ends or corrects the other Installation |
+| **I-INS-6 (possible overlap)** | a **possible** overlap is governed by the workspace policy `uncertain_overlap`. With `review` (the default), the decision applies, a non-blocking `possible_overlap` conflict and review item open, and both Installations show as *uncertain*. With `warn`, the decision applies with a warning only; this setting is allowed only for migration back-fill |
+| **I-INS-7** | Proposed Installations may overlap anything. A decision that would create a definite overlap between Confirmed Installations fails, unless the same atomic batch removes the overlap |
 
 **Compatibility check.** The Equipment's type or class should match the position's
-`position_class` or typed element. A mismatch is only a warning, because substitute units
-happen.
+`position_class` or typed element. A mismatch is only a warning, because substitute units happen.
 
 ### 8.4 Corrections and backdating
 
@@ -789,6 +1006,53 @@ happen.
 | 3 401 | query at `2026-03-02` → 84321; at `2026-03-03T09:00Z` → 90001 | |
 | 4 000 | revision `epik8-sparc@a41f…` drops GUNSIP01 | the device claims `disappeared`, and the device becomes Retired. The position still has a Confirmed Installation, so it is **flagged**, not retired, and the Installation is **not** ended |
 
+### 8.6 Ticket attribution
+
+Tickets link to objects through `asset_tickets`. The link gains four columns [proj]: `role`,
+`certainty`, `origin` and `derivation`.
+
+| Role | Meaning | Per ticket | Counted in aggregates |
+|---|---|---|---|
+| `subject` | the canonical object the ticket is about | exactly one (I-TKT-1) | yes |
+| `related` | other objects linked by a person or a source | any number | only in "related" views |
+| `involved_equipment` [derived] | the Equipment installed at the subject's position at incident time | derived | only if `certainty = definite` |
+| `involved_position` [derived] | for a ticket whose subject is Equipment: the position it was installed at | derived | only if `certainty = definite` |
+
+- **Canonical subject.** The importer takes the first object the source ticket names (Jira's
+  primary linked object) as the subject; the others become `related`. A person can change the
+  subject with a decision. After a legacy split, the subject is the Position (the legacy uid).
+- **Incident time** [valid] is a temporal value:
+  - the ticket's reported occurrence field, if present, with its precision;
+  - otherwise `{earliest: created − attribution_window, latest: created}`, with a default
+    window of 7 days (D8).
+- **Derivation.** For a subject Position P, or for a Control Device through its `acts on`
+  positions, the involved equipment is every unit whose Confirmed Installation at P overlaps the
+  incident time.
+  - If exactly one unit's interval **definitely** covers the whole incident range, it is linked
+    as `definite`.
+  - Otherwise every overlapping unit is linked as `possible`.
+
+  Links are recomputed when Installations or incident times change. They are derived state, and
+  their history is available by replay.
+- **Migration links.** If derivation cannot attribute a legacy ticket because no Installation
+  covers it, migration writes a link with `role = involved_equipment`, `origin = migration-split`
+  and `certainty = possible`. These links never enter aggregates.
+- **Counting rules** (views `v_ticket_counts`):
+  - **Per record**: `COUNT(DISTINCT ticket_key)` over `role = subject`, and separately over
+    definite `involved_*` links.
+  - **Per group** (system, section, product model, vendor): `COUNT(DISTINCT ticket_key)` over the
+    union of the member records' subject links and definite involved links. It is never the sum
+    of per-record counts.
+  - **Root-cause and reliability reports**: a position and the unit installed there at incident
+    time form one **failure locus**, and a ticket contributes to it once.
+
+Invariants:
+
+- **I-TKT-1.** Every ticket key has exactly one `subject` link.
+- **I-TKT-2.** Aggregates count distinct tickets. They exclude `related` links, `possible` links
+  and links with `origin = migration-split`.
+- **I-TKT-3.** A derived link exists exactly when its derivation holds.
+
 ---
 
 ## 9. Connectivity and Access Points
@@ -800,61 +1064,162 @@ These are as described in the first revision:
 - a **Communication Path** runs from one IOC to one endpoint and carries the protocol and
   transport;
 - an **Access Point** is the endpoint as the configuration names it;
-- a **Bus Segment** is the medium downstream of the endpoint. It holds the line parameters and a
-  stated or inferred `port_number`;
+- a **Bus Segment** is the medium downstream of the endpoint. It holds the line parameters and
+  the port requirement of §9.3;
 - an **Equipment Port** is one physical port of one unit;
 - **hops** (`traverses`) form an unordered series set.
 
 The generalization table from the first revision (Ethernet native, Ethernet→Serial, GPIB, CAN,
 fieldbus, IOC on the instrument) is unchanged.
 
-### 9.2 Access Point semantics
+### 9.2 Access Point identity and assignment
 
-An Access Point is an address in the control plane. A position does not implement an address; a
-unit does. So the model separates the two links:
+**Decision: an Access Point's position assignment is write-once.** There is no Endpoint
+Assignment object. It would be introduced only if a requirement appears that an endpoint's own
+tickets, documents or service commitments must follow the address across positions (D13).
 
-- **`assigned to`** (AP → position) is asserted. It says the address belongs to a place: the
-  BTF supply's position for `192.168.192.40:502`, or the IT position `IT:POS:scsparcsipmxa001`
-  for a converter hostname. Three sources can claim it:
-  - the IT registry;
-  - resolution (hostname or IP → IT position);
-  - inference from the device that the configuration puts at that address.
+- **Identity.** An Access Point is a domain record with the opaque key `AP-<ULID>`. Its `address`
+  is an attribute: normalized as a lower-case FQDN or an IP, plus the port when the configuration
+  gives one. The address is also a label that is unique among **Active** Access Points of the
+  same workspace (I-AP-1). The source ref `epik8s:<FAC>:endpoint:<address>` binds to the Active
+  Access Point for that address.
+- **Assignment.** `assigned to` → position is set at most once (I-AP-2). An Access Point may
+  start unassigned, as a transitional state, and be assigned later, once.
+- **Service interval** [valid]: `in_service_from` and `in_service_until`, both temporal values.
+  - `in_service_from` defaults to the `observed_at` of the first published revision that states
+    the address, at the source's precision. Migrated Access Points use `before_records`.
+  - `in_service_until` defaults to `open`. On retirement it is set to the `observed_at` of the
+    published revision that stopped stating the address or reassigned it.
+  - A person can confirm exact values.
+- **Reassignment.** When the address is claimed for a different position, or a person moves it,
+  one atomic batch runs:
+  1. The old Access Point gets `in_service_until`, record status `Retired` and `successor` = the
+     new Access Point (record event).
+  2. A new Access Point is created with the same address, assigned to the new position, with
+     `in_service_from` at the same instant.
+  3. The source ref is rebound to the new Access Point (`identity_event: rebound`). The stream's
+     path claims (`enters at`) therefore project onto it.
+  4. The old Access Point's address label becomes inactive. Its key and uid stay resolvable.
+     Tickets and documents stay on it, because they happened while it served the old position.
+- **Retirement without a successor.** If the address disappears from a published revision, the
+  Access Point retires per §11, and `in_service_until` is set.
+- **`implemented by`** [derived] is the Equipment of the Confirmed Installation at the Access
+  Point's position at the query time.
+  - An unassigned Access Point may carry an asserted, transitional `implemented by` from the
+    resolver. Its history is record time only.
+  - Once the Access Point is assigned, any asserted `implemented by` is treated as an
+    expectation. Disagreement opens a non-blocking conflict (I-AP-4).
 
-  One position may have several addresses, for example data and management.
-- **`implemented by`** (AP → Equipment) is **derived** when the AP is assigned. Its target is the
-  Equipment of the Current, Confirmed Installation at the assigned position. If there is no such
-  Installation, there is no edge, and the gap is visible.
-- **Unassigned Access Points.** A resolver may still *assert* `implemented by`, by MAC or FQDN,
-  as a transitional claim. Its history is record time only. Once the AP gets an assignment, any
-  asserted `implemented by` is treated as an expectation: agreement is silent, and disagreement
-  opens a non-blocking conflict (**I-AP-2**).
-- **History across swaps.** "Which unit answered at this address at time *t*" is the
-  Installation at the assigned position at *t* (valid time), bounded by the assignment's
-  record-time history in the ledger. Nothing is re-pointed, so nothing is lost.
-- **Ports follow the unit.** A Bus Segment's `attached to` is derived from its `port_number` on
-  the unit now implementing the path's AP. After a converter swap, each segment attaches to the
-  new unit's port with the same number. If the new unit has no such port, the gap is shown.
+**Query: which position and equipment used address X at time T?**
+
+```sql
+SELECT ap.uid, ap.position_uid, i.asset_uid,
+       combine(covers(ap.service, :T), covers(i.interval, :T)) AS certainty
+FROM v_access_point ap
+LEFT JOIN v_installation i
+  ON i.position_uid = ap.position_uid AND i.workflow = 'Confirmed'
+ AND covers(i.interval, :T) <> 'none'
+WHERE ap.workspace_id = :ws AND ap.address = normalize(:X)
+  AND covers(ap.service, :T) <> 'none';
+```
+
+- `covers(interval, T)` returns `definite`, `possible` or `none`, per §8.2.
+- `combine` returns `definite` only if both arguments are definite.
+- Several rows appear only around an uncertain handover, and each one carries its certainty.
 
 Invariants:
 
-- **I-AP-1.** An AP has at most one active `assigned to`.
-- **I-AP-2.** An assigned AP has no effective asserted `implemented by`.
-- **I-AP-3.** An AP belongs to the beamline or IT workspace that owns the configuration naming
-  it. Its assignment may point across workspaces.
+- **I-AP-1.** At most one Active Access Point per workspace and address.
+- **I-AP-2.** `assigned to` is write-once; changing it is a reassignment batch.
+- **I-AP-3.** Access Points with the same workspace and address have no definite overlap of
+  their service intervals.
+- **I-AP-4.** An assigned Access Point has no effective asserted `implemented by`.
+- **I-AP-5.** An Access Point belongs to the beamline or IT workspace that owns the configuration
+  naming it. Its assignment may point across workspaces.
 
-### 9.3 Lifecycle example: a converter swap
+### 9.3 Port mapping
 
-Setup:
+**Fields.**
+
+- **Equipment Port** [domain record, owned by the IT registry]:
+  - `port_label`: as printed or configured (`P3`, `COM3`);
+  - `port_role`: a governed vocabulary with an index (`serial-data#3`, `console`, `uplink`,
+    `gpib`, `can`);
+  - `port_kind`: RS-232, RS-422, RS-485-2w, RS-485-4w, GPIB, CAN, RJ45, …;
+  - `supported_modes`: multi-valued;
+  - `operating_mode`: as configured (real COM, TCP server, RFC 2217, …);
+  - `tcp_port`, `signal_level`, `termination`.
+- **Bus Segment:**
+  - `required_port`: `{role | label, kind, mode, tcp_port, signal_level?, termination?}`. These
+    are claims. They are initially inferred from the configuration: for example, port 4003
+    implies role `serial-data#3`, `tcp_port` 4003 and mode TCP server. They stay advisory until
+    confirmed.
+  - `require_swap_confirmation`: bool, default false; true for safety and interlock buses.
+- **Port map** [fact on the segment]: `attr:port_map = {installation_uid, port_uid}`, confirmed by
+  a person. It is scoped to one Installation, and a new Installation never inherits it
+  (I-PORT-2).
+
+**Algorithm** (derive stage). It runs for a segment S whose path's Access Point is assigned to
+position P, where the current Installation I holds unit U:
+
+1. **Confirmed map.** If a confirmed `port_map` exists for I, check that the port belongs to U
+   and passes the kind check in step 3b. If so, attach. If not, create no edge and open a
+   `port_map_invalid` review item.
+2. **Confirmation required.** If `S.require_swap_confirmation` is set and there is no confirmed
+   map for I, create no edge and open a `port_confirmation_required` review item.
+3. **Candidates.** Take the ports of U and filter them in order:
+   a. **identity**: `port_role` equals the required role, including its index. If the
+      requirement names no role, `port_label` must equal the required label.
+   b. **kind**: `port_kind` is compatible with the segment's medium, per a compatibility table
+      (RS-485-2w is not RS-232). A multi-mode port is compatible only if its **configured** kind
+      and mode match. Listing the mode in `supported_modes` is not enough.
+   c. **mode and protocol**: `operating_mode` equals the required mode. When the transport is
+      Ethernet→Serial, `tcp_port` also equals the path's `tcp_port`.
+   d. **electrical**: `signal_level` and `termination` equal the requirement, where the
+      requirement states them.
+4. **Exactly one candidate** gives a derived `attached to`, with `rule = port-match/1` and the
+   matched criteria as evidence.
+5. **Zero or several candidates** give no edge. A `port_mapping_unresolved` review item opens,
+   listing each port and the first criterion it failed. Impact analysis treats the segment as
+   *unattached*: its devices still depend on the path and the Access Point, and the port-level
+   answer is shown as unknown rather than wrong.
+
+A port number alone is never a match criterion. The previous unit's attachment stays in history
+through its Installation interval.
+
+Invariants:
+
+- **I-PORT-1.** A derived `attached to` exists only if step 1 or step 4 holds for the current
+  Installation.
+- **I-PORT-2.** A confirmed port map applies only to its own Installation.
+- **I-PORT-3.** An unresolved mapping always has an open review item.
+
+### 9.4 Lifecycle example: a converter swap
+
+**Setup.**
 
 - `IT:POS:scsparcsipmxa001` is an IT-owned Equipment Position of class Serial Converter.
-- Moxa M-5531 is installed there from `before_records`.
-- SPARC's AP `NET:sparc:SCSPARCSIPMXA001` is assigned to that position.
-- Four Bus Segments carry `port_number` 1 to 4.
+- Moxa M-5531 (NPort 5650-16) is installed there from `before_records`.
+- SPARC's Access Point is assigned to that position.
+- Four Bus Segments require `serial-data#1` to `#4`, RS-485-2w, TCP server, `tcp_port` 4001 to
+  4004.
 
-IT swaps in M-7702 at time T with one decision batch. The derive stage then produces
-`implemented by` → M-7702 and attaches each segment to M-7702's ports P1 to P4. For any
-`t < T`, the answer is still M-5531. The root-cause walk reaches the right box both before and
-after T.
+IT swaps in M-7702 at time T with one decision batch. After that, `implemented by` → M-7702
+immediately, and for any `t < T` the answer is still M-5531. The port-level outcome depends on
+the new unit:
+
+- **Compatible replacement.** M-7702 is the same model, and its ports in the IT registry are
+  configured as the old ones were. Every segment finds exactly one candidate and attaches
+  automatically.
+- **Incompatible replacement.** M-7702 is an NPort 5650-8 whose ports are configured as RS-232.
+  They list RS-485 in `supported_modes`, but their configured kind is RS-232, so step 3b fails.
+  There is no `attached to` edge, and four review items open. The box-level answer
+  (`implemented by` M-7702) is intact.
+
+  The gap closes in one of two ways. IT reconfigures the ports, a new registry revision
+  publishes, and the next derive run attaches them. Or a person confirms port maps; this is
+  possible only once the configured kind is compatible, because step 1 also applies the kind
+  check.
 
 ---
 
@@ -893,25 +1258,69 @@ conflict for review.
 
 ---
 
-## 11. Retirement and held revisions
+## 11. Source revisions: held, published, retired
 
-- **Guard at parse.** A new revision is stored with `state = held` if either of these holds:
-  - more than 10 % of the stream's subjects would disappear;
-  - it would withdraw the last support of any record that has tickets, documents or a Confirmed
-    Installation.
+Each stream has two heads [proj `stream_head`]:
 
-  A held revision's claim events are written, but projection does not consume them until an
-  `approve_revision` decision. The earlier list-vs-mapping bug (AS §14.1) would have stopped
-  here.
-- **Retirement is a projection.** A record becomes `Retired` (`record_event: status`) when all
-  of its `exists` facts are withdrawn, rejected or superseded and nothing confirmed supports it.
-  Its asserted edges follow the registry's `on_source_retire` rule, and its derived edges are
+- **parsed head**: the latest revision parsed, in stream order;
+- **published head**: the latest revision whose claim set the project stage consumes.
+
+**Parsing.** A new head-order revision is always diffed against the **parsed head**. Claim events
+therefore form one unbroken history of what the source said (R1 → R2 → R3), whether or not R2
+was ever published [audit].
+
+**Presence.** For projection, presence is the claim set *as of the published head*: the claims
+whose last event at or before that revision is `appeared`. The project stage never reads events
+of unpublished revisions directly (I-REV-1).
+
+**Guard.** A newly parsed revision R is evaluated against the **published head** H, not against
+the previous parsed revision. The guard measures the net change `presence(H) → presence(R)`. R is
+`held` if either:
+
+- more than 10 % of the stream's subjects would disappear; or
+- the last support of a record that has tickets, documents or a Confirmed Installation would be
+  withdrawn.
+
+Otherwise R is published immediately.
+
+**Publishing R**, automatically or by approval, moves H to R. The project stage applies the
+**net** transition from `presence(H_old)` to `presence(R)` in one step. Claims present in both
+produce no status events, even if an intermediate held revision removed and re-added them. Every
+held revision between H_old and R becomes `superseded` (a revision event) and is never projected.
+
+| Situation | Result |
+|---|---|
+| R2 is held; R3 arrives and passes the guard against H = R1 (for example, R3 restores what R2 dropped) | R3 is published and R2 superseded; the projection moves R1 → R3 |
+| R2 is held; R3 arrives and fails the guard against R1 | R3 is held too. Its review item shows the net diff R1 → R3, with R2 → R3 for context |
+| `approve_revision` R3 while R2 and R3 are held | H = R3; R2 is superseded |
+| `approve_revision` R2 while R3 is held | H = R2; R3 stays held and its guard is re-evaluated against R2 |
+| `reject_revision` R2 | R2 never publishes, and H is unchanged. Later revisions still parse against R2, because the source did say it, and are guarded against H. Rejecting a revision rejects no claims: its facts can publish through a later revision. To reject facts, reject the claims |
+| `rewind` to an earlier published or historical revision R0 | H = R0, with the net transition `presence(H) → presence(R0)`. Used when a source was force-pushed back, or a published revision turns out to be bad |
+| a historical revision (older than the parsed head by ancestry) | parsed for audit against its own parent. It never moves either head without a `rewind` |
+| bytes identical to an earlier revision | parsing is skipped (content hash). The revision still gets a row, and its events are computed against the parsed head; this is typically a revert |
+
+**Retirement** is computed only from published presence, plus decisions. A held revision never
+retires anything.
+
+- When a revision is published, a record becomes `Retired` (`record_event: status`) if all of
+  its `exists` facts are withdrawn, rejected or superseded and nothing confirmed supports it. Its
+  asserted edges follow the registry's `on_source_retire` rule, and its derived edges are
   recomputed.
-- **Positions are an exception.** A position with a Current, Confirmed Installation is
-  **never** retired because a source withdrew it. It is flagged for review instead, because the
-  hardware may still be in place.
+- **Positions are an exception.** A position with a Current, Confirmed Installation is never
+  retired because a source withdrew it. It is flagged for review instead, because the hardware
+  may still be in place.
 - **Nothing is deleted.** Retired records stay reachable from their tickets and documents. They
   are hidden from default views.
+
+Invariants:
+
+- **I-REV-1.** The project stage consumes only claim events at or before each stream's published
+  head.
+- **I-REV-2.** The published head moves only through a guard-passed publication, an
+  `approve_revision` or a `rewind`, and each move is recorded as a revision event.
+- **I-REV-3.** A superseded or rejected revision is never projected.
+- **I-REV-4.** Publication is a net transition. Replaying only the published heads reproduces the
+  projection.
 
 ---
 
@@ -941,7 +1350,7 @@ The first matching row, from top to bottom, decides the outcome:
 | **M-BLOCK** (blocked) | E-COLL: the object's strong identifier is already held by another active record with conflicting data; or the object changed after planning | nothing moves; the object is listed for manual resolution |
 | **M-FUNC** (already functional) | a legacy inferred *element* (Quadrupole, BPM, Screen Station, Mirror…) | kept, and re-keyed only if needed. Its edges to assets are handled by the rows below |
 | **M-POS** (pure control identity) | created by the importer; no E-SER, no E-LBL, no E-URL objectId; no physical E-EDIT; no E-ATT that produced an identifier | the legacy row **becomes the Position**, retyped in place with the same uid. All dependents stay |
-| **M-PHYS** (confirmed physical identity) | at least one of: E-SER written by a person; a verified E-LBL; an E-URL resolving to exactly one inventory record. And no contradicting identifier | the legacy row becomes the Position. The Equipment is either the matched inventory record, or is created in `inventory` as Active. The Installation is Confirmed, with `actor = migration:<plan>` and the history entry as `basis`. `valid_from` is `installed_on` if a person set it, otherwise `before_records` |
+| **M-PHYS** (confirmed physical identity) | at least one of: E-SER written by a person; a verified E-LBL; an E-URL resolving to exactly one inventory record. And no contradicting identifier | the legacy row becomes the Position. The Equipment is either the matched inventory record, or is created in `inventory` as Active. The Installation is Confirmed, with `actor = migration:<plan>` and the history entry as `basis`. `valid_from` is `installed_on` (day precision) if a person set it; otherwise `before_records`, with `bound` = the time of the history entry that first recorded the unit |
 | **M-MIXED** (mixed or ambiguous) | physical evidence that is unverified or conflicting: a photo-read serial never verified; a physical E-EDIT with no identifier; an E-URL that matches several records or none; attachments with no serial | the legacy row becomes the Position. **Provisional Equipment** is created and the Installation is **Proposed**. A review item carries the evidence |
 | **M-RETIRE** (stale inference) | E-RULE is false, and there is no E-TKT, E-DOC, E-ATT, E-EDIT or E-HIST from a person | `Retired`, not deleted |
 
@@ -1005,7 +1414,9 @@ finalize(plan_id):
 | Dependent | Goes to | Rule |
 |---|---|---|
 | uid, key history | the **Position** keeps the legacy uid and gets the new key `FAC:POS:<tag>`, with a `former_key` label | the legacy object's relations are mostly control and functional, and it is what tickets were raised against |
-| tickets | the Position. For M-PHYS they are **also** linked to the Equipment, with the link labelled `origin=migration-split` | the unit's failure history must include them, and the duplication is declared |
+| tickets | the Position stays the canonical `subject`. `involved_equipment` is derived from the new Installation (§8.6). Where derivation cannot attribute a ticket, migration writes an `involved_equipment` link with `origin = migration-split` and `certainty = possible` | no ticket is counted twice (I-TKT-2) |
+| Access Points | re-keyed in place to `AP-<ULID>`: the uid is kept and the former key becomes an alias; `in_service_from = before_records`. Assigned only if the evidence identifies exactly one position; otherwise left unassigned | §9.2 |
+| Serial Line port hints | become advisory `required_port` claims on the Bus Segment (§9.3). `attached to` is derived only after IT registry ports exist and match | a port number never attaches on its own |
 | documents, comments | the Position | |
 | attachments | the Equipment, if photo identification produced a label from them or a person tagged them as a photo of the unit; otherwise the Position | |
 | labels | strong identifiers (serial, qrcode, jiraObjectId, inventory) go to the Equipment; everything else stays | |
@@ -1037,7 +1448,7 @@ SPARC:AST:vac-gunvpc:GUNSIP01   Ion Pump   M-PHYS   0.95
    evidence   E-SER(serial=84321, author=user:rossi), E-URL(objectId=129573 → 1 match)
    records    position SPARC:POS:GUNSIP01 (same uid) · equipment INV:… (matched)
               · installation INS-… Confirmed from before_records
-   dependents tickets 3 → position (+3 split-linked to equipment)
+   dependents tickets 3: subject stays the position; involved_equipment derived (3 definite)
 
 SPARC:AST:histar:GUNQUA01       Power Supply   M-POS   1.0
    evidence   no identifiers, no physical edits
@@ -1057,10 +1468,10 @@ finalization.
 
 | Id | Invariant |
 |---|---|
-| **I-MIG-1 (nothing lost)** | for each kind of dependent, the count before equals the count after, summed over the records in `migration_map`. Declared split duplicates are counted separately |
+| **I-MIG-1 (nothing lost)** | for each kind of dependent, the count before equals the count after, summed over the records in `migration_map`. Links with `origin = migration-split` are counted separately and never as additional tickets (I-TKT-2) |
 | **I-MIG-2 (traceable)** | every legacy uid appears in `migration_map`, and every legacy key resolves through labels |
 | **I-MIG-3** | no relation references a Retired or Merged record, except as the registry's retire rules allow |
-| **I-MIG-4** | I-INS-1 to I-INS-7, I-AP-1 to I-AP-3 and identifier uniqueness all hold |
+| **I-MIG-4** | I-INS-1 to I-INS-7, I-AP-1 to I-AP-5, I-PORT-1 to I-PORT-3, I-TKT-1 to I-TKT-3 and identifier uniqueness all hold |
 | **I-MIG-5** | the number of registry violations in the workspace does not increase (warn-mode report, before vs after) |
 | **I-MIG-6** | rebuilding the projection from the ledger gives exactly the post-migration state |
 | **I-MIG-7 (behaviour)** | on a golden set of past incidents, root-cause walks return the same causes or more precisely resolved ones (equipment instead of channel, never fewer) |
@@ -1084,13 +1495,13 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 | Step | Scope | Depends on | Exit criterion |
 |---|---|---|---|
 | **P0 safety fixes** | stated `upsert` keeps values edited since the last import; remove `remove_all_before`; record the commit SHA; permission checks on `--it-workspace` and `create_asset`; correct the C15 figures | — | a re-import leaves a hand-edited IOC description intact |
-| **S1 vertical slice** | the ledger tables; the six stages, only for the slice's predicates; authority and multi-value loaders with validators; the Installation type, its validation and the derived `realized by`; a minimal Insight fixture importer; the review API (list items, post decisions) | P0 | acceptance tests A1–A16 (§14) pass; replay equals incremental projection |
+| **S1 vertical slice** | the ledger tables, including revision events and stream heads; the six stages, only for the slice's predicates; the rule catalogue and its CI check; the lexicographic authority loader with its validator; multi-value modes with negative facts; temporal values and the overlap classifier; the Installation type, its validation and the derived `realized by`; Access Point identity and reassignment; ticket roles and attribution; a minimal Insight fixture importer; the review API (list items, post decisions) | P0 | acceptance tests A1–A32 (§14) pass; replay equals incremental projection |
 | **S2 shadow pipeline** | all EPIK8s and PBS predicates through the pipeline, on copies of production workspaces. It writes to shadow projections while the legacy importers keep writing | S1 | the diff report between shadow and legacy is empty or every difference is explained |
 | **S3a classification** | the §12 plan and report on real workspaces, with no writes | S1 (for the resolver) | owners have reviewed the reports and recorded any overrides |
 | **S3b registry and derivation** | registry in `warn` mode; derived edges; attribute → edge sync | S2 | the violation report has been triaged |
 | **S4 migration apply** | per workspace, with rollback | S2, S3a, S3b | I-MIG-1 to I-MIG-7 hold; plan finalized |
 | **S5 cut-over** | importers and the UI write only through the ledger; legacy fields become read-only; `equipment_class` governance and its reports go live | S4 | nothing writes `attributes` or `relations` directly (enforced by DB grants) |
-| **S6 connectivity** | Communication Paths, Bus Segments, Equipment Ports; AP assignments; derived `implemented by` and `attached to` | S5 | the IT §4.3 box, port and switch impact figures are reproduced |
+| **S6 connectivity** | Communication Paths, Bus Segments, Equipment Ports with roles and modes; the port-matching algorithm (§9.3) at production scale; derived `implemented by` and `attached to` | S5 (A20–A23 already pass on the fixture) | the IT §4.3 box, port and switch impact figures are reproduced; every unresolved port has a review item |
 | **S7 enforce** | registry in `enforce` mode; retirement guard live on all streams | S5 | — |
 | **S8 extensions** | one per trigger | S5 | an owner, a source and a query in the test suite |
 
@@ -1125,6 +1536,39 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 | A15 | A1 | a reviewer `reject`s the inferred position `SLICE:POS:GUNSIP00` by fingerprint; re-import r1, then r2 | the position is not proposed again, and its status stays `rejected` | rejection memory |
 | A16 | A1–A15 | drop every projection and rebuild from the ledger; then publish a new `policy_version` that changes one rule | the rebuild yields identical attributes, edges, record statuses, conflicts and `v_installation`; the policy change writes status events that cite the new version | auditability; policy versioning |
 
+**Additional fixture for A17–A32.**
+
+- In `slice-sparc`, Access Point `192.168.0.28` is assigned to `SLICE:POS:GUNQUA01/PS`, with power
+  supply s/n PS-1 installed there.
+- In `slice-it`, position `IT:POS:scsparcsipmxa001` holds converter M-5531. Its ports P1–P16 have
+  roles `serial-data#1…#16`, RS-485-2w, TCP server, `tcp_port` 4001–4016.
+- Spare converters: M-7702, the same model with the same port configuration, and M-8800, whose
+  ports are configured RS-232.
+- Tickets:
+  - T-1: incident `2026-03-02T10:00Z`, subject GUNSIP01's position;
+  - T-2: no incident field, created `T + 2 d`;
+  - T-3: legacy, before any Installation.
+- Rules: `infer.vac.sip/2`, plus a variant `/3` with a changed output class.
+
+| # | Given | When | Then | Validates |
+|---|---|---|---|---|
+| A17 | the AP fixture | revision r4, once published, states `192.168.0.28` for `SLICE:POS:GUNQSK01/PS` | one batch: the old AP is Retired with `successor` and `in_service_until` = r4's `observed_at`; a new `AP-<ULID>` is Active with the same address; the source ref is rebound; the path's `enters at` projects onto the new AP; the old AP's tickets stay on it | AP reassignment, rebinding |
+| A18 | A17 | query "who used 192.168.0.28" at a time before r4, and after | before: the old position and PS-1, `definite`. After: the new position and its unit. With r4's time at day precision, a query on that day returns both rows as `possible` | the address-at-time query, uncertainty |
+| A19 | the AP fixture | a direct decision to change `assigned to` on an assigned AP | fails with I-AP-2 | write-once assignment |
+| A20 | the IT fixture, segments attached to M-5531 P1–P4 | swap batch M-5531 → M-7702 at T | derived `attached to` → M-7702 `serial-data#1…#4`; the query at `T − 1 s` returns M-5531's ports | compatible replacement |
+| A21 | the IT fixture | swap M-5531 → M-8800 | no `attached to`; four `port_mapping_unresolved` items naming criterion 3b (kind); impact analysis shows the segments as unattached; `implemented by` M-8800 is intact. After an IT registry revision configures the ports as RS-485-2w, the next derive run attaches them | incompatible replacement, recovery |
+| A22 | a segment with `require_swap_confirmation`, and A20 | the swap alone; then `confirm port_map`; then a second swap | no edge until the confirmation; attached after it; after the second swap, no edge again, because the map does not carry over | swap-time confirmation scope |
+| A23 | the registry lists two ports of M-7702 with role `serial-data#3` | derive | no edge; the review item lists both ports | ambiguous candidates |
+| A24 | r1 published | r2 drops 50 % of subjects (held); then r3 restores them and passes the guard against r1 | r3 published, r2 `superseded`; zero status events for claims present in both r1 and r3; parsed head r3; the stream history still shows r2's `disappeared` events | net transition, superseded revisions |
+| A25 | r2 and r3 both held | `approve_revision` r3; separately, `approve_revision` r2 first | first case: H = r3, r2 superseded, net r1 → r3. Second case: H = r2, and r3's guard is re-evaluated against r2 | approval order |
+| A26 | r2 held | `reject_revision` r2; then r4 carries r2's facts and passes the guard against r1; then `rewind` to r1 | r2 is never projected; r4 publishes its facts; the rewind applies the net r4 → r1 transition, recorded as `rewound_to` | rejection vs claim rejection; rewind |
+| A27 | the config states zones `LINAC, GUN` on GUNSIP01's device | a person confirms `GUN` absent; re-import; then the person `retract`s; then confirms `GUN` present (`supersede`) and the config drops GUN | absent: zones = `LINAC`, with a `source_vs_confirmed` conflict, and the re-import keeps it absent. After the retract: `GUN` is back from the source. After the supersede: `GUN` is present although no source states it | negative facts, restoration |
+| A28 | two streams state `GUN` present | a reviewer `reject`s one stream's claim | `GUN` stays present through the other claim; its polarity is unchanged (I-NEG-1) | reject ≠ removal |
+| A29 | the §7.7 example policy | a `pv` claim from the BTF test branch; then load three bad policies | the effective rank is advisory (L1 wins). The validator rejects the ambiguous policy (equal keys, different effects), the one with an unreachable rule, and the one with a dominant L2 rule on `attr:serial` from a non-owner | lexicographic precedence, validation |
+| A30 | installations of s/n 84321 and 90001 | confirm A until `2026-03` (month) with B from `2026-03-15T08:00Z`; confirm a definite overlap; confirm an exact handover | first: accepted, with a `possible_overlap` review item and both marked uncertain. Second: fails with I-INS-1. Third: accepted, no item | temporal classification |
+| A31 | T-1, T-2, T-3 | derive attribution; compute counts | T-1: `involved_equipment` 84321, definite. T-2: 84321 and 90001, both possible. T-3: a `migration-split` link. The position's ticket count is 3 (subjects). 84321's involved count is 1. The count for the vacuum group is 3 distinct tickets | ticket attribution, deduplication |
+| A32 | `infer.vac.sip/2` active | an `impl_version` bump with identical output; a fix changing one output; a switch to `/3`; a signature change without a new id | first: no claim events. Second: one `disappeared` and one `appeared` under `/2`. Third: all outputs are new `/3` claims and all `/2` claims disappear; attributes do not change; rejections carry over only with `carries_rejections`. Fourth: CI fails | rule identity and versions |
+
 ---
 
 ## 15. Invariants (collected)
@@ -1133,12 +1577,20 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 |---|---|
 | I-LED-1…5 | §7.4: sticky confirmations; conflicting confirmations; source vs confirmed; append-only; every status change has a cause |
 | I-PROJ-1 | `assets.attributes` and the asserted `relations` rows equal the projection of the ledger at the project stage's watermark. Only the project stage writes them |
-| I-PROJ-2 | a derived edge exists exactly when its registry rule holds on the current projections. Nothing else writes derived edges |
-| I-PROJ-3 | an authority policy with two equally specific rules of different effect cannot be loaded |
+| I-PROJ-2 | a derived edge or derived ticket link exists exactly when its rule holds on the current projections. Nothing else writes them |
+| I-POL-1 | a policy with ambiguous, unreachable, or unjustified dominant rules cannot be loaded (§7.7) |
+| I-POL-2 | rule selection uses only the lexicographic key L1–L7 |
+| I-POL-3 | every `activate_policy` decision references a validation and impact report for the same policy version |
+| I-NEG-1…2 | §7.8: member polarity only by §7.8.2; a confirmed absence excludes the member everywhere |
+| I-RULE-1…2 | §7.9: semantic rule id in claim identity; implementation version on events |
+| I-REV-1…4 | §11: projection reads only published heads; head moves recorded; superseded and rejected revisions are never projected; publication is a net transition |
+| I-TIME-1 | valid-time comparisons use `earliest` and `latest` only, never `nominal` |
 | I-REL-1 | every `relations` row's type is in the registry at the recorded registry version, and its domain, range, cardinality and acyclicity hold (warn first, then enforce) |
 | I-REL-2 | a `composed of` target has at most one composite; components have no `part of` of their own; `part of` never targets a Location |
 | I-INS-1…7 | §8.3 |
-| I-AP-1…3 | §9.2 |
+| I-AP-1…5 | §9.2 |
+| I-PORT-1…3 | §9.3 |
+| I-TKT-1…3 | §8.6 |
 | I-ID-1 | at most one active record per strong identifier. A Merged record has a `merged_into_uid` that resolves to an active record |
 | I-ID-2 | every source ref has at most one binding at a time; rebinding writes an `identity_event` |
 | I-RET-1 | no record referenced by a ticket, a document or a Confirmed Installation is ever deleted |
@@ -1164,11 +1616,18 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
   Engineering records stay private either way.
 - **D7. Thresholds.** The retirement guard (10 %) and the `Other Equipment` promotion values
   (25 objects, 2 workspaces, 5 % Unclassified).
-- **D8. Split tickets.** In M-PHYS, may legacy tickets be linked to both the Position and the new
-  Equipment?
+- **D8. Incident time.** Does the ticket system hold a reliable occurrence field that importers can
+  map? And is 7 days the right attribution window when it is missing? This is decided by how
+  operators actually file tickets, not by the model.
 - **D9. Initial authority policy.** Who signs the first `policy_version`, and who may change it?
 - **D10. Projection latency.** Must the UI show a user's own edit immediately (projection inside
   the request), or is a delay of a few seconds acceptable?
 - **D11. Migration rollback window** before finalization. The proposal is 30 days per workspace.
 - **D12. Carried over from the first revision:** the status of the DNS naming convention;
   ownership of the lattice; and which of the C15 counts are authoritative for tests.
+- **D13. Endpoint history requirement.** Must an endpoint's tickets, documents or service
+  commitments follow an address when it moves to another position? The model assumes no (§9.2).
+  A yes would justify a temporal Endpoint Assignment object.
+- **D14. Port confirmation and protected predicates.** Which buses require swap-time port
+  confirmation (safety, interlock, others)? Who owns each protected predicate in the authority
+  policy?
