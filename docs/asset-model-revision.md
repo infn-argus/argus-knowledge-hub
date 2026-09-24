@@ -5,7 +5,7 @@ implements them, and a revised model that keeps their architecture and makes it 
 positions and installations, fact-level provenance, a governed relation registry, identity
 reconciliation, non-destructive retirement and a staged catalogue.*
 
-Status: **proposal, third revision**. Where this document and the two design notes disagree,
+Status: **proposal, fourth revision**. Where this document and the two design notes disagree,
 this one states the intended model. It refers to them by section (`AS §n` =
 `asset-schema-design.md`, `IT §n` = `it-model-design.md`).
 
@@ -74,6 +74,24 @@ Each mechanism below is labelled with its data class where that matters:
 - **[derived]**: derived state;
 - **[valid]**: valid time, when something was true in the world;
 - **[record]**: record time, when the ledger learned it.
+
+### 0.4 What the fourth revision decides
+
+The fourth revision adopts a strategic premise. **ARGUS replaces Jira and Insight as the primary
+software for assets, documents and tickets.** Jira and Insight are migration sources and
+temporary read-only archives, not long-term systems of record.
+
+No mechanism from the earlier revisions changes. This revision:
+
+- answers stakeholder decisions D1–D14 (§20);
+- adds a system-of-record matrix (§16), the Jira-to-ARGUS transition plan with cutover entry and
+  exit criteria, rollback and archival rules (§17), ownership and governance (§18), and the
+  product-readiness checklist that must pass before Jira can be retired (§19);
+- aligns existing sections with that premise: ownership and visibility (§4), position
+  granularity (§5.3), thresholds (§5.5, §11), user-visible consistency (§7.6), native ticket
+  time (§8.6), port safety (§9.3), identity binding (§10) and migration rollback (§12).
+
+§21 lists the decisions that only stakeholders can make, and §22 states the architectural policy.
 
 ---
 
@@ -166,6 +184,9 @@ not objects (§3.3). Ordered hops and permit thresholds remain deferred (§9.1, 
     with a reviewable report, before anything moves.
 11. **Types follow sources and questions.** Fallback categories are governed and promoted when
     they cross a threshold.
+12. **ARGUS is the system of record** for assets, documents, tickets, Positions, Installations and
+    their relationships. Jira and Insight are migration sources and read-only archives. There is
+    no write-back to them and no permanent synchronization with them (§16, §17).
 
 ### 2.2 Terms
 
@@ -259,9 +280,14 @@ importers, the UI or the API. A UI edit becomes a claim from the stream `person:
 | Workspace | Owns | Authoritative sources |
 |---|---|---|
 | `catalogue` | shared types; Product Model, Vendor; the `equipment_class` vocabulary | catalogue editors, vendor data |
-| `inventory` | non-IT Equipment, Location | Jira Insight asset schemas; inventory staff |
-| `it-infrastructure` | IT Equipment and its Equipment Ports; Address Records; **IT positions** (the rack slot or role a converter or server fills) and **their Installations** | IT registry, DNS/DHCP; IT staff |
+| `inventory` | non-IT Equipment, Location | inventory staff working in ARGUS. Jira Insight asset schemas are a migration source until the domain's cutover (§17) |
+| `it-infrastructure` | IT Equipment and its Equipment Ports; Address Records; **IT positions** (the rack slot or role a converter or server fills) and **their Installations** | IT staff working in ARGUS; DNS/DHCP exports (continuing). Insight IT schemas are a migration source until cutover |
 | beamline | functional elements and positions; control items (including Communication Paths, Bus Segments and Access Points); **their Installations**; engineering records | its configuration repository, PBS matrix and operators |
+| `service-desk` | ticket workflows, ticket types, queues, service levels and escalation rules | Operations / service desk |
+| document spaces | controlled documents, their versions, approvals and retention | document control, together with each document's technical owner |
+
+The **ARGUS platform team** operates the software, the pipelines, backups and access
+configuration. It does not own domain data (§18).
 
 **An Installation belongs to the workspace that owns its position.** A beamline records the
 swaps on its machine, and IT records the swaps behind its hostnames. Positions and Installations
@@ -275,9 +301,10 @@ are. The owner of a piece of equipment can **propose** decisions about any Insta
 |---|---|---|---|
 | EPIK8s configuration | control items, Access Points, Communication Paths, Bus Segments; the positions it infers (`Provisional` until a policy or a person accepts them) | Installations from `asset:` evidence; edges from naming rules; Access Point assignments | Equipment, Locations, Product Models |
 | PBS matrix | functional elements and positions (lifecycle Planned); modules, stations, sections; engineering records | Areas | Equipment |
-| Inventory (Insight) | Equipment, Locations | Product Models; Installations where Insight records a slot | positions |
-| IT registry | IT Equipment, Equipment Ports, Address Records, IT positions and their Installations | — | Access Points |
-| Person | anything their workspace owns | decisions on records in other workspaces | — |
+| Jira Insight asset import (**migration only**, until the domain's cutover watermark) | Equipment, Locations | Product Models; Installations where Insight records a slot | positions |
+| Insight IT import (**migration only**), and DNS/DHCP exports (continuing) | IT Equipment, Equipment Ports, Address Records, IT positions and their Installations | — | Access Points |
+| Jira issue import (**migration only**) | tickets, with their comments, attachments, history and links | subjects and related objects | — |
+| Person, in ARGUS | anything their workspace owns. **After cutover, this is the primary way Equipment, Installations, Locations, tickets and documents are created** | decisions on records in other workspaces | — |
 
 Provisional IT Equipment may be created only when all four conditions from the first revision
 hold:
@@ -291,10 +318,31 @@ hold:
 
 | Permission | Rule |
 |---|---|
-| Read | the owner workspace; or anyone, if the record is flagged global |
+| Read | role-based. Ordinary Equipment, Positions, Installations, Documents and Tickets are searchable by every role with read access to their domain, across workspaces. **Restricted classes** (below) need an explicit grant |
 | Edit | editors in the owner workspace. Their edits are recorded as claims plus `confirm` decisions |
 | Link | an asserted edge *from* a record you own *to* any record you can read, if the registry allows that relation to cross workspaces |
 | Propose | a claim or a `propose` decision on any readable record. It lands in the owner's review queue, and only the owner can confirm it |
+
+**Restricted classes.** The following are restricted at **record** level (a `classification`
+on the record, `restricted:<class>`) or at **field** level (`restricted` on the attribute
+definition):
+
+- costs and procurement values;
+- personnel information;
+- security incidents;
+- safety investigations;
+- sensitive designs.
+
+A restriction applies everywhere a value could leak (I-ACL-1):
+
+- search results and counts;
+- the API and exports;
+- derived graph views, where a restricted neighbour appears as an anonymous node;
+- notifications;
+- the audit and ledger views;
+- AI and MCP tools.
+
+**Secrets are never stored.** The import filter (AS §9.4) removes them before they reach a claim.
 
 Two platform gaps must be closed: `create_asset` must check that the type is usable from the
 workspace, and the unchecked `--it-workspace` script path is removed.
@@ -346,6 +394,12 @@ status field.
 
 ### 5.3 Equipment Position
 
+**Granularity (D5).** A Position is created only for a persistent function that is either
+independently replaceable or operationally significant. Ordinary software channels, calculated
+PVs, soft-IOC records and simulated devices remain Control Devices and never produce Positions.
+Every inference rule that creates a Position declares which of the two criteria it relies on.
+Controls owns the channel-to-position mappings (`acts on`).
+
 `position_class` uses the same governed vocabulary as `equipment_class` (§5.5), so the
 compatibility check in §8.3 compares like with like. `expected_product_model` records design
 intent, taken from an IOC template's `asset:` or from the PBS. If it differs from the installed
@@ -390,8 +444,8 @@ The unit itself has exactly one Installation.
   - a query or dashboard that filters on the class;
   - a causal role that the root-cause walk needs.
 
-  Separately, `Unclassified` above 5 % of Equipment, or above 50 objects, raises a catalogue
-  alert.
+  Separately, a catalogue alert is raised when `Unclassified` exceeds 5 % of Equipment and is at
+  least 10 records, or exceeds 50 records.
 - **Promotion** creates a child type of `Equipment`. The class's objects are retyped in place,
   keeping their uids, and each retype writes a `record_event: retyped`. The old class value is
   deprecated: kept for history, no longer assignable (I-CAT-1).
@@ -468,7 +522,7 @@ source_revision                  one row per stream revision read
 
 revision_event                   the lifecycle of a source revision (§11)
   seq, source_revision_id,
-  kind ('parsed' | 'held' | 'published' | 'rejected' | 'superseded' | 'rewound_to'),
+  kind ('parsed' | 'held' | 'published' | 'rejected' | 'superseded' | 'rewound_to' | 'frozen'),
   cause (decision | guard | job_run), at
 
 claim                            immutable; content-addressed; one row per distinct statement
@@ -567,6 +621,7 @@ claim's `method`. Manually confirmed means a `confirm` decision exists, whatever
 | `bind`, `merge`, `unmerge`, `confirm_new`, `reject_candidate` | identities (§10) | |
 | `approve_revision`, `reject_revision`, `rewind` | a source revision (§11) | move or keep the published head |
 | `activate_policy` | a validated policy version and its impact report (§7.7) | |
+| `approve_cutover`, `abort_cutover`, `revert_pilot` | a domain's transition (§17) | record the cutover exit (with the final watermark and the reconciliation report), an aborted cutover, or the pilot reversion |
 | `resolve_conflict` | a conflict | must carry, or reference, the supersede, retract or reject decisions that remove the conflict's cause |
 
 Several decisions can be submitted as one **atomic batch**, for example ending one Installation
@@ -624,7 +679,7 @@ When each stage skips or reruns:
 | Stage | Skips when | Must rerun when |
 |---|---|---|
 | parse | `(stream, content_hash, parser@v)` was already parsed. The revision row is still written, with no claims | new bytes; a parser version bump |
-| infer | the digest of `(input claim set, ruleset@v, impl_versions)` is unchanged | input claims changed; a ruleset or implementation bump. A run that would change more than 10 % of effective facts is held like a source revision (§11) |
+| infer | the digest of `(input claim set, ruleset@v, impl_versions)` is unchanged | input claims changed; a ruleset or implementation bump. A run that would change more than 10 % of effective facts, and at least 10, is held like a source revision (§11) |
 | resolve | the digest of `(source refs, label watermark, inventory watermarks, merge-decision watermark, resolver@v)` is unchanged | a label or alias changed; a merge or bind decision; an inventory or IT import; a resolver bump |
 | project | the ledger watermark and all versions are unchanged | any new ledger event; any version bump |
 | derive | the projection watermark is unchanged | any projection change; a scheduled clock tick that crosses an Installation boundary |
@@ -634,6 +689,16 @@ Every run writes a `job_run`. Each stage records the ledger `seq` it has consume
 from that watermark. As a result, re-importing identical bytes **skips parse but still reruns
 resolve and project** if an alias, an inventory revision, a policy or a decision has changed
 since the last run.
+
+**User-visible consistency (D10).**
+
+- **Synchronous.** A user's own edit (to an asset, document, ticket or comment) is projected
+  within the request. The request writes the claim and the decision, runs the project stage for
+  the affected subject, and returns the new state. The next read by any user sees it (I-UX-1).
+- **Asynchronous.** Derive and reconcile run in the background. While they are pending, the
+  record shows a processing state (`deriving` or `reconciling`, with the pending job's
+  watermark), and derived edges, counts and graph views are marked as not yet updated.
+- **Imports** remain fully asynchronous.
 
 ### 7.7 Authority policies
 
@@ -648,7 +713,7 @@ defaults:                       # used when no rule matches, by claim method
   resolved: contributory
   inferred: advisory
 rules:
-  - id: insight-identity
+  - id: insight-identity                     # migration stream; frozen at the domain's cutover watermark (§17)
     match: {predicate: [attr:serial, attr:inventory_number, attr:manufacturer, attr:model],
             object_type: Equipment+, owner_workspace: inventory, source_kind: insight}
     rank: authoritative
@@ -884,7 +949,7 @@ Invariants:
   `policy` decisions citing both rule ids.
 
 **Guard.** A ruleset change whose infer run would change the effective value of more than 10 %
-of a stream's facts is held like a source revision (§11).
+of a stream's facts, and at least 10 facts, is held like a source revision (§11).
 
 Invariants:
 
@@ -1021,10 +1086,19 @@ Tickets link to objects through `asset_tickets`. The link gains four columns [pr
 - **Canonical subject.** The importer takes the first object the source ticket names (Jira's
   primary linked object) as the subject; the others become `related`. A person can change the
   subject with a decision. After a legacy split, the subject is the Position (the legacy uid).
-- **Incident time** [valid] is a temporal value:
-  - the ticket's reported occurrence field, if present, with its precision;
-  - otherwise `{earliest: created − attribution_window, latest: created}`, with a default
-    window of 7 days (D8).
+- **Ticket time fields** [valid]. These are native in ARGUS:
+  - `occurred_from` and `occurred_until`: temporal values with precision;
+  - `detected_at`, `reported_at` and `resolved_at`.
+
+  A ticket of an **operational-incident** type cannot be created without `occurred_from`
+  (I-TKT-4). If the end is unknown, `occurred_until` is `open`.
+- **Incident time** [valid] depends on the ticket's type and origin:
+  - **Operational incidents**: from `occurred_from.earliest` to `occurred_until.latest`, or to
+    `occurred_from.latest` if the ticket has no end.
+  - **Other ticket types** (requests, tasks): `reported_at`.
+  - **Migrated legacy tickets without an occurrence field** (and only these):
+    `{earliest: created − 7 days, latest: created}`, marked
+    `occurrence_source = legacy_created_fallback`. The uncertainty is visible on the ticket.
 - **Derivation.** For a subject Position P, or for a Control Device through its `acts on`
   positions, the involved equipment is every unit whose Confirmed Installation at P overlaps the
   incident time.
@@ -1154,7 +1228,11 @@ Invariants:
     are claims. They are initially inferred from the configuration: for example, port 4003
     implies role `serial-data#3`, `tcp_port` 4003 and mode TCP server. They stay advisory until
     confirmed.
-  - `require_swap_confirmation`: bool, default false; true for safety and interlock buses.
+  - `safety_class`: a governed enumeration, set by the owning steward and reviewed by Controls
+    and the safety owners (D14). Values: `none`, `personnel_safety`, `machine_protection`,
+    `interlock`, `critical_rf_permit`, `critical_actuator`, `damage_risk` (an incorrect mapping
+    could damage equipment).
+  - `require_swap_confirmation` [derived]: true whenever `safety_class ≠ none`.
 - **Port map** [fact on the segment]: `attr:port_map = {installation_uid, port_uid}`, confirmed by
   a person. It is scoped to one Installation, and a new Installation never inherits it
   (I-PORT-2).
@@ -1177,8 +1255,16 @@ position P, where the current Installation I holds unit U:
       Ethernet→Serial, `tcp_port` also equals the path's `tcp_port`.
    d. **electrical**: `signal_level` and `termination` equal the requirement, where the
       requirement states them.
-4. **Exactly one candidate** gives a derived `attached to`, with `rule = port-match/1` and the
-   matched criteria as evidence.
+4. **Exactly one candidate** gives a derived `attached to` only if the match is **registry-backed
+   and fully compatible**. That means:
+   - every port attribute it used comes from the IT registry or from a person, never from an
+     inference;
+   - every field of the segment's `required_port` is stated or confirmed, never advisory.
+
+   The edge carries `rule = port-match/1` and the matched criteria as evidence. A unique match
+   that is not registry-backed or fully compatible is offered in a `port_confirmation_required`
+   review item instead. As a result, each segment's first attachment needs one confirmation of
+   its requirement. After that, like-for-like replacements attach automatically.
 5. **Zero or several candidates** give no edge. A `port_mapping_unresolved` review item opens,
    listing each port and the first criterion it failed. Impact analysis treats the segment as
    *unattached*: its devices still depend on the path and the Access Point, and the port-level
@@ -1234,9 +1320,20 @@ mechanisms keep duplicates out:
 3. **Alias-aware resolution.** The resolver tries the key, then labels, then aliases, and
    creates a record only where §4.2 allows it.
 
-**Candidates.** Each identity candidate carries a score and its evidence. The reconciliation
-policy may auto-merge on a strong identifier when there is exactly one type-compatible
-candidate, and the policy is recorded as the decision's actor. Everything else is proposed.
+**Binding and merging (D4).**
+
+- **Automatic binding.** Records that carry the **same immutable Jira or Insight identifier**
+  are bound automatically, with the policy recorded as the actor. The identifiers are the issue
+  id, the history of an issue's keys, the Insight objectId and the Insight object key. A key
+  renamed in Jira becomes an alias of the same record.
+- **No automatic merging of different source objects.** Different Jira or Insight objects are
+  never merged automatically, whatever the evidence: serial, MAC, hostname, location or name
+  similarity. Each such match is an identity candidate, with a score and its evidence, reviewed
+  by the owning steward (§18).
+- **Uniqueness at creation, after cutover.** Once a domain is cut over, creating Equipment
+  whose serial (per manufacturer), inventory number or MAC is already held by an active record
+  is refused, and the user is pointed to the existing record. The partial unique index enforces
+  the same rule at the database level (I-ID-1).
 
 **Decisions:** `merge`, `reject_candidate`, `confirm_new`, `unmerge`. A merge:
 
@@ -1277,9 +1374,10 @@ of unpublished revisions directly (I-REV-1).
 the previous parsed revision. The guard measures the net change `presence(H) → presence(R)`. R is
 `held` if either:
 
-- more than 10 % of the stream's subjects would disappear; or
-- the last support of a record that has tickets, documents or a Confirmed Installation would be
-  withdrawn.
+- more than 10 % of the stream's subjects would disappear, **and** at least 10 subjects would;
+  or
+- the revision would retire, or withdraw the last support of, any record that has tickets,
+  documents or a Confirmed Installation. This clause holds a revision whatever its size.
 
 Otherwise R is published immediately.
 
@@ -1325,6 +1423,9 @@ Invariants:
 ---
 
 ## 12. Legacy migration
+
+This section converts ARGUS's own legacy data: inferred objects and legacy markers. The
+migration of Jira and Insight data is §17. The two meet in the reconciliation queues.
 
 ### 12.1 Evidence gathered per legacy object
 
@@ -1389,7 +1490,7 @@ apply(plan_id):                                         # resumable; idempotent 
       commit; mark 'applied'
   run workspace-level invariants; mark the plan 'verified' or 'needs_attention'
 
-rollback(plan_id [, items]):                            # allowed until the plan is finalized
+rollback(plan_id [, items]):                            # allowed until finalized; never after domain cutover
   for each applied item, in reverse order:
       refuse if a created record has since gained dependents not covered by the item's actions
       apply inverse_actions: restore the pre-image, move dependents back, mark created records
@@ -1477,7 +1578,8 @@ finalization.
 | **I-MIG-7 (behaviour)** | on a golden set of past incidents, root-cause walks return the same causes or more precisely resolved ones (equipment instead of channel, never fewer) |
 
 The migration runs first on a restored copy of production. It then runs per workspace in
-production, after a database backup, with a rollback window until finalization (decision D11).
+production, after a database backup. The rollback window lasts until finalization: at most
+30 days in the pilot, and never beyond the domain's cutover (D11).
 
 ---
 
@@ -1487,7 +1589,7 @@ Each step proves something before the next step depends on it.
 
 ```
 P0 safety fixes ──────────────────────────────────────────────┐
-S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─▶ S4 migration apply ─▶ S5 cut-over ─▶ S6 connectivity ─▶ S7 enforce
+S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─▶ S4 migration apply ─▶ S5 ledger-only writes ─▶ S6 connectivity ─▶ S7 enforce
                                        └─▶ S3a classification dry-run reports (read-only) ─┘            └─▶ S8 extensions
                      S3b registry warn + derived edges (after S2) ─┘
 ```
@@ -1500,10 +1602,17 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 | **S3a classification** | the §12 plan and report on real workspaces, with no writes | S1 (for the resolver) | owners have reviewed the reports and recorded any overrides |
 | **S3b registry and derivation** | registry in `warn` mode; derived edges; attribute → edge sync | S2 | the violation report has been triaged |
 | **S4 migration apply** | per workspace, with rollback | S2, S3a, S3b | I-MIG-1 to I-MIG-7 hold; plan finalized |
-| **S5 cut-over** | importers and the UI write only through the ledger; legacy fields become read-only; `equipment_class` governance and its reports go live | S4 | nothing writes `attributes` or `relations` directly (enforced by DB grants) |
+| **S5 ledger-only writes** | importers and the UI write only through the ledger; legacy fields become read-only; `equipment_class` governance and its reports go live | S4 | nothing writes `attributes` or `relations` directly (enforced by DB grants) |
 | **S6 connectivity** | Communication Paths, Bus Segments, Equipment Ports with roles and modes; the port-matching algorithm (§9.3) at production scale; derived `implemented by` and `attached to` | S5 (A20–A23 already pass on the fixture) | the IT §4.3 box, port and switch impact figures are reproduced; every unresolved port has a review item |
 | **S7 enforce** | registry in `enforce` mode; retirement guard live on all streams | S5 | — |
 | **S8 extensions** | one per trigger | S5 | an owner, a source and a query in the test suite |
+
+**How this plan meets the Jira transition.** Domain transitions (§17) build on this plan:
+
+- T1 (import and reconcile) needs S5, plus the Jira and Insight importers at production scale.
+- T3 (cutover) of a domain needs that domain's product-readiness items (§19) and the
+  transition tests A33–A41.
+- The pilot domain's T1 can start as soon as S5 is complete.
 
 ---
 
@@ -1532,7 +1641,7 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 | A11 | A3 | one person confirms `argus_location = Rack B13` on 84321; a second person confirms `Rack B14` without `supersedes` | a blocking `confirmed_vs_confirmed` conflict opens; the projected value stays B13 | I-LED-2 |
 | A12 | A11 | a reviewer issues a `supersede` naming the B13 confirmation, with value B14, and a `resolve_conflict` | B14 is effective and the conflict is resolved; both confirmations and the resolution remain in the ledger | explicit supersession |
 | A13 | A12 | a new Insight revision states `Rack B12` | a non-blocking `source_vs_confirmed` conflict opens; B14 stays | sticky confirmation |
-| A14 | A3 | revision r2 removes `GUNSIP02` (in this small fixture, above the 10 % guard) | r2 is `held` and nothing retires. After `approve_revision`, the GUNSIP02 Control Device is Retired, its edges are retired and its tickets still resolve; its position, which has no Installation, retires; `GUNSIP01`'s position is untouched | retraction; guard; non-destructive retirement |
+| A14 | A3, with one ticket linked to GUNSIP02's device | revision r2 removes `GUNSIP02` (held, because a record with a ticket would retire) | r2 is `held` and nothing retires. After `approve_revision`, the GUNSIP02 Control Device is Retired, its edges are retired and its tickets still resolve; its position, which has no Installation, retires; `GUNSIP01`'s position is untouched | retraction; guard; non-destructive retirement |
 | A15 | A1 | a reviewer `reject`s the inferred position `SLICE:POS:GUNSIP00` by fingerprint; re-import r1, then r2 | the position is not proposed again, and its status stays `rejected` | rejection memory |
 | A16 | A1–A15 | drop every projection and rebuild from the ledger; then publish a new `policy_version` that changes one rule | the rebuild yields identical attributes, edges, record statuses, conflicts and `v_installation`; the policy change writes status events that cite the new version | auditability; policy versioning |
 
@@ -1542,11 +1651,13 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
   supply s/n PS-1 installed there.
 - In `slice-it`, position `IT:POS:scsparcsipmxa001` holds converter M-5531. Its ports P1–P16 have
   roles `serial-data#1…#16`, RS-485-2w, TCP server, `tcp_port` 4001–4016.
+- Four Bus Segments whose `required_port` (`serial-data#1…#4`, RS-485-2w, TCP server) has been
+  confirmed. They have `safety_class = none`, except one with `interlock` (A22, A39).
 - Spare converters: M-7702, the same model with the same port configuration, and M-8800, whose
   ports are configured RS-232.
 - Tickets:
   - T-1: incident `2026-03-02T10:00Z`, subject GUNSIP01's position;
-  - T-2: no incident field, created `T + 2 d`;
+  - T-2: a migrated legacy ticket with no occurrence field, created `T + 2 d`;
   - T-3: legacy, before any Installation.
 - Rules: `infer.vac.sip/2`, plus a variant `/3` with a changed output class.
 
@@ -1557,9 +1668,9 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 | A19 | the AP fixture | a direct decision to change `assigned to` on an assigned AP | fails with I-AP-2 | write-once assignment |
 | A20 | the IT fixture, segments attached to M-5531 P1–P4 | swap batch M-5531 → M-7702 at T | derived `attached to` → M-7702 `serial-data#1…#4`; the query at `T − 1 s` returns M-5531's ports | compatible replacement |
 | A21 | the IT fixture | swap M-5531 → M-8800 | no `attached to`; four `port_mapping_unresolved` items naming criterion 3b (kind); impact analysis shows the segments as unattached; `implemented by` M-8800 is intact. After an IT registry revision configures the ports as RS-485-2w, the next derive run attaches them | incompatible replacement, recovery |
-| A22 | a segment with `require_swap_confirmation`, and A20 | the swap alone; then `confirm port_map`; then a second swap | no edge until the confirmation; attached after it; after the second swap, no edge again, because the map does not carry over | swap-time confirmation scope |
+| A22 | the `interlock` segment, and A20 | the swap alone; then `confirm port_map`; then a second swap | no edge until the confirmation; attached after it; after the second swap, no edge again, because the map does not carry over | swap-time confirmation scope |
 | A23 | the registry lists two ports of M-7702 with role `serial-data#3` | derive | no edge; the review item lists both ports | ambiguous candidates |
-| A24 | r1 published | r2 drops 50 % of subjects (held); then r3 restores them and passes the guard against r1 | r3 published, r2 `superseded`; zero status events for claims present in both r1 and r3; parsed head r3; the stream history still shows r2's `disappeared` events | net transition, superseded revisions |
+| A24 | r1 published (at least 20 subjects) | r2 drops 50 % of the stream's subjects, at least 10 (held); then r3 restores them and passes the guard against r1 | r3 published, r2 `superseded`; zero status events for claims present in both r1 and r3; parsed head r3; the stream history still shows r2's `disappeared` events | net transition, superseded revisions |
 | A25 | r2 and r3 both held | `approve_revision` r3; separately, `approve_revision` r2 first | first case: H = r3, r2 superseded, net r1 → r3. Second case: H = r2, and r3's guard is re-evaluated against r2 | approval order |
 | A26 | r2 held | `reject_revision` r2; then r4 carries r2's facts and passes the guard against r1; then `rewind` to r1 | r2 is never projected; r4 publishes its facts; the rewind applies the net r4 → r1 transition, recorded as `rewound_to` | rejection vs claim rejection; rewind |
 | A27 | the config states zones `LINAC, GUN` on GUNSIP01's device | a person confirms `GUN` absent; re-import; then the person `retract`s; then confirms `GUN` present (`supersede`) and the config drops GUN | absent: zones = `LINAC`, with a `source_vs_confirmed` conflict, and the re-import keeps it absent. After the retract: `GUN` is back from the source. After the supersede: `GUN` is present although no source states it | negative facts, restoration |
@@ -1568,6 +1679,21 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 | A30 | installations of s/n 84321 and 90001 | confirm A until `2026-03` (month) with B from `2026-03-15T08:00Z`; confirm a definite overlap; confirm an exact handover | first: accepted, with a `possible_overlap` review item and both marked uncertain. Second: fails with I-INS-1. Third: accepted, no item | temporal classification |
 | A31 | T-1, T-2, T-3 | derive attribution; compute counts | T-1: `involved_equipment` 84321, definite. T-2: 84321 and 90001, both possible. T-3: a `migration-split` link. The position's ticket count is 3 (subjects). 84321's involved count is 1. The count for the vacuum group is 3 distinct tickets | ticket attribution, deduplication |
 | A32 | `infer.vac.sip/2` active | an `impl_version` bump with identical output; a fix changing one output; a switch to `/3`; a signature change without a new id | first: no claim events. Second: one `disappeared` and one `appeared` under `/2`. Third: all outputs are new `/3` claims and all `/2` claims disappear; attributes do not change; rejections carry over only with `carries_rejections`. Fourth: CI fails | rule identity and versions |
+
+**Transition and readiness tests.** A33–A41 gate the pilot domain's cutover (§17.4). They are not
+part of the vertical slice.
+
+| # | Given | When | Then | Validates |
+|---|---|---|---|---|
+| A33 | the stream `insight:schema=44` frozen at watermark W | a revision with changes after W arrives | refused; a revision event `rejected` with cause `frozen`; nothing is projected. ARGUS edits continue | I-SOR-1 |
+| A34 | Insight object 129573, re-keyed in Insight between two imports | re-import | the same ARGUS record, bound automatically by objectId; the old key becomes an alias; no candidate | automatic binding on immutable ids |
+| A35 | two different Insight objects with the same serial and manufacturer | import; then, after cutover, a user creates Equipment with that serial | before cutover: an identity candidate for review, with no merge. After cutover: creation is refused and points to the existing record | D4, uniqueness at creation |
+| A36 | a user with edit rights | edits a ticket's description and an asset's location | the response and the next read show the new values. The asset shows `deriving` until the derive job completes; then its `located in` edge updates | I-UX-1 |
+| A37 | a Procurement Record with a cost, and a safety-investigation ticket | search, API, export, graph and MCP queries by a user without the grant; then with it | without: absent from results and counts, and an anonymous node in the graph. With: visible | I-ACL-1 |
+| A38 | the ticket type "operational incident" | create one without `occurred_from`; create one with a day-precision `occurred_from`; import a legacy ticket without occurrence | first: refused. Second: accepted. Third: fallback range with `occurrence_source = legacy_created_fallback` | I-TKT-4 |
+| A39 | the `interlock` segment; the swap in A20 | derive | no edge, although a unique registry-backed match exists; a `port_confirmation_required` item until a person confirms | port safety |
+| A40 | migrated tickets and equipment | resolve `SPARC-123`, an old Jira issue URL and `LNFMAC-00417` | each redirects to its ARGUS record; an unknown key returns "not migrated" with its archive location | historical lookup |
+| A41 | a pilot scope with one attachment deliberately missing | produce the cutover reconciliation report | the report fails, naming the attachment and its checksum; the exit criteria are not met | reconciliation report |
 
 ---
 
@@ -1597,37 +1723,318 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 | I-RET-2 | a position with a Current, Confirmed Installation is not retired because a source withdrew it |
 | I-MIG-1…7 | §12.6 |
 | I-CAT-1 | every `Other Equipment` has an `equipment_class` from the current vocabulary; deprecated classes cannot be assigned |
+| I-TKT-4 | a ticket of an operational-incident type created in ARGUS has `occurred_from`. The creation-time fallback exists only on tickets that originate in Jira |
+| I-SOR-1 | a stream frozen at a cutover watermark accepts no further revisions. Its claims remain as history and evidence |
+| I-SOR-2 | ARGUS performs no write to Jira or Insight. The only outbound path is the pilot reversion export (§17.7), which is a one-off, manual, audited export |
+| I-ACL-1 | a restricted record or field never appears, directly or through counts, derived views, exports, notifications or tools, to a role without the grant |
+| I-UX-1 | a committed user edit is visible on the next read. Derived state that is still pending is labelled as such |
 
 ---
 
-## 16. Decisions needed from stakeholders
+## 16. System of record
 
-- **D1. System of record for physical assets.** Does the hub mirror Jira Insight, or become the
-  record? This decides whether Installations are written back to Insight.
-- **D2. Inventory and IT staffing.** Who staffs these workspaces, and who owns **IT positions**
-  (rack slots or host roles) and records IT swaps?
-- **D3. Review owners** for each domain (vacuum, magnets, diagnostics, IT). They handle
-  proposals, conflicts and migration items.
-- **D4. Auto-merge policy.** May a single strong-identifier match merge records without a
-  person?
-- **D5. Position granularity.** Is every configured channel a position, or only equipment that
-  is swapped as a unit?
-- **D6. Visibility.** May positions and Installations be readable from every workspace?
-  Engineering records stay private either way.
-- **D7. Thresholds.** The retirement guard (10 %) and the `Other Equipment` promotion values
-  (25 objects, 2 workspaces, 5 % Unclassified).
-- **D8. Incident time.** Does the ticket system hold a reliable occurrence field that importers can
-  map? And is 7 days the right attribution window when it is missing? This is decided by how
-  operators actually file tickets, not by the model.
-- **D9. Initial authority policy.** Who signs the first `policy_version`, and who may change it?
-- **D10. Projection latency.** Must the UI show a user's own edit immediately (projection inside
-  the request), or is a delay of a few seconds acceptable?
-- **D11. Migration rollback window** before finalization. The proposal is 30 days per workspace.
-- **D12. Carried over from the first revision:** the status of the DNS naming convention;
-  ownership of the lattice; and which of the C15 counts are authoritative for tests.
-- **D13. Endpoint history requirement.** Must an endpoint's tickets, documents or service
-  commitments follow an address when it moves to another position? The model assumes no (§9.2).
-  A yes would justify a temporal Endpoint Assignment object.
-- **D14. Port confirmation and protected predicates.** Which buses require swap-time port
-  confirmation (safety, interlock, others)? Who owns each protected predicate in the authority
-  policy?
+A domain's data is recorded in ARGUS **from that domain's cutover** (§17). Before the cutover,
+the Jira or Insight stream is the authoritative source for its scope, and ARGUS holds the domain
+read-only (shadow). Systems other than Jira keep the roles listed below.
+
+| Data | System of record | Owner | Continuing inputs to ARGUS | Jira / Insight role |
+|---|---|---|---|---|
+| Physical Equipment (non-IT): lifecycle, custody, location, spares | **ARGUS** | Inventory | people; photo identification | Insight asset schemas: migration source, then archive |
+| Locations | **ARGUS** | Inventory | people | Insight: migration source |
+| IT Equipment, IT Positions, Equipment Ports, IT Installations | **ARGUS** | IT | people | Insight IT schemas: migration source |
+| Addressing (IP, MAC, DNS names) | **ARGUS** for the inventory record. The DNS/DHCP servers remain the operational authority for live resolution | IT | DNS/DHCP exports | Insight address types (Registered Nodes, DHCP Nodes, DNS, IP): migration source |
+| Functional Positions and their Installations | **ARGUS** | the beamline team | people; configuration (inferred Positions, under D5); PBS (planned Positions) | Insight records: evidence for Installations |
+| Channel-to-position mappings, control configuration as objects | **ARGUS** for the mappings; the configuration repositories for IOC configuration | Controls | EPIK8s repositories | — |
+| Lattice identity, order and design values | the lattice files; ARGUS mirrors them | Accelerator Physics | lattice importer | — |
+| Product Models, Vendors, `equipment_class` | **ARGUS** | Inventory (catalogue steward) | people | Insight product types: migration source |
+| Tickets, workflows, comments, watchers, attachments | **ARGUS** | Operations / service desk | people | Jira projects: migration source, then archive |
+| Controlled documents: versions, approvals, retention | **ARGUS** | document control and the technical owner | people; other authoring tools per U2 | Jira attachments: migration source |
+| Engineering records (PBS, procurement, utilities); costs restricted | **ARGUS** for the records; the PBS workbooks remain the source of design data until the work package decides to author in ARGUS | work-package owners | PBS importer | — |
+| Relationships among all of the above | **ARGUS** | the owner of the relation's source record | as for their endpoints | Jira links and Insight references: migration source |
+| Authority policy, relation registry, catalogue types, protected predicates | **ARGUS configuration**, versioned in its repository | the governance group (§18) | — | — |
+| Audit ledger | **ARGUS** | operated by the platform team; the ledger content belongs to its domain owners | — | Jira history is imported as ledger history |
+| Historical Jira and Insight records | the ARGUS copy (imported), the read-only Jira archive and immutable exports | the owner of each migrated domain | — | read-only archive until retirement |
+
+---
+
+## 17. Transition from Jira and Insight
+
+### 17.1 Domains and order
+
+The transition runs **domain by domain**. The order below is the recommended default (U4). It
+puts assets before tickets, so that migrated tickets link to ARGUS records.
+
+| Order | Domain | Jira / Insight scope | Owner |
+|---|---|---|---|
+| 1 (pilot) | SPARC vacuum equipment, with its Locations, Product Models and Installations | Insight vacuum objects; SPARC positions | Inventory and the SPARC beamline team |
+| 2 | the remaining non-IT Equipment, Locations and catalogue | Insight asset schemas | Inventory |
+| 3 | IT equipment, ports, addressing and IT Installations | Insight IT schemas | IT |
+| 4 | beamline Positions and Installations, one beamline at a time | ARGUS-native, with Insight as evidence | the beamline teams |
+| 5 | tickets and workflows, one Jira project at a time | Jira projects | Operations / service desk |
+| 6 | controlled documents | per U2 | document control |
+
+### 17.2 Stages per domain
+
+| Stage | Activity | Jira state | ARGUS state for the domain |
+|---|---|---|---|
+| **T0 Prepare** | name stewards and backups; freeze counting definitions; write the mapping specifications; pass the domain's readiness items (§19) | authoritative, writable | not holding the domain |
+| **T1 Import and reconcile** | full import into the streams `insight:schema=<id>` and `jira:<project>`; automatic binding by immutable id; review queues; first reconciliation report | authoritative, writable | read-only mirror; stewards work the queues |
+| **T2 Shadow validation** | incremental imports (at least daily) while Jira stays in use; a reconciliation report per run; workflow rehearsal with test data; performance tests | authoritative, writable | read-only. The only writes are review decisions about the migration itself (bindings, merges, classifications) |
+| **T3 Cutover** | make the Jira scope read-only; take the final delta up to watermark W; produce the final reconciliation report; freeze the streams; open editing in ARGUS | read-only from W | authoritative once the exit criteria are signed |
+| **T4 Archive** | keep the Jira scope readable for lookup; take and verify immutable exports; activate redirects | read-only archive | authoritative |
+| **T5 Retire Jira** | once every domain is past T4, §19 is complete and the retention decision (U1) allows it | decommissioned. Exports and redirects remain | authoritative |
+
+**No dual write.** At no stage are both systems writable for the same scope. During T1 and T2,
+ARGUS records only decisions about the migration. Those decisions do not change source data and
+are replayed on every import. T2 lasts at least **2 weeks, with 10 consecutive clean
+reconciliation runs** (a proposed default). Shadow validation must not become a prolonged
+parallel operation: if T2 exceeds 8 weeks, the governance group decides either to cut over or to
+return the domain to T1.
+
+### 17.3 The migration watermark
+
+The watermark W is captured **after** the Jira scope is made read-only:
+
+- for Jira: the highest `updated` timestamp and changelog id consumed;
+- for Insight: the highest object-history id and `updated` timestamp consumed.
+
+W is recorded on the stream's final source revision, together with the export manifest hash.
+The stream then gets a `frozen` revision event (I-SOR-1). A Jira change after W means the
+freeze failed. The cutover stops until that change is explained and imported.
+
+### 17.4 Cutover entry criteria
+
+All of the following must hold:
+
+1. The domain's product-readiness items (§19) have passed, and tests A33–A41 have passed for
+   the domain's data.
+2. The primary steward and the backup are named. No blocking conflict or held revision is open.
+   The other queues are within their ageing targets (§18.2).
+3. T2 is complete: at least 10 consecutive reconciliation runs with **zero unexplained
+   differences**.
+4. No migration item is in `M-BLOCK`. Every `M-MIXED` item is either resolved or accepted as
+   Provisional by its steward.
+5. A restore of ARGUS to a point in time has been rehearsed in staging within the last 30 days.
+6. Users are trained. The read-only change to the Jira scope is approved by the Jira
+   administrators and scheduled.
+7. Performance tests at production scale meet the targets in §19.
+
+### 17.5 Cutover exit criteria (the domain is authoritative in ARGUS)
+
+1. W is recorded, the final delta has been consumed and the streams are frozen.
+2. The final reconciliation report (§17.6) shows zero unexplained differences, and every Jira or
+   Insight identifier in scope resolves to an ARGUS record.
+3. A write attempt against the Jira scope fails (verified).
+4. Smoke tests pass for the domain in ARGUS: create, edit, search, link and, for tickets, a
+   complete workflow.
+5. The immutable export has been taken and its checksums verified.
+6. Lookup and redirects work for the domain's keys and URLs.
+7. The domain owner and the platform lead sign the exit, as an `approve_cutover` decision in the
+   ledger.
+
+### 17.6 The reconciliation report
+
+The report is produced per record type, comparing source and ARGUS:
+
+- counts of records, relationships and links, comments and history entries (Jira changelog
+  items against ledger events);
+- attachments: count, size and SHA-256 must all match;
+- workflow states: every Jira status mapped;
+- users: every referenced user resolved to an account, or to a restricted placeholder for users
+  who have left;
+- unresolved identifiers: must be zero.
+
+Every difference is either unexplained, which blocks the cutover, or explained by a decision
+reference (for example, a deliberate merge). The report is stored immutably with the stream's
+final source revision.
+
+### 17.7 Rollback and archival rules
+
+**Rollback.**
+
+- **Before cutover (T0–T2)**: roll back freely. Discard or roll back migration plans (§12.3),
+  or re-import. Jira remains the authority and is not touched.
+- **During the cutover window, before the exit is signed**: abort. The Jira scope is made
+  writable again. ARGUS editing opens only after the exit, so no ARGUS-native changes exist that
+  would need reverting.
+- **After the exit**: there is no rollback to Jira. Errors are corrected with ledger decisions
+  (supersede, retract, revoke, `unmerge`). A damaged ARGUS is recovered by point-in-time restore
+  of ARGUS, never by restoring Jira.
+- **Pilot exception.** For the pilot domain only, a **30-day reversion window** follows the exit.
+  If the pilot is abandoned (U9), the ARGUS-native changes since W are exported from the ledger
+  as a change report. They are applied once to the re-opened Jira scope by its administrators,
+  and ARGUS returns the domain to T1. This is a one-off, manual, audited export (I-SOR-2), not
+  synchronization. After day 30, the rule for "after the exit" applies. The window length is
+  reviewed after the pilot.
+
+**Archival.**
+
+- **Immutable exports** per scope at W. They contain:
+  - issues or objects with all fields;
+  - the complete changelog and object history;
+  - comments, links, workflow and schema definitions;
+  - attachments with a SHA-256 manifest;
+  - referenced users, restricted.
+
+  They are stored in write-once storage (object lock), with the manifest hash recorded in the
+  ARGUS ledger.
+- **ARGUS keeps** migration maps, pre-images, aliases, the reconciliation reports and the source
+  metadata as audit evidence. That metadata covers Jira object ids, issue keys, timestamps and
+  URLs.
+- **Lookup.** ARGUS resolves Jira keys, Insight keys and objectIds, and old Jira URLs, through
+  alias labels (`/lookup/<key>`). When Jira is retired, its host name redirects to that lookup;
+  the DNS change is IT's.
+- **Retention** of exports and archives follows the institutional records policy (U1). Access
+  to personal data in archives is restricted (U6).
+- **Jira retirement** happens only after every domain has passed T4 and the readiness checklist
+  (§19) is complete.
+
+---
+
+## 18. Ownership and governance
+
+### 18.1 Domain owners and stewards
+
+Every domain has a **primary steward and a backup**, named in the `stewards` configuration (U3).
+Review items are routed by workspace, record type and predicate.
+
+| Domain | Owner | Queues routed to its steward |
+|---|---|---|
+| non-IT Equipment, Locations, catalogue | Inventory | proposals, conflicts, duplicates and migration items for Equipment, Locations and Product Models; `Other Equipment` promotion reviews |
+| IT Equipment, IT Positions, ports, addressing, IT Installations | IT | the same for IT; port-mapping items for IT-side ports |
+| functional Positions and their Installations (per beamline) | the beamline team | installation proposals, possible overlaps, positions flagged for retirement, held revisions of that beamline's streams |
+| channel-to-position mappings | Controls | `acts on` proposals and conflicts; port-mapping items for segments; `safety_class` changes (with the safety owners) |
+| lattice | Accelerator Physics | lattice-stream conflicts; `upstream of` |
+| ticket workflows | Operations / service desk | ticket-subject changes; workflow configuration; ticket-attribution items |
+| controlled documents | document control and the technical owners | approvals, supersessions and retention decisions |
+| engineering records, costs | work-package owners | PBS-stream conflicts and held revisions |
+| restricted classes | the security and safety officers | grants, classification changes |
+| policy, registry, protected predicates, thresholds | the governance group | policy changes (§18.3) |
+| software operation | the ARGUS platform team | pipeline failures, job backlogs. **It owns no domain data** |
+
+### 18.2 Review queues, ageing and escalation
+
+Every review item carries `owner_domain`, `steward`, `created_at`, `due_at`, `age` and
+`escalation_level`. Dashboards show each queue's size and age distribution. Escalation notifies
+the backup, then the governance group. The targets below are proposed defaults in working days.
+
+| Queue | Due | To backup | To governance group |
+|---|---|---|---|
+| blocking conflict; held revision | 2 | 3 | 5 |
+| port confirmation, `safety_class ≠ none` | before the equipment returns to operation | at the due point | 1 day after |
+| port confirmation, other | 5 | 7 | 10 |
+| identity candidate (duplicate) | 10 | 15 | 30 |
+| migration item | before the domain's cutover | — | at cutover planning |
+| proposal (inferred fact) | 20 | 30 | 60 |
+| non-blocking conflict; possible overlap | 30 | 45 | 90 |
+| retirement flag (a position with an Installation) | 10 | 15 | 30 |
+
+### 18.3 Policy governance (D9)
+
+- **The first authority policy** is signed by a cross-domain governance group. Its members are
+  the owners in §18.1 (or their delegates) and the platform lead.
+- **Each later version** needs all of the following:
+  - a reviewed change in the repository;
+  - a passing validator run and an impact report (§7.7);
+  - technical approval by the platform team;
+  - approval from the owners of every protected predicate the change affects.
+
+  The `activate_policy` decision lists these approvals.
+- **The relation registry and the thresholds** in this document follow the same procedure.
+
+### 18.4 The platform team
+
+The platform team:
+
+- operates ARGUS: deployments, pipelines, monitoring, backups, point-in-time recovery and
+  disaster recovery;
+- implements access configuration as the owners define it;
+- runs the migration tooling and produces reconciliation reports.
+
+It does not decide domain facts, approve domain reviews or own domain data. Its technical
+approval of policies checks feasibility and performance, not content.
+
+---
+
+## 19. Product readiness for Jira retirement
+
+Each item names the evidence required, and when it is needed:
+
+- **P**: before the pilot cutover;
+- **D**: before every domain's cutover (for the capability that domain uses);
+- **R**: before Jira retirement.
+
+Performance and recovery targets are proposed defaults for sign-off (U10).
+
+| # | Capability | Evidence | Needed |
+|---|---|---|---|
+| 1 | Role-based access control and restricted records | a role model per domain; record- and field-level restriction; a permission test suite covering search, API, export, graph, notifications and MCP (A37); an access review signed by the owners | P |
+| 2 | Complete append-only audit history | ledger grants (insert and select only); a replay-equals-projection test at production scale (A16); an audit view per record; a daily hash of the event log stored outside ARGUS | P |
+| 3 | Ticket workflows | configurable states and transitions per ticket type; assignment; notifications; escalation timers; comments; watchers; every workflow of the migrated Jira projects rehearsed | D (tickets) |
+| 4 | Documents | versioning, approval (review, approve, release), supersession, retention classes, attachments with checksums | D (documents) |
+| 5 | Equipment | lifecycle states, custody (`custodian` with its history), location history, designated spares and their availability, Installation history | P |
+| 6 | Search and cross-linking | one search across assets, documents and tickets, respecting access control; links navigable in both directions; search p95 < 1 s at 10× current volume | P |
+| 7 | Controlled imports and bulk operations | every bulk change is a ledger batch with a dry-run preview; approval required above 100 records; undo by `revoke` | P |
+| 8 | Stable APIs and external identifiers | a versioned API with a deprecation policy; Jira and Insight identifiers resolvable through the API | D |
+| 9 | Complete export in open formats | JSON or CSV plus attachments plus the ledger as JSON lines, with a documented schema; a tested load of an export into an empty instance | P |
+| 10 | Backup, restore, disaster recovery, point-in-time recovery | scheduled backups; a point-in-time restore rehearsed at least quarterly; RPO ≤ 15 min and RTO ≤ 4 h; one disaster-recovery drill | P |
+| 11 | Historical Jira keys and URLs | lookup and redirects (A40); redirect of the Jira host after retirement | D; R for the host |
+| 12 | Reconciliation reports | per domain and per run, stored immutably; they prove that records, relationships, comments, attachments and history were not lost (A41) | D |
+| 13 | Performance at production scale | record page p95 < 500 ms; own edit visible in < 1 s (I-UX-1); full re-projection of the largest workspace < 30 min; final cutover import within the cutover window | D |
+| 14 | Retirement conditions | all domains past T4; immutable exports verified; retention decision (U1) taken; items 1–13 met | R |
+
+---
+
+## 20. Stakeholder decisions D1–D14 (decided defaults)
+
+| # | Decision | Applied in |
+|---|---|---|
+| **D1** System of record | ARGUS is authoritative for Equipment, Positions, Installations, Locations, Product Models, Documents, Tickets, workflows and their relationships. Jira object ids, issue keys, timestamps, URLs and source metadata are kept as aliases and audit evidence. There is no permanent two-way synchronization and no long-term write-back. The transition is staged per domain: import and reconcile, shadow validation, cutover at a final watermark, a read-only Jira scope, an archive with immutable exports, and then Jira's retirement | §16, §17 |
+| **D2** Ownership | Inventory: non-IT Equipment and Locations. IT: IT Equipment, IT Positions, ports, addressing and IT Installations. Beamline teams: functional Positions and their Installations. Operations / service desk: ticket workflows. Document control and technical owners: controlled documents. The platform team operates the software and owns no domain data | §4.1, §18.1 |
+| **D3** Review responsibility | Every domain has a primary steward and a backup. Every queue has an owner, ageing indicators and escalation rules | §18.1, §18.2 |
+| **D4** Identity and merging | Records with the same immutable Jira or Insight identifier are bound automatically. Merging different source objects on serial, MAC, hostname, location or similarity requires review. After cutover, strong-identifier uniqueness is enforced when a record is created | §10 |
+| **D5** Position granularity | A Position is created only for a persistent function that is independently replaceable or operationally significant. Software channels and calculated PVs stay Control Devices | §5.3 |
+| **D6** Visibility | Ordinary records are broadly searchable according to role. Costs, personnel information, security incidents, safety investigations and sensitive designs are restricted at record or field level. Secrets are never stored | §4.3 |
+| **D7** Thresholds | Retirement guard: more than 10 % **and** at least 10 subjects. Revisions that would retire records with tickets, documents or Confirmed Installations are always held. `Other Equipment` is promoted at 25 records, 2 workspaces, 3 requested class-specific attributes, or a real query or causal need. `Unclassified` raises an alert above 5 % with at least 10 records, or above 50 records | §5.5, §11 |
+| **D8** Ticket time | Native `occurred_from`, `occurred_until` with precision, and `detected_at`, `reported_at`, `resolved_at`. Occurrence is required for operational incidents. The creation-time fallback applies only to migrated legacy tickets, with the uncertainty shown | §8.6 |
+| **D9** Policy governance | The first policy is signed by the cross-domain governance group. Later versions need a reviewed change, an impact report, platform approval and the approval of affected protected-predicate owners | §18.3 |
+| **D10** Consistency | A user's own edits are projected synchronously. Derivation and reconciliation run asynchronously, with a visible processing state | §7.6 |
+| **D11** Migration rollback | Rollback is allowed before domain cutover. After cutover, corrections are ledger decisions, never a Jira restore. Migration maps, pre-images, immutable exports and tested point-in-time recovery are kept. The pilot has a 30-day window, reconsidered after the pilot | §12.6, §17.7 |
+| **D12** DNS, lattice, counts | The DNS convention is advisory until IT formally approves it, so inferences drawn from it stay advisory. Accelerator Physics owns lattice identity, order and design values. Controls owns channel-to-position mappings. Disputed baseline counts (C15) are recomputed from frozen source revisions using explicit counting definitions | §7.7, §16 |
+| **D13** Endpoint history | An Access Point never moves between Positions. When an address moves, the old Access Point is retired and a successor created, and the address history is kept through aliases and successor links. A separate `Network Service` record is introduced only if a persistent service identity is ever required | §9.2 |
+| **D14** Port safety | Swap-time confirmation is required for personnel safety, machine protection, interlocks, critical RF permits, critical actuators, and any connection where a wrong mapping could damage equipment. Automatic attachment only for a unique, registry-backed, fully compatible match. Protected-predicate owners: `serial` and `inventory_number` → Inventory; `ip`, `mac` and `fqdn` → IT; lattice design values → Accelerator Physics; `acts on` → Controls | §9.3, §7.7 |
+
+---
+
+## 21. Decisions that cannot be settled technically
+
+- **U1. Retention.** How long must the Jira archive, the immutable exports and ARGUS audit data
+  be kept? This is set by the institutional records policy and legal requirements, and it gates
+  T5.
+- **U2. Scope of "documents".** Does ARGUS also replace Confluence (and Git-hosted documents)
+  for controlled documents, or do they remain authoring tools feeding ARGUS?
+- **U3. Named people.** Who are the primary steward and backup for each domain, and is there
+  enough capacity to keep the queues within their targets during migration?
+- **U4. Order and dates.** Which domain order and cutover dates? This includes confirming the
+  pilot (recommended: SPARC vacuum equipment and its Installations).
+- **U5. Jira contract.** When do the Jira and Insight licences end, and where will the read-only
+  archive be hosted until T5?
+- **U6. Personal data.** How are users named in migrated tickets and archives handled,
+  especially users who have left? This is for the data-protection officer.
+- **U7. Sensitive tickets.** Do security incidents and safety investigations migrate into
+  ARGUS as restricted records, or stay in a dedicated system?
+- **U8. DNS convention.** When will IT formally approve it (or not)? Until then, inferences from
+  it stay advisory (D12).
+- **U9. Pilot outcome.** Who decides at day 30 whether the pilot is accepted or reverted, and on
+  which criteria beyond §17.5?
+- **U10. Service levels.** Sign-off of the performance and recovery targets in §19 (RPO, RTO,
+  response times) by the domain owners.
+
+---
+
+## 22. Architectural policy
+
+ARGUS will become the system of record for assets, documents, tickets, Positions, Installations,
+and their relationships. Jira and Insight are migration sources and temporary read-only
+archives. Migration will occur domain by domain, with no permanent bidirectional synchronization
+and no prolonged dual-write period.
