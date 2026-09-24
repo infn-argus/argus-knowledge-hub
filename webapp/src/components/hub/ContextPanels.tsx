@@ -8,19 +8,21 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { hubApi } from "../../api/client";
 import type { HubDocument } from "../../api/hubTypes";
+import { INSTALLABLE, InstallationHistory, ProvenancePanel } from "./LedgerPanels";
 import { Card, DocumentRow, Empty, StatTile, Tabs, TicketRow, VIA_META } from "./ui";
 
-type AssetTab = "service" | "knowledge" | "connections";
+type AssetTab = "service" | "knowledge" | "connections" | "installations" | "provenance";
+const ASSET_TABS: AssetTab[] = ["service", "knowledge", "connections", "installations", "provenance"];
 
 export function AssetContextPanel({ assetUid }: { assetUid: string }) {
   const location = useLocation();
   const initial = (location.hash.replace("#", "") as AssetTab) || "service";
-  const [tab, setTab] = useState<AssetTab>(["service", "knowledge", "connections"].includes(initial) ? initial : "service");
+  const [tab, setTab] = useState<AssetTab>(ASSET_TABS.includes(initial) ? initial : "service");
   const ctx = useQuery({ queryKey: ["hub-asset", assetUid], queryFn: () => hubApi.assetContext(assetUid) });
 
   useEffect(() => {
-    const h = location.hash.replace("#", "");
-    if (h === "service" || h === "knowledge" || h === "connections") setTab(h);
+    const h = location.hash.replace("#", "") as AssetTab;
+    if (ASSET_TABS.includes(h)) setTab(h);
   }, [location.hash]);
 
   if (ctx.isLoading) return <div className="mt-6 h-40 animate-pulse rounded-lg bg-slate-100" />;
@@ -69,6 +71,8 @@ export function AssetContextPanel({ assetUid }: { assetUid: string }) {
               { key: "service", label: "Service", count: c.stats.open_tickets, alert: c.stats.open_tickets > 0 },
               { key: "knowledge", label: "Knowledge", count: c.stats.documents, alert: c.stats.documents_overdue > 0 },
               { key: "connections", label: "Connections", count: c.stats.relations },
+              { key: "installations", label: INSTALLABLE.has(c.asset.type) ? "Installed units" : "Installations" },
+              { key: "provenance", label: "Provenance" },
             ]}
           />
           <div className="flex gap-2 pb-2">
@@ -151,6 +155,9 @@ export function AssetContextPanel({ assetUid }: { assetUid: string }) {
                 ))}
               </div>
             ))}
+
+          {tab === "installations" && <InstallationHistory uid={assetUid} type={c.asset.type} />}
+          {tab === "provenance" && <ProvenancePanel uid={assetUid} />}
 
           {tab === "connections" &&
             (c.relations.items.length === 0 ? (

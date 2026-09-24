@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { workspacesApi } from "../api/client";
+import { ledgerApi, workspacesApi } from "../api/client";
 import { signOut } from "../api/signOut";
 import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
 import { CommandPalette, useCommandPaletteShortcut } from "../components/hub/CommandPalette";
@@ -209,6 +209,11 @@ export function AppShell() {
     }
   }, [storedSection]);
 
+  const review = useQuery({ queryKey: ["ledger-review"], queryFn: ledgerApi.review, refetchInterval: 60_000 });
+  const reviewCount = review.data
+    ? review.data.counts.blocking + review.data.counts.held_revisions + review.data.counts.installation_proposals
+    : 0;
+
   const [paletteOpen, setPaletteOpen] = useState(false);
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   useCommandPaletteShortcut(openPalette);
@@ -230,6 +235,15 @@ export function AppShell() {
         <nav className="border-t border-slate-200 px-2 py-2" aria-label="Main">
           <NavItem to="/" end>
             <span className="w-4 text-center text-slate-400">⌂</span> Cockpit
+          </NavItem>
+          <NavItem to="/review">
+            <span className="w-4 text-center text-slate-400">✓</span>
+            <span className="flex-1">Review queue</span>
+            {reviewCount > 0 && (
+              <span className="rounded-full bg-red-100 px-1.5 text-[11px] font-medium tabular-nums text-red-700">
+                {reviewCount}
+              </span>
+            )}
           </NavItem>
           {ORDER.map((key) => {
             const s = SECTIONS[key];

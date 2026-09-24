@@ -305,12 +305,21 @@ export function AssetDetail() {
                       {assetName(r.to_asset_uid)}
                     </Link>
                   </span>
-                  <button
-                    onClick={() => deleteRelationMutation.mutate(r.id)}
-                    className="text-xs text-red-500 hover:text-red-700"
-                  >
-                    Remove
-                  </button>
+                  {r.derivation ? (
+                    <span
+                      className="text-[11px] text-slate-400"
+                      title="Maintained by the fact ledger from sources, installations and decisions; not edited here"
+                    >
+                      {r.derivation === "derived" ? "derived" : "from sources"}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => deleteRelationMutation.mutate(r.id)}
+                      className="text-xs text-red-500 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -327,12 +336,21 @@ export function AssetDetail() {
                     </Link>{" "}
                     → {r.relation_type}
                   </span>
-                  <button
-                    onClick={() => deleteRelationMutation.mutate(r.id)}
-                    className="text-xs text-red-500 hover:text-red-700"
-                  >
-                    Remove
-                  </button>
+                  {r.derivation ? (
+                    <span
+                      className="text-[11px] text-slate-400"
+                      title="Maintained by the fact ledger from sources, installations and decisions; not edited here"
+                    >
+                      {r.derivation === "derived" ? "derived" : "from sources"}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => deleteRelationMutation.mutate(r.id)}
+                      className="text-xs text-red-500 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

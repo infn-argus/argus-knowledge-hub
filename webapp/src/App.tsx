@@ -30,6 +30,7 @@ import { IssueForm } from "./pages/issues/Form";
 import { IssueList } from "./pages/issues/List";
 import { IssueSearch } from "./pages/issues/Search";
 import { LabelList } from "./pages/labels/List";
+import { ReviewQueuePage } from "./pages/review/Queue";
 import { SchemaDetail } from "./pages/schemas/Detail";
 import { IconLibrary } from "./pages/icons/List";
 import { SchemaForm } from "./pages/schemas/Form";
@@ -88,6 +89,7 @@ export function App() {
           <Route path="/documents/:uid" element={<DocumentDetail />} />
 
           <Route path="/graph" element={<GraphExplorer />} />
+          <Route path="/review" element={<ReviewQueuePage />} />
 
           <Route path="/labels" element={<LabelList />} />
 

@@ -103,6 +103,9 @@ export interface Relation {
   to_asset_uid: string;
   relation_type: string;
   created_at: string;
+  /** Set on edges the fact ledger maintains ("ledger" from claims, "derived"
+   * from other records); those are never edited directly. */
+  derivation?: string | null;
 }
 
 export interface Issue {

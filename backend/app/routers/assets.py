@@ -281,6 +281,11 @@ def delete_relation(
     relation = db.get(Relation, relation_id)
     if relation is None or relation.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Relation not found")
+    if relation.derivation is not None:
+        # Only the ledger writes these (I-PROJ-2): change the source, the
+        # installation or the decision behind the edge instead.
+        raise HTTPException(status_code=409, detail="This relation is maintained by the fact ledger "
+                                                    "and cannot be removed directly")
     from_uid, to_uid = relation.from_asset_uid, relation.to_asset_uid
     db.delete(relation)
     db.commit()

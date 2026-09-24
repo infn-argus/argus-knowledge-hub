@@ -56,6 +56,13 @@ currently valid* revision rather than to an arbitrary PDF.
   import configurations and merge strategies (override / don't override / update-if-newer).
   Imports never delete: a re-import keeps values people edited since the last run (import
   snapshots) and records the commit it read. The old wipe-and-reimport strategy is retired.
+- **Fact ledger and installations.** Sources (EPIK8s configuration, Insight) are ingested as
+  revisions of claims in an append-only ledger; an authority policy decides which source owns
+  each fact, people's confirmations stick, and every value on a record can show where it came
+  from (*Provenance* tab). A position's history of installed units is kept as Installation
+  records, with swaps and "what was installed on date X" queries. A revision that would retire
+  too much is held, and conflicts, inferred facts and proposed installations wait in the
+  *Review queue*. Served by `/v1/ledger` and `/v1/installations`.
 - **Data integrity tools**: relink of unresolved references, and a report of missing
   references, dangling links and orphaned objects, with targeted cleanup actions.
 
@@ -64,7 +71,8 @@ currently valid* revision rather than to an arbitrary PDF.
 - [The asset model revision](docs/asset-model-revision.md) — positions and installations, the fact
   ledger, the relation registry, identity reconciliation, and ARGUS as the system of record that
   replaces Jira/Insight domain by domain. The implementation follows its plan (§13); the unified
-  hub and the P0 import fixes are the first increment.
+  hub and the P0 import fixes are the first increment; the S1 vertical slice (fact ledger,
+  authority policy, installations, review queue) is the second.
 - [Object schema design for a large-scale accelerator](docs/asset-schema-design.md) — the
   type catalogue (122 types over four planes), the relation vocabulary, composite elements such
   as a screen station, and how a beamline's EPIK8s control configuration and a EuPRAXIA-style

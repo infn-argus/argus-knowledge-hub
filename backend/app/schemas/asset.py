@@ -42,6 +42,8 @@ class AssetOut(BaseModel):
     inbound_relations: list[str]
     outbound_relations: list[str]
     is_global: bool
+    # Provisional, Active, Retired or Merged: projected by the fact ledger.
+    record_status: str = "Active"
     created_at: datetime
     updated_at: datetime
     deleted_at: Optional[datetime]
@@ -71,3 +73,6 @@ class RelationOut(BaseModel):
     to_asset_uid: str
     relation_type: str
     created_at: datetime
+    # None for hand-made and legacy edges; "ledger" or "derived" for edges the
+    # fact ledger maintains, which are not edited directly.
+    derivation: Optional[str] = None

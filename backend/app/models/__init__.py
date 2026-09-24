@@ -17,6 +17,7 @@ from app.models.icon import Icon
 from app.models.import_config import ImportConfig
 from app.models.import_job import ImportJob
 from app.models.import_snapshot import ImportSnapshot
+from app.models import ledger  # noqa: F401  (registers the ledger tables)
 from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
 from app.models.membership import Membership
 from app.models.role import Role, RoleBinding

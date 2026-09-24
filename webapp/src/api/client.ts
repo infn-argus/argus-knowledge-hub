@@ -84,6 +84,13 @@ import type {
   HubSearchResult,
   TicketContext,
 } from "./hubTypes";
+import type {
+  Decision as LedgerDecision,
+  InstallationView,
+  RecordFacts,
+  ReviewQueue,
+  TemporalValue,
+} from "./ledgerTypes";
 
 export class ApiError extends Error {
   status: number;
@@ -736,4 +743,35 @@ export const hubApi = {
   assetContext: (uid: string) => request<AssetContext>(`/v1/hub/assets/${uid}/context`),
   ticketContext: (uid: string) => request<TicketContext>(`/v1/hub/tickets/${uid}/context`),
   documentContext: (uid: string) => request<DocumentContext>(`/v1/hub/documents/${uid}/context`),
+};
+
+/** The fact ledger: review queue, provenance, decisions and installation
+ * history. Every change here is a decision recorded in the audit ledger. */
+export const ledgerApi = {
+  review: () => request<ReviewQueue>("/v1/ledger/review"),
+  facts: (uid: string) => request<RecordFacts>(`/v1/ledger/records/${uid}/facts`),
+  decide: (batch: LedgerDecision[]) =>
+    request<{ decisions: string[] }>("/v1/ledger/decisions", { method: "POST", body: json({ batch }) }),
+  edit: (uid: string, input: { predicate: string; value?: unknown; member?: unknown; present?: boolean; reason?: string }) =>
+    request<{ ok: boolean }>(`/v1/ledger/records/${uid}/edit`, { method: "POST", body: json(input) }),
+  approveRevision: (revisionId: string) =>
+    request<{ state: string }>(`/v1/ledger/revisions/${revisionId}/approve`, { method: "POST" }),
+  rejectRevision: (revisionId: string) =>
+    request<{ state: string }>(`/v1/ledger/revisions/${revisionId}/reject`, { method: "POST" }),
+  installations: (query: { position_uid?: string; asset_uid?: string; at?: string }) => {
+    const q = new URLSearchParams(Object.entries(query).filter(([, v]) => v) as [string, string][]);
+    return request<InstallationView[]>(`/v1/installations?${q.toString()}`);
+  },
+  confirmInstallation: (uid: string, validFrom?: TemporalValue) =>
+    request<{ ok: boolean }>(`/v1/installations/${uid}/confirm`, {
+      method: "POST",
+      body: json(validFrom ? { valid_from: validFrom } : {}),
+    }),
+  rejectInstallation: (uid: string) =>
+    request<{ ok: boolean }>(`/v1/installations/${uid}/reject`, { method: "POST" }),
+  swap: (input: { position_uid: string; new_asset_uid: string; at: string; precision?: string; reason?: string }) =>
+    request<{ ended: string[]; installation_uid: string }>("/v1/installations/swap", {
+      method: "POST",
+      body: json(input),
+    }),
 };

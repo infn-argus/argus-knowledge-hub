@@ -16,6 +16,7 @@ from app.routers import (
     graph,
     groups,
     hub,
+    ledger,
     icons,
     import_configs,
     imports,
@@ -52,6 +53,8 @@ app.include_router(attachments.router)
 app.include_router(global_values.router)
 app.include_router(graph.router)
 app.include_router(hub.router)
+app.include_router(ledger.router)
+app.include_router(ledger.installations_router)
 app.include_router(attribute_values.router)
 app.include_router(ai.router)
 app.include_router(mcp.router)

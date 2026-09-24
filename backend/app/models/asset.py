@@ -26,6 +26,10 @@ class Asset(Base, WorkspaceScopedMixin, TimestampMixin):
     # Visible/referenceable from any workspace when true; editing/deleting still
     # requires permission in the workspace that owns it (workspace_id, unchanged).
     is_global: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The record's own state, projected by the fact ledger (Provisional, Active,
+    # Retired, Merged); separate from argus_lifecycle, the equipment's state.
+    record_status: Mapped[str] = mapped_column(String, default="Active", server_default="Active")
+    merged_into_uid: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class Relation(Base, WorkspaceScopedMixin):
@@ -40,3 +44,9 @@ class Relation(Base, WorkspaceScopedMixin):
     )
     relation_type: Mapped[str] = mapped_column(String)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # None for edges made before the ledger (by importers or by hand);
+    # "ledger" for edges projected from claims; "derived" for edges computed
+    # from other records (realized by, from Installations). Only the ledger
+    # writes or removes the last two.
+    derivation: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    rule: Mapped[Optional[str]] = mapped_column(String, nullable=True)
