@@ -1,6 +1,8 @@
+import hashlib
+import os
 from typing import Optional
 
-from sqlalchemy import ForeignKey, Integer, String
+from sqlalchemy import ForeignKey, Integer, String, event
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -25,7 +27,27 @@ class Attachment(Base, WorkspaceScopedMixin, TimestampMixin):
     filename: Mapped[str] = mapped_column(String)
     mime_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # SHA-256 of the stored bytes: what a cutover reconciliation compares (§17.6).
+    sha256: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     author: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     storage_path: Mapped[str] = mapped_column(String)
     backend_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     backend_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+
+def file_sha256(path: str) -> Optional[str]:
+    if not path or not os.path.exists(path):
+        return None
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+@event.listens_for(Attachment, "before_insert")
+def _checksum(_mapper, _connection, target: Attachment) -> None:
+    # Every upload path writes the file before the row, so one hook covers
+    # them all, imports included.
+    if target.sha256 is None:
+        target.sha256 = file_sha256(target.storage_path)

@@ -17,7 +17,7 @@ from app.models.document import Document
 from app.models.issue import Issue
 from app.services import knowledge_hub as hub
 from app.services.permissions import resolve_permission
-from app.services.visibility import asset_visible_in
+from app.services.visibility import asset_visible_in, can_see
 
 router = APIRouter(prefix="/v1/hub", tags=["hub"])
 
@@ -80,7 +80,7 @@ def ticket_context(uid: str, s: _Scope = Depends(scope), db: Session = Depends(g
     if not s.access.tickets:
         raise HTTPException(status_code=403, detail="Not permitted")
     issue = db.get(Issue, uid)
-    if issue is None or issue.deleted_at is not None or issue.workspace_id != s.workspace_id:
+    if issue is None or issue.deleted_at is not None or issue.workspace_id != s.workspace_id or not can_see(issue):
         raise HTTPException(status_code=404, detail="Ticket not found")
     return hub.ticket_context(db, s.workspace_id, issue, s.access)
 

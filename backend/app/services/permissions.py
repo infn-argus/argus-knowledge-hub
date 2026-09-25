@@ -19,7 +19,8 @@ from app.models.user import User
 from app.models.workspace import Workspace
 from app.services.roles import membership_permissions
 
-RESOURCES = ("objects", "tickets", "documents", "workspace")
+# "restricted" holds class names rather than actions (§4.3): {"restricted": ["costs"]}.
+RESOURCES = ("objects", "tickets", "documents", "workspace", "restricted")
 
 RESOURCE_SUFFIX = {"objects": "", "tickets": "_tickets", "documents": "_documents"}
 

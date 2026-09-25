@@ -44,6 +44,10 @@ const CONFLICT_TEXT: Record<string, { title: string; explain: string }> = {
     title: "A confirmed port is no longer compatible",
     explain: "The port confirmed for this installation fails a hard check. A confirmation never overrides compatibility.",
   },
+  identity_candidate: {
+    title: "Two records may be the same thing",
+    explain: "They share a strong identifier. Nothing is merged automatically: merge them, or say they are different.",
+  },
   retirement_blocked: {
     title: "A source dropped a position that is still occupied",
     explain: "The position stays active because a confirmed installation is current. End the installation if the unit was removed.",
@@ -86,7 +90,17 @@ export function ReviewQueuePage() {
       ledgerApi.confirmPortMap(v.segment, { installation_uid: v.installation, port_uid: v.port }),
     onSuccess: done,
   });
-  const error = [decide, confirmInst, rejectInst, approve, rejectRev, portMap].find((m) => m.isError)?.error;
+  const merge = useMutation({
+    mutationFn: (v: { survivor: string; loser: string }) =>
+      ledgerApi.merge({ survivor_uid: v.survivor, loser_uid: v.loser, reason: "merged from the review queue" }),
+    onSuccess: done,
+  });
+  const dismiss = useMutation({
+    mutationFn: (v: { records: string[]; kind: "reject_candidate" | "confirm_new" }) => ledgerApi.dismissCandidate(v),
+    onSuccess: done,
+  });
+  const error = [decide, confirmInst, rejectInst, approve, rejectRev, portMap, merge, dismiss].find((m) => m.isError)
+    ?.error;
 
   if (review.isLoading) return <p className="text-sm text-slate-500">Loading the review queue…</p>;
   if (!review.data) return <p className="text-sm text-red-600">The review queue could not be loaded.</p>;
@@ -184,6 +198,14 @@ export function ReviewQueuePage() {
                         </button>
                       ))}
                     </div>
+                  )}
+                  {c.type === "identity_candidate" && (
+                    <IdentityActions
+                      records={(c.detail.records as string[]) ?? []}
+                      evidence={String(c.detail.evidence ?? "")}
+                      onMerge={(survivor, loser) => merge.mutate({ survivor, loser })}
+                      onDismiss={(kind) => dismiss.mutate({ records: c.detail.records as string[], kind })}
+                    />
                   )}
                   {c.type.startsWith("port_") && c.record && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -334,5 +356,49 @@ function RulesCard() {
         </p>
       ))}
     </Card>
+  );
+}
+
+function IdentityActions({
+  records,
+  evidence,
+  onMerge,
+  onDismiss,
+}: {
+  records: string[];
+  evidence: string;
+  onMerge: (survivor: string, loser: string) => void;
+  onDismiss: (kind: "reject_candidate" | "confirm_new") => void;
+}) {
+  const [a, b] = records;
+  const one = useQuery({ queryKey: ["ledger-facts", a], queryFn: () => ledgerApi.facts(a), enabled: !!a });
+  const two = useQuery({ queryKey: ["ledger-facts", b], queryFn: () => ledgerApi.facts(b), enabled: !!b });
+  const ra = one.data?.record;
+  const rb = two.data?.record;
+  return (
+    <div className="mt-2 space-y-2">
+      <p className="text-xs text-slate-600">{evidence}</p>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <RecordLink r={ra ?? null} /> <span className="text-slate-400">and</span> <RecordLink r={rb ?? null} />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {ra && rb && (
+          <>
+            <button onClick={() => onMerge(a, b)} className="rounded border border-slate-300 bg-white px-3 py-1 text-xs hover:bg-slate-50">
+              Merge into {ra.key}
+            </button>
+            <button onClick={() => onMerge(b, a)} className="rounded border border-slate-300 bg-white px-3 py-1 text-xs hover:bg-slate-50">
+              Merge into {rb.key}
+            </button>
+          </>
+        )}
+        <button onClick={() => onDismiss("confirm_new")} className="rounded border border-slate-300 px-3 py-1 text-xs">
+          Both are real, different items
+        </button>
+        <button onClick={() => onDismiss("reject_candidate")} className="rounded border border-slate-300 px-3 py-1 text-xs">
+          Not the same — dismiss
+        </button>
+      </div>
+    </div>
   );
 }

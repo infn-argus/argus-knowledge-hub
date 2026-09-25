@@ -118,6 +118,19 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           })),
         });
     }
+    if (debounced.trim().length >= 2)
+      out.push({
+        label: "History",
+        items: [
+          {
+            id: "lookup",
+            kind: "action",
+            title: `Look up “${debounced.trim()}” as an old Jira or Insight key`,
+            subtitle: "Goes to the ARGUS record it became, or to the archive",
+            to: `/lookup/${debounced.trim()}`,
+          } as Item,
+        ],
+      });
     const q = query.trim().toLowerCase();
     const actions = ACTIONS.filter(
       (a) => !q || a.title.toLowerCase().includes(q) || (a.subtitle ?? "").toLowerCase().includes(q),
@@ -185,7 +198,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           <kbd className="rounded border border-slate-200 px-1.5 text-[10px] text-slate-400">Esc</kbd>
         </div>
         <div className="max-h-[60vh] overflow-y-auto py-2">
-          {debounced.length >= 2 && results.data && flat.length === ACTIONS.length && (
+          {debounced.length >= 2 && results.data && results.data.assets.length + results.data.tickets.length + results.data.documents.length === 0 && (
             <p className="px-4 py-3 text-sm text-slate-500">
               Nothing matches “{debounced}” in assets, tickets or documents.
             </p>

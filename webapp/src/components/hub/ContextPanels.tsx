@@ -19,7 +19,12 @@ export function AssetContextPanel({ assetUid }: { assetUid: string }) {
   const location = useLocation();
   const initial = (location.hash.replace("#", "") as AssetTab) || "service";
   const [tab, setTab] = useState<AssetTab>(ASSET_TABS.includes(initial) ? initial : "service");
-  const ctx = useQuery({ queryKey: ["hub-asset", assetUid], queryFn: () => hubApi.assetContext(assetUid) });
+  const ctx = useQuery({
+    queryKey: ["hub-asset", assetUid],
+    queryFn: () => hubApi.assetContext(assetUid),
+    // While derived links are catching up with an edit, look again shortly.
+    refetchInterval: (q) => (q.state.data?.processing ? 2000 : false),
+  });
 
   useEffect(() => {
     const h = location.hash.replace("#", "") as AssetTab;
@@ -36,6 +41,20 @@ export function AssetContextPanel({ assetUid }: { assetUid: string }) {
 
   return (
     <section className="mt-6" aria-label="Asset 360°">
+      {(c.processing || c.restricted) && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {c.processing && (
+            <span className="rounded bg-sky-50 px-2 py-0.5 text-xs text-sky-800 ring-1 ring-inset ring-sky-200">
+              Deriving — links, counts and the graph are catching up with the latest edit
+            </span>
+          )}
+          {c.restricted && (
+            <span className="rounded bg-red-50 px-2 py-0.5 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+              Restricted: {c.restricted.replace(/_/g, " ")} — hidden from anyone without that grant
+            </span>
+          )}
+        </div>
+      )}
       {c.type_path.length > 1 && (
         <p className="mb-2 text-xs text-slate-500">
           Type: {c.type_path.join(" › ")}

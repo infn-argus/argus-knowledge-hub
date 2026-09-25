@@ -26,21 +26,26 @@ def confirm_value(uid: str, predicate: str, value, *, member: Optional[str] = No
 
 
 def edit_value(db: Session, workspace_id: str, actor: str, uid: str, predicate: str, value,
-               reason: Optional[str] = None) -> list:
+               reason: Optional[str] = None, defer_derive: bool = False) -> list:
     """A person setting a field: their statement, confirmed, replacing any
     confirmation they could see (an edit form shows the current value)."""
+    from app.ledger.cutover import assert_writable
+    assert_writable(db, workspace_id, "objects")
     stream = engine.person_stream(db, workspace_id, actor)
     engine.add_manual_claims(db, stream, [ParsedClaim(f"uid:{uid}", predicate, value, method="manual")],
                              cause=f"edit by {actor}")
     return engine.apply_decisions(db, workspace_id, actor, [
-        confirm_value(uid, predicate, value, replaces=_active(db, uid, predicate), reason=reason)])
+        confirm_value(uid, predicate, value, replaces=_active(db, uid, predicate), reason=reason)],
+        defer_derive=defer_derive)
 
 
 def set_member(db: Session, workspace_id: str, actor: str, uid: str, predicate: str, member_value,
-               present: bool, reason: Optional[str] = None) -> list:
+               present: bool, reason: Optional[str] = None, defer_derive: bool = False) -> list:
     """Add or remove one member of a set as a confirmed positive or negative
     fact (§7.8.1). Removing is never a `reject`."""
     import json
+    from app.ledger.cutover import assert_writable
+    assert_writable(db, workspace_id, "objects")
     member = json.dumps(member_value)
     stream = engine.person_stream(db, workspace_id, actor)
     engine.add_manual_claims(db, stream, [ParsedClaim(f"uid:{uid}", predicate, member_value, method="manual",
@@ -49,7 +54,7 @@ def set_member(db: Session, workspace_id: str, actor: str, uid: str, predicate: 
                              cause=f"edit by {actor}")
     return engine.apply_decisions(db, workspace_id, actor, [
         confirm_value(uid, predicate, "present" if present else "absent", member=member,
-                      replaces=_active(db, uid, predicate, member), reason=reason)])
+                      replaces=_active(db, uid, predicate, member), reason=reason)], defer_derive=defer_derive)
 
 
 def confirm_installation(db: Session, workspace_id: str, actor: str, installation_uid: str, *,

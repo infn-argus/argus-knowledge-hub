@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
@@ -12,6 +12,7 @@ from app.routers import (
     attachments,
     attribute_values,
     documents,
+    export,
     global_values,
     graph,
     groups,
@@ -32,7 +33,10 @@ from app.routers import (
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="ARGUS Asset Knowledge Hub API", version="1.0.0")
+from app.auth import bind_grants  # noqa: E402
+
+# Every request carries the viewer's restricted-class grants (I-ACL-1).
+app = FastAPI(title="ARGUS Asset Knowledge Hub API", version="1.0.0", dependencies=[Depends(bind_grants)])
 
 # Auth is a Bearer token per request (no cookies), so a wildcard origin here
 # carries none of the usual CSRF-adjacent risk of credentialed CORS.
@@ -56,6 +60,9 @@ app.include_router(hub.router)
 app.include_router(ledger.router)
 app.include_router(ledger.installations_router)
 app.include_router(ledger.access_points_router)
+app.include_router(ledger.domains_router)
+app.include_router(ledger.lookup_router)
+app.include_router(export.router)
 app.include_router(attribute_values.router)
 app.include_router(ai.router)
 app.include_router(mcp.router)

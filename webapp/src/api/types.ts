@@ -1019,6 +1019,8 @@ export interface GraphNode {
   state: string | null;
   /** Hops from the node the walk started at. */
   depth: number;
+  /** A restricted record the viewer may not see: drawn, never named. */
+  restricted?: boolean;
 }
 
 export interface GraphEdge {

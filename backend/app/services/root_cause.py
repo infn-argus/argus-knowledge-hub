@@ -32,6 +32,7 @@ from each candidate to each symptom, whether any hop of it is an inference rathe
 file states, and how often tickets have named the candidate before.
 """
 import collections
+import hashlib
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
@@ -45,6 +46,7 @@ from app.models.schema import Schema
 from app.services.causal_model import (
     CONTROL, DEGRADATION, FUNCTION, PERMIT, classify, dependency, follows,
 )
+from app.services.visibility import can_see
 
 MAX_DEPTH = 8
 MAX_AFFECTED = 600
@@ -137,6 +139,11 @@ def load_graph(db: Session, workspace_id: str, layers: Optional[Iterable[str]] =
 
 
 def _info(a: Asset) -> NodeInfo:
+    if not can_see(a):
+        # A restricted unit stays in the dependency structure — hiding it would
+        # change the answer — but as an anonymous node (I-ACL-1).
+        opaque = "restricted-" + hashlib.sha256(f"asset:{a.uid}".encode()).hexdigest()[:12]
+        return NodeInfo(uid=opaque, key=opaque, name="Restricted record", type=None, inferred=False, lifecycle=None)
     return NodeInfo(
         uid=a.uid, key=a.key, name=a.name, type=a.type,
         inferred="inferred" in ((a.attributes or {}).get("argus_keywords") or []),

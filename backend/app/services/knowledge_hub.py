@@ -26,7 +26,8 @@ from app.models.asset_subresources import AssetTicket
 from app.models.document import Document, DocumentRelation, DocumentRevision
 from app.models.issue import Issue
 from app.models.schema import Schema
-from app.services.visibility import asset_visible_in, visible_assets_clause
+from app.services.visibility import (asset_visible_in, can_see, restricted_class, visible_assets_clause,
+                                     visible_issues_clause)
 
 CLOSED_STATES = frozenset({"closed", "done", "resolved", "cancelled", "canceled", "rejected"})
 
@@ -114,14 +115,14 @@ def tickets_for_assets(db: Session, workspace_id: str, asset_uids: Iterable[str]
     found: dict[str, Issue] = {}
     for issue in db.scalars(select(Issue).where(
             Issue.workspace_id == workspace_id, Issue.asset_uid.in_(uids),
-            Issue.deleted_at.is_(None))):
+            Issue.deleted_at.is_(None), visible_issues_clause())):
         found[issue.uid] = issue
     keys = {t.ticket_key for t in db.scalars(select(AssetTicket).where(AssetTicket.asset_uid.in_(uids)))}
     keys -= set(found)
     if keys:
         source_key = Issue.attributes["argus_source_key"].astext
         for issue in db.scalars(select(Issue).where(
-                Issue.workspace_id == workspace_id, Issue.deleted_at.is_(None),
+                Issue.workspace_id == workspace_id, Issue.deleted_at.is_(None), visible_issues_clause(),
                 or_(Issue.uid.in_(keys), source_key.in_(keys)))):
             found[issue.uid] = issue
     return sorted(found.values(), key=lambda i: (not is_open(i), -(i.updated_at.timestamp() if i.updated_at else 0)))
@@ -165,6 +166,8 @@ def documents_for_asset(db: Session, workspace_id: str, asset: Asset) -> list[di
         .where(or_(*targets), readable_documents_clause(workspace_id))
     ).all()
     product = db.get(Asset, product_uid) if isinstance(product_uid, str) and product_uid else None
+    if product is not None and not can_see(product):
+        product = None
     rank = {"asset": 0, "product": 1, "type": 2, "service": 3}
     best: dict[str, dict] = {}
     for rel, doc in rows:
@@ -211,8 +214,12 @@ def asset_context(db: Session, workspace_id: str, asset: Asset, access: Access) 
     docs = documents_for_asset(db, workspace_id, asset) if access.documents else []
     graph = neighbours(db, workspace_id, asset)
     open_tickets = [t for t in tickets if is_open(t)]
+    from app.ledger.engine import pending_derive
     return {
         "asset": asset_summary(asset),
+        # Derived edges and counts not yet updated after an edit (I-UX-1).
+        "processing": pending_derive(db, asset.workspace_id),
+        "restricted": restricted_class(asset),
         "type_path": [s.name for s in reversed(lineage)],
         "access": {"tickets": access.tickets, "documents": access.documents},
         "stats": {
@@ -369,7 +376,7 @@ def unified_search(db: Session, workspace_id: str, access: Access, q: str, limit
     if access.tickets:
         source_key = Issue.attributes["argus_source_key"].astext
         rows = db.scalars(select(Issue).where(
-            Issue.workspace_id == workspace_id, Issue.deleted_at.is_(None),
+            Issue.workspace_id == workspace_id, Issue.deleted_at.is_(None), visible_issues_clause(),
             or_(Issue.title.ilike(like), Issue.uid.ilike(like), source_key.ilike(like),
                 Issue.description.ilike(like))).limit(fetch)).all()
         ranked = sorted(rows, key=lambda i: (-_score(q, i.title, i.uid, (i.attributes or {}).get("argus_source_key")),
@@ -393,14 +400,16 @@ def overview(db: Session, workspace_id: str, access: Access, user_id: Optional[s
     if access.assets:
         out["assets"] = {
             "own": db.scalar(select(func.count()).select_from(Asset).where(
-                Asset.workspace_id == workspace_id, Asset.deleted_at.is_(None))) or 0,
+                Asset.workspace_id == workspace_id, Asset.deleted_at.is_(None),
+                visible_assets_clause(workspace_id))) or 0,
             "recent": [asset_summary(a) for a in db.scalars(
-                select(Asset).where(Asset.workspace_id == workspace_id, Asset.deleted_at.is_(None))
+                select(Asset).where(Asset.workspace_id == workspace_id, Asset.deleted_at.is_(None),
+                                    visible_assets_clause(workspace_id))
                 .order_by(Asset.updated_at.desc()).limit(8))],
         }
     if access.tickets:
         issues = list(db.scalars(select(Issue).where(
-            Issue.workspace_id == workspace_id, Issue.deleted_at.is_(None))))
+            Issue.workspace_id == workspace_id, Issue.deleted_at.is_(None), visible_issues_clause())))
         open_issues = [i for i in issues if is_open(i)]
         by_state = Counter((i.state or "new") for i in open_issues)
         by_priority = Counter((i.priority or "none") for i in open_issues)

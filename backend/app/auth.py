@@ -36,6 +36,7 @@ def hash_token(raw_token: str) -> str:
 @dataclass
 class PatIdentity:
     workspace_id: str
+    restricted_grants: tuple = ()
 
 
 @dataclass
@@ -99,7 +100,8 @@ def get_identity(
     if token is not None:
         token.last_used_at = datetime.now(timezone.utc)
         db.commit()
-        return PatIdentity(workspace_id=token.workspace_id)
+        return PatIdentity(workspace_id=token.workspace_id,
+                           restricted_grants=tuple(token.restricted_grants or ()))
 
     if oidc_configured():
         try:
@@ -137,3 +139,66 @@ def require_permission(action: Action, resource: Resource = "objects"):
         return x_workspace_id
 
     return dependency
+
+
+def grants_of(db: Session, identity: Identity, workspace_id: str):
+    """The restricted classes this viewer may see in this workspace (§4.3):
+    a token's own grants, a person's `restricted` role permissions, or
+    everything for an administrator."""
+    from app.services.permissions import effective_permissions
+    from app.services.visibility import Grants
+    if isinstance(identity, PatIdentity):
+        return Grants(identity.restricted_grants)
+    if identity.user.is_admin:
+        return Grants.all()
+    return Grants(effective_permissions(db, identity.user, workspace_id).get("restricted", set()))
+
+
+def get_grants(
+    identity: Identity = Depends(get_identity),
+    db: Session = Depends(get_db),
+    x_workspace_id: Optional[str] = Header(default=None, alias="X-Workspace-Id"),
+):
+    workspace_id = identity.workspace_id if isinstance(identity, PatIdentity) else x_workspace_id
+    return grants_of(db, identity, workspace_id or "")
+
+
+def _lenient_grants(authorization: Optional[str], workspace_id: Optional[str]):
+    """Grants for whoever the bearer token names, or none. Never raises:
+    authentication itself is each endpoint's own dependency."""
+    from app.db import SessionLocal
+    from app.services.visibility import NONE, Grants
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return NONE
+    raw = authorization.split(" ", 1)[1].strip()
+    db = SessionLocal()
+    try:
+        token = db.scalar(select(ApiToken).where(ApiToken.token_hash == hash_token(raw),
+                                                 ApiToken.revoked_at.is_(None)))
+        if token is not None:
+            return Grants(token.restricted_grants or ())
+        if oidc_configured():
+            try:
+                claims = verify_oidc_token(raw)
+            except jwt.PyJWTError:
+                return NONE
+            user = db.scalar(select(User).where(User.oidc_sub == claims["sub"])) or db.get(User, claims["sub"])
+            if user is not None and workspace_id:
+                return grants_of(db, OidcIdentity(user=user), workspace_id)
+            if user is not None and user.is_admin:
+                return Grants.all()
+        return NONE
+    finally:
+        db.close()
+
+
+async def bind_grants(
+    authorization: Optional[str] = Header(default=None),
+    x_workspace_id: Optional[str] = Header(default=None, alias="X-Workspace-Id"),
+) -> None:
+    """App-wide: record the viewer's restricted-class grants for this request
+    (I-ACL-1). Async on purpose — a value set here is inherited by the
+    endpoint, which runs in a copy of this context."""
+    from starlette.concurrency import run_in_threadpool
+    from app.services.visibility import set_current_grants
+    set_current_grants(await run_in_threadpool(_lenient_grants, authorization, x_workspace_id))

@@ -16,7 +16,8 @@ undirected for traversal — a question about a magnet must find the ticket
 that names it, not only the other way — but each edge remembers its own
 direction so the answer can still say which way round it is.
 """
-from dataclasses import dataclass, field
+import hashlib
+from dataclasses import dataclass, field, replace
 from typing import Iterable, Literal, Optional
 
 from sqlalchemy import func, select
@@ -29,6 +30,7 @@ from app.models.group import Group, GroupMember
 from app.models.issue import Issue, IssueLink
 from app.models.schema import Schema
 from app.models.user import User
+from app.services.visibility import can_see, visible_assets_clause, visible_issues_clause
 
 NodeKind = Literal["asset", "ticket", "document", "group", "person", "type"]
 
@@ -51,6 +53,10 @@ class Node:
     state: Optional[str] = None
     # How many hops from the node the traversal started at.
     depth: int = 0
+    # A restricted record the viewer may not see (I-ACL-1): drawn so the
+    # structure is honest, but with no name, type or real uid, and never
+    # expanded.
+    restricted: bool = False
 
 
 @dataclass
@@ -287,6 +293,11 @@ _NEIGHBOURS = {
 }
 
 
+def _anonymous(kind: str, uid: str) -> Node:
+    opaque = "restricted-" + hashlib.sha256(f"{kind}:{uid}".encode()).hexdigest()[:12]
+    return Node(kind=kind, uid=opaque, label="Restricted record", restricted=True)
+
+
 def _asset_visible(db: Session, asset: Asset, workspace_id: str) -> bool:
     """The same rule the REST API applies (routers/assets._get_visible_asset).
 
@@ -302,10 +313,14 @@ def load_node(db: Session, workspace_id: str, kind: str, uid: str) -> Optional[N
     workspace's to see."""
     if kind == "asset":
         asset = db.get(Asset, uid)
-        return _label_asset(asset) if asset and _asset_visible(db, asset, workspace_id) else None
+        if not (asset and _asset_visible(db, asset, workspace_id)):
+            return None
+        return _label_asset(asset) if can_see(asset) else _anonymous(kind, uid)
     if kind == "ticket":
         issue = db.get(Issue, uid)
-        return _label_issue(issue) if issue and issue.workspace_id == workspace_id else None
+        if not (issue and issue.workspace_id == workspace_id):
+            return None
+        return _label_issue(issue) if can_see(issue) else _anonymous(kind, uid)
     if kind == "document":
         document = db.get(Document, uid)
         visible = document is not None and (
@@ -338,7 +353,7 @@ def traverse(
     rather than pretending it is complete.
     """
     start = load_node(db, workspace_id, kind, uid)
-    if start is None:
+    if start is None or start.restricted:
         return Graph()
 
     wanted = set(kinds) if kinds else None
@@ -349,6 +364,7 @@ def traverse(
     # Built once and shared by every node the walk touches.
     ctx = {"ticket_uids_by_key": ticket_uids_by_key(db, workspace_id)}
 
+    anonymous: dict[NodeRef, str] = {}
     frontier = [NodeRef(kind, uid)]
     for hop in range(1, max(depth, 0) + 1):
         next_frontier: list[NodeRef] = []
@@ -371,6 +387,11 @@ def traverse(
                 )
                 if not known and node is None:
                     continue
+                if node is not None and node.restricted or anonymous.get(neighbour):
+                    # Point the edge at the opaque id, never the real one.
+                    anonymous[neighbour] = node.uid if node is not None else anonymous[neighbour]
+                    edge = replace(edge, **({"to_uid": anonymous[neighbour]} if edge.to_uid == neighbour.uid
+                                            else {"from_uid": anonymous[neighbour]}))
 
                 signature = (
                     edge.from_kind, edge.from_uid, edge.to_kind, edge.to_uid,
@@ -387,7 +408,8 @@ def traverse(
                 node.depth = hop
                 seen_nodes.add(neighbour)
                 graph.nodes.append(node)
-                next_frontier.append(neighbour)
+                if not node.restricted:
+                    next_frontier.append(neighbour)
         frontier = next_frontier
         if not frontier:
             break
@@ -404,8 +426,8 @@ def graph_summary(db: Session, workspace_id: str) -> dict:
     def count(model, *where):
         return db.scalar(select(func.count()).select_from(model).where(*where)) or 0
 
-    assets = count(Asset, Asset.workspace_id == workspace_id)
-    tickets = count(Issue, Issue.workspace_id == workspace_id)
+    assets = count(Asset, Asset.workspace_id == workspace_id, visible_assets_clause(workspace_id))
+    tickets = count(Issue, Issue.workspace_id == workspace_id, visible_issues_clause())
     documents = count(Document, Document.workspace_id == workspace_id)
     types = count(Schema, Schema.workspace_id == workspace_id)
     groups = count(Group)

@@ -36,8 +36,8 @@ from app.models.asset_subresources import AssetTicket
 from app.models.document import DocumentRelation
 from app.models.issue import Issue
 from app.models.ledger import (Claim, ClaimEvent, Conflict, ConflictEvent, Decision, FactState, IdentityBinding,
-                               IdentityEvent, JobRun, LedgerPolicy, LedgerRuleset, LedgerStream, RecordEvent,
-                               RevisionEvent, SourceRevision, StatusEvent, StreamHead)
+                               DeriveRequest, IdentityEvent, JobRun, LedgerPolicy, LedgerRuleset, LedgerStream,
+                               RecordEvent, RevisionEvent, SourceRevision, StatusEvent, StreamHead)
 from app.models.schema import Schema
 from app.models.workspace import Workspace
 
@@ -543,6 +543,8 @@ def publish(db: Session, stream: LedgerStream, rev: SourceRevision, *, cause: st
     subjects = {b.uid for ref in affected_refs if (b := db.get(IdentityBinding, ref)) is not None} | touched
     for uid in sorted(subjects):
         project_subject(db, uid, f"revision:{rev.id}")
+    from app.ledger.identity import detect_candidates
+    detect_candidates(db, subjects, f"revision:{rev.id}")
     if stream.kind != "resolver":
         run_resolvers(db, stream, changed)
     derive_all(db, _workspaces_of(db, subjects) | {stream.workspace_id})
@@ -589,7 +591,7 @@ def freeze_stream(db: Session, stream_id: str, actor: str) -> None:
     """The cutover watermark (§17.3): the stream accepts no further revisions."""
     stream = db.get(LedgerStream, stream_id)
     stream.frozen_at = now()
-    _record_decision(db, "approve_cutover", actor, stream.workspace_id, target={"stream_id": stream_id})
+    _record_decision(db, "freeze", actor, stream.workspace_id, target={"stream_id": stream_id})
     db.flush()
 
 
@@ -642,6 +644,10 @@ def _ensure_record(db: Session, stream: LedgerStream, source_ref: str, exists: O
         return uid
     b = db.get(IdentityBinding, source_ref)
     if b is not None:
+        if exists is not None:
+            # Bound by an immutable id: a re-keyed object is the same record (A34).
+            from app.ledger.identity import maybe_rekey
+            maybe_rekey(db, stream, b.uid, exists.value, cause)
         return b.uid
     if exists is None or not isinstance(exists.value, dict):
         return None
@@ -708,9 +714,12 @@ def _active_decisions(db: Session, uid: str, predicate: str, member: Optional[st
     return [d for d in db.scalars(q) if d.member == member and d.decision_id not in ended]
 
 
-def apply_decisions(db: Session, workspace_id: str, actor: str, batch: list[dict]) -> list[Decision]:
+def apply_decisions(db: Session, workspace_id: str, actor: str, batch: list[dict], *,
+                    defer_derive: bool = False) -> list[Decision]:
     """Apply a batch of decisions atomically (§7.4). The caller commits; on
-    LedgerError it must roll back and may call record_rejected_batch()."""
+    LedgerError it must roll back and may call record_rejected_batch().
+    Projection is always synchronous (I-UX-1); with `defer_derive` the
+    derive stage is queued and the records show `deriving` until it runs."""
     batch_id = str(uuid.uuid4())
     written: list[Decision] = []
     subjects: set[str] = set()
@@ -761,7 +770,11 @@ def apply_decisions(db: Session, workspace_id: str, actor: str, batch: list[dict
     validate_installations(db, subjects, strict=True)
     from app.ledger.connectivity import validate_access_points
     validate_access_points(db, subjects)
-    derive_all(db, _workspaces_of(db, subjects) | {workspace_id})
+    workspaces = _workspaces_of(db, subjects) | {workspace_id}
+    if defer_derive:
+        request_derive(db, workspaces, f"decision-batch:{batch_id}")
+    else:
+        derive_all(db, workspaces)
     return written
 
 
@@ -1091,7 +1104,8 @@ def _write_record_status(db: Session, record: Asset, outcome: Optional[_Outcome]
 
 
 # Review items the validate and derive stages own; projection leaves them alone.
-DERIVED_CONFLICTS = ("possible_overlap", "port_mapping_unresolved", "port_confirmation_required", "port_map_invalid")
+DERIVED_CONFLICTS = ("possible_overlap", "port_mapping_unresolved", "port_confirmation_required", "port_map_invalid",
+                     "identity_candidate")
 
 
 def _write_conflicts(db: Session, record: Asset, new: dict, cause: str, emit: bool) -> None:
@@ -1235,12 +1249,42 @@ def validate_installations(db: Session, subjects: Iterable[str], *, strict: bool
     db.flush()
 
 
+def request_derive(db: Session, workspace_ids: Iterable[str], cause: str) -> DeriveRequest:
+    """Queue a derive run (D10: derive is asynchronous for user edits)."""
+    req = DeriveRequest(workspace_ids=sorted(set(workspace_ids)), cause=cause, status="pending", requested_at=now())
+    db.add(req)
+    db.flush()
+    return req
+
+
+def process_derive_requests(db: Session) -> int:
+    """Run every pending derive request, oldest first; returns how many ran."""
+    pending = list(db.scalars(select(DeriveRequest).where(DeriveRequest.status == "pending")
+                              .order_by(DeriveRequest.id).with_for_update(skip_locked=True)))
+    if not pending:
+        return 0
+    derive_all(db, {w for r in pending for w in r.workspace_ids})
+    for r in pending:
+        r.status, r.done_at = "done", now()
+    db.flush()
+    return len(pending)
+
+
+def pending_derive(db: Session, workspace_id: str) -> Optional[dict]:
+    """The processing state a record shows while derive is queued (I-UX-1)."""
+    for r in db.scalars(select(DeriveRequest).where(DeriveRequest.status == "pending").order_by(DeriveRequest.id)):
+        if workspace_id in (r.workspace_ids or []):
+            return {"state": "deriving", "since": r.requested_at, "request": r.id}
+    return None
+
+
 def derive_all(db: Session, workspace_ids: Optional[Iterable[str]] = None) -> dict:
-    """The derive stage: `realized by`, `implemented by`, port attachment and
-    ticket attribution, all from Confirmed Installations."""
+    """The derive stage: `realized by`, `implemented by`, `located in`, port
+    attachment and ticket attribution."""
     from app.ledger import connectivity, tickets
     ids = None if workspace_ids is None else list(set(workspace_ids))
     out = derive_realized_by(db, ids)
+    out.update(derive_located_in(db, ids))
     out.update(connectivity.derive_implemented_by(db, ids))
     out.update(connectivity.derive_ports(db, ids))
     out.update(tickets.derive_ticket_links(db, workspace_ids=ids))
@@ -1273,6 +1317,43 @@ def derive_realized_by(db: Session, workspace_ids: Optional[Iterable[str]] = Non
                         relation_type="realized by", derivation="derived", rule="realized-by/1"))
     db.flush()
     return {"realized_by": len(wanted)}
+
+
+LOCATION_TYPES = {"Location", "Room", "Rack", "Building", "Area", "Storage"}
+
+
+def derive_located_in(db: Session, workspace_ids: Optional[Iterable[str]] = None) -> dict:
+    """`located in` (derived): a record whose `argus_location` names a
+    Location record — by key or name, in its own workspace first — points
+    at it. The value stays the fact; the edge follows it."""
+    q = select(Asset).where(Asset.attributes["argus_location"].astext.isnot(None))
+    rq = select(Relation).where(Relation.derivation == "derived", Relation.relation_type == "located in")
+    if workspace_ids is not None:
+        ids = list(set(workspace_ids))
+        q = q.where(Asset.workspace_id.in_(ids))
+        rq = rq.where(Relation.workspace_id.in_(ids))
+    locations: dict[str, list[Asset]] = defaultdict(list)
+    for loc in db.scalars(select(Asset).where(Asset.type.in_(LOCATION_TYPES), Asset.record_status != "Retired")):
+        for label in {loc.key, loc.name}:
+            if label:
+                locations[label.strip().lower()].append(loc)
+    wanted: dict[tuple, str] = {}
+    for a in db.scalars(q):
+        value = (a.attributes or {}).get("argus_location")
+        hits = locations.get(str(value).strip().lower(), []) if isinstance(value, str) else []
+        hits = sorted(hits, key=lambda loc: (loc.workspace_id != a.workspace_id, loc.key or ""))
+        if hits and hits[0].uid != a.uid:
+            wanted[(a.uid, hits[0].uid)] = a.workspace_id
+    current = {(r.from_asset_uid, r.to_asset_uid): r for r in db.scalars(rq)}
+    for key, row in current.items():
+        if key not in wanted:
+            db.delete(row)
+    for (frm, to), ws in wanted.items():
+        if (frm, to) not in current:
+            db.add(Relation(workspace_id=ws, from_asset_uid=frm, to_asset_uid=to, relation_type="located in",
+                            derivation="derived", rule="located-in/1"))
+    db.flush()
+    return {"located_in": len(wanted)}
 
 
 # --------------------------------------------------------------------------- resolve
@@ -1333,4 +1414,6 @@ def rebuild(db: Session, workspace_id: str) -> None:
         for uid in uids:
             project_subject(db, uid, "rebuild", emit=False)
     validate_installations(db, uids, strict=False)
+    from app.ledger.identity import detect_candidates
+    detect_candidates(db, uids, "rebuild")
     derive_all(db, [workspace_id])

@@ -54,6 +54,7 @@ interface Placed extends GraphNode {
 }
 
 function detailPath(node: GraphNode): string | null {
+  if (node.restricted) return null;
   if (node.kind === "asset") return `/assets/${node.uid}`;
   if (node.kind === "ticket") return `/tickets/${node.uid}`;
   if (node.kind === "document") return `/documents/${node.uid}`;
@@ -253,6 +254,7 @@ export function GraphExplorer() {
     : [];
 
   const recenter = (node: GraphNode) => {
+    if (node.restricted) return;
     if (node.kind !== "asset" && node.kind !== "ticket" && node.kind !== "document") return;
     setStartKind(node.kind);
     setStartUid(node.uid);

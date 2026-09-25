@@ -1,9 +1,10 @@
 """The fact ledger's API: sources, decisions, the review queue, provenance and
 installation history (asset-model-revision §7, §8, §11, §13 step S1)."""
+import os
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from app.ledger import connectivity, engine, rules, service, temporal, tickets
 from app.ledger.engine import LedgerError
 from app.ledger.policy import PolicyError
 from app.models.asset import Asset
+from app.services.visibility import asset_visible_in, can_see, restriction_clause
 from app.models.ledger import (Claim, ClaimEvent, Conflict, Decision, FactState, IdentityBinding, LedgerStream,
                                RevisionEvent, SourceRevision, StreamHead)
 
@@ -138,26 +140,60 @@ class EditIn(BaseModel):
     reason: Optional[str] = None
 
 
+def user_edit_derive_mode() -> str:
+    """How a user edit's derive stage runs (D10): `background` (default) —
+    after the response, the record showing `deriving` meanwhile; `manual` —
+    left queued for a worker; `inline` — within the request."""
+    return os.environ.get("LEDGER_USER_EDIT_DERIVE", "background")
+
+
+def run_pending_derives() -> None:
+    from app.db import SessionLocal
+    db = SessionLocal()
+    try:
+        engine.process_derive_requests(db)
+        db.commit()
+    finally:
+        db.close()
+
+
 @router.post("/records/{uid}/edit")
-def edit(uid: str, body: EditIn, identity=Depends(get_identity),
+def edit(uid: str, body: EditIn, background: BackgroundTasks, identity=Depends(get_identity),
          workspace_id: str = Depends(require_permission("modify")), db: Session = Depends(get_db)):
+    """A person's edit: projected within the request, so the response and the
+    next read show it (I-UX-1); derived edges follow asynchronously."""
     actor = actor_of(identity)
+    mode = user_edit_derive_mode()
     try:
         if body.present is not None:
-            service.set_member(db, workspace_id, actor, uid, body.predicate, body.member, body.present, body.reason)
+            service.set_member(db, workspace_id, actor, uid, body.predicate, body.member, body.present, body.reason,
+                               defer_derive=mode != "inline")
         else:
-            service.edit_value(db, workspace_id, actor, uid, body.predicate, body.value, body.reason)
+            service.edit_value(db, workspace_id, actor, uid, body.predicate, body.value, body.reason,
+                               defer_derive=mode != "inline")
     except LedgerError as exc:
         _fail(db, exc)
     db.commit()
-    return {"ok": True}
+    if mode == "background":
+        background.add_task(run_pending_derives)
+    record = db.get(Asset, uid)
+    return {"ok": True, "attributes": record.attributes if record else None,
+            "processing": engine.pending_derive(db, record.workspace_id) if record else None}
 
 
 # --------------------------------------------------------------------------- review and provenance
 
 def _record_brief(db: Session, uid: str) -> Optional[dict]:
     a = db.get(Asset, uid)
+    if a is not None and not can_see(a):
+        return {"uid": None, "key": None, "name": "Restricted record", "type": None, "record_status": None,
+                "restricted": True}
     return {"uid": a.uid, "key": a.key, "name": a.name, "type": a.type, "record_status": a.record_status} if a else None
+
+
+def _hidden(db: Session, uid: Optional[str]) -> bool:
+    a = db.get(Asset, uid) if uid else None
+    return a is not None and not can_see(a)
 
 
 @router.get("/review")
@@ -166,11 +202,12 @@ def review(workspace_id: str = Depends(require_permission("read")), db: Session 
     conflicts = [{"conflict_id": c.conflict_id, "type": c.conflict_type, "severity": c.severity,
                   "predicate": c.predicate, "member": c.member, "detail": c.detail,
                   "record": _record_brief(db, c.subject_uid)}
-                 for c in db.scalars(select(Conflict).where(Conflict.workspace_id == workspace_id))]
+                 for c in db.scalars(select(Conflict).where(Conflict.workspace_id == workspace_id))
+                 if not _hidden(db, c.subject_uid)]
     proposals = []
     ws_uids = set(db.scalars(select(Asset.uid).where(Asset.workspace_id == workspace_id)))
     for f in db.scalars(select(FactState).where(FactState.status == "proposed")):
-        if f.subject_uid not in ws_uids or not f.contributor.startswith("claim:"):
+        if f.subject_uid not in ws_uids or not f.contributor.startswith("claim:") or _hidden(db, f.subject_uid):
             continue
         claim = db.get(Claim, f.contributor[6:])
         proposals.append({"claim_id": claim.claim_id, "predicate": f.predicate, "member": f.member,
@@ -185,7 +222,8 @@ def review(workspace_id: str = Depends(require_permission("read")), db: Session 
                 held.append({"revision_id": r.id, "stream_id": s.id, "revision": r.revision,
                              "observed_at": r.observed_at, "reasons": (ev.detail or {}).get("reasons", [])})
     provisional = [_record_brief(db, a.uid) for a in db.scalars(
-        select(Asset).where(Asset.workspace_id == workspace_id, Asset.record_status == "Provisional"))]
+        select(Asset).where(Asset.workspace_id == workspace_id, Asset.record_status == "Provisional",
+                            restriction_clause(Asset)))]
     installations = [
         {**{k: v for k, v in inst.items() if k != "interval"},
          "position": _record_brief(db, inst["position_uid"]) if inst["position_uid"] else None,
@@ -203,7 +241,7 @@ def review(workspace_id: str = Depends(require_permission("read")), db: Session 
 def provenance(uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """Why each value is what it is: every contributing claim and decision."""
     record = db.get(Asset, uid)
-    if record is None or not (record.workspace_id == workspace_id or record.is_global):
+    if record is None or not asset_visible_in(record, workspace_id):
         raise HTTPException(status_code=404, detail="Record not found")
     facts: dict = {}
     for f in db.scalars(select(FactState).where(FactState.subject_uid == uid).order_by(FactState.id)):
@@ -226,6 +264,7 @@ def provenance(uid: str, workspace_id: str = Depends(require_permission("read"))
         facts.setdefault(f"{f.predicate}|{f.member or ''}", {"predicate": f.predicate, "member": f.member,
                                                              "contributors": []})["contributors"].append(entry)
     return {"record": _record_brief(db, uid), "facts": list(facts.values()),
+            "processing": engine.pending_derive(db, record.workspace_id),
             "source_refs": [b.source_ref for b in db.scalars(select(IdentityBinding)
                                                              .where(IdentityBinding.uid == uid))]}
 
@@ -367,7 +406,7 @@ def ticket_links(uid: str, workspace_id: str = Depends(require_permission("read"
 def record_tickets(uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """Tickets a record is involved in without being their subject, and its counts."""
     record = db.get(Asset, uid)
-    if record is None or not (record.workspace_id == workspace_id or record.is_global):
+    if record is None or not asset_visible_in(record, workspace_id):
         raise HTTPException(status_code=404, detail="Record not found")
     return {"counts": tickets.record_counts(db, uid), "involved": tickets.tickets_involving(db, uid)}
 
@@ -454,3 +493,222 @@ def confirm_port_map(uid: str, body: PortMapIn, identity=Depends(get_identity),
     db.commit()
     seg = db.get(Asset, uid)
     return connectivity.match_segment(db, seg)
+
+
+# --------------------------------------------------------------------------- identity (§10)
+
+class MergeIn(BaseModel):
+    survivor_uid: str
+    loser_uid: str
+    reason: Optional[str] = None
+
+
+@router.post("/identity/merge")
+def merge_records(body: MergeIn, identity=Depends(get_identity),
+                  workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger.identity import merge
+    actor = actor_of(identity)
+    try:
+        d = merge(db, workspace_id, actor, body.survivor_uid, body.loser_uid, body.reason)
+    except LedgerError as exc:
+        _fail(db, exc, workspace_id, actor, [{"kind": "merge", **body.model_dump()}])
+    db.commit()
+    return {"decision_id": d.decision_id}
+
+
+class DismissIn(BaseModel):
+    records: list[str]
+    kind: str = "reject_candidate"   # or confirm_new
+    reason: Optional[str] = None
+
+
+@router.post("/identity/dismiss")
+def dismiss_candidate(body: DismissIn, identity=Depends(get_identity),
+                      workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger.identity import dismiss_candidate as dismiss
+    try:
+        d = dismiss(db, workspace_id, actor_of(identity), body.records, body.kind, body.reason)
+    except LedgerError as exc:
+        _fail(db, exc)
+    db.commit()
+    return {"decision_id": d.decision_id}
+
+
+# --------------------------------------------------------------------------- migration domains (§17)
+
+domains_router = APIRouter(prefix="/v1/domains", tags=["migration domains"])
+
+
+def _owned_domain(db: Session, domain_id: str, workspace_id: str):
+    from app.models.ledger import LedgerDomain
+    d = db.get(LedgerDomain, domain_id)
+    if d is None or d.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    return d
+
+
+class DomainIn(BaseModel):
+    id: str
+    name: str
+    resource: str = "objects"
+    stream_ids: list[str] = []
+    pilot: bool = False
+    archive_url: Optional[str] = None
+
+
+@domains_router.post("", status_code=201)
+def create_domain(body: DomainIn, workspace_id: str = Depends(require_permission("approve")),
+                  db: Session = Depends(get_db)):
+    from app.ledger import cutover
+    try:
+        d = cutover.create_domain(db, workspace_id, body.id, body.name, resource=body.resource,
+                                  stream_ids=body.stream_ids, pilot=body.pilot, archive_url=body.archive_url)
+    except LedgerError as exc:
+        _fail(db, exc)
+    db.commit()
+    return cutover.domain_view(db, d)
+
+
+@domains_router.get("")
+def list_domains(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    from app.ledger import cutover
+    return [cutover.domain_view(db, d) for d in cutover.domains_of(db, workspace_id)]
+
+
+@domains_router.get("/{domain_id}")
+def get_domain(domain_id: str, workspace_id: str = Depends(require_permission("read")),
+               db: Session = Depends(get_db)):
+    from app.ledger import cutover
+    d = _owned_domain(db, domain_id, workspace_id)
+    report = cutover.latest_report(db, domain_id)
+    return {**cutover.domain_view(db, d), "exit_criteria": cutover.exit_criteria(db, domain_id),
+            "report": report.body if report else None, "stages": cutover.STAGE_NAMES}
+
+
+class StageIn(BaseModel):
+    stage: str
+
+
+@domains_router.post("/{domain_id}/stage")
+def set_stage(domain_id: str, body: StageIn, identity=Depends(get_identity),
+              workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger import cutover
+    _owned_domain(db, domain_id, workspace_id)
+    try:
+        d = cutover.advance(db, domain_id, body.stage, actor_of(identity))
+    except LedgerError as exc:
+        _fail(db, exc)
+    db.commit()
+    return cutover.domain_view(db, d)
+
+
+class FreezeIn(BaseModel):
+    watermark: dict
+    manifest: dict
+
+
+@domains_router.post("/{domain_id}/freeze")
+def freeze_domain(domain_id: str, body: FreezeIn, identity=Depends(get_identity),
+                  workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger import cutover
+    _owned_domain(db, domain_id, workspace_id)
+    try:
+        d = cutover.freeze(db, domain_id, actor_of(identity), body.watermark, body.manifest)
+    except LedgerError as exc:
+        _fail(db, exc)
+    db.commit()
+    return cutover.domain_view(db, d)
+
+
+class ManifestIn(BaseModel):
+    manifest: dict
+
+
+@domains_router.post("/{domain_id}/reconcile")
+def reconcile_domain(domain_id: str, body: ManifestIn, identity=Depends(get_identity),
+                     workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger import cutover
+    _owned_domain(db, domain_id, workspace_id)
+    report = cutover.reconcile(db, domain_id, body.manifest, actor_of(identity))
+    db.commit()
+    return {"id": report.id, "passed": report.passed, "body_hash": report.body_hash, **report.body}
+
+
+@domains_router.get("/{domain_id}/reports")
+def list_reports(domain_id: str, workspace_id: str = Depends(require_permission("read")),
+                 db: Session = Depends(get_db)):
+    from app.models.ledger import ReconciliationReport
+    _owned_domain(db, domain_id, workspace_id)
+    return [{"id": r.id, "passed": r.passed, "created_at": r.created_at, "actor": r.actor,
+             "unexplained": r.body["unexplained"], "body_hash": r.body_hash}
+            for r in db.scalars(select(ReconciliationReport).where(ReconciliationReport.domain_id == domain_id)
+                                .order_by(ReconciliationReport.created_at.desc()))]
+
+
+class ExplainIn(BaseModel):
+    difference: str
+    reason: str
+
+
+@domains_router.post("/{domain_id}/explain")
+def explain_difference(domain_id: str, body: ExplainIn, identity=Depends(get_identity),
+                       workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    """A difference is explained by a decision (a deliberate merge, a record
+    left behind on purpose); the next report counts it as explained."""
+    _owned_domain(db, domain_id, workspace_id)
+    d = engine._record_decision(db, "explain_difference", actor_of(identity), workspace_id,
+                                target={"domain": domain_id, "difference": body.difference}, reason=body.reason)
+    db.commit()
+    return {"decision_id": d.decision_id}
+
+
+class ExitIn(BaseModel):
+    attestations: dict[str, bool] = {}
+
+
+@domains_router.post("/{domain_id}/exit")
+def sign_exit(domain_id: str, body: ExitIn, identity=Depends(get_identity),
+              workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger import cutover
+    _owned_domain(db, domain_id, workspace_id)
+    try:
+        d = cutover.sign_exit(db, domain_id, actor_of(identity), body.attestations)
+    except LedgerError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail={
+            "error": str(exc), "criteria": cutover.exit_criteria(db, domain_id, body.attestations)})
+    db.commit()
+    return cutover.domain_view(db, d)
+
+
+# --------------------------------------------------------------------------- lookup (§17.7)
+
+lookup_router = APIRouter(prefix="/v1/lookup", tags=["lookup"])
+
+
+def _readable_workspaces(db: Session, identity) -> list[str]:
+    from app.auth import PatIdentity
+    from app.models.workspace import Workspace
+    from app.services.permissions import resolve_permission
+    if isinstance(identity, PatIdentity):
+        return [identity.workspace_id]
+    return [w.id for w in db.scalars(select(Workspace))
+            if resolve_permission(db, identity.user, w.id, "read", "objects")
+            or resolve_permission(db, identity.user, w.id, "read", "tickets")]
+
+
+@lookup_router.get("/{identifier:path}")
+def lookup(identifier: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """A Jira key, an old Jira or Insight URL, an Insight key or objectId:
+    the ARGUS record it became, or where it can still be read."""
+    from app.ledger import lookup as lk
+    from app.models.issue import Issue
+    workspaces = _readable_workspaces(db, identity)
+    hit = lk.resolve(db, identifier, workspaces)
+    if hit is not None:
+        record = db.get(Issue, hit["uid"]) if hit["kind"] == "ticket" else db.get(Asset, hit["uid"])
+        if record is not None and can_see(record):
+            return {"status": "migrated", **hit}
+    archive = lk.archive_location(db, identifier, workspaces)
+    raise HTTPException(status_code=404, detail={"status": "not migrated", "identifier": identifier,
+                                                 "archive": archive})

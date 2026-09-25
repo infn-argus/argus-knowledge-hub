@@ -10,7 +10,9 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth import get_current_user_id, require_permission
 from app.db import get_db
-from app.ledger.tickets import derive_for_ticket
+from app.ledger.cutover import assert_writable
+from app.ledger.engine import LedgerError
+from app.ledger.tickets import OccurrenceRequired, derive_for_ticket, validate_occurrence
 from app.models.asset import Asset
 from app.models.asset_subresources import AssetTicket
 from app.models.attachment import Attachment
@@ -36,6 +38,7 @@ from app.schemas.issue import (
     IssueUpdate,
 )
 from app.services.asset_ticket_links import ensure_asset_link, sync_subject_link
+from app.services.visibility import can_see, visible_issues_clause
 from app.services.issue_history import (
     TRACKED_FIELDS,
     record_issue_changes,
@@ -51,9 +54,22 @@ ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
 
 def _get_owned_issue(uid: str, workspace_id: str, db: Session) -> Issue:
     issue = db.get(Issue, uid)
-    if issue is None or issue.workspace_id != workspace_id:
+    if issue is None or issue.workspace_id != workspace_id or not can_see(issue):
         raise HTTPException(status_code=404, detail="Issue not found")
     return issue
+
+
+def _guard_ticket_write(db: Session, workspace_id: str, schema_uid: Optional[str], attributes: dict) -> None:
+    """No dual write during a ticket domain's migration (§17.2), and an
+    operational incident says when it happened (I-TKT-4)."""
+    try:
+        assert_writable(db, workspace_id, "tickets")
+    except LedgerError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": "I-SOR-1"})
+    try:
+        validate_occurrence(db, schema_uid, attributes or {})
+    except OccurrenceRequired as exc:
+        raise HTTPException(status_code=422, detail={"error": str(exc), "invariant": exc.code})
 
 
 @router.get("", response_model=list[IssueOut])
@@ -62,7 +78,7 @@ def list_issues(
     workspace_id: str = Depends(require_permission("read", resource="tickets")),
     db: Session = Depends(get_db),
 ):
-    stmt = select(Issue).where(Issue.workspace_id == workspace_id)
+    stmt = select(Issue).where(Issue.workspace_id == workspace_id, visible_issues_clause())
     if schema_uid:
         stmt = stmt.where(Issue.schema_uid == schema_uid)
     return db.scalars(stmt).all()
@@ -77,6 +93,7 @@ def create_issue(
 ):
     if db.get(Issue, body.uid) is not None:
         raise HTTPException(status_code=409, detail="Issue uid already exists")
+    _guard_ticket_write(db, workspace_id, body.schema_uid, body.attributes)
     schema = db.get(Schema, body.schema_uid) if body.schema_uid else None
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
     validate_attributes(db, schema, body.attributes, workspace_id, Issue)
@@ -133,6 +150,8 @@ def update_issue(
 ):
     issue = _get_owned_issue(uid, workspace_id, db)
     patch = body.model_dump(exclude_unset=True)
+    _guard_ticket_write(db, workspace_id, patch.get("schema_uid", issue.schema_uid),
+                        patch["attributes"] if patch.get("attributes") is not None else issue.attributes)
     # Captured before anything is written, so the entry says what actually
     # changed rather than comparing a value with itself.
     before = {field: getattr(issue, field, None) for field in TRACKED_FIELDS}

@@ -285,6 +285,9 @@ export function AppShell() {
             <NavItem to="/ask">
               <span className="w-4 text-center text-slate-400">?</span> Ask ARGUS
             </NavItem>
+            <NavItem to="/migration">
+              <span className="w-4 text-center text-slate-400">⇄</span> Migration to ARGUS
+            </NavItem>
           </div>
         </nav>
 

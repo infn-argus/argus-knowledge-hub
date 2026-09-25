@@ -72,6 +72,24 @@ currently valid* revision rather than to an arbitrary PDF.
   and counts never add up the same ticket twice. Inference rules are versioned: a new meaning
   needs a new rule id, which a CI check enforces (`python -m app.ledger.rules`). Served by
   `/v1/access-points` and `/v1/ledger` (`segments`, `tickets`, `rules`, `rulesets`).
+- **Migration from Jira and Insight, domain by domain.** A migration domain moves through the
+  stages T0 Prepare … T5 Retire (*Migration to ARGUS*). While a domain is imported and shadowed,
+  ARGUS holds it read-only (no dual write); at cutover its streams are frozen at the watermark W,
+  and a reconciliation report compares the export manifest with ARGUS — records, comments,
+  history, links, attachments by SHA-256, workflow states and users. The exit is signed only
+  when every difference is resolved or explained and the criteria hold; ARGUS is then the
+  system of record. Old Jira keys, Jira URLs, Insight keys and objectIds resolve through
+  `/lookup/<key>`, or point to the archive when never migrated. Served by `/v1/domains`,
+  `/v1/lookup` and `/v1/export` (JSON lines).
+- **Identity.** Insight objects are bound by their objectId, so a re-keyed object stays the same
+  record with its old key as an alias. Different source objects sharing a serial (per
+  manufacturer), inventory number or MAC become a review item — merged by a person, never
+  automatically — and once a scope is cut over, creating a duplicate is refused.
+- **Restricted records.** A record or ticket classified `restricted:<class>` (costs, personnel,
+  security incidents, safety investigations, sensitive designs) is absent from lists, search,
+  counts, exports, MCP tools and the ledger views for anyone without that grant, and appears in
+  graphs only as an anonymous node. Grants come from a role's `restricted` permissions or a
+  token's `restricted_grants`.
 - **Data integrity tools**: relink of unresolved references, and a report of missing
   references, dangling links and orphaned objects, with targeted cleanup actions.
 
@@ -82,7 +100,8 @@ currently valid* revision rather than to an arbitrary PDF.
   replaces Jira/Insight domain by domain. The implementation follows its plan (§13); the unified
   hub and the P0 import fixes are the first increment; the S1 vertical slice (fact ledger,
   authority policy, installations, review queue, Access Points, port mapping, ticket
-  attribution, rule versions; acceptance tests A1–A32) is the second.
+  attribution, rule versions; acceptance tests A1–A32) is the second; the transition and
+  readiness gates (A33–A41: cutover, identity, restrictions, lookup, reconciliation) the third.
 - [Object schema design for a large-scale accelerator](docs/asset-schema-design.md) — the
   type catalogue (122 types over four planes), the relation vocabulary, composite elements such
   as a screen station, and how a beamline's EPIK8s control configuration and a EuPRAXIA-style
@@ -191,6 +210,7 @@ a personal access token or a Google sign-in at first launch.
 | `IMPORT_SECRETS_KEY`  | Key used to encrypt stored import credentials at rest.          |
 | `ATTACHMENTS_DIR`     | Where uploaded files are stored (defaults to `/data/attachments`). |
 | `OIDC_ISSUER` / `OIDC_JWKS_URI` / `OIDC_AUDIENCE` | OIDC token verification.            |
+| `LEDGER_USER_EDIT_DERIVE` | How derived links follow a user's edit: `background` (default), `inline`, or `manual` (left for a worker). |
 
 ## Deployment
 

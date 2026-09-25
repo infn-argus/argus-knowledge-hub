@@ -14,15 +14,97 @@ meant to be shared — a product model, a vendor, a person, a company, an
 inventory document — is flagged; a beamline's own cameras and pumps are not, and
 stay in the beamline that has them. Anything created in a global workspace is
 flagged when it is made, the way its types and documents already are.
+
+Restricted classes (asset-model-revision §4.3, I-ACL-1)
+--------------------------------------------------------
+A record (object or ticket) whose `classification` attribute is
+`restricted:<class>` — costs, personnel, security incidents, safety
+investigations, sensitive designs — is visible only to a viewer granted that
+class. The grants travel with the request (`current_grants()`); a helper can
+also be given them explicitly. Outside a request nothing restricted is seen.
 """
-from sqlalchemy import or_
+from __future__ import annotations
+
+from contextvars import ContextVar
+from typing import Optional
+
+from sqlalchemy import and_, not_, or_
 
 from app.models.asset import Asset
+from app.models.issue import Issue
+
+RESTRICTED_PREFIX = "restricted:"
+RESTRICTED_CLASSES = ("costs", "personnel", "security_incident", "safety_investigation", "sensitive_design")
 
 
-def asset_visible_in(asset: Asset, workspace_id: str) -> bool:
-    return asset.workspace_id == workspace_id or bool(asset.is_global)
+class Grants(frozenset):
+    """The restricted classes a viewer may see. `Grants.all()` for admins."""
+    everything = False
+
+    @classmethod
+    def all(cls) -> "Grants":
+        g = cls()
+        g.everything = True
+        return g
+
+    def allows(self, cls_name: Optional[str]) -> bool:
+        return cls_name is None or self.everything or cls_name in self
 
 
-def visible_assets_clause(workspace_id: str):
-    return or_(Asset.workspace_id == workspace_id, Asset.is_global.is_(True))
+NONE = Grants()
+# Set once per request by app.auth.bind_grants, so every read path — routers,
+# the hub, the graph, MCP tools — filters by the same viewer without each
+# call site having to pass it.
+_CURRENT: ContextVar[Grants] = ContextVar("restricted_grants", default=NONE)
+
+
+def current_grants() -> Grants:
+    return _CURRENT.get()
+
+
+def set_current_grants(grants: Grants) -> None:
+    _CURRENT.set(grants)
+
+
+def restricted_class(record) -> Optional[str]:
+    value = ((getattr(record, "attributes", None) or {}).get("classification") or "")
+    if isinstance(value, str) and value.startswith(RESTRICTED_PREFIX):
+        return value[len(RESTRICTED_PREFIX):]
+    return None
+
+
+def can_see(record, grants: Optional[Grants] = None) -> bool:
+    return (grants if grants is not None else current_grants()).allows(restricted_class(record))
+
+
+def _restriction_clause(model, grants: Optional[Grants]):
+    grants = grants if grants is not None else current_grants()
+    if grants.everything:
+        return None
+    cls = model.attributes["classification"].astext
+    allowed = [cls.is_(None), not_(cls.like(f"{RESTRICTED_PREFIX}%"))]
+    if grants:
+        allowed.append(cls.in_([f"{RESTRICTED_PREFIX}{g}" for g in grants]))
+    return or_(*allowed)
+
+
+def asset_visible_in(asset: Asset, workspace_id: str, grants: Optional[Grants] = None) -> bool:
+    return (asset.workspace_id == workspace_id or bool(asset.is_global)) and can_see(asset, grants)
+
+
+def visible_assets_clause(workspace_id: str, grants: Optional[Grants] = None):
+    base = or_(Asset.workspace_id == workspace_id, Asset.is_global.is_(True))
+    extra = _restriction_clause(Asset, grants)
+    return base if extra is None else and_(base, extra)
+
+
+def visible_issues_clause(grants: Optional[Grants] = None):
+    """Only the restriction part: tickets are workspace-scoped by their callers."""
+    extra = _restriction_clause(Issue, grants)
+    return extra if extra is not None else Issue.uid.isnot(None)
+
+
+def restriction_clause(model, grants: Optional[Grants] = None):
+    """Just the restricted-class filter for `model` (Asset or Issue)."""
+    extra = _restriction_clause(model, grants)
+    return extra if extra is not None else model.uid.isnot(None)

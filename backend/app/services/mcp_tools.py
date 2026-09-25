@@ -28,6 +28,7 @@ from app.services.alarm_symptoms import root_cause_from_alarms as _root_cause_fr
 from app.services.root_cause import blast_radius as _blast_radius
 from app.services.root_cause import impact_of as _impact_of
 from app.services.root_cause import root_causes as _root_causes
+from app.services.visibility import can_see, restriction_clause, visible_issues_clause
 
 # Enough to answer with, small enough not to bury the model.
 DEFAULT_LIMIT = 20
@@ -54,7 +55,7 @@ def _asset_visible(db: Session, asset: Asset, workspace_id: str) -> bool:
     them here too, or "what model is this camera" is unanswerable in the
     tool built to answer it.
     """
-    return asset.workspace_id == workspace_id or bool(asset.is_global)
+    return (asset.workspace_id == workspace_id or bool(asset.is_global)) and can_see(asset)
 
 
 def _document_visible(workspace_id: str):
@@ -115,6 +116,7 @@ def search_objects(db: Session, workspace_id: str, query: str = "",
             ),
         )
     )
+    stmt = stmt.where(restriction_clause(Asset))
     if type:
         stmt = stmt.where(Asset.type == type)
     # The type counts as a match. Equipment here is named FI4-B-CAM-VIS-001,
@@ -153,7 +155,8 @@ def get_object(db: Session, workspace_id: str, uid_or_key: str) -> dict:
         relations.append({
             "relation": relation.relation_type,
             "direction": "to" if outgoing else "from",
-            "object": _asset_summary(other) if other else {"uid": other_uid},
+            "object": (_asset_summary(other) if can_see(other) else {"restricted": True}) if other
+            else {"uid": other_uid},
         })
 
     return {
@@ -168,7 +171,7 @@ def search_tickets(db: Session, workspace_id: str, query: str = "",
                    state: Optional[str] = None, limit: int = DEFAULT_LIMIT) -> dict:
     """Work: faults, maintenance, requests."""
     needle = (query or "").strip().lower()
-    stmt = select(Issue).where(Issue.workspace_id == workspace_id)
+    stmt = select(Issue).where(Issue.workspace_id == workspace_id, visible_issues_clause())
     if state:
         stmt = stmt.where(Issue.state == state)
     rows = [
@@ -186,7 +189,7 @@ def search_tickets(db: Session, workspace_id: str, query: str = "",
 def get_ticket(db: Session, workspace_id: str, uid: str) -> dict:
     """One ticket, including the ARGUS fields: cause, cure, downtime."""
     issue = db.scalar(
-        select(Issue).where(Issue.workspace_id == workspace_id, Issue.uid == uid)
+        select(Issue).where(Issue.workspace_id == workspace_id, Issue.uid == uid, visible_issues_clause())
     )
     if issue is None:
         return {"found": False, "looked_for": uid}

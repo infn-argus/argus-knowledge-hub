@@ -31,6 +31,8 @@ import { IssueList } from "./pages/issues/List";
 import { IssueSearch } from "./pages/issues/Search";
 import { LabelList } from "./pages/labels/List";
 import { ReviewQueuePage } from "./pages/review/Queue";
+import { MigrationPage } from "./pages/migration/Domains";
+import { LookupPage } from "./pages/lookup/Lookup";
 import { SchemaDetail } from "./pages/schemas/Detail";
 import { IconLibrary } from "./pages/icons/List";
 import { SchemaForm } from "./pages/schemas/Form";
@@ -90,6 +92,8 @@ export function App() {
 
           <Route path="/graph" element={<GraphExplorer />} />
           <Route path="/review" element={<ReviewQueuePage />} />
+          <Route path="/migration" element={<MigrationPage />} />
+          <Route path="/lookup/*" element={<LookupPage />} />
 
           <Route path="/labels" element={<LabelList />} />
 

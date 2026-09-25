@@ -27,6 +27,7 @@ from app.models.asset import Asset, Relation
 from app.models.asset_subresources import AssetTicket
 from app.models.issue import Issue
 from app.models.ledger import MigrationMap, TicketLink
+from app.services.visibility import can_see, restriction_clause
 
 LEGACY_WINDOW = timedelta(days=7)
 DERIVATION = "attribution/1"
@@ -171,19 +172,25 @@ def derive_ticket_links(db: Session, *, workspace_ids: Optional[Iterable[str]] =
     return {"tickets_attributed": n}
 
 
+def _visible_tickets():
+    return TicketLink.ticket_uid.in_(select(Issue.uid).where(restriction_clause(Issue)))
+
+
 def _counted():
     """I-TKT-2: subject links and definite derived links; never related,
-    possible or migration-split links."""
-    return (TicketLink.role == "subject") | (
+    possible or migration-split links. Restricted tickets the viewer may not
+    see are not counted either (I-ACL-1)."""
+    return _visible_tickets() & (TicketLink.role == "subject") | _visible_tickets() & (
         TicketLink.role.in_(("involved_equipment", "involved_position"))
         & (TicketLink.certainty == "definite") & (TicketLink.origin == "derived"))
 
 
 def record_counts(db: Session, uid: str) -> dict:
     subject = db.scalar(select(func.count(func.distinct(TicketLink.ticket_uid))).where(
-        TicketLink.asset_uid == uid, TicketLink.role == "subject"))
+        TicketLink.asset_uid == uid, TicketLink.role == "subject", _visible_tickets()))
     involved = db.scalar(select(func.count(func.distinct(TicketLink.ticket_uid))).where(
         TicketLink.asset_uid == uid, TicketLink.role.in_(("involved_equipment", "involved_position")),
+        _visible_tickets(),
         TicketLink.certainty == "definite", TicketLink.origin == "derived"))
     return {"subject": subject or 0, "involved": involved or 0}
 
@@ -198,6 +205,8 @@ def links_of_ticket(db: Session, ticket_uid: str) -> list[dict]:
     out = []
     for link in db.scalars(select(TicketLink).where(TicketLink.ticket_uid == ticket_uid).order_by(TicketLink.id)):
         a = db.get(Asset, link.asset_uid)
+        if a is not None and not can_see(a):
+            continue
         out.append({"asset_uid": link.asset_uid, "name": a.name if a else None, "key": a.key if a else None,
                     "type": a.type if a else None, "role": link.role, "certainty": link.certainty,
                     "origin": link.origin, "detail": link.detail})
@@ -209,8 +218,42 @@ def tickets_involving(db: Session, asset_uid: str) -> list[dict]:
     for link in db.scalars(select(TicketLink).where(TicketLink.asset_uid == asset_uid,
                                                     TicketLink.role != "subject")):
         issue = db.get(Issue, link.ticket_uid)
-        if issue is None:
+        if issue is None or not can_see(issue):
             continue
         out.append({"ticket_uid": issue.uid, "key": ticket_key(issue), "title": issue.title, "state": issue.state,
                     "role": link.role, "certainty": link.certainty, "origin": link.origin})
     return out
+
+
+# --------------------------------------------------------------------------- I-TKT-4
+
+INCIDENT_TYPES = {"operational incident", "operational-incident"}
+
+
+class OccurrenceRequired(ValueError):
+    code = "I-TKT-4"
+
+
+def is_incident_type(db: Session, schema_uid: Optional[str]) -> bool:
+    from app.models.schema import Schema
+    schema = db.get(Schema, schema_uid) if schema_uid else None
+    return schema is not None and schema.name.strip().lower() in INCIDENT_TYPES
+
+
+def validate_occurrence(db: Session, schema_uid: Optional[str], attributes: dict) -> None:
+    """An operational incident created in ARGUS says when it happened, with
+    the precision known (I-TKT-4). Only a ticket migrated from Jira may lack
+    it; it then gets the creation-date fallback."""
+    attributes = attributes or {}
+    if not is_incident_type(db, schema_uid) or attributes.get("argus_source") == "jira":
+        return
+    value = attributes.get("occurred_from")
+    if not value:
+        raise OccurrenceRequired("an operational incident needs occurred_from: when it happened, "
+                                 "with the precision known (a day, a month)")
+    try:
+        start = _endpoint(value, "from")
+    except (temporal.TemporalError, KeyError, ValueError) as exc:
+        raise OccurrenceRequired(f"occurred_from is not a valid time: {exc}")
+    if start is None or not start.placed:
+        raise OccurrenceRequired("occurred_from must name a time")

@@ -61,6 +61,10 @@ export interface ExternalTicket {
 
 export interface AssetContext {
   asset: HubAsset;
+  /** Set while the derive stage is catching up with an edit (I-UX-1). */
+  processing: { state: "deriving"; since: string; request: number } | null;
+  /** The restricted class of this record, when it has one. */
+  restricted: string | null;
   type_path: string[];
   access: { tickets: boolean; documents: boolean };
   stats: {

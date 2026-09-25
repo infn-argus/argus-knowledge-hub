@@ -228,6 +228,55 @@ class MigrationMap(Base):
     plan_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
+class LedgerDomain(Base):
+    """A migration domain (§17): one scope moving from Jira or Insight to
+    ARGUS, through the stages T0 Prepare … T5 Retire. ARGUS becomes the
+    system of record for the scope when its exit is signed."""
+    __tablename__ = "ledger_domains"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String)
+    resource: Mapped[str] = mapped_column(String, default="objects")   # objects | tickets | documents
+    stage: Mapped[str] = mapped_column(String, default="T0")
+    stream_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    pilot: Mapped[bool] = mapped_column(Boolean, default=False)
+    archive_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)   # the read-only Jira/Insight archive
+    watermark: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    manifest_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    frozen_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
+    exited_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_decision_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReconciliationReport(Base):
+    """One comparison of a source export with ARGUS (§17.6). Written once."""
+    __tablename__ = "ledger_reconciliation_reports"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    domain_id: Mapped[str] = mapped_column(String, index=True)
+    manifest_hash: Mapped[str] = mapped_column(String)
+    passed: Mapped[bool] = mapped_column(Boolean)
+    body: Mapped[dict] = mapped_column(JSONB)
+    body_hash: Mapped[str] = mapped_column(String)
+    actor: Mapped[str] = mapped_column(String)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DeriveRequest(Base):
+    """A derive run a user edit is waiting for (D10): until it is done the
+    records of these workspaces show `deriving`."""
+    __tablename__ = "ledger_derive_requests"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_ids: Mapped[list] = mapped_column(JSONB)
+    cause: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="pending", index=True)   # pending | done | failed
+    requested_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    done_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 # --------------------------------------------------------------------------- projections
 
 class TicketLink(Base):

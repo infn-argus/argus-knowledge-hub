@@ -11,6 +11,7 @@ class GraphNodeOut(BaseModel):
     type_name: Optional[str] = None
     state: Optional[str] = None
     depth: int
+    restricted: bool = False
 
 
 class GraphEdgeOut(BaseModel):

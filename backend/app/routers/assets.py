@@ -7,8 +7,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.auth import get_current_user_id, require_permission
+from app.auth import get_current_user_id, get_grants, require_permission
 from app.db import get_db
+from app.ledger.cutover import assert_writable
+from app.ledger.engine import LedgerError
+from app.ledger.identity import DuplicateIdentifier, assert_unique_at_creation
 from app.models.asset import Asset, Relation
 from app.models.attachment import Attachment
 from app.models.schema import Schema
@@ -36,11 +39,13 @@ ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
 def list_assets(
     schema_uid: Optional[str] = None,
     workspace_id: str = Depends(require_permission("read")),
+    grants=Depends(get_grants),
     db: Session = Depends(get_db),
 ):
     # This workspace's own objects, and any other workspace's that are flagged
     # global. Being of a global *type* is not enough (see services/visibility).
-    stmt = select(Asset).where(visible_assets_clause(workspace_id))
+    # A restricted record is absent unless the viewer holds its class.
+    stmt = select(Asset).where(visible_assets_clause(workspace_id, grants))
     if schema_uid:
         stmt = stmt.where(Asset.schema_uid == schema_uid)
     return db.scalars(stmt).all()
@@ -61,8 +66,10 @@ def create_asset(
     # type (asset-model-revision §4.3).
     if schema is None or (schema.workspace_id != workspace_id and not schema.is_global):
         raise HTTPException(status_code=422, detail="Unknown object type for this workspace")
+    _assert_writable(db, workspace_id)
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
     validate_attributes(db, schema, body.attributes, workspace_id, Asset)
+    _assert_unique(db, workspace_id, body.attributes)
     data = body.model_dump()
     # Made in a global workspace, an object is global unless it says otherwise —
     # as its types and documents already are.
@@ -83,23 +90,42 @@ def _get_owned_asset(uid: str, workspace_id: str, db: Session) -> Asset:
     asset = db.get(Asset, uid)
     if asset is None or asset.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Asset not found")
+    _assert_writable(db, workspace_id)
     return asset
 
 
-def _get_visible_asset(uid: str, workspace_id: str, db: Session) -> Asset:
+def _assert_writable(db: Session, workspace_id: str) -> None:
+    """No dual write (§17.2): a scope being migrated is read-only here until
+    its cutover exit is signed."""
+    try:
+        assert_writable(db, workspace_id, "objects")
+    except LedgerError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": "I-SOR-1"})
+
+
+def _assert_unique(db: Session, workspace_id: str, attributes: dict, exclude: Optional[str] = None) -> None:
+    try:
+        assert_unique_at_creation(db, workspace_id, attributes, exclude)
+    except DuplicateIdentifier as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": exc.code,
+                                                     "existing": exc.existing})
+
+
+def _get_visible_asset(uid: str, workspace_id: str, db: Session, grants=None) -> Asset:
     asset = db.get(Asset, uid)
     if asset is None:
         raise HTTPException(status_code=404, detail="Asset not found")
-    if asset_visible_in(asset, workspace_id):
+    if asset_visible_in(asset, workspace_id, grants):
         return asset
     raise HTTPException(status_code=404, detail="Asset not found")
 
 
 @router.get("/{uid}", response_model=AssetOut)
 def get_asset(
-    uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)
+    uid: str, workspace_id: str = Depends(require_permission("read")), grants=Depends(get_grants),
+    db: Session = Depends(get_db),
 ):
-    asset = _get_visible_asset(uid, workspace_id, db)
+    asset = _get_visible_asset(uid, workspace_id, db, grants)
     # Keep the denormalized relation cache honest every time an object is
     # actually looked at, independent of whatever else may have changed it
     # (relations are also resynced at the point of change, but this catches
@@ -130,6 +156,7 @@ def update_asset(
 
     if "attributes" in patch or "schema_uid" in patch:
         validate_attributes(db, schema, asset.attributes, workspace_id, Asset, exclude_uid=uid)
+        _assert_unique(db, workspace_id, asset.attributes, exclude=uid)
     db.commit()
     if global_changed:
         # Cross-workspace visibility just changed — this asset's neighbors
@@ -156,6 +183,7 @@ def bulk_delete_assets(
     workspace_id: str = Depends(require_permission("delete")),
     db: Session = Depends(get_db),
 ):
+    _assert_writable(db, workspace_id)
     deleted = 0
     missing: list[str] = []
     for uid in body.uids:

@@ -181,3 +181,68 @@ export interface RuleEntry {
   active: boolean;
   active_impl: string | null;
 }
+
+export interface ExitCriterion {
+  id: string;
+  text: string;
+  ok: boolean;
+  attested?: boolean;
+  detail?: Record<string, unknown>;
+}
+
+export interface ReconciliationDifference {
+  id: string;
+  section: string;
+  item: string;
+  message: string;
+  explained_by: string | null;
+  sha256?: string;
+  size?: number;
+}
+
+export interface ReconciliationBody {
+  domain: string;
+  manifest_hash: string;
+  watermark: Record<string, unknown> | null;
+  sections: Record<string, { source: number; argus: number }>;
+  differences: ReconciliationDifference[];
+  unexplained: number;
+  passed: boolean;
+  at: string;
+}
+
+export interface DomainView {
+  id: string;
+  workspace_id: string;
+  name: string;
+  resource: string;
+  stage: "T0" | "T1" | "T2" | "T3" | "T4" | "T5";
+  stage_name: string;
+  stream_ids: string[];
+  pilot: boolean;
+  archive_url: string | null;
+  watermark: Record<string, unknown> | null;
+  manifest_hash: string | null;
+  frozen_at: string | null;
+  exited_at: string | null;
+  authoritative: boolean;
+  latest_report: { id: string; passed: boolean; created_at: string; unexplained: number; body_hash: string } | null;
+  streams: { id: string; kind: string; frozen_at: string | null }[];
+}
+
+export interface DomainDetail extends DomainView {
+  exit_criteria: ExitCriterion[];
+  report: ReconciliationBody | null;
+  stages: Record<string, string>;
+}
+
+export interface LookupHit {
+  status: "migrated";
+  kind: "asset" | "ticket";
+  uid: string;
+  key: string;
+  name: string;
+  workspace_id: string;
+  path: string;
+  via: string;
+}

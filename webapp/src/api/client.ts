@@ -88,7 +88,11 @@ import type {
   AccessPointView,
   AddressUse,
   Decision as LedgerDecision,
+  DomainDetail,
+  DomainView,
   InstallationView,
+  LookupHit,
+  ReconciliationBody,
   RecordFacts,
   RecordTickets,
   ReviewQueue,
@@ -794,4 +798,36 @@ export const ledgerApi = {
   ticketLinks: (ticketUid: string) => request<TicketLinkView[]>(`/v1/ledger/tickets/${ticketUid}/links`),
   recordTickets: (uid: string) => request<RecordTickets>(`/v1/ledger/records/${uid}/tickets`),
   rules: () => request<{ rules: RuleEntry[]; check: string[] }>("/v1/ledger/rules"),
+  streams: () => request<{ id: string; kind: string; frozen_at: string | null }[]>("/v1/ledger/streams"),
+  merge: (input: { survivor_uid: string; loser_uid: string; reason?: string }) =>
+    request<{ decision_id: string }>("/v1/ledger/identity/merge", { method: "POST", body: json(input) }),
+  dismissCandidate: (input: { records: string[]; kind: "reject_candidate" | "confirm_new"; reason?: string }) =>
+    request<{ decision_id: string }>("/v1/ledger/identity/dismiss", { method: "POST", body: json(input) }),
+  lookup: (identifier: string) => request<LookupHit>(`/v1/lookup/${encodeURIComponent(identifier)}`),
+};
+
+export const domainsApi = {
+  list: () => request<DomainView[]>("/v1/domains"),
+  get: (id: string) => request<DomainDetail>(`/v1/domains/${encodeURIComponent(id)}`),
+  create: (input: { id: string; name: string; resource: string; stream_ids: string[]; pilot: boolean; archive_url?: string }) =>
+    request<DomainView>("/v1/domains", { method: "POST", body: json(input) }),
+  stage: (id: string, stage: string) =>
+    request<DomainView>(`/v1/domains/${encodeURIComponent(id)}/stage`, { method: "POST", body: json({ stage }) }),
+  freeze: (id: string, watermark: unknown, manifest: unknown) =>
+    request<DomainView>(`/v1/domains/${encodeURIComponent(id)}/freeze`, {
+      method: "POST",
+      body: json({ watermark, manifest }),
+    }),
+  reconcile: (id: string, manifest: unknown) =>
+    request<ReconciliationBody & { id: string }>(`/v1/domains/${encodeURIComponent(id)}/reconcile`, {
+      method: "POST",
+      body: json({ manifest }),
+    }),
+  explain: (id: string, difference: string, reason: string) =>
+    request<{ decision_id: string }>(`/v1/domains/${encodeURIComponent(id)}/explain`, {
+      method: "POST",
+      body: json({ difference, reason }),
+    }),
+  exit: (id: string, attestations: Record<string, boolean>) =>
+    request<DomainView>(`/v1/domains/${encodeURIComponent(id)}/exit`, { method: "POST", body: json({ attestations }) }),
 };
