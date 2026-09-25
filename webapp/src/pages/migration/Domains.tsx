@@ -8,7 +8,7 @@ import { ApiError, auditApi, domainsApi, ledgerApi, retirementApi } from "../../
 import type { DomainDetail, DomainView, ReconciliationDifference } from "../../api/ledgerTypes";
 import { errorText } from "../../components/hub/LedgerPanels";
 import { Card, Empty } from "../../components/hub/ui";
-import { LedgerOnlyCard, LegacyMigrationCard, RegistryCard } from "./LegacyMigration";
+import { LedgerOnlyCard, LegacyMigrationCard, RegistryCard, SerialLinesCard } from "./LegacyMigration";
 
 const STAGES = ["T0", "T1", "T2", "T3", "T4", "T5"] as const;
 const STAGE_HELP: Record<string, string> = {
@@ -68,6 +68,7 @@ export function MigrationPage() {
       <LegacyMigrationCard />
       <LedgerOnlyCard />
       <RegistryCard />
+      <SerialLinesCard />
       <AuditIntegrity />
       <RetirementCard />
     </div>

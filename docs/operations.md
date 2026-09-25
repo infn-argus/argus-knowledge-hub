@@ -243,7 +243,7 @@ rewritten where the rewrite is mechanical:
 |---|---|
 | `assigned to` → a Work Package | the `work_package` attribute of the source. The derived `in work package` edge follows it |
 | `spare for` between two units | the source becomes a designated spare, with the target's product model if it has one |
-| `on line`, `carried by`, a Serial Line's `port of` | held for a person. A Serial Line becomes a Bus Segment behind its IOC's Communication Path (§9); build the path, then remove the edge, or accept it as a registry exception |
+| `on line`, `carried by`, a Serial Line's `port of` | held for a person. A Serial Line becomes a Bus Segment behind its IOC's Communication Path (§9): convert it under *Serial lines* (below), or accept the edge as a registry exception |
 | `replaced` | held for a person: a replacement is an Installation swap, with its date |
 | `spare for` between two Positions | held for a person: name the unit that is the spare |
 
@@ -500,3 +500,47 @@ disappear, or retire a record that still has tickets, documents or a
 Confirmed Installation, is held for review. A person's own edits are not
 revisions: retiring a record by hand is an explicit decision with its
 author.
+
+## Converting serial lines (§9.1, §12.4)
+
+The old importer wrote one Serial Line per converter port. Each line had
+its devices `on line`, a `port of` edge to its Access Point and a
+`carried by` edge to the converter. The model has none of these edges.
+*Migration to ARGUS → Serial lines* (or `GET /v1/ledger/serial-lines`)
+lists each remaining line with what converting it would build:
+
+- the Access Point it enters at (from `port of`);
+- the converter (from `carried by`);
+- one Communication Path per IOC of its devices (from each device's
+  `provided by`);
+- its port number, from `tcp_port` or the `:4003` at the end of its key;
+- anything a person must settle first. A line may name several Access
+  Points, in which case pick one; or a device may have no IOC. A device
+  without an IOC blocks the conversion: give it one, because removing its
+  edge would leave it unreachable in the model.
+
+*Convert* (`POST /v1/ledger/serial-lines/{uid}/convert` with a `reason`,
+and an `access_point_uid` when the line names several Access Points) makes
+these changes, all through the ledger:
+
+1. The line is retyped in place as a **Bus Segment**, so its uid, key,
+   tickets and documents stay the same. A `retyped` record event says so.
+2. Each path is created (`PATH:<ioc>:<line>`). The path `enters at` the
+   Access Point and `continues on` the segment. The segment is
+   `served by` the path, and each device `uses path`.
+3. The Access Point is `implemented by` the converter, unless it already
+   names equipment.
+4. The port number becomes a `required_port` claim. The claim is inferred
+   and advisory: it waits for a person, and a number never attaches a
+   port on its own (§9.3).
+5. The old `on line`, `port of` and `carried by` edges are removed. Legacy
+   edges get a `remove_legacy_edge` decision each.
+
+The golden incidents are walked before and after. If the walk would stop
+finding a cause it found before, nothing is changed and the conversion is
+refused (422). It goes ahead only when a person accepts the loss with a
+reason (`accept_golden_loss`). That reason is kept on the
+`convert_serial_line` decision. The root-cause walk follows the new edges:
+a failed converter reaches the devices through `implemented by`,
+`enters at` and `uses path`, and a broken segment reaches them through
+`continues on`.

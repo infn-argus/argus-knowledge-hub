@@ -346,6 +346,34 @@ def registry_mode(body: RegistryModeIn, identity=Depends(get_identity),
     return {"mode": w.registry_mode}
 
 
+@router.get("/serial-lines")
+def serial_lines(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """The old importer's Serial Lines, each with what converting it would build (§9.1, §12.4)."""
+    from app.ledger import serial_lines as sl
+    return {"lines": sl.lines(db, workspace_id)}
+
+
+class SerialLineConvertIn(BaseModel):
+    reason: str
+    access_point_uid: Optional[str] = None
+    accept_golden_loss: Optional[str] = None
+
+
+@router.post("/serial-lines/{uid}/convert")
+def convert_serial_line(uid: str, body: SerialLineConvertIn, identity=Depends(get_identity),
+                        workspace_id: str = Depends(require_permission("modify")), db: Session = Depends(get_db)):
+    """Build the Communication Path and Bus Segment for one line and remove its old edges.
+    Refused if the golden incidents' walk would lose a cause, unless that is accepted with a reason."""
+    from app.ledger import serial_lines as sl
+    try:
+        built = sl.convert(db, workspace_id, actor_of(identity), uid, access_point_uid=body.access_point_uid,
+                           reason=body.reason, accept_golden_loss=body.accept_golden_loss)
+    except LedgerError as exc:
+        _fail(db, exc)
+    db.commit()
+    return built
+
+
 @router.get("/review/queues")
 def review_queues(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """§18.2: each queue's size, age distribution and escalation, and who owns it."""

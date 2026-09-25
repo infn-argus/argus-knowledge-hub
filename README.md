@@ -144,6 +144,11 @@ currently valid* revision rather than to an arbitrary PDF.
   verbs, wrong end types, cardinality, cycles, edges to retired records. A workspace switches to
   enforce mode once each violation is fixed or accepted as an exception with a reason. From
   then on, a new edge that breaks the registry is refused.
+- **Serial line conversion (§9.1).** The old importer's Serial Lines are converted one at a time.
+  Each line is retyped in place as a Bus Segment behind a Communication Path, running from its
+  IOC to the Access Point. The port number becomes an advisory `required_port`, and the old
+  edges are removed. The golden incidents are walked before and after; a conversion that loses
+  a known cause is refused unless someone accepts the loss with a reason.
 - **Equipment classes (§5.5).** Equipment with no type of its own is *Other Equipment* with a
   class from a vocabulary the catalogue owns. A monthly report shows the classes and the
   `Unclassified` share with its alert. Promotion reviews open at the §5.5 thresholds, and a

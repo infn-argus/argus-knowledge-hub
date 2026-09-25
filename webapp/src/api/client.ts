@@ -785,6 +785,21 @@ export const hubApi = {
   documentContext: (uid: string) => request<DocumentContext>(`/v1/hub/documents/${uid}/context`),
 };
 
+type Ref = { uid: string; key: string };
+/** What converting one old Serial Line into a path and a Bus Segment would build (§9.1, §12.4). */
+export type SerialLineProposal = {
+  line: Ref & { name: string };
+  access_point: Ref | null;
+  access_points: Ref[];
+  converter: Ref | null;
+  implements_access_point: boolean;
+  paths: { ioc: Ref; devices: string[] }[];
+  devices: Ref[];
+  required_port: { tcp_port: number } | null;
+  questions: string[];
+  ready: boolean;
+};
+
 /** The fact ledger: review queue, provenance, decisions and installation
  * history. Every change here is a decision recorded in the audit ledger. */
 export const ledgerApi = {
@@ -801,6 +816,11 @@ export const ledgerApi = {
     request<{ decision_id: string }>("/v1/ledger/registry/exceptions", { method: "POST", body: json({ violation_id, reason }) }),
   setRegistryMode: (mode: "warn" | "enforce", reason: string) =>
     request<{ mode: string }>("/v1/ledger/registry/mode", { method: "PUT", body: json({ mode, reason }) }),
+  serialLines: () => request<{ lines: SerialLineProposal[] }>("/v1/ledger/serial-lines"),
+  convertSerialLine: (uid: string, body: { reason: string; access_point_uid?: string; accept_golden_loss?: string }) =>
+    request<{ paths: { uid: string; key: string; devices: number }[]; removed: unknown[];
+              golden: { ok: boolean | null; lost?: { incident: string; cause: string }[] } }>(
+      `/v1/ledger/serial-lines/${encodeURIComponent(uid)}/convert`, { method: "POST", body: json(body) }),
   setLedgerOnly: (enabled: boolean, reason: string) =>
     request<{ enabled: boolean }>("/v1/ledger/ledger-only", { method: "PUT", body: json({ enabled, reason }) }),
   escalateReview: () =>

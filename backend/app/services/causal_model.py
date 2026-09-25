@@ -85,6 +85,16 @@ SEMANTICS: dict = {
     "carried by": RelationSemantics("control", REVERSE, CONTROL,
                                     note="a logical line → each thing it passes through: cable, switch, "
                                          "converter. A series path: any of them stopping cuts the line"),
+    # The connectivity model (§9) that replaces the three edges above.
+    "uses path": RelationSemantics("control", REVERSE, CONTROL,
+                                   note="device → communication path: the path is cut, the device is unreachable"),
+    "enters at": RelationSemantics("control", REVERSE, CONTROL,
+                                   note="path → the access point it ends at: the endpoint stops, the path is cut"),
+    "continues on": RelationSemantics("control", REVERSE, CONTROL,
+                                      note="path → the bus segment behind the endpoint: a broken segment cuts it"),
+    "served by": RelationSemantics("control", FORWARD, CONTROL,
+                                   note="segment → the path that serves it: stored the other way round from "
+                                        "`continues on`, and failing the same way"),
     "acts on": RelationSemantics("control", FORWARD, CONTROL,
                                  note="device → what it drives: it loses control, not function"),
     "drives": RelationSemantics("control", FORWARD, CONTROL, note="IOC → the unit it is"),

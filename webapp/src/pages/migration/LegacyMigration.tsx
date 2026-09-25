@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ledgerApi, legacyMigrationApi } from "../../api/client";
+import { ledgerApi, legacyMigrationApi, type SerialLineProposal } from "../../api/client";
 import type { MigrationAction, MigrationOutcome, MigrationRow } from "../../api/ledgerTypes";
 import { errorText } from "../../components/hub/LedgerPanels";
 import { Card, Empty } from "../../components/hub/ui";
@@ -423,5 +423,83 @@ export function RegistryCard() {
       </button>
       {(accept.isError || mode.isError) && <p className="mt-1 text-xs text-red-600">{errorText(accept.error ?? mode.error)}</p>}
     </Card>
+  );
+}
+
+
+/** §9.1, §12.4: the old importer's Serial Lines, one at a time. Each becomes a
+ * Bus Segment behind a Communication Path from its IOC to the Access Point;
+ * the golden incidents are walked before and after, and a lost cause refuses
+ * the conversion unless a person accepts it with a reason. */
+export function SerialLinesCard() {
+  const queryClient = useQueryClient();
+  const q = useQuery({ queryKey: ["serial-lines"], queryFn: ledgerApi.serialLines, retry: false });
+  const [done, setDone] = useState<string | null>(null);
+  const convert = useMutation({
+    mutationFn: (v: { uid: string; key: string; reason: string; access_point_uid?: string; accept_golden_loss?: string }) =>
+      ledgerApi.convertSerialLine(v.uid, { reason: v.reason, access_point_uid: v.access_point_uid, accept_golden_loss: v.accept_golden_loss }),
+    onSuccess: (r, v) => {
+      setDone(`${v.key}: ${r.paths.length} path(s), ${r.removed.length} old edge(s) removed` +
+              (r.golden.ok === null ? ", no golden incidents to check" : r.golden.ok ? ", golden incidents unchanged" : ", a golden cause accepted as lost"));
+      queryClient.invalidateQueries();              // types, counts and the registry all change
+    },
+  });
+  if (!q.data) return null;
+  const lines = q.data.lines;
+
+  function run(p: SerialLineProposal, ap?: string) {
+    const reason = prompt(`Why convert ${p.line.key}?`);
+    if (!reason) return;
+    convert.mutate({ uid: p.line.uid, key: p.line.key, reason, access_point_uid: ap }, {
+      onError: (e) => {
+        const text = errorText(e);
+        if (!text.includes("lose a cause")) return;
+        const accept = prompt(`${text}\n\nConvert anyway? Say why the walk may lose it.`);
+        if (accept) convert.mutate({ uid: p.line.uid, key: p.line.key, reason, access_point_uid: ap, accept_golden_loss: accept });
+      },
+    });
+  }
+
+  return (
+    <Card title="Serial lines (§9)">
+      <p className="py-1 text-sm text-slate-600">
+        {lines.length === 0
+          ? "No Serial Line is left: every one is a Bus Segment behind a Communication Path."
+          : `${lines.length} line(s) from the old importer. Converting one retypes it in place as a Bus Segment, draws a path from each IOC to the Access Point, and removes its old edges.`}
+      </p>
+      <ul className="divide-y divide-slate-100 text-sm">
+        {lines.map((p) => <SerialLineRow key={p.line.uid} p={p} busy={convert.isPending} onConvert={(ap) => run(p, ap)} />)}
+      </ul>
+      {done && <p className="mt-1 text-xs text-emerald-700">{done}</p>}
+      {convert.isError && <p className="mt-1 text-xs text-red-600">{errorText(convert.error)}</p>}
+    </Card>
+  );
+}
+
+function SerialLineRow({ p, busy, onConvert }: { p: SerialLineProposal; busy: boolean; onConvert: (ap?: string) => void }) {
+  const [ap, setAp] = useState(p.access_point?.uid ?? "");
+  const blocking = p.questions.filter((x) => !x.includes("Access Points") || !ap);
+  return (
+    <li className="py-2">
+      <div className="flex items-center gap-2">
+        <Link to={`/assets/${p.line.uid}`} className="font-medium text-indigo-700 hover:underline">{p.line.key}</Link>
+        {p.required_port && <span className="rounded bg-slate-100 px-1.5 text-[11px] text-slate-600">port {p.required_port.tcp_port} (advisory)</span>}
+        <span className="flex-1" />
+        {p.access_points.length > 1 && (
+          <select value={ap} onChange={(e) => setAp(e.target.value)} className="rounded border border-slate-300 px-1 py-0.5 text-xs">
+            <option value="">Access Point…</option>
+            {p.access_points.map((a) => <option key={a.uid} value={a.uid}>{a.key}</option>)}
+          </select>
+        )}
+        <button onClick={() => onConvert(ap || undefined)} disabled={busy || blocking.length > 0}
+                className="rounded-md border border-slate-300 px-3 py-1 text-xs disabled:opacity-40">Convert</button>
+      </div>
+      <p className="mt-0.5 text-xs text-slate-600">
+        enters at {p.access_point?.key ?? (p.access_points.length ? "one of " + p.access_points.map((a) => a.key).join(", ") : "—")}
+        {p.converter && <> · implemented by {p.converter.key}{p.implements_access_point ? " (already set)" : ""}</>}
+        {" · "}{p.paths.map((g) => `${g.ioc.key} → ${g.devices.length} device(s)`).join("; ") || "no path"}
+      </p>
+      {p.questions.map((x) => <p key={x} className="text-xs text-amber-700">{x}</p>)}
+    </li>
   );
 }
