@@ -235,6 +235,22 @@ What each outcome does:
 | M-RETIRE | the importer no longer produces it and no person touched it: Retired, with its relations kept in the pre-image |
 | M-BLOCK | nothing moves |
 
+**Deprecated edges** (§12.3 step 4) are planned too, one item each, and
+applied after the records and before retirements. They are only
+rewritten where the rewrite is mechanical:
+
+| Edge | Becomes |
+|---|---|
+| `assigned to` → a Work Package | the `work_package` attribute of the source. The derived `in work package` edge follows it |
+| `spare for` between two units | the source becomes a designated spare, with the target's product model if it has one |
+| `on line`, `carried by`, a Serial Line's `port of` | held for a person. A Serial Line becomes a Bus Segment behind its IOC's Communication Path (§9); build the path, then remove the edge, or accept it as a registry exception |
+| `replaced` | held for a person: a replacement is an Installation swap, with its date |
+| `spare for` between two Positions | held for a person: name the unit that is the spare |
+
+Rewritten edges are removed through recorded decisions and restored on
+rollback. Held edges stay, and the relation registry keeps reporting them
+until someone deals with them.
+
 ## Cutover entry criteria (§17.4)
 
 A domain is frozen for cutover (T3) only when every entry criterion holds.

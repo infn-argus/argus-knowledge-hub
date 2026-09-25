@@ -1317,6 +1317,7 @@ def derive_all(db: Session, workspace_ids: Optional[Iterable[str]] = None) -> di
     ids = None if workspace_ids is None else list(set(workspace_ids))
     out = derive_realized_by(db, ids)
     out.update(derive_located_in(db, ids))
+    out.update(derive_in_work_package(db, ids))
     out.update(connectivity.derive_implemented_by(db, ids))
     out.update(connectivity.derive_ports(db, ids))
     out.update(tickets.derive_ticket_links(db, workspace_ids=ids))
@@ -1386,6 +1387,36 @@ def derive_located_in(db: Session, workspace_ids: Optional[Iterable[str]] = None
                             derivation="derived", rule="located-in/1"))
     db.flush()
     return {"located_in": len(wanted)}
+
+
+def derive_in_work_package(db: Session, workspace_ids: Optional[Iterable[str]] = None) -> dict:
+    """`in work package` (derived, §6.2): a record whose `work_package` names a
+    Work Package record, by uid or key, points at it. The attribute is the
+    fact; the edge follows it (it replaced the old `assigned to`)."""
+    q = select(Asset).where(Asset.attributes["work_package"].astext.isnot(None))
+    rq = select(Relation).where(Relation.derivation == "derived", Relation.relation_type == "in work package")
+    if workspace_ids is not None:
+        ids = list(set(workspace_ids))
+        q = q.where(Asset.workspace_id.in_(ids))
+        rq = rq.where(Relation.workspace_id.in_(ids))
+    wanted: dict[tuple, str] = {}
+    for a in db.scalars(q):
+        value = (a.attributes or {}).get("work_package")
+        if not isinstance(value, str):
+            continue
+        wp = db.get(Asset, value) or db.scalar(select(Asset).where(Asset.key == value))
+        if wp is not None and wp.type == "Work Package" and wp.record_status != "Retired" and wp.uid != a.uid:
+            wanted[(a.uid, wp.uid)] = a.workspace_id
+    current = {(r.from_asset_uid, r.to_asset_uid): r for r in db.scalars(rq)}
+    for key, row in current.items():
+        if key not in wanted:
+            db.delete(row)
+    for (frm, to), ws in wanted.items():
+        if (frm, to) not in current:
+            db.add(Relation(workspace_id=ws, from_asset_uid=frm, to_asset_uid=to, relation_type="in work package",
+                            derivation="derived", rule="in-work-package/1"))
+    db.flush()
+    return {"in_work_package": len(wanted)}
 
 
 # --------------------------------------------------------------------------- resolve

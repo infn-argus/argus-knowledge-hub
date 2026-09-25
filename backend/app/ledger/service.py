@@ -218,3 +218,15 @@ def retire_record(db: Session, workspace_id: str, actor: str, uid: str, reason: 
     assert_writable(db, workspace_id, "objects")
     return engine.apply_decisions(db, workspace_id, actor, [
         confirm_value(uid, "exists", "absent", replaces=_active(db, uid, "exists"), reason=reason)])
+
+
+def remove_legacy_edge(db: Session, workspace_id: str, actor: str, relation, reason: Optional[str] = None) -> None:
+    """An edge from before the ledger has no claim to withdraw: its removal is
+    recorded as a decision, with the edge as it was, then made."""
+    from app.ledger.writer import writing
+    with writing(db):
+        engine._record_decision(db, "remove_legacy_edge", actor, workspace_id, subject_uid=relation.from_asset_uid,
+                                predicate=f"rel:{relation.relation_type}", reason=reason,
+                                target={"to": relation.to_asset_uid, "relation_id": relation.id})
+        db.delete(relation)
+        db.flush()

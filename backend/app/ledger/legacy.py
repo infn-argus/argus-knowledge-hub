@@ -58,9 +58,22 @@ PHYSICAL = ("serial", "inventory_number", "manufacturer", "model", "argus_locati
 IDENTIFIERS = ("serial", "inventory_number")
 STRONG_LABELS = {"serial", "qrcode", "jiraObjectId", "inventory", "inventory_number"}
 IMPORTER_AUTHORS = {"system", "importer", "ledger", SOURCE}
-ORDER = {"M-BLOCK": 0, "M-FUNC": 0, "M-POS": 1, "M-PHYS": 2, "M-MIXED": 2, "M-RETIRE": 4}
-CONFIDENCE = {"M-BLOCK": 0.0, "M-FUNC": 1.0, "M-POS": 1.0, "M-PHYS": 0.95, "M-MIXED": 0.5, "M-RETIRE": 0.9}
-OUTCOMES = tuple(ORDER)
+ORDER = {"M-BLOCK": 0, "M-FUNC": 0, "M-POS": 1, "M-PHYS": 2, "M-MIXED": 2, "M-EDGE": 3, "M-EDGE-HOLD": 3,
+         "M-RETIRE": 4}
+CONFIDENCE = {"M-BLOCK": 0.0, "M-FUNC": 1.0, "M-POS": 1.0, "M-PHYS": 0.95, "M-MIXED": 0.5, "M-RETIRE": 0.9,
+              "M-EDGE": 1.0, "M-EDGE-HOLD": 0.0}
+OUTCOMES = ("M-BLOCK", "M-FUNC", "M-POS", "M-PHYS", "M-MIXED", "M-RETIRE")      # a record's; edges have their own
+EDGE_OUTCOMES = ("M-EDGE", "M-EDGE-HOLD")
+# §12.3 step 4 and §6.2: the deprecated verbs, and what a person must do where no rewrite is mechanical.
+HOLD_REASONS = {
+    "on line": "a Serial Line becomes a Bus Segment behind its IOC's Communication Path (§9.1, §9.3); build the "
+               "path, then remove this edge, or accept it as a registry exception",
+    "carried by": "a Serial Line becomes a Bus Segment behind a Communication Path (§9.1, §9.3); build the path, "
+                  "then remove this edge, or accept it as a registry exception",
+    "port of": "a Serial Line's port becomes an advisory required_port on its Bus Segment (§9.3, §12.4)",
+    "replaced": "a replacement is an Installation swap with its date (§8.4); record the swap, then remove this edge",
+    "spare for": "a Position is not a spare: name the unit that is, then remove this edge",
+}
 
 
 class MigrationError(LedgerError):
@@ -337,6 +350,55 @@ def _plan_item(db: Session, plan: LegacyMigrationPlan, r: Asset, latest: Optiona
                                status="planned", updated_at=now())
 
 
+def _edge_image(db: Session, rel: Relation, attrs: tuple = ()) -> dict:
+    a = db.get(Asset, rel.from_asset_uid)
+    return {"relation": {"id": rel.id, "from": rel.from_asset_uid, "to": rel.to_asset_uid, "type": rel.relation_type,
+                         "derivation": rel.derivation, "workspace_id": rel.workspace_id},
+            "attrs": {k: (a.attributes or {}).get(k) for k in attrs} if a is not None else {}}
+
+
+def edge_action(db: Session, rel: Relation) -> tuple[str, dict, list[str]]:
+    """The rewrite of one deprecated edge (§12.3 step 4), or why a person must decide."""
+    a, b = db.get(Asset, rel.from_asset_uid), db.get(Asset, rel.to_asset_uid)
+    name = rel.relation_type
+    if name == "assigned to" and b.type == "Work Package":
+        return "M-EDGE", {"do": "edge_to_attribute", "set": {"work_package": b.uid},
+                          "label": f"work_package = {b.key}",
+                          "note": "the work package becomes an attribute; `in work package` is derived from it"}, []
+    if name == "spare for" and a.type not in engine.INSTALLABLE and b.type not in engine.INSTALLABLE:
+        values = {"is_designated_spare": True}
+        if (b.attributes or {}).get("product_model"):
+            values["product_model"] = b.attributes["product_model"]
+        return "M-EDGE", {"do": "edge_to_attribute", "set": values,
+                          "label": "designated spare" + (f", product model {values['product_model']}"
+                                                         if "product_model" in values else ""),
+                          "note": "the unit becomes a designated spare for the product model"}, []
+    return "M-EDGE-HOLD", {"do": "hold_edge"}, [HOLD_REASONS.get(name, "no mechanical rewrite")]
+
+
+def _plan_edges(db: Session, p: LegacyMigrationPlan, retiring: set[str]) -> None:
+    from app.ledger.registry import DEPRECATED
+    q = (select(Relation).join(Asset, Asset.uid == Relation.from_asset_uid)
+         .where(Asset.workspace_id == p.workspace_id, Relation.derivation.is_(None),
+                or_(Relation.relation_type.in_(DEPRECATED), Relation.relation_type == "assigned to"))
+         .order_by(Relation.id))
+    for rel in db.scalars(q):
+        a, b = db.get(Asset, rel.from_asset_uid), db.get(Asset, rel.to_asset_uid)
+        if a is None or b is None or {a.uid, b.uid} & retiring:
+            continue                     # retiring a record takes its edges with it
+        if rel.relation_type == "assigned to" and b.type != "Work Package":
+            continue                     # the current `assigned to` (Access Point → Position)
+        if rel.relation_type == "port of" and a.type != "Serial Line":
+            continue                     # only a Serial Line's `port of` is deprecated
+        outcome, action, warnings = edge_action(db, rel)
+        image = _edge_image(db, rel, tuple(action.get("set", {})))
+        db.add(LegacyMigrationItem(plan_id=p.id, legacy_uid=f"edge:{rel.id}",
+                                   legacy_key=f"{a.key} —{rel.relation_type}→ {b.key}", legacy_type=rel.relation_type,
+                                   outcome=outcome, confidence=CONFIDENCE[outcome], evidence={"from": a.uid, "to": b.uid},
+                                   actions=[action], warnings=warnings, pre_image=image,
+                                   pre_image_hash=hash_image(image), status="planned", updated_at=now()))
+
+
 def plan(db: Session, workspace_id: str, actor: str, inventory_workspace_id: Optional[str] = None) -> LegacyMigrationPlan:
     p = LegacyMigrationPlan(id=f"MIG-{engine.ulid()}", workspace_id=workspace_id,
                             inventory_workspace_id=inventory_workspace_id or workspace_id, status="planned",
@@ -344,8 +406,14 @@ def plan(db: Session, workspace_id: str, actor: str, inventory_workspace_id: Opt
     db.add(p)
     db.flush()
     latest, taken = _latest_ref(db, workspace_id), set()
+    retiring = set()
     for r in _scope(db, workspace_id):
-        db.add(_plan_item(db, p, r, latest, taken))
+        item = _plan_item(db, p, r, latest, taken)
+        db.add(item)
+        if item.outcome == "M-RETIRE":
+            retiring.add(r.uid)
+    db.flush()
+    _plan_edges(db, p, retiring)
     db.flush()
     p.report_hash = hashlib.sha256(canonical(report(db, p)).encode()).hexdigest()
     engine._record_decision(db, "migration_plan", actor, workspace_id, target={"plan": p.id},
@@ -373,6 +441,8 @@ def override(db: Session, plan_id: str, item_id: int, outcome: str, actor: str, 
         raise MigrationError("unknown item")
     if item.status not in ("planned", "failed", "stale"):
         raise MigrationError("only an item not yet applied can be overridden")
+    if item.outcome in EDGE_OUTCOMES:
+        raise MigrationError("an edge's rewrite follows the registry; fix or accept the edge instead")
     if outcome not in OUTCOMES or (outcome == "M-FUNC") != (item.legacy_type in ELEMENTS):
         raise MigrationError(f"{outcome} is not a possible outcome for a {item.legacy_type}")
     if not reason.strip():
@@ -586,6 +656,9 @@ def apply(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
     todo = [i for i in items(db, p.id) if i.status in ("planned", "failed")]
     removed: dict[int, dict] = {}         # relations this run removed with retired records
     for item in sorted(todo, key=lambda i: (ORDER[i.outcome], i.id)):
+        if item.outcome in EDGE_OUTCOMES:
+            _apply_edge(db, p, item, actor)
+            continue
         r = db.get(Asset, item.legacy_uid)
         if r is None or _current_hash(db, r, removed) != item.pre_image_hash:
             item.status, item.reason = "stale", "the record changed after planning; plan it again"
@@ -616,6 +689,50 @@ def apply(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
     return p
 
 
+def _apply_edge(db: Session, p: LegacyMigrationPlan, item: LegacyMigrationItem, actor: str) -> None:
+    rel = db.get(Relation, item.pre_image["relation"]["id"])
+    if rel is None or hash_image(_edge_image(db, rel, tuple(item.pre_image["attrs"]))) != item.pre_image_hash:
+        item.status, item.reason = "stale", "the edge or its record changed after planning; plan it again"
+        return
+    action = item.actions[0]
+    if action["do"] == "hold_edge":
+        item.status, item.applied = "applied", {"held": True, "from": rel.from_asset_uid}
+        item.reason = None                        # the warning already says what the person must do
+        item.updated_at = now()
+        return
+    savepoint = db.begin_nested()
+    try:
+        service.edit_values(db, p.workspace_id, actor, rel.from_asset_uid,
+                            {f"attr:{k}": v for k, v in action["set"].items()},
+                            reason=f"{rel.relation_type} rewritten by {p.id}")
+        snapshot = dict(item.pre_image["relation"])
+        service.remove_legacy_edge(db, p.workspace_id, actor, rel, reason=f"rewritten by {p.id}")
+        savepoint.commit()
+        item.status, item.reason = "applied", None
+        item.applied = {"from": snapshot["from"], "set": action["set"], "removed_relations": [snapshot]}
+    except (LedgerError, ValueError) as exc:
+        savepoint.rollback()
+        item.status, item.reason = "failed", str(exc)
+    item.updated_at = now()
+
+
+def _rollback_edge(db: Session, p: LegacyMigrationPlan, item: LegacyMigrationItem, actor: str) -> None:
+    from app.ledger.writer import writing
+    done = item.applied or {}
+    if not done.get("held"):
+        service.edit_values(db, p.workspace_id, actor, done["from"],
+                            {f"attr:{k}": v for k, v in item.pre_image["attrs"].items()},
+                            reason=f"rollback of {p.id}")
+        with writing(db):
+            for rel in done.get("removed_relations", []):
+                db.add(Relation(workspace_id=rel["workspace_id"], from_asset_uid=rel["from"], to_asset_uid=rel["to"],
+                                relation_type=rel["type"], derivation=rel["derivation"]))
+            engine._record_decision(db, "restore_legacy_edge", actor, p.workspace_id, subject_uid=done["from"],
+                                    target={"plan": p.id, "item": item.id}, reason=f"rollback of {p.id}")
+    item.status, item.reason, item.updated_at = "rolled_back", f"rollback of {p.id}", now()
+    db.flush()
+
+
 def verify(db: Session, p: LegacyMigrationPlan) -> dict:
     """Plan-wide invariants. I-MIG-1 and I-MIG-2 were checked per item as it
     was applied; I-MIG-3 needs the whole plan."""
@@ -624,7 +741,7 @@ def verify(db: Session, p: LegacyMigrationPlan) -> dict:
     retired = {i.legacy_uid for i in applied if i.outcome == "M-RETIRE"}
     dangling = db.scalar(select(func.count()).select_from(Relation).where(
         or_(Relation.from_asset_uid.in_(retired), Relation.to_asset_uid.in_(retired)))) if retired else 0
-    untraced = [i.legacy_uid for i in applied if not db.scalar(
+    untraced = [i.legacy_uid for i in applied if i.outcome not in EDGE_OUTCOMES and not db.scalar(
         select(func.count()).select_from(MigrationMap).where(MigrationMap.legacy_uid == i.legacy_uid,
                                                             MigrationMap.plan_id == p.id))]
     open_items = [i.id for i in all_items if i.status in ("failed", "stale", "planned")]
@@ -669,7 +786,10 @@ def deep_verify(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
     for i in items(db, p.id):
         if i.status == "applied":
             done = i.applied or {}
-            touched += [u for u in (i.legacy_uid, done.get("equipment"), done.get("installation")) if u]
+            if i.outcome in EDGE_OUTCOMES:
+                touched += [done["from"]] if done.get("from") else []
+            else:
+                touched += [u for u in (i.legacy_uid, done.get("equipment"), done.get("installation")) if u]
     before_state = _state(db, touched)
     savepoint = db.begin_nested()
     try:
@@ -717,6 +837,9 @@ def rollback(db: Session, plan_id: str, actor: str, item_ids: Optional[list[int]
     _assert_open(db, p)
     chosen = [i for i in items(db, p.id) if i.status == "applied" and (item_ids is None or i.id in item_ids)]
     for item in sorted(chosen, key=lambda i: (-ORDER[i.outcome], -i.id)):
+        if item.outcome in EDGE_OUTCOMES:
+            _rollback_edge(db, p, item, actor)
+            continue
         done = item.applied or {}
         r = db.get(Asset, item.legacy_uid)
         eq = done.get("equipment") if done.get("equipment_created") else None

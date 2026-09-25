@@ -455,10 +455,13 @@ export interface RetirementStatus {
   attestations: Record<string, string>;
 }
 
-export type MigrationOutcome = "M-BLOCK" | "M-FUNC" | "M-POS" | "M-PHYS" | "M-MIXED" | "M-RETIRE";
+export type MigrationOutcome = "M-BLOCK" | "M-FUNC" | "M-POS" | "M-PHYS" | "M-MIXED" | "M-RETIRE" | "M-EDGE" | "M-EDGE-HOLD";
 
 export interface MigrationAction {
-  do: "keep" | "retire" | "retype" | "equipment" | "installation" | "move_labels" | "move_attachments";
+  do: "keep" | "retire" | "retype" | "equipment" | "installation" | "move_labels" | "move_attachments" | "edge_to_attribute" | "hold_edge";
+  set?: Record<string, unknown>;
+  label?: string;
+  note?: string;
   key?: string;
   match?: string | null;
   workspace?: string;

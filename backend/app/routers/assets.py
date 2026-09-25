@@ -423,7 +423,7 @@ def delete_relation(
             ledger_service.relate(db, workspace_id, _actor(identity), from_uid, relation.relation_type, to_uid,
                                   present=False)
         else:
-            _remove_legacy_edge(db, workspace_id, _actor(identity), relation)
+            ledger_service.remove_legacy_edge(db, workspace_id, _actor(identity), relation)
     except LedgerError as exc:
         _ledger_failed(db, exc)
     db.commit()
@@ -431,14 +431,3 @@ def delete_relation(
     rebuild_asset_relations(db, to_uid)
     db.commit()
 
-
-def _remove_legacy_edge(db: Session, workspace_id: str, actor: str, relation: Relation) -> None:
-    """An edge from before the ledger has no claim to withdraw: its removal is
-    recorded as a decision, with the edge as it was, then made."""
-    from app.ledger import engine
-    from app.ledger.writer import writing
-    with writing(db):
-        engine._record_decision(db, "remove_legacy_edge", actor, workspace_id, subject_uid=relation.from_asset_uid,
-                                predicate=f"rel:{relation.relation_type}",
-                                target={"to": relation.to_asset_uid, "relation_id": relation.id})
-        db.delete(relation)

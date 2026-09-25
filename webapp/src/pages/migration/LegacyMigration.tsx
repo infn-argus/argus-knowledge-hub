@@ -17,6 +17,8 @@ const OUTCOME: Record<MigrationOutcome, { text: string; tone: string }> = {
   "M-PHYS": { text: "position + equipment", tone: "bg-emerald-50 text-emerald-800" },
   "M-MIXED": { text: "mixed — review", tone: "bg-amber-50 text-amber-800" },
   "M-RETIRE": { text: "retire", tone: "bg-slate-100 text-slate-500" },
+  "M-EDGE": { text: "edge rewritten", tone: "bg-indigo-50 text-indigo-700" },
+  "M-EDGE-HOLD": { text: "edge — a person decides", tone: "bg-amber-50 text-amber-800" },
 };
 const CHOICES: MigrationOutcome[] = ["M-POS", "M-PHYS", "M-MIXED", "M-RETIRE", "M-BLOCK"];
 
@@ -34,6 +36,10 @@ function planned(a: MigrationAction): string {
       return `${a.attachments?.length} photo(s) → equipment`;
     case "retire":
       return "retired, not deleted";
+    case "edge_to_attribute":
+      return `${a.label ?? Object.keys(a.set ?? {}).join(", ")} (edge removed)`;
+    case "hold_edge":
+      return "kept for now";
     default:
       return "kept as it is";
   }
@@ -282,7 +288,8 @@ function Row({ r, open, onOverride }: { r: MigrationRow; open: boolean; onOverri
   return (
     <tr>
       <td className="py-1.5 pr-3">
-        <Link to={`/assets/${r.legacy_uid}`} className="font-mono text-xs text-slate-800 hover:underline">{r.legacy_key}</Link>
+        <Link to={`/assets/${r.outcome.startsWith("M-EDGE") ? String(r.evidence.from) : r.legacy_uid}`}
+              className="font-mono text-xs text-slate-800 hover:underline">{r.legacy_key}</Link>
         <span className="block text-xs text-slate-400">{r.legacy_type}</span>
         {r.warnings.map((w) => (
           <span key={w} className="block text-[11px] text-amber-700">{w}</span>
@@ -291,7 +298,7 @@ function Row({ r, open, onOverride }: { r: MigrationRow; open: boolean; onOverri
       <td className="pr-3">
         <span className={`rounded px-1.5 py-0.5 text-xs ${o.tone}`} title={`confidence ${r.confidence}`}>{o.text}</span>
         {r.override && <span className="block text-[11px] text-slate-500" title={r.override.reason}>overridden by {r.override.by}</span>}
-        {open && r.status !== "applied" && r.outcome !== "M-FUNC" && (
+        {open && r.status !== "applied" && r.outcome !== "M-FUNC" && !r.outcome.startsWith("M-EDGE") && (
           <select
             value=""
             onChange={(e) => {
@@ -313,9 +320,13 @@ function Row({ r, open, onOverride }: { r: MigrationRow; open: boolean; onOverri
         ))}
       </td>
       <td className="text-xs">
-        <span className={r.status === "applied" ? "text-emerald-700" : r.status === "failed" || r.status === "stale" ? "text-red-600" : "text-slate-500"}>
-          {r.status}
-        </span>
+        {r.outcome === "M-EDGE-HOLD" && r.status === "applied" ? (
+          <span className="text-amber-700">held for a person</span>
+        ) : (
+          <span className={r.status === "applied" ? "text-emerald-700" : r.status === "failed" || r.status === "stale" ? "text-red-600" : "text-slate-500"}>
+            {r.status}
+          </span>
+        )}
         {r.reason && <span className="block text-[11px] text-slate-500">{r.reason}</span>}
       </td>
     </tr>
