@@ -135,6 +135,10 @@ currently valid* revision rather than to an arbitrary PDF.
   queues, the other queues within their ageing targets, two weeks of shadow validation with
   10 consecutive clean runs, a recent restore rehearsal and probe run, and the attested items.
   The governance group can waive a criterion only with a reason, recorded in the freeze decision.
+- **Review queues (§18.2).** Every open review item has an age in working days against its
+  queue's targets. Overdue items go to the backup steward, then to the governance group
+  (`ARGUS_GOVERNANCE`), once per level. The notification never names the record. The review
+  queue page shows each queue's size, age distribution and escalations.
   *Migration to ARGUS → Legacy records*; served by `/v1/migration`.
 - **Stable API and Jira retirement.** The API is versioned in its path, and a deprecated
   endpoint announces its sunset in headers at least 180 days ahead

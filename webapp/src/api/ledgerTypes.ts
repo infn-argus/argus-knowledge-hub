@@ -498,3 +498,25 @@ export interface MigrationPlanView {
   statuses: Record<string, number>;
   rows?: MigrationRow[];
 }
+
+export interface QueueAgeing {
+  queue: string;
+  label: string;
+  targets: { due: number; backup: number; governance: number };
+  size: number;
+  overdue: number;
+  at_backup: number;
+  at_governance: number;
+  oldest: number | null;
+  buckets: { label: string; count: number }[];
+}
+
+export interface QueueDashboard {
+  workspace_id: string;
+  queues: QueueAgeing[];
+  total: number;
+  steward: string | null;
+  backup_steward: string | null;
+  domain: string | null;
+  governance: string[];
+}

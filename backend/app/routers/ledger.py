@@ -240,6 +240,22 @@ def review(workspace_id: str = Depends(require_permission("read")), db: Session 
                        "installation_proposals": len(installations)}}
 
 
+@router.get("/review/queues")
+def review_queues(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """§18.2: each queue's size, age distribution and escalation, and who owns it."""
+    from app.ledger import queues
+    return queues.dashboard(db, workspace_id)
+
+
+@router.post("/review/escalate")
+def escalate_review(workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    """Run the escalation for this workspace now (the scheduled job runs it for all)."""
+    from app.ledger import queues
+    sent = queues.escalate(db, workspace_id=workspace_id)
+    db.commit()
+    return sent
+
+
 @router.get("/records/{uid}/facts")
 def provenance(uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """Why each value is what it is: every contributing claim and decision."""

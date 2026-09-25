@@ -239,3 +239,45 @@ read-only change is approved and scheduled (6).
 The governance group may waive a criterion with a reason, for example a
 rehearsal on staging, or a domain it decided to cut over at the T2 limit.
 The waivers and attestations are written into the `freeze` decision.
+
+## Review queues and escalation (§18.2)
+
+Every open review item is in one queue. Each queue has three targets in
+working days: when an item is due, when it goes to the domain's backup
+steward, and when it goes to the governance group.
+
+| Queue | Due | To backup | To governance |
+|---|---|---|---|
+| blocking conflicts, held revisions | 2 | 3 | 5 |
+| port confirmations, safety-relevant | 0 | 0 | 1 |
+| other port confirmations and mappings | 5 | 7 | 10 |
+| identity candidates | 10 | 15 | 30 |
+| proposals (inferred facts) | 20 | 30 | 60 |
+| non-blocking conflicts, possible overlaps | 30 | 45 | 90 |
+| retirement flags | 10 | 15 | 30 |
+
+The scheduled `python -m app.ledger escalate` job, or *Review queue →
+Queue ageing → Escalate overdue now*, sends an in-app notification once
+per level. It is also e-mailed when SMTP is configured:
+
+- level 1 goes to the backup steward, with the steward in copy;
+- level 2 goes to the governance group, with the backup in copy.
+
+The stewards are the ones set on the workspace's domain. The governance
+group is set here:
+
+```
+ARGUS_GOVERNANCE=governance-lead@example.org,platform-lead@example.org
+```
+
+A notification names the queue, the workspace and the age, never the
+record. The recipient opens the review queue with their own access, so a
+restricted record is not disclosed. The dashboard (`GET
+/v1/ledger/review/queues`) shows, for each queue:
+
+- its size and age distribution;
+- how many items are overdue, at backup and at governance;
+- the age of the oldest item.
+
+Migration items are not in a queue of their own: they are due before the
+domain's cutover, and the freeze enforces that (§12, §17.4).

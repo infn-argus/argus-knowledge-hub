@@ -374,3 +374,18 @@ class Conflict(Base):
     member: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     detail: Mapped[dict] = mapped_column(JSONB, default=dict)
     opened_seq: Mapped[int] = mapped_column(BigInteger)
+
+
+class ReviewEscalation(Base):
+    """How far an open review item has been escalated (§18.2): 1 to the
+    domain's backup steward, 2 to the governance group. One row per item;
+    each level notifies once."""
+    __tablename__ = "review_escalations"
+
+    item_key: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String, index=True)
+    queue: Mapped[str] = mapped_column(String)
+    opened_at: Mapped[object] = mapped_column(DateTime(timezone=True))
+    level: Mapped[int] = mapped_column(Integer, default=0)
+    escalated_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    targets: Mapped[list] = mapped_column(JSONB, default=list)

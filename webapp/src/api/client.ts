@@ -94,6 +94,7 @@ import type {
   RetentionView,
   RetirementStatus,
   MigrationPlanView,
+  QueueDashboard,
   MigrationRow,
   RoleTemplate,
   Rehearsal,
@@ -783,6 +784,9 @@ export const hubApi = {
  * history. Every change here is a decision recorded in the audit ledger. */
 export const ledgerApi = {
   review: () => request<ReviewQueue>("/v1/ledger/review"),
+  queues: () => request<QueueDashboard>("/v1/ledger/review/queues"),
+  escalateReview: () =>
+    request<{ backup: number; governance: number; without_recipient: number }>("/v1/ledger/review/escalate", { method: "POST" }),
   facts: (uid: string) => request<RecordFacts>(`/v1/ledger/records/${uid}/facts`),
   decide: (batch: LedgerDecision[]) =>
     request<{ decisions: string[] }>("/v1/ledger/decisions", { method: "POST", body: json({ batch }) }),

@@ -161,8 +161,8 @@ export function NotificationBell() {
             {items.data.length === 0 && <li className="px-3 py-4 text-sm text-slate-500">Nothing yet.</li>}
             {items.data.map((n) => (
               <li key={n.id} className={`px-3 py-2 text-sm ${n.read ? "text-slate-500" : "text-slate-900"}`}>
-                {n.issue_uid ? (
-                  <Link to={`/tickets/${n.issue_uid}`} onClick={() => { workflowApi.readNotification(n.id); setOpen(false); }} className="hover:underline">
+                {n.issue_uid || typeof n.detail?.path === "string" ? (
+                  <Link to={n.issue_uid ? `/tickets/${n.issue_uid}` : String(n.detail.path)} onClick={() => { workflowApi.readNotification(n.id); setOpen(false); }} className="hover:underline">
                     {n.title}
                   </Link>
                 ) : (

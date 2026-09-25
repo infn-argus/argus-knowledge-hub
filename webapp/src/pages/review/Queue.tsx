@@ -4,6 +4,7 @@ import { ApiError, ledgerApi } from "../../api/client";
 import type { Decision, RecordBrief, ReviewQueue } from "../../api/ledgerTypes";
 import { Card, Empty, StatTile } from "../../components/hub/ui";
 import { formatTemporal } from "../../components/hub/LedgerPanels";
+import { QueueAgeingCard } from "../../components/hub/QueueAgeing";
 
 /**
  * Everything waiting on a person: conflicts between sources and confirmations,
@@ -127,6 +128,7 @@ export function ReviewQueuePage() {
         <StatTile label="Facts to confirm" value={q.counts.proposals} tone="amber" />
         <StatTile label="Other conflicts" value={other.length} />
       </div>
+      <QueueAgeingCard />
       {error && (
         <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error instanceof ApiError ? JSON.stringify((error.body as { detail?: unknown })?.detail) : "The decision failed."}

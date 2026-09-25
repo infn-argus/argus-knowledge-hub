@@ -19,8 +19,8 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.ledger import engine
-from app.models.ledger import (Conflict, ConflictEvent, Decision, JobRun, LedgerDomain, ReconciliationReport,
+from app.ledger import engine, queues
+from app.models.ledger import (Conflict, Decision, JobRun, LedgerDomain, ReconciliationReport,
                                SourceRevision)
 
 T2_MIN_DAYS = 14
@@ -36,49 +36,19 @@ ATTESTATIONS = {
     "jira_readonly_scheduled": "The Jira administrators approved and scheduled the read-only change",
 }
 
-# §18.2, in working days: when an open item is overdue.
-DUE_DAYS = {"port_confirmation_required": 5, "port_mapping_unresolved": 5, "port_map_invalid": 5,
-            "identity_candidate": 10, "retirement_blocked": 10}
-NON_BLOCKING_DUE = 30
-
-
 def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def working_days(start: datetime, end: datetime) -> int:
-    """Monday to Friday between two instants, not counting the first day."""
-    a, b = start.date(), end.date()
-    if b <= a:
-        return 0
-    days = (b - a).days
-    weeks, rest = divmod(days, 7)
-    count = weeks * 5
-    for i in range(1, rest + 1):
-        if (a + timedelta(days=weeks * 7 + i)).weekday() < 5:
-            count += 1
-    return count
-
-
-def _due(c: Conflict) -> int:
-    if c.conflict_type == "port_confirmation_required" and (c.detail or {}).get("safety_class", "none") != "none":
-        return 0                  # before the equipment returns to operation: never left open at a cutover
-    return DUE_DAYS.get(c.conflict_type, NON_BLOCKING_DUE)
+working_days = queues.working_days
 
 
 def overdue(db: Session, workspace_id: str, at: Optional[datetime] = None) -> list[dict]:
-    at = at or now()
-    out = []
-    # Blocking conflicts are a criterion of their own: none may be open at all.
-    for c in db.scalars(select(Conflict).where(Conflict.workspace_id == workspace_id,
-                                               Conflict.severity != "blocking")):
-        opened = db.scalar(select(func.max(ConflictEvent.at)).where(ConflictEvent.conflict_id == c.conflict_id,
-                                                                    ConflictEvent.kind == "opened"))
-        age = working_days(opened, at) if opened else 0
-        if age > _due(c) or _due(c) == 0:
-            out.append({"conflict_id": c.conflict_id, "type": c.conflict_type, "age_working_days": age,
-                        "due": _due(c)})
-    return out
+    """Open items past their §18.2 target, other than the blocking queue,
+    which is a criterion of its own: none may be open at all."""
+    return [{"key": i["key"], "type": i["kind"], "queue": i["queue"], "age_working_days": i["age"]}
+            for i in queues.items(db, workspace_id, at, visible_only=False)
+            if i["overdue"] and i["queue"] != "blocking"]
 
 
 def t2_started(db: Session, d: LedgerDomain) -> Optional[datetime]:

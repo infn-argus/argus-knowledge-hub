@@ -176,6 +176,10 @@ def main(argv=None) -> int:
         db = SessionLocal()
         try:
             n = notify.escalate_overdue(db)
+            from app.ledger import queues
+            review = queues.escalate(db)
+            print(f"review items escalated: {review['backup']} to backup stewards, "
+                  f"{review['governance']} to the governance group")
             sent = notify.deliver_pending(db)
             db.commit()
         finally:
