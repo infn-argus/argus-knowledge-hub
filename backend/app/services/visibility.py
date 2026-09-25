@@ -28,7 +28,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Optional
 
-from sqlalchemy import and_, not_, or_
+from sqlalchemy import and_, not_, or_, select
 
 from app.models.asset import Asset
 from app.models.issue import Issue
@@ -108,3 +108,53 @@ def restriction_clause(model, grants: Optional[Grants] = None):
     """Just the restricted-class filter for `model` (Asset or Issue)."""
     extra = _restriction_clause(model, grants)
     return extra if extra is not None else model.uid.isnot(None)
+
+
+# --------------------------------------------------------------------------- field level
+
+def restricted_fields(db, schema_uid: Optional[str]) -> dict[str, str]:
+    """attribute key -> restricted class, from the type and its ancestors
+    (an attribute definition with `"restricted": "<class>"`)."""
+    from app.models.schema import Schema
+    out: dict[str, str] = {}
+    seen: set = set()
+    uid = schema_uid
+    while uid and uid not in seen:
+        seen.add(uid)
+        schema = db.get(Schema, uid)
+        if schema is None:
+            break
+        for attr in schema.attributes or []:
+            key = attr.get("key") or attr.get("name")
+            if key and attr.get("restricted"):
+                out.setdefault(key, str(attr["restricted"]))
+        uid = schema.parent_schema_uid
+    return out
+
+
+def hidden_fields(db, record, grants: Optional[Grants] = None) -> set[str]:
+    grants = grants if grants is not None else current_grants()
+    if grants.everything:
+        return set()
+    return {k for k, cls in restricted_fields(db, getattr(record, "schema_uid", None)).items()
+            if not grants.allows(cls)}
+
+
+def redacted_attributes(db, record, grants: Optional[Grants] = None) -> dict:
+    """The record's attributes without the fields the viewer may not see."""
+    hidden = hidden_fields(db, record, grants)
+    return {k: v for k, v in (record.attributes or {}).items() if k not in hidden}
+
+
+def visible_uids(db, uids, grants: Optional[Grants] = None) -> list[str]:
+    """Those of these asset uids the viewer may see — for relation lists, so
+    a restricted neighbour is not even named by uid."""
+    uids = list(uids or [])
+    if not uids:
+        return []
+    grants = grants if grants is not None else current_grants()
+    if grants.everything:
+        return uids
+    shown = set(db.scalars(select(Asset.uid).where(Asset.uid.in_(uids), restriction_clause(Asset, grants))))
+    missing = set(uids) - set(db.scalars(select(Asset.uid).where(Asset.uid.in_(uids))))
+    return [u for u in uids if u in shown or u in missing]

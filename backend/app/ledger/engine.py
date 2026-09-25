@@ -630,7 +630,13 @@ def bind(db: Session, source_ref: str, uid: str, cause: str) -> None:
 
 def resolve_ref(db: Session, source_ref: str) -> Optional[str]:
     if source_ref.startswith("uid:"):
-        return source_ref[4:] if db.get(Asset, source_ref[4:]) is not None else None
+        record = db.get(Asset, source_ref[4:])
+        # A merged record is a tombstone: a reference to it means its survivor.
+        seen = set()
+        while record is not None and record.merged_into_uid and record.uid not in seen:
+            seen.add(record.uid)
+            record = db.get(Asset, record.merged_into_uid)
+        return record.uid if record is not None else None
     b = db.get(IdentityBinding, source_ref)
     return b.uid if b else None
 
@@ -768,6 +774,8 @@ def apply_decisions(db: Session, workspace_id: str, actor: str, batch: list[dict
     for uid in sorted(subjects):
         project_subject(db, uid, f"decision-batch:{batch_id}")
     validate_installations(db, subjects, strict=True)
+    from app.ledger.identity import clear_merge_overlaps
+    clear_merge_overlaps(db, subjects, f"decision-batch:{batch_id}")
     from app.ledger.connectivity import validate_access_points
     validate_access_points(db, subjects)
     workspaces = _workspaces_of(db, subjects) | {workspace_id}
@@ -1105,7 +1113,7 @@ def _write_record_status(db: Session, record: Asset, outcome: Optional[_Outcome]
 
 # Review items the validate and derive stages own; projection leaves them alone.
 DERIVED_CONFLICTS = ("possible_overlap", "port_mapping_unresolved", "port_confirmation_required", "port_map_invalid",
-                     "identity_candidate")
+                     "identity_candidate", "merge_installation_overlap")
 
 
 def _write_conflicts(db: Session, record: Asset, new: dict, cause: str, emit: bool) -> None:

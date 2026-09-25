@@ -28,7 +28,8 @@ from app.schemas.asset import (
 from app.services.attribute_validation import validate_attributes
 from app.services.current_user_attrs import stamp_current_user_attributes
 from app.services.relations import rebuild_asset_relations, rebuild_asset_relations_with_neighbors
-from app.services.visibility import asset_visible_in, visible_assets_clause
+from app.services.visibility import (asset_visible_in, hidden_fields, redacted_attributes, visible_assets_clause,
+                                     visible_uids)
 
 router = APIRouter(prefix="/v1/assets", tags=["assets"])
 
@@ -48,7 +49,18 @@ def list_assets(
     stmt = select(Asset).where(visible_assets_clause(workspace_id, grants))
     if schema_uid:
         stmt = stmt.where(Asset.schema_uid == schema_uid)
-    return db.scalars(stmt).all()
+    return [asset_out(db, a) for a in db.scalars(stmt).all()]
+
+
+def asset_out(db: Session, asset: Asset) -> AssetOut:
+    """What the viewer may see of a record: no restricted field, and no
+    restricted neighbour in its relation lists, not even by uid (I-ACL-1)."""
+    out = AssetOut.model_validate(asset)
+    return out.model_copy(update={
+        "attributes": redacted_attributes(db, asset),
+        "outbound_relations": visible_uids(db, out.outbound_relations),
+        "inbound_relations": visible_uids(db, out.inbound_relations),
+    })
 
 
 @router.post("", response_model=AssetOut, status_code=201)
@@ -133,7 +145,7 @@ def get_asset(
     rebuild_asset_relations(db, uid)
     db.commit()
     db.refresh(asset)
-    return asset
+    return asset_out(db, asset)
 
 
 @router.put("/{uid}", response_model=AssetOut)
@@ -147,6 +159,12 @@ def update_asset(
     asset = _get_owned_asset(uid, workspace_id, db)
     patch = body.model_dump(exclude_unset=True)
     global_changed = "is_global" in patch and patch["is_global"] != asset.is_global
+    if patch.get("attributes") is not None:
+        # A field the editor cannot see is neither erased nor overwritten by
+        # them: it was never in the form they submitted (I-ACL-1).
+        hidden = hidden_fields(db, asset)
+        patch["attributes"] = {**{k: v for k, v in patch["attributes"].items() if k not in hidden},
+                               **{k: v for k, v in (asset.attributes or {}).items() if k in hidden}}
     for field, value in patch.items():
         setattr(asset, field, value)
 
@@ -165,7 +183,7 @@ def update_asset(
         rebuild_asset_relations_with_neighbors(db, uid)
         db.commit()
     db.refresh(asset)
-    return asset
+    return asset_out(db, asset)
 
 
 @router.delete("/{uid}", status_code=204)
@@ -184,6 +202,13 @@ def bulk_delete_assets(
     db: Session = Depends(get_db),
 ):
     _assert_writable(db, workspace_id)
+    from app.ledger.bulk import APPROVAL_THRESHOLD
+    if len(body.uids) > APPROVAL_THRESHOLD:
+        # Above the threshold a change needs a preview and a second person
+        # (§19 item 7): retire the records with a bulk change instead.
+        raise HTTPException(status_code=409, detail={
+            "error": f"more than {APPROVAL_THRESHOLD} records: use a bulk change (POST /v1/bulk-changes with "
+                     f"\"retire\": true), which is previewed, approved and can be undone"})
     deleted = 0
     missing: list[str] = []
     for uid in body.uids:

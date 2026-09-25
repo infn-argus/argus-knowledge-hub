@@ -90,6 +90,20 @@ currently valid* revision rather than to an arbitrary PDF.
   counts, exports, MCP tools and the ledger views for anyone without that grant, and appears in
   graphs only as an anonymous node. Grants come from a role's `restricted` permissions or a
   token's `restricted_grants`.
+- **Equipment lifecycle, custody and spares.** A unit's lifecycle moves only along allowed
+  transitions (Installed follows from its installation); custodian and location keep their full
+  history with who changed them and when; designated spares show whether they are available, and a
+  position lists the spares that fit it (*Lifecycle & custody* tab). Served by `/v1/equipment`.
+- **Controlled bulk changes.** Set an attribute on, or retire, many records at once: always
+  previewed first, approved by a second person above 100 records, applied as one ledger batch and
+  undone as one (*Bulk changes*). Plain bulk deletes above 100 records are refused. Served by
+  `/v1/bulk-changes`.
+- **Tamper-evident audit log.** The ledger's audit tables are append-only in the database itself
+  (a trigger refuses UPDATE and DELETE). Each day is sealed with a SHA-256 digest chained to the
+  previous day (`python -m app.ledger audit-digest`, run daily; keep the digests outside ARGUS);
+  `python -m app.ledger verify-audit` finds the first altered day. Every record has an audit trail
+  under *Provenance*. Restricted fields (an attribute definition with `"restricted": "<class>"`)
+  are hidden, and kept intact on edit, for viewers without that grant.
 - **Data integrity tools**: relink of unresolved references, and a report of missing
   references, dangling links and orphaned objects, with targeted cleanup actions.
 
@@ -210,6 +224,7 @@ a personal access token or a Google sign-in at first launch.
 | `IMPORT_SECRETS_KEY`  | Key used to encrypt stored import credentials at rest.          |
 | `ATTACHMENTS_DIR`     | Where uploaded files are stored (defaults to `/data/attachments`). |
 | `OIDC_ISSUER` / `OIDC_JWKS_URI` / `OIDC_AUDIENCE` | OIDC token verification.            |
+| (worker) | `python -m app.ledger derive-worker` runs queued derives when `LEDGER_USER_EDIT_DERIVE=manual`; `python -m app.ledger backfill-checksums` records SHA-256 for older attachments. |
 | `LEDGER_USER_EDIT_DERIVE` | How derived links follow a user's edit: `background` (default), `inline`, or `manual` (left for a worker). |
 
 ## Deployment

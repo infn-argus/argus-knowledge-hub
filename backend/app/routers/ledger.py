@@ -15,7 +15,7 @@ from app.ledger import connectivity, engine, rules, service, temporal, tickets
 from app.ledger.engine import LedgerError
 from app.ledger.policy import PolicyError
 from app.models.asset import Asset
-from app.services.visibility import asset_visible_in, can_see, restriction_clause
+from app.services.visibility import asset_visible_in, can_see, hidden_fields, restriction_clause
 from app.models.ledger import (Claim, ClaimEvent, Conflict, Decision, FactState, IdentityBinding, LedgerStream,
                                RevisionEvent, SourceRevision, StreamHead)
 
@@ -164,6 +164,9 @@ def edit(uid: str, body: EditIn, background: BackgroundTasks, identity=Depends(g
     next read show it (I-UX-1); derived edges follow asynchronously."""
     actor = actor_of(identity)
     mode = user_edit_derive_mode()
+    target = db.get(Asset, uid)
+    if target is None or not can_see(target) or body.predicate in {f"attr:{k}" for k in hidden_fields(db, target)}:
+        raise HTTPException(status_code=404, detail="Record not found")
     try:
         if body.present is not None:
             service.set_member(db, workspace_id, actor, uid, body.predicate, body.member, body.present, body.reason,
@@ -244,7 +247,10 @@ def provenance(uid: str, workspace_id: str = Depends(require_permission("read"))
     if record is None or not asset_visible_in(record, workspace_id):
         raise HTTPException(status_code=404, detail="Record not found")
     facts: dict = {}
+    hidden = {f"attr:{k}" for k in hidden_fields(db, record)}
     for f in db.scalars(select(FactState).where(FactState.subject_uid == uid).order_by(FactState.id)):
+        if f.predicate in hidden:
+            continue
         entry = {"status": f.status, "rank": f.rank, "effective": f.effective}
         if f.contributor.startswith("claim:"):
             c = db.get(Claim, f.contributor[6:])
@@ -534,6 +540,24 @@ def dismiss_candidate(body: DismissIn, identity=Depends(get_identity),
     return {"decision_id": d.decision_id}
 
 
+class UnmergeIn(BaseModel):
+    merge_decision_id: str
+    reason: Optional[str] = None
+
+
+@router.post("/identity/unmerge")
+def unmerge_records(body: UnmergeIn, identity=Depends(get_identity),
+                    workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger.identity import unmerge
+    actor = actor_of(identity)
+    try:
+        d = unmerge(db, workspace_id, actor, body.merge_decision_id, body.reason)
+    except LedgerError as exc:
+        _fail(db, exc, workspace_id, actor, [{"kind": "unmerge", **body.model_dump()}])
+    db.commit()
+    return {"decision_id": d.decision_id}
+
+
 # --------------------------------------------------------------------------- migration domains (§17)
 
 domains_router = APIRouter(prefix="/v1/domains", tags=["migration domains"])
@@ -712,3 +736,75 @@ def lookup(identifier: str, identity=Depends(get_identity), db: Session = Depend
     archive = lk.archive_location(db, identifier, workspaces)
     raise HTTPException(status_code=404, detail={"status": "not migrated", "identifier": identifier,
                                                  "archive": archive})
+
+
+@domains_router.post("/{domain_id}/reversion-export")
+def reversion_export(domain_id: str, identity=Depends(get_identity),
+                     workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    """The pilot's one-off change report since W (I-SOR-2)."""
+    from app.ledger import cutover
+    _owned_domain(db, domain_id, workspace_id)
+    try:
+        report = cutover.reversion_export(db, domain_id, actor_of(identity))
+    except LedgerError as exc:
+        _fail(db, exc)
+    db.commit()
+    return report
+
+
+class RevertIn(BaseModel):
+    reason: str
+
+
+@domains_router.post("/{domain_id}/revert")
+def revert_pilot(domain_id: str, body: RevertIn, identity=Depends(get_identity),
+                 workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger import cutover
+    _owned_domain(db, domain_id, workspace_id)
+    try:
+        d = cutover.revert_pilot(db, domain_id, actor_of(identity), body.reason)
+    except LedgerError as exc:
+        _fail(db, exc)
+    db.commit()
+    return cutover.domain_view(db, d)
+
+
+# --------------------------------------------------------------------------- audit (§19 item 2)
+
+@router.get("/records/{uid}/audit")
+def record_audit(uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """Everything the ledger recorded about one record, oldest first."""
+    from app.ledger.audit import record_trail
+    record = db.get(Asset, uid)
+    if record is None or not asset_visible_in(record, workspace_id):
+        raise HTTPException(status_code=404, detail="Record not found")
+    hidden = {f"attr:{k}" for k in hidden_fields(db, record)}
+    return [e for e in record_trail(db, uid) if e.get("predicate") not in hidden]
+
+
+@router.get("/audit/digests")
+def audit_digests(limit: int = Query(30, ge=1, le=366), workspace_id: str = Depends(require_permission("read")),
+                  db: Session = Depends(get_db)):
+    from app.models.ledger import AuditDigest
+    return [{"day": d.day, "digest": d.digest, "prev_digest": d.prev_digest, "counts": d.counts,
+             "sealed_at": d.sealed_at}
+            for d in db.scalars(select(AuditDigest).order_by(AuditDigest.day.desc()).limit(limit))]
+
+
+@router.post("/audit/seal")
+def audit_seal(workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    """Seal yesterday (and any unsealed day before it). Normally a daily job:
+    `python -m app.ledger audit-digest`."""
+    from app.ledger.audit import seal_day
+    try:
+        row = seal_day(db)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    db.commit()
+    return {"day": row.day, "digest": row.digest}
+
+
+@router.get("/audit/verify")
+def audit_verify(workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger.audit import verify
+    return verify(db)

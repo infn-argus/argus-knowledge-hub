@@ -16,7 +16,7 @@ what the rest of the application reads.
 """
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -275,6 +275,40 @@ class DeriveRequest(Base):
     status: Mapped[str] = mapped_column(String, default="pending", index=True)   # pending | done | failed
     requested_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
     done_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AuditDigest(Base):
+    """One day of the audit log, sealed: SHA-256 over that day's events,
+    chained to the previous day's digest (§19 item 2). Copy each digest out
+    of ARGUS; `verify` recomputes the chain and finds the first break."""
+    __tablename__ = "ledger_audit_digests"
+
+    day: Mapped[object] = mapped_column(Date, primary_key=True)
+    prev_digest: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    digest: Mapped[str] = mapped_column(String)
+    counts: Mapped[dict] = mapped_column(JSONB, default=dict)
+    sealed_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class BulkChange(Base):
+    """A change to many records at once (§19 item 7): previewed before it is
+    applied, approved by a second person above the threshold, applied as one
+    ledger batch of decisions, and undone by revoking that batch."""
+    __tablename__ = "ledger_bulk_changes"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    actor: Mapped[str] = mapped_column(String)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    spec: Mapped[dict] = mapped_column(JSONB)
+    preview: Mapped[list] = mapped_column(JSONB, default=list)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[str] = mapped_column(String, default="previewed")   # previewed | awaiting_approval | applied | undone
+    approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    batch_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    undo_batch_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    applied_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # --------------------------------------------------------------------------- projections

@@ -38,7 +38,7 @@ from app.schemas.issue import (
     IssueUpdate,
 )
 from app.services.asset_ticket_links import ensure_asset_link, sync_subject_link
-from app.services.visibility import can_see, visible_issues_clause
+from app.services.visibility import can_see, hidden_fields, redacted_attributes, visible_issues_clause
 from app.services.issue_history import (
     TRACKED_FIELDS,
     record_issue_changes,
@@ -81,7 +81,12 @@ def list_issues(
     stmt = select(Issue).where(Issue.workspace_id == workspace_id, visible_issues_clause())
     if schema_uid:
         stmt = stmt.where(Issue.schema_uid == schema_uid)
-    return db.scalars(stmt).all()
+    return [issue_out(db, i) for i in db.scalars(stmt).all()]
+
+
+def issue_out(db: Session, issue: Issue) -> IssueOut:
+    """The ticket without the fields the viewer may not see (I-ACL-1)."""
+    return IssueOut.model_validate(issue).model_copy(update={"attributes": redacted_attributes(db, issue)})
 
 
 @router.post("", response_model=IssueOut, status_code=201)
@@ -132,7 +137,7 @@ def list_issue_labels(
 def get_issue(
     uid: str, workspace_id: str = Depends(require_permission("read", resource="tickets")), db: Session = Depends(get_db)
 ):
-    return _get_owned_issue(uid, workspace_id, db)
+    return issue_out(db, _get_owned_issue(uid, workspace_id, db))
 
 
 def _apply_state(issue: Issue, new_state: str) -> None:
@@ -156,6 +161,10 @@ def update_issue(
     # changed rather than comparing a value with itself.
     before = {field: getattr(issue, field, None) for field in TRACKED_FIELDS}
     previous_asset_uid = issue.asset_uid
+    if patch.get("attributes") is not None:
+        hidden = hidden_fields(db, issue)
+        patch["attributes"] = {**{k: v for k, v in patch["attributes"].items() if k not in hidden},
+                               **{k: v for k, v in (issue.attributes or {}).items() if k in hidden}}
 
     if "state" in patch:
         _apply_state(issue, patch.pop("state"))
@@ -174,7 +183,7 @@ def update_issue(
     derive_for_ticket(db, issue)
     db.commit()
     db.refresh(issue)
-    return issue
+    return issue_out(db, issue)
 
 
 @router.get("/{uid}/history", response_model=list[IssueHistoryOut])
@@ -514,6 +523,11 @@ def bulk_delete_issues(
     workspace_id: str = Depends(require_permission("delete", resource="tickets")),
     db: Session = Depends(get_db),
 ):
+    from app.ledger.bulk import APPROVAL_THRESHOLD
+    if len(body.uids) > APPROVAL_THRESHOLD:
+        raise HTTPException(status_code=409, detail={
+            "error": f"more than {APPROVAL_THRESHOLD} tickets at once needs a reviewed change; delete them in "
+                     f"batches of at most {APPROVAL_THRESHOLD} after a second person has checked the list"})
     deleted = 0
     missing: list[str] = []
     for uid in body.uids:

@@ -246,3 +246,70 @@ export interface LookupHit {
   path: string;
   via: string;
 }
+
+export interface ValueHistory {
+  current: unknown;
+  history: { at: string; until: string | null; value: unknown; by: string | null; via: string; kind: string; reason?: string | null }[];
+}
+
+export interface EquipmentState {
+  lifecycle: { state: string | null; recorded: string | null; allowed: string[]; installation: Record<string, unknown> | null };
+  states: string[];
+  custody: ValueHistory;
+  location: ValueHistory;
+  lifecycle_history: ValueHistory;
+  designated_spare: boolean;
+}
+
+export interface SpareView {
+  uid: string;
+  key: string;
+  name: string;
+  type: string;
+  product_model: string | null;
+  location: string | null;
+  custodian: string | null;
+  lifecycle: string | null;
+  available: boolean;
+  why_not: string | null;
+}
+
+export interface AuditEntry {
+  at: string;
+  type: "record" | "decision" | "fact" | "identity" | "conflict";
+  kind: string;
+  actor?: string;
+  predicate?: string | null;
+  value?: unknown;
+  before?: unknown;
+  after?: unknown;
+  cause?: string;
+  reason?: string | null;
+  decision_id?: string;
+  source_ref?: string;
+  conflict_type?: string;
+}
+
+export interface BulkChangeView {
+  id: string;
+  actor: string;
+  description: string | null;
+  spec: Record<string, unknown>;
+  count: number;
+  state: "previewed" | "awaiting_approval" | "applied" | "undone";
+  approved_by: string | null;
+  needs_approval: boolean;
+  threshold: number;
+  batch_id: string | null;
+  created_at: string;
+  applied_at: string | null;
+  preview: { uid: string; key: string; name: string; type: string; changes: { predicate: string; before: unknown; after: unknown }[] }[];
+}
+
+export interface AuditDigestView {
+  day: string;
+  digest: string;
+  prev_digest: string | null;
+  counts: Record<string, number>;
+  sealed_at: string;
+}

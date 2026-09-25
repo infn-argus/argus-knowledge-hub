@@ -13,8 +13,9 @@ export const INSTALLABLE = new Set([
   "Equipment Position", "Motion Axis", "Mirror", "Dipole", "Quadrupole", "Sextupole", "Corrector",
   "Solenoid", "Accelerating Structure", "RF Gun", "Beam Position Monitor",
 ]);
-const NOT_EQUIPMENT = new Set([...INSTALLABLE, "Installation", "IOC", "Control Device", "Access Point",
-  "Communication Path", "Bus Segment", "Facility", "Section", "Product Model", "Vendor"]);
+export const NOT_EQUIPMENT = new Set([...INSTALLABLE, "Installation", "IOC", "Control Device", "Access Point",
+  "Communication Path", "Bus Segment", "Facility", "Section", "Product Model", "Vendor", "Location",
+  "Equipment Port", "Procurement Record", "Building", "Area", "Rack"]);
 
 export function formatTemporal(v: TemporalValue | null | undefined, role: "from" | "until"): string {
   if (!v) return role === "until" ? "now" : "not scheduled";

@@ -13,6 +13,7 @@ not read comes back empty and flagged, never partially.
 """
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date
@@ -26,8 +27,8 @@ from app.models.asset_subresources import AssetTicket
 from app.models.document import Document, DocumentRelation, DocumentRevision
 from app.models.issue import Issue
 from app.models.schema import Schema
-from app.services.visibility import (asset_visible_in, can_see, restricted_class, visible_assets_clause,
-                                     visible_issues_clause)
+from app.services.visibility import (asset_visible_in, can_see, redacted_attributes, restricted_class,
+                                     visible_assets_clause, visible_issues_clause)
 
 CLOSED_STATES = frozenset({"closed", "done", "resolved", "cancelled", "canceled", "rejected"})
 
@@ -220,6 +221,7 @@ def asset_context(db: Session, workspace_id: str, asset: Asset, access: Access) 
         # Derived edges and counts not yet updated after an edit (I-UX-1).
         "processing": pending_derive(db, asset.workspace_id),
         "restricted": restricted_class(asset),
+        "merged": _merge_of(db, asset),
         "type_path": [s.name for s in reversed(lineage)],
         "access": {"tickets": access.tickets, "documents": access.documents},
         "stats": {
@@ -235,6 +237,18 @@ def asset_context(db: Session, workspace_id: str, asset: Asset, access: Access) 
         "documents": docs,
         "relations": graph,
     }
+
+
+def _merge_of(db: Session, asset: Asset) -> Optional[dict]:
+    """For a merge tombstone: its survivor and the merge decision to undo."""
+    if asset.record_status != "Merged" or not asset.merged_into_uid:
+        return None
+    from app.models.ledger import RecordEvent
+    ev = db.scalar(select(RecordEvent).where(RecordEvent.uid == asset.uid, RecordEvent.kind == "status",
+                                             RecordEvent.cause.like("merge:%")).order_by(RecordEvent.seq.desc()).limit(1))
+    survivor = db.get(Asset, asset.merged_into_uid)
+    return {"into": asset_summary(survivor) if survivor is not None else None,
+            "decision_id": ev.cause.split(":", 1)[1] if ev else None}
 
 
 def linked_assets_of_ticket(db: Session, workspace_id: str, issue: Issue) -> list[Asset]:
@@ -371,6 +385,10 @@ def unified_search(db: Session, workspace_id: str, access: Access, q: str, limit
             visible_assets_clause(workspace_id), Asset.deleted_at.is_(None),
             or_(Asset.key.ilike(like), Asset.name.ilike(like), Asset.type.ilike(like),
                 cast(Asset.attributes, String).ilike(like))).limit(fetch)).all()
+        # A match only inside a field the viewer may not see is no match (I-ACL-1).
+        ql = q.lower()
+        rows = [a for a in rows if ql in f"{a.key} {a.name} {a.type}".lower()
+                or ql in json.dumps(redacted_attributes(db, a), default=str).lower()]
         ranked = sorted(rows, key=lambda a: -max(_score(q, a.key, a.name), 10 if q.lower() in (a.type or "").lower() else 1))
         result["assets"] = [asset_summary(a) for a in ranked[:limit]]
     if access.tickets:

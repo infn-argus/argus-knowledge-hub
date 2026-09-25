@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.ledger import engine
 from app.ledger.engine import LedgerError, canonical, now
 from app.models.asset import Asset
-from app.models.attachment import Attachment
+from app.models.attachment import Attachment, file_sha256
 from app.models.issue import Issue, IssueComment, IssueHistory, IssueLink
 from app.models.ledger import (Conflict, Decision, LedgerDomain, LedgerStream, ReconciliationReport,
                                RevisionEvent, SourceRevision, StreamHead)
@@ -234,6 +234,10 @@ def reconcile(db: Session, domain_id: str, manifest: dict, actor: str) -> Reconc
                 if (n or 0) != i[field]:
                     diff(field, key, f"{i[field]} in the source, {n or 0} in ARGUS")
         stored = list(db.scalars(select(Attachment).where(Attachment.issue_uid == issue.uid)))
+        for att in stored:
+            if att.sha256 is None:
+                # Uploaded before checksums were recorded: computed now, once.
+                att.sha256 = file_sha256(att.storage_path)
         for a in i.get("attachments") or []:
             counts["attachments"][0] += 1
             match = [s for s in stored if s.filename == a["name"] and s.sha256 == a.get("sha256")
@@ -341,3 +345,75 @@ def domain_view(db: Session, d: LedgerDomain) -> dict:
             "streams": [{"id": s.id, "kind": s.kind, "frozen_at": s.frozen_at}
                         for s in (db.get(LedgerStream, sid) for sid in d.stream_ids) if s]}
 
+
+
+# --------------------------------------------------------------------------- pilot reversion (§17.7, I-SOR-2)
+
+REVERSION_DAYS = 30
+MIGRATION_DECISIONS = {"freeze", "advance_domain", "abort_cutover", "approve_cutover", "explain_difference",
+                       "reversion_export", "revert_pilot"}
+
+
+def _pilot_in_window(d: LedgerDomain) -> None:
+    from datetime import timedelta
+    if not d.pilot:
+        raise LedgerError("only the pilot domain has a reversion window")
+    if d.exited_at is None:
+        raise LedgerError("the pilot has not been cut over; abort the cutover instead")
+    if now() - d.exited_at > timedelta(days=REVERSION_DAYS):
+        raise LedgerError(f"the {REVERSION_DAYS}-day reversion window has closed")
+
+
+def reversion_export(db: Session, domain_id: str, actor: str) -> dict:
+    """The one-off change report of everything done in ARGUS since W, for the
+    source's administrators to apply by hand if the pilot is abandoned. ARGUS
+    itself never writes to Jira or Insight (I-SOR-2); the export is audited."""
+    from app.models.ledger import RecordEvent
+    d = _domain(db, domain_id)
+    _pilot_in_window(d)
+    since = d.frozen_at
+    decisions = [{"decision_id": x.decision_id, "kind": x.kind, "actor": x.actor, "subject_uid": x.subject_uid,
+                  "predicate": x.predicate, "member": x.member, "value": x.value, "target": x.target,
+                  "reason": x.reason, "at": x.at.isoformat()}
+                 for x in db.scalars(select(Decision).where(Decision.workspace_id == d.workspace_id,
+                                                            Decision.at > since).order_by(Decision.seq))
+                 if x.kind not in MIGRATION_DECISIONS]
+    uids = set(db.scalars(select(Asset.uid).where(Asset.workspace_id == d.workspace_id)))
+    events = [{"uid": e.uid, "kind": e.kind, "before": e.before, "after": e.after, "cause": e.cause,
+               "at": e.at.isoformat()}
+              for e in db.scalars(select(RecordEvent).where(RecordEvent.at > since).order_by(RecordEvent.seq))
+              if e.uid in uids]
+    tickets = [{"uid": i.uid, "key": (i.attributes or {}).get("argus_source_key"), "title": i.title,
+                "state": i.state, "created_at": i.created_at.isoformat() if i.created_at else None,
+                "updated_at": i.updated_at.isoformat() if i.updated_at else None}
+               for i in db.scalars(select(Issue).where(Issue.workspace_id == d.workspace_id, Issue.updated_at > since))]
+    comments = [{"ticket_uid": c.issue_uid, "author": c.author, "body": c.body, "created_at": c.created_at.isoformat()}
+                for c in db.scalars(select(IssueComment).join(Issue, Issue.uid == IssueComment.issue_uid).where(
+                    Issue.workspace_id == d.workspace_id, IssueComment.created_at > since))]
+    report = {"domain": d.id, "since_watermark": d.watermark, "since": since.isoformat(), "decisions": decisions,
+              "record_events": events, "tickets": tickets, "comments": comments}
+    digest = hashlib.sha256(canonical(report).encode()).hexdigest()
+    engine._record_decision(db, "reversion_export", actor, d.workspace_id, target={"domain": d.id},
+                            value={"sha256": digest, "counts": {k: len(v) for k, v in report.items()
+                                                                if isinstance(v, list)}})
+    return {**report, "sha256": digest}
+
+
+def revert_pilot(db: Session, domain_id: str, actor: str, reason: str) -> LedgerDomain:
+    """Abandon the pilot within its window: after its change report has been
+    exported, the domain returns to T1 and its source is authoritative again."""
+    d = _domain(db, domain_id)
+    _pilot_in_window(d)
+    exported = db.scalar(select(Decision).where(Decision.workspace_id == d.workspace_id,
+                                                Decision.kind == "reversion_export",
+                                                Decision.target["domain"].astext == d.id).limit(1))
+    if exported is None:
+        raise LedgerError("export the change report first; it is the only way the ARGUS changes reach the source")
+    for sid in d.stream_ids:
+        db.get(LedgerStream, sid).frozen_at = None
+    engine._record_decision(db, "revert_pilot", actor, d.workspace_id, target={"domain": d.id,
+                                                                              "export": exported.decision_id},
+                            reason=reason)
+    d.exited_at, d.exit_decision_id, d.frozen_at, d.stage = None, None, None, "T1"
+    db.flush()
+    return d

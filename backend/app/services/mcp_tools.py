@@ -28,7 +28,7 @@ from app.services.alarm_symptoms import root_cause_from_alarms as _root_cause_fr
 from app.services.root_cause import blast_radius as _blast_radius
 from app.services.root_cause import impact_of as _impact_of
 from app.services.root_cause import root_causes as _root_causes
-from app.services.visibility import can_see, restriction_clause, visible_issues_clause
+from app.services.visibility import can_see, redacted_attributes, restriction_clause, visible_issues_clause
 
 # Enough to answer with, small enough not to bury the model.
 DEFAULT_LIMIT = 20
@@ -162,7 +162,7 @@ def get_object(db: Session, workspace_id: str, uid_or_key: str) -> dict:
     return {
         "found": True,
         **_asset_summary(asset),
-        "attributes": asset.attributes or {},
+        "attributes": redacted_attributes(db, asset),
         "relations": relations,
     }
 

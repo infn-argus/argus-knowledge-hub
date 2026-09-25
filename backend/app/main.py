@@ -12,6 +12,7 @@ from app.routers import (
     attachments,
     attribute_values,
     documents,
+    equipment,
     export,
     global_values,
     graph,
@@ -34,6 +35,7 @@ from app.routers import (
 logging.basicConfig(level=logging.INFO)
 
 from app.auth import bind_grants  # noqa: E402
+import app.ledger.audit  # noqa: E402,F401  (append-only guards on create_all)
 
 # Every request carries the viewer's restricted-class grants (I-ACL-1).
 app = FastAPI(title="ARGUS Asset Knowledge Hub API", version="1.0.0", dependencies=[Depends(bind_grants)])
@@ -63,6 +65,8 @@ app.include_router(ledger.access_points_router)
 app.include_router(ledger.domains_router)
 app.include_router(ledger.lookup_router)
 app.include_router(export.router)
+app.include_router(equipment.router)
+app.include_router(equipment.bulk_router)
 app.include_router(attribute_values.router)
 app.include_router(ai.router)
 app.include_router(mcp.router)

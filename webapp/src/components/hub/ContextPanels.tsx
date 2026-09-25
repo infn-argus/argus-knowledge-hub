@@ -3,17 +3,19 @@
  * that applies to it; a ticket shows its equipment, the procedures for that
  * equipment and what else is open on it; a document shows where it applies
  * and what is currently broken there. All from /v1/hub (one call each). */
-import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { hubApi } from "../../api/client";
-import type { HubDocument } from "../../api/hubTypes";
+import type { AssetContext, HubDocument } from "../../api/hubTypes";
 import { AccessPointPanel, InvolvedTickets, SegmentPortPanel, TicketAttribution } from "./ConnectivityPanels";
-import { INSTALLABLE, InstallationHistory, ProvenancePanel } from "./LedgerPanels";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { auditApi } from "../../api/client";
+import { AuditTrail, EquipmentPanel, PositionSpares } from "./EquipmentPanels";
+import { errorText, INSTALLABLE, InstallationHistory, NOT_EQUIPMENT, ProvenancePanel } from "./LedgerPanels";
 import { Card, DocumentRow, Empty, StatTile, Tabs, TicketRow, VIA_META } from "./ui";
 
-type AssetTab = "service" | "knowledge" | "connections" | "installations" | "provenance";
-const ASSET_TABS: AssetTab[] = ["service", "knowledge", "connections", "installations", "provenance"];
+type AssetTab = "service" | "knowledge" | "connections" | "installations" | "equipment" | "provenance";
+const ASSET_TABS: AssetTab[] = ["service", "knowledge", "connections", "installations", "equipment", "provenance"];
 
 export function AssetContextPanel({ assetUid }: { assetUid: string }) {
   const location = useLocation();
@@ -41,6 +43,7 @@ export function AssetContextPanel({ assetUid }: { assetUid: string }) {
 
   return (
     <section className="mt-6" aria-label="Asset 360°">
+      {c.merged && <MergedBanner merged={c.merged} assetUid={assetUid} />}
       {(c.processing || c.restricted) && (
         <div className="mb-2 flex flex-wrap gap-2">
           {c.processing && (
@@ -102,6 +105,9 @@ export function AssetContextPanel({ assetUid }: { assetUid: string }) {
                         ? "Installed units"
                         : "Installations",
               },
+              ...(NOT_EQUIPMENT.has(c.asset.type)
+                ? []
+                : [{ key: "equipment" as AssetTab, label: "Lifecycle & custody" }]),
               { key: "provenance", label: "Provenance" },
             ]}
           />
@@ -194,9 +200,22 @@ export function AssetContextPanel({ assetUid }: { assetUid: string }) {
             ) : c.asset.type === "Bus Segment" ? (
               <SegmentPortPanel uid={assetUid} />
             ) : (
-              <InstallationHistory uid={assetUid} type={c.asset.type} />
+              <>
+                <InstallationHistory uid={assetUid} type={c.asset.type} />
+                {INSTALLABLE.has(c.asset.type) && (
+                  <div className="mt-3">
+                    <PositionSpares uid={assetUid} />
+                  </div>
+                )}
+              </>
             ))}
-          {tab === "provenance" && <ProvenancePanel uid={assetUid} />}
+          {tab === "equipment" && <EquipmentPanel uid={assetUid} />}
+          {tab === "provenance" && (
+            <>
+              <ProvenancePanel uid={assetUid} />
+              <AuditTrail uid={assetUid} />
+            </>
+          )}
 
           {tab === "connections" &&
             (c.relations.items.length === 0 ? (
@@ -365,6 +384,35 @@ export function DocumentContextPanel({ documentUid }: { documentUid: string }) {
           </ul>
         )}
       </Card>
+    </div>
+  );
+}
+
+function MergedBanner({ merged, assetUid }: { merged: NonNullable<AssetContext["merged"]>; assetUid: string }) {
+  const queryClient = useQueryClient();
+  const undo = useMutation({
+    mutationFn: () => auditApi.unmerge(merged.decision_id!, "undone from the merged record"),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["hub-asset", assetUid] }),
+  });
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+      <span>
+        Merged into{" "}
+        {merged.into ? (
+          <Link to={`/assets/${merged.into.uid}`} className="font-medium underline">
+            {merged.into.name}
+          </Link>
+        ) : (
+          "another record"
+        )}
+        . This record is kept as a tombstone; its references resolve to the survivor.
+      </span>
+      {merged.decision_id && (
+        <button onClick={() => undo.mutate()} className="rounded border border-amber-300 bg-white px-3 py-1 text-xs">
+          Undo the merge
+        </button>
+      )}
+      {undo.isError && <span className="w-full text-xs text-red-700">{errorText(undo.error)}</span>}
     </div>
   );
 }

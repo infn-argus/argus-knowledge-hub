@@ -32,6 +32,7 @@ import { IssueSearch } from "./pages/issues/Search";
 import { LabelList } from "./pages/labels/List";
 import { ReviewQueuePage } from "./pages/review/Queue";
 import { MigrationPage } from "./pages/migration/Domains";
+import { BulkChangesPage } from "./pages/bulk/BulkChanges";
 import { LookupPage } from "./pages/lookup/Lookup";
 import { SchemaDetail } from "./pages/schemas/Detail";
 import { IconLibrary } from "./pages/icons/List";
@@ -93,6 +94,7 @@ export function App() {
           <Route path="/graph" element={<GraphExplorer />} />
           <Route path="/review" element={<ReviewQueuePage />} />
           <Route path="/migration" element={<MigrationPage />} />
+          <Route path="/bulk-changes" element={<BulkChangesPage />} />
           <Route path="/lookup/*" element={<LookupPage />} />
 
           <Route path="/labels" element={<LabelList />} />

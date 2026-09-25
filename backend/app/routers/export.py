@@ -16,7 +16,8 @@ from app.db import get_db
 from app.models.asset import Asset, Relation
 from app.models.issue import Issue
 from app.models.ledger import Decision, RecordEvent
-from app.services.visibility import can_see, restriction_clause, visible_assets_clause, visible_issues_clause
+from app.services.visibility import (can_see, redacted_attributes, restriction_clause, visible_assets_clause,
+                                     visible_issues_clause)
 
 router = APIRouter(prefix="/v1/export", tags=["export"])
 
@@ -33,14 +34,14 @@ def _assets(db: Session, ws: str):
                         .order_by(Asset.uid)):
         yield {"uid": a.uid, "key": a.key, "name": a.name, "type": a.type, "schema_uid": a.schema_uid,
                "record_status": a.record_status, "merged_into_uid": a.merged_into_uid,
-               "attributes": a.attributes or {}, "is_global": a.is_global}
+               "attributes": redacted_attributes(db, a), "is_global": a.is_global}
 
 
 def _tickets(db: Session, ws: str):
     for i in db.scalars(select(Issue).where(Issue.workspace_id == ws, visible_issues_clause()).order_by(Issue.uid)):
         yield {"uid": i.uid, "title": i.title, "description": i.description, "state": i.state,
                "priority": i.priority, "assignee": i.assignee, "asset_uid": i.asset_uid,
-               "schema_uid": i.schema_uid, "attributes": i.attributes or {}, "labels": i.labels or [],
+               "schema_uid": i.schema_uid, "attributes": redacted_attributes(db, i), "labels": i.labels or [],
                "created_at": i.created_at, "updated_at": i.updated_at, "closed_at": i.closed_at}
 
 

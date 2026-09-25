@@ -87,6 +87,12 @@ import type {
 import type {
   AccessPointView,
   AddressUse,
+  AuditDigestView,
+  AuditEntry,
+  BulkChangeView,
+  EquipmentState,
+  SpareView,
+  ValueHistory,
   Decision as LedgerDecision,
   DomainDetail,
   DomainView,
@@ -806,6 +812,35 @@ export const ledgerApi = {
   lookup: (identifier: string) => request<LookupHit>(`/v1/lookup/${encodeURIComponent(identifier)}`),
 };
 
+export const equipmentApi = {
+  get: (uid: string) => request<EquipmentState>(`/v1/equipment/${uid}`),
+  setLifecycle: (uid: string, state: string, reason?: string) =>
+    request<unknown>(`/v1/equipment/${uid}/lifecycle`, { method: "POST", body: json({ state, reason }) }),
+  setCustody: (uid: string, custodian: string, reason?: string) =>
+    request<ValueHistory>(`/v1/equipment/${uid}/custody`, { method: "POST", body: json({ custodian, reason }) }),
+  positionSpares: (uid: string) =>
+    request<{ basis: Record<string, string> | null; spares: SpareView[] }>(`/v1/equipment/positions/${uid}/spares`),
+};
+
+export const bulkApi = {
+  list: () => request<BulkChangeView[]>("/v1/bulk-changes"),
+  get: (id: string) => request<BulkChangeView>(`/v1/bulk-changes/${id}`),
+  preview: (spec: Record<string, unknown>, description?: string) =>
+    request<BulkChangeView>("/v1/bulk-changes", { method: "POST", body: json({ spec, description }) }),
+  apply: (id: string) => request<BulkChangeView>(`/v1/bulk-changes/${id}/apply`, { method: "POST" }),
+  approve: (id: string) => request<BulkChangeView>(`/v1/bulk-changes/${id}/approve`, { method: "POST" }),
+  undo: (id: string) => request<BulkChangeView>(`/v1/bulk-changes/${id}/undo`, { method: "POST" }),
+};
+
+export const auditApi = {
+  trail: (uid: string) => request<AuditEntry[]>(`/v1/ledger/records/${uid}/audit`),
+  digests: () => request<AuditDigestView[]>("/v1/ledger/audit/digests"),
+  verify: () => request<{ ok: boolean; day?: string; reason?: string; days?: number; head?: string }>("/v1/ledger/audit/verify"),
+  seal: () => request<{ day: string; digest: string }>("/v1/ledger/audit/seal", { method: "POST" }),
+  unmerge: (merge_decision_id: string, reason?: string) =>
+    request<{ decision_id: string }>("/v1/ledger/identity/unmerge", { method: "POST", body: json({ merge_decision_id, reason }) }),
+};
+
 export const domainsApi = {
   list: () => request<DomainView[]>("/v1/domains"),
   get: (id: string) => request<DomainDetail>(`/v1/domains/${encodeURIComponent(id)}`),
@@ -828,6 +863,12 @@ export const domainsApi = {
       method: "POST",
       body: json({ difference, reason }),
     }),
+  reversionExport: (id: string) =>
+    request<Record<string, unknown> & { sha256: string }>(`/v1/domains/${encodeURIComponent(id)}/reversion-export`, {
+      method: "POST",
+    }),
+  revert: (id: string, reason: string) =>
+    request<DomainView>(`/v1/domains/${encodeURIComponent(id)}/revert`, { method: "POST", body: json({ reason }) }),
   exit: (id: string, attestations: Record<string, boolean>) =>
     request<DomainView>(`/v1/domains/${encodeURIComponent(id)}/exit`, { method: "POST", body: json({ attestations }) }),
 };

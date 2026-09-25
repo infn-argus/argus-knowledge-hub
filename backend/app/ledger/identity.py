@@ -83,12 +83,16 @@ def maybe_rekey(db: Session, stream: LedgerStream, uid: str, exists_value, cause
     db.flush()
 
 
-def add_label(db: Session, uid: str, label_type: str, value: str, namespace: str) -> None:
+def add_label(db: Session, uid: str, label_type: str, value: str, namespace: str) -> Optional[str]:
+    """Add an alias label unless it exists; returns the new label's uid."""
     exists = db.scalar(select(AssetLabel).where(AssetLabel.asset_uid == uid, AssetLabel.type == label_type,
                                                 AssetLabel.value == value).limit(1))
-    if exists is None:
-        db.add(AssetLabel(uid=str(uuid.uuid4()), asset_uid=uid, type=label_type, value=value, namespace=namespace,
-                          issuer="ledger", verified=True, created_at=now(), updated_at=now()))
+    if exists is not None:
+        return None
+    label_uid = str(uuid.uuid4())
+    db.add(AssetLabel(uid=label_uid, asset_uid=uid, type=label_type, value=value, namespace=namespace,
+                      issuer="ledger", verified=True, created_at=now(), updated_at=now()))
+    return label_uid
 
 
 # --------------------------------------------------------------------------- candidates (A35)
@@ -162,12 +166,18 @@ def dismiss_candidate(db: Session, workspace_id: str, actor: str, records: list[
     return d
 
 
+MOVABLE = ((Issue, "asset_uid", "uid"), (AssetTicket, "asset_uid", "uid"), (AssetLabel, "asset_uid", "uid"),
+           (AssetComment, "asset_uid", "uid"), (Attachment, "asset_uid", "uid"))
+OVERLAP = "merge_installation_overlap"
+
+
 def merge(db: Session, workspace_id: str, actor: str, survivor_uid: str, loser_uid: str,
           reason: Optional[str] = None) -> Decision:
     """A steward's merge (§10): the survivor keeps its uid; everything that
     pointed at the loser points at the survivor; the loser's source refs are
     rebound, so its claims now compete on the survivor under the policy; the
-    loser stays as a `Merged` tombstone."""
+    loser stays as a `Merged` tombstone. What moved is kept on the decision,
+    so `unmerge` can put it back."""
     survivor, loser = db.get(Asset, survivor_uid), db.get(Asset, loser_uid)
     if survivor is None or loser is None or survivor_uid == loser_uid:
         raise LedgerError("name two different records")
@@ -175,6 +185,8 @@ def merge(db: Session, workspace_id: str, actor: str, survivor_uid: str, loser_u
         raise LedgerError("a merge is decided in the workspace of one of its records")
     if loser.record_status == "Merged" or survivor.record_status == "Merged":
         raise LedgerError("a merged record cannot be merged again")
+    moved: dict = {"relations_from": [], "relations_to": [], "document_relations": [], "bindings": [],
+                   "labels_added": [], "loser_status": loser.record_status}
     decision = engine._record_decision(db, "merge", actor, workspace_id, subject_uid=survivor_uid,
                                        target={"survivor": survivor_uid, "loser": loser_uid}, reason=reason)
     cause = f"merge:{decision.decision_id}"
@@ -185,22 +197,31 @@ def merge(db: Session, workspace_id: str, actor: str, survivor_uid: str, loser_u
                                                    Relation.to_asset_uid == loser_uid))):
         if r.from_asset_uid == loser_uid:
             r.from_asset_uid = survivor_uid
+            moved["relations_from"].append(r.id)
         if r.to_asset_uid == loser_uid:
             r.to_asset_uid = survivor_uid
-    for model, col in ((Issue, Issue.asset_uid), (AssetTicket, AssetTicket.asset_uid),
-                       (AssetLabel, AssetLabel.asset_uid), (AssetComment, AssetComment.asset_uid),
-                       (Attachment, Attachment.asset_uid)):
-        for row in db.scalars(select(model).where(col == loser_uid)):
-            setattr(row, col.key, survivor_uid)
+            moved["relations_to"].append(r.id)
+    for model, col, pk in MOVABLE:
+        ids = []
+        for row in db.scalars(select(model).where(getattr(model, col) == loser_uid)):
+            setattr(row, col, survivor_uid)
+            ids.append(getattr(row, pk))
+        moved[model.__tablename__] = ids
     for rel in db.scalars(select(DocumentRelation).where(DocumentRelation.to_type == "asset",
                                                          DocumentRelation.to_uid == loser_uid)):
         rel.to_uid = survivor_uid
+        moved["document_relations"].append(rel.id)
     db.execute(delete(TicketLink).where(TicketLink.asset_uid == loser_uid))
     for b in list(db.scalars(select(IdentityBinding).where(IdentityBinding.uid == loser_uid))):
         if not b.source_ref.startswith("uid:"):
             engine.bind(db, b.source_ref, survivor_uid, f"rebound: {cause}")
-    add_label(db, survivor_uid, "former_key", loser.key, "merge")
-    add_label(db, survivor_uid, "former_uid", loser.uid, "merge")
+            moved["bindings"].append(b.source_ref)
+    for label_type, value in (("former_key", loser.key), ("former_uid", loser.uid)):
+        uid = add_label(db, survivor_uid, label_type, value, "merge")
+        if uid:
+            moved["labels_added"].append(uid)
+    # The pre-image `unmerge` needs, as an audit event of its own.
+    db.add(RecordEvent(uid=loser_uid, kind="merge_moved", after=moved, cause=cause, at=now()))
     db.add(RecordEvent(uid=loser_uid, kind="status", before=loser.record_status, after="Merged", cause=cause,
                        at=now()))
     loser.record_status, loser.merged_into_uid = "Merged", survivor_uid
@@ -209,13 +230,118 @@ def merge(db: Session, workspace_id: str, actor: str, survivor_uid: str, loser_u
     try:
         engine.validate_installations(db, [survivor_uid], strict=True)
     except InvariantError as exc:
-        raise InvariantError(exc.code, f"the merged units were installed at overlapping times: {exc}")
+        # Both units were installed somewhere at overlapping times: the merge
+        # stands, and the overlap is a blocking item for review (§10).
+        _open(db, OVERLAP, survivor, "blocking", {"merge": decision.decision_id, "error": str(exc)}, cause)
     detect_candidates(db, [survivor_uid, loser_uid], cause)
     engine.derive_all(db, {survivor.workspace_id, loser.workspace_id})
-    from app.ledger.tickets import derive_ticket_links
-    derive_ticket_links(db, ticket_uids=[i.uid for i in db.scalars(select(Issue).where(
-        Issue.asset_uid == survivor_uid))])
+    _rederive_tickets(db, [survivor_uid, loser_uid])
     return decision
+
+
+def unmerge(db: Session, workspace_id: str, actor: str, merge_decision_id: str,
+            reason: Optional[str] = None) -> Decision:
+    """Reverse a merge from what it recorded: every row it moved goes back to
+    the loser (unless it has moved on since), the source refs are rebound,
+    the labels it added are removed, and the loser is restored."""
+    m = db.scalar(select(Decision).where(Decision.decision_id == merge_decision_id, Decision.kind == "merge"))
+    if m is None or m.workspace_id != workspace_id:
+        raise LedgerError("no such merge in this workspace")
+    if db.scalar(select(Decision).where(Decision.kind == "unmerge",
+                                        Decision.target["merge"].astext == merge_decision_id).limit(1)):
+        raise LedgerError("this merge has already been undone")
+    survivor_uid, loser_uid = m.target["survivor"], m.target["loser"]
+    pre = db.scalar(select(RecordEvent).where(RecordEvent.uid == loser_uid, RecordEvent.kind == "merge_moved",
+                                              RecordEvent.cause == f"merge:{merge_decision_id}"))
+    moved = (pre.after if pre else None) or {}
+    loser = db.get(Asset, loser_uid)
+    if loser is None or loser.merged_into_uid != survivor_uid:
+        raise LedgerError("the merged record is no longer a tombstone of this merge")
+    decision = engine._record_decision(db, "unmerge", actor, workspace_id, subject_uid=loser_uid,
+                                       target={"merge": merge_decision_id, "survivor": survivor_uid,
+                                               "loser": loser_uid}, supersedes=[merge_decision_id], reason=reason)
+    cause = f"unmerge:{decision.decision_id}"
+    for rid in moved.get("relations_from", []):
+        r = db.get(Relation, rid)
+        if r is not None and r.from_asset_uid == survivor_uid:
+            r.from_asset_uid = loser_uid
+    for rid in moved.get("relations_to", []):
+        r = db.get(Relation, rid)
+        if r is not None and r.to_asset_uid == survivor_uid:
+            r.to_asset_uid = loser_uid
+    for model, col, _pk in MOVABLE:
+        for pk in moved.get(model.__tablename__, []):
+            row = db.get(model, pk)
+            if row is not None and getattr(row, col) == survivor_uid:
+                setattr(row, col, loser_uid)
+    for rid in moved.get("document_relations", []):
+        rel = db.get(DocumentRelation, rid)
+        if rel is not None and rel.to_uid == survivor_uid:
+            rel.to_uid = loser_uid
+    for ref in moved.get("bindings", []):
+        if engine.resolve_ref(db, ref) == survivor_uid:
+            engine.bind(db, ref, loser_uid, f"rebound: {cause}")
+    for label_uid in moved.get("labels_added", []):
+        label = db.get(AssetLabel, label_uid)
+        if label is not None:
+            db.delete(label)
+    before = loser.record_status
+    loser.record_status, loser.merged_into_uid = moved.get("loser_status") or "Active", None
+    db.add(RecordEvent(uid=loser_uid, kind="status", before=before, after=loser.record_status, cause=cause,
+                       at=now()))
+    for c in db.scalars(select(Conflict).where(Conflict.conflict_type == OVERLAP,
+                                               Conflict.subject_uid == survivor_uid)):
+        if (c.detail or {}).get("merge") == merge_decision_id:
+            _close(db, c, cause)
+    db.flush()
+    for uid in (survivor_uid, loser_uid):
+        engine.project_subject(db, uid, cause)
+    detect_candidates(db, [survivor_uid, loser_uid], cause)
+    survivor = db.get(Asset, survivor_uid)
+    engine.derive_all(db, {survivor.workspace_id, loser.workspace_id})
+    _rederive_tickets(db, [survivor_uid, loser_uid])
+    return decision
+
+
+def clear_merge_overlaps(db: Session, uids: Iterable[str], cause: str) -> None:
+    """A batch that passed validation has resolved any overlap left by a merge
+    of these units (called after validate_installations succeeds)."""
+    units = set()
+    for uid in uids:
+        rec = db.get(Asset, uid)
+        if rec is None:
+            continue
+        if rec.type == engine.INSTALLATION:
+            v = engine.installation_view(db, rec)
+            units |= {v["asset_uid"], v["position_uid"]}
+        units.add(uid)
+    for c in db.scalars(select(Conflict).where(Conflict.conflict_type == OVERLAP,
+                                               Conflict.subject_uid.in_([u for u in units if u]))):
+        _close(db, c, cause)
+
+
+def _open(db: Session, ctype: str, record: Asset, severity: str, detail: dict, cause: str) -> None:
+    cid = hashlib.sha256(canonical([ctype, record.uid, detail.get("merge")]).encode()).hexdigest()[:24]
+    if db.get(Conflict, cid) is not None:
+        return
+    ev = ConflictEvent(conflict_id=cid, kind="opened", conflict_type=ctype, subject_uid=record.uid, detail=detail,
+                       cause=cause, at=now())
+    db.add(ev)
+    db.flush()
+    db.add(Conflict(conflict_id=cid, conflict_type=ctype, severity=severity, workspace_id=record.workspace_id,
+                    subject_uid=record.uid, detail=detail, opened_seq=ev.seq))
+    db.flush()
+
+
+def _close(db: Session, c: Conflict, cause: str) -> None:
+    db.add(ConflictEvent(conflict_id=c.conflict_id, kind="resolved", conflict_type=c.conflict_type,
+                         subject_uid=c.subject_uid, detail=c.detail, cause=cause, at=now()))
+    db.delete(c)
+
+
+def _rederive_tickets(db: Session, uids: list[str]) -> None:
+    from app.ledger.tickets import derive_ticket_links
+    derive_ticket_links(db, ticket_uids=[i.uid for i in db.scalars(select(Issue).where(Issue.asset_uid.in_(uids)))])
 
 
 # --------------------------------------------------------------------------- creation (I-ID-1)

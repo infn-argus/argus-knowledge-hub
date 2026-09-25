@@ -375,6 +375,9 @@ def delete_workspace(
     workspace = db.get(Workspace, workspace_id)
     if workspace is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    # The one sanctioned purge of append-only audit rows: the workspace's own.
+    from app.ledger.audit import allow_purge
+    allow_purge(db)
     db.delete(workspace)
     try:
         db.commit()

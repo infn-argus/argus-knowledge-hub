@@ -65,6 +65,8 @@ export interface AssetContext {
   processing: { state: "deriving"; since: string; request: number } | null;
   /** The restricted class of this record, when it has one. */
   restricted: string | null;
+  /** For a merge tombstone: where it went, and the merge to undo. */
+  merged: { into: HubAsset | null; decision_id: string | null } | null;
   type_path: string[];
   access: { tickets: boolean; documents: boolean };
   stats: {

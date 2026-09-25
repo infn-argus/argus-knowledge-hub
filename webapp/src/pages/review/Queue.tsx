@@ -44,6 +44,10 @@ const CONFLICT_TEXT: Record<string, { title: string; explain: string }> = {
     title: "A confirmed port is no longer compatible",
     explain: "The port confirmed for this installation fails a hard check. A confirmation never overrides compatibility.",
   },
+  merge_installation_overlap: {
+    title: "A merge left one unit installed in two places at once",
+    explain: "The merged records were both installed at overlapping times. End one of the installations, or undo the merge from the merged record.",
+  },
   identity_candidate: {
     title: "Two records may be the same thing",
     explain: "They share a strong identifier. Nothing is merged automatically: merge them, or say they are different.",

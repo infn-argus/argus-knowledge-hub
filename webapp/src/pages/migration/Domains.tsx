@@ -4,7 +4,7 @@
  * Jira or Insight. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { domainsApi, ledgerApi } from "../../api/client";
+import { auditApi, domainsApi, ledgerApi } from "../../api/client";
 import type { DomainDetail, DomainView, ReconciliationDifference } from "../../api/ledgerTypes";
 import { errorText } from "../../components/hub/LedgerPanels";
 import { Card, Empty } from "../../components/hub/ui";
@@ -64,7 +64,59 @@ export function MigrationPage() {
         </div>
         {current ? <DomainPanel id={current} /> : <Empty>Create a domain to start.</Empty>}
       </div>
+      <AuditIntegrity />
     </div>
+  );
+}
+
+/** The append-only log's daily digest chain: copy each digest out of ARGUS;
+ * verification recomputes the chain from the events. */
+function AuditIntegrity() {
+  const queryClient = useQueryClient();
+  const digests = useQuery({ queryKey: ["audit-digests"], queryFn: auditApi.digests });
+  const verify = useMutation({ mutationFn: auditApi.verify });
+  const seal = useMutation({
+    mutationFn: auditApi.seal,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["audit-digests"] }),
+  });
+  return (
+    <Card
+      title="Audit log integrity"
+      action={
+        <span className="flex gap-2">
+          <button onClick={() => seal.mutate()} className="rounded border border-slate-300 px-2 py-1 text-xs">
+            Seal yesterday
+          </button>
+          <button onClick={() => verify.mutate()} className="rounded bg-slate-900 px-2 py-1 text-xs text-white">
+            Verify the chain
+          </button>
+        </span>
+      }
+    >
+      {verify.data && (
+        <p className={`py-1 text-sm ${verify.data.ok ? "text-emerald-700" : "text-red-700"}`}>
+          {verify.data.ok
+            ? `Intact: ${verify.data.days} sealed day(s), head ${verify.data.head?.slice(0, 16) ?? "—"}…`
+            : `Broken at ${verify.data.day}: ${verify.data.reason}`}
+        </p>
+      )}
+      {(seal.error || verify.error) && <p className="text-sm text-red-600">{errorText(seal.error ?? verify.error)}</p>}
+      {(digests.data ?? []).length === 0 ? (
+        <Empty>No day sealed yet. Run `python -m app.ledger audit-digest` daily and keep its output outside ARGUS.</Empty>
+      ) : (
+        <ul className="divide-y divide-slate-50 font-mono text-xs">
+          {digests.data!.slice(0, 7).map((d) => (
+            <li key={d.day} className="flex justify-between gap-3 py-1">
+              <span>{d.day}</span>
+              <span className="truncate text-slate-500">{d.digest}</span>
+              <span className="shrink-0 text-slate-400">
+                {Object.values(d.counts).reduce((a, b) => a + b, 0)} events
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
@@ -241,6 +293,7 @@ function DomainPanel({ id }: { id: string }) {
               </li>
             ))}
           </ul>
+          {d.authoritative && d.pilot && <PilotReversion d={d} onDone={refresh} />}
           {!d.authoritative ? (
             <button
               onClick={() => exit.mutate()}
@@ -400,5 +453,47 @@ function ReconcileCard({ d, onDone }: { d: DomainDetail; onDone: () => void }) {
         </button>
       </div>
     </Card>
+  );
+}
+
+/** The pilot's 30-day way back (§17.7): export what ARGUS changed since W,
+ * for the source's administrators to apply by hand, then return the domain. */
+function PilotReversion({ d, onDone }: { d: DomainDetail; onDone: () => void }) {
+  const [reason, setReason] = useState("");
+  const [exported, setExported] = useState(false);
+  const exportIt = useMutation({
+    mutationFn: () => domainsApi.reversionExport(d.id),
+    onSuccess: (report) => {
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${d.id}-changes-since-W.json`;
+      a.click();
+      setExported(true);
+    },
+  });
+  const revert = useMutation({ mutationFn: () => domainsApi.revert(d.id, reason), onSuccess: onDone });
+  return (
+    <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+      <p className="font-medium">Pilot reversion window (30 days after the exit)</p>
+      <p className="mt-0.5">
+        ARGUS never writes to Jira. If the pilot is abandoned, export the change report, have the Jira administrators
+        apply it, then return the domain to T1.
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button onClick={() => exportIt.mutate()} className="rounded border border-amber-300 bg-white px-2 py-1">
+          Export the change report
+        </button>
+        <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why the pilot is abandoned" className="min-w-[14rem] flex-1 rounded border border-amber-300 px-2 py-1" />
+        <button
+          disabled={!exported || !reason}
+          onClick={() => revert.mutate()}
+          className="rounded bg-amber-700 px-2 py-1 text-white disabled:opacity-50"
+        >
+          Return the domain to T1
+        </button>
+      </div>
+      {(exportIt.error || revert.error) && <p className="mt-1 text-red-700">{errorText(exportIt.error ?? revert.error)}</p>}
+    </div>
   );
 }
