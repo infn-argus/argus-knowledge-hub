@@ -793,6 +793,14 @@ export const ledgerApi = {
   ledgerOnly: () =>
     request<{ enabled: boolean; legacy: { ok: boolean; blocked: string[]; mixed_open: string[]; unplanned: number } }>(
       "/v1/ledger/ledger-only"),
+  registry: () =>
+    request<{ mode: string; total: number; unexplained: number; counts: Record<string, number>;
+              violations: { id: string; rule: string; relation: string | null; from: string | null; to: string | null;
+                            record?: string; message: string; explained_by: string | null }[] }>("/v1/ledger/registry/report"),
+  acceptViolation: (violation_id: string, reason: string) =>
+    request<{ decision_id: string }>("/v1/ledger/registry/exceptions", { method: "POST", body: json({ violation_id, reason }) }),
+  setRegistryMode: (mode: "warn" | "enforce", reason: string) =>
+    request<{ mode: string }>("/v1/ledger/registry/mode", { method: "PUT", body: json({ mode, reason }) }),
   setLedgerOnly: (enabled: boolean, reason: string) =>
     request<{ enabled: boolean }>("/v1/ledger/ledger-only", { method: "PUT", body: json({ enabled, reason }) }),
   escalateReview: () =>

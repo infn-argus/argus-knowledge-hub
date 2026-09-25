@@ -17,6 +17,8 @@ class Workspace(Base):
     is_global: Mapped[bool] = mapped_column(Boolean, default=False)
     # §13 S5: record facts and relations change only through the fact ledger (a trigger enforces it).
     ledger_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # §13 S7: the relation registry warns (reports) or enforces (refuses new edges that break it).
+    registry_mode: Mapped[str] = mapped_column(String, default="warn", server_default="warn")
 
     # Fallback rights for any authenticated user with no explicit Membership
     # row in this workspace. All unchecked by default — a workspace stays

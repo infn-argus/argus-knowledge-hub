@@ -292,6 +292,60 @@ def invariants_report(workspace_id: str = Depends(require_permission("read")), d
     return invariants.report(db, [workspace_id])
 
 
+class RegistryExceptionIn(BaseModel):
+    violation_id: str
+    reason: str
+
+
+@router.post("/registry/exceptions", status_code=201)
+def registry_exception(body: RegistryExceptionIn, identity=Depends(get_identity),
+                       workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    """Accept one violation as it is, with a reason: the registry's owners
+    agree this edge is right although the registry would not allow it."""
+    from app.ledger import registry
+    if not body.reason.strip():
+        raise HTTPException(status_code=422, detail={"error": "an exception needs a reason"})
+    rep = registry.report(db, [workspace_id], detail_limit=10 ** 6)
+    v = next((x for x in rep["violations"] if x["id"] == body.violation_id), None)
+    if v is None:
+        raise HTTPException(status_code=404, detail="No such violation in this workspace")
+    d = engine._record_decision(db, "registry_exception", actor_of(identity), workspace_id,
+                                subject_uid=v.get("from") or v.get("record"),
+                                predicate=f"rel:{v['relation']}" if v.get("relation") else None,
+                                target={"violation": v["id"], "rule": v["rule"]}, reason=body.reason)
+    db.commit()
+    return {"decision_id": d.decision_id, "violation": v["id"]}
+
+
+class RegistryModeIn(BaseModel):
+    mode: str
+    reason: str
+
+
+@router.put("/registry/mode")
+def registry_mode(body: RegistryModeIn, identity=Depends(get_identity),
+                  workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    """§13 S7: enforce the registry here once every violation is fixed or accepted."""
+    from app.ledger import registry
+    from app.models.workspace import Workspace
+    if body.mode not in ("warn", "enforce"):
+        raise HTTPException(status_code=422, detail={"error": "mode is 'warn' or 'enforce'"})
+    if not body.reason.strip():
+        raise HTTPException(status_code=422, detail={"error": "give a reason; it is recorded"})
+    w = db.get(Workspace, workspace_id)
+    if body.mode == "enforce":
+        rep = registry.report(db, [workspace_id])
+        if rep["unexplained"]:
+            raise HTTPException(status_code=409, detail={
+                "error": f"{rep['unexplained']} violation(s) are neither fixed nor accepted as exceptions",
+                "unexplained": rep["unexplained"]})
+    engine._record_decision(db, "set_registry_mode", actor_of(identity), workspace_id,
+                            value={"mode": body.mode, "before": w.registry_mode}, reason=body.reason)
+    w.registry_mode = body.mode
+    db.commit()
+    return {"mode": w.registry_mode}
+
+
 @router.get("/review/queues")
 def review_queues(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """§18.2: each queue's size, age distribution and escalation, and who owns it."""

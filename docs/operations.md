@@ -448,3 +448,39 @@ ARGUS_CATALOGUE=inventory-lead@example.org python -m app.ledger catalogue-report
 
 Mapping source classes through a versioned table is the importers' part of
 §5.5. It is left out while ARGUS itself is the source of truth.
+
+## Enforcing the relation registry (§13 S7)
+
+The registry runs in warn mode per workspace until it is switched to
+enforce (*Migration to ARGUS → Relation registry*, or `PUT
+/v1/ledger/registry/mode` with a reason, recorded as a decision). The
+switch is allowed only when every violation in the workspace's report is
+either fixed or accepted:
+
+- fix an edge by removing it, or by stating the relation the registry
+  allows;
+- accept an edge as it is with *Accept as exception*, or `POST
+  /v1/ledger/registry/exceptions` with the violation's id and a reason.
+  The exception is a decision; revoking it makes the violation count
+  again.
+
+In enforce mode, every decision that adds an edge is checked before it is
+recorded. That covers the API, bulk changes, the review tools and the
+decisions endpoint. An edge is refused with 409 `I-REG` if it:
+
+- uses a deprecated verb;
+- has an end of a type the relation does not allow;
+- goes over the relation's cardinality (a single-valued relation is
+  replaced, not added to);
+- closes a cycle in `part of` or `composed of`;
+- points at a retired or merged record.
+
+Removing an edge is never refused. Going back to warn mode is allowed at
+any time, with a reason.
+
+The retirement guard is already live on every source stream. A revision
+that would make more than 10 % of its subjects (and at least 10)
+disappear, or retire a record that still has tickets, documents or a
+Confirmed Installation, is held for review. A person's own edits are not
+revisions: retiring a record by hand is an explicit decision with its
+author.

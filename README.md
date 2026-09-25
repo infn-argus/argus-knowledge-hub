@@ -140,6 +140,10 @@ currently valid* revision rather than to an arbitrary PDF.
   author in the record's audit trail. A workspace whose legacy records are migrated can be
   switched to ledger-only. The database then refuses any change to record facts or relations
   written around the ledger, and deleting a record retires it.
+- **Relation registry (§6, §13 S7).** The registry reports every edge that breaks it: deprecated
+  verbs, wrong end types, cardinality, cycles, edges to retired records. A workspace switches to
+  enforce mode once each violation is fixed or accepted as an exception with a reason. From
+  then on, a new edge that breaks the registry is refused.
 - **Equipment classes (§5.5).** Equipment with no type of its own is *Other Equipment* with a
   class from a vocabulary the catalogue owns. A monthly report shows the classes and the
   `Unclassified` share with its alert. Promotion reviews open at the §5.5 thresholds, and a

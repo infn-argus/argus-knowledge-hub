@@ -761,6 +761,8 @@ def apply_decisions(db: Session, workspace_id: str, actor: str, batch: list[dict
             _check_installation_immutability(record, item["predicate"])
             from app.ledger.connectivity import check_assignment_decision
             check_assignment_decision(record, item["predicate"], db)
+            from app.ledger.registry import enforce_decision
+            enforce_decision(db, record, item)
             if kind == "supersede" and not item.get("supersedes"):
                 raise LedgerError("supersede must name the confirmations it replaces")
         if kind in ("retract", "revoke") and not target.get("decisions"):

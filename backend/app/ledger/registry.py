@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.ledger.engine import ACCESS_POINT, INSTALLABLE, INSTALLATION
 from app.models.asset import Asset, Relation
+from app.models.workspace import Workspace
 
 MODE = "warn"
 POS = INSTALLABLE
@@ -73,10 +74,15 @@ def report(db: Session, workspace_ids: Iterable[str], detail_limit: int = 200) -
     records = {a.uid: a for a in db.scalars(select(Asset).where(Asset.uid.in_(uids)))} if uids else {}
     violations: list[dict] = []
 
+    explained = explanations(db, ws)
+
     def add(rule: str, r: Optional[Relation], message: str, **extra):
-        violations.append({"rule": rule, "relation": r.relation_type if r else extra.pop("relation", None),
-                           "from": r.from_asset_uid if r else None, "to": r.to_asset_uid if r else None,
-                           "message": message, **extra})
+        v = {"rule": rule, "relation": r.relation_type if r else extra.pop("relation", None),
+             "from": r.from_asset_uid if r else None, "to": r.to_asset_uid if r else None,
+             "message": message, **extra}
+        v["id"] = violation_id(v)
+        v["explained_by"] = explained.get(v["id"])
+        violations.append(v)
 
     per_source, per_target, graph = Counter(), Counter(), defaultdict(lambda: defaultdict(set))
     for r in rels:
@@ -86,12 +92,12 @@ def report(db: Session, workspace_ids: Iterable[str], detail_limit: int = 200) -
             continue
         name = r.relation_type
         if name in DEPRECATED or (name == "assigned to" and b.type == "Work Package"):
-            add("deprecated", r, f"'{name}' is deprecated; the legacy migration rewrites it")
+            add("deprecated", r, f"'{name}' is deprecated: remove it, or replace it with a current relation")
         ends = ENDPOINTS.get(name)
         if ends and not _ok(ends[0], a.type):
-            add("source_type", r, f"'{name}' cannot start at a {a.type}")
+            add("source_type", r, f"'{name}' cannot start at type {a.type}")
         if ends and not _ok(ends[1], b.type):
-            add("target_type", r, f"'{name}' cannot point to a {b.type}")
+            add("target_type", r, f"'{name}' cannot point to type {b.type}")
         if _gone(b) and not _gone(a) and a.type not in RETIRE_EXEMPT_SOURCES:
             add("retired_end", r, f"'{name}' points to a retired or merged record")
         if name in CARDINALITY:
@@ -129,7 +135,11 @@ def report(db: Session, workspace_ids: Iterable[str], detail_limit: int = 200) -
 
     counts = Counter(v["rule"] for v in violations)
     by_relation = Counter(v["relation"] for v in violations)
-    return {"mode": MODE, "workspaces": sorted(ws), "relations": len(rels), "total": len(violations),
+    unexplained = [v for v in violations if not v["explained_by"]]
+    modes = sorted({m for m in db.scalars(select(Workspace.registry_mode).where(Workspace.id.in_(ws)))})
+    violations.sort(key=lambda v: bool(v["explained_by"]))          # what still needs a person first
+    return {"mode": modes[0] if len(modes) == 1 else modes, "workspaces": sorted(ws), "relations": len(rels),
+            "total": len(violations), "unexplained": len(unexplained),
             "counts": dict(counts), "by_relation": dict(by_relation),
             "checked": sorted(set(ENDPOINTS) | set(CARDINALITY) | ACYCLIC | DEPRECATED),
             "violations": violations[:detail_limit]}
@@ -144,3 +154,92 @@ def compare(before: dict, after: dict) -> dict:
             if after.get("counts", {}).get(r, 0) > before.get("counts", {}).get(r, 0)}
     return {"ok": after.get("total", 0) <= before.get("total", 0), "before": before.get("total", 0),
             "after": after.get("total", 0), "grew": grew}
+
+
+
+# --------------------------------------------------------------------------- enforce mode (§13 S7)
+
+def violation_id(v: dict) -> str:
+    import hashlib
+    from app.ledger.engine import canonical
+    key = [v["rule"], v.get("relation"), v.get("from"), v.get("to"), v.get("record")]
+    return hashlib.sha256(canonical(key).encode()).hexdigest()[:24]
+
+
+def explanations(db: Session, workspace_ids: Iterable[str]) -> dict[str, str]:
+    """violation id -> the decision that accepts it as it is (an exception
+    the registry's owners agreed to), unless that decision was revoked."""
+    from app.ledger import engine
+    from app.models.ledger import Decision
+    out = {}
+    for w in set(workspace_ids):
+        ended = engine._ended(db, w)
+        for d in db.scalars(select(Decision).where(Decision.workspace_id == w, Decision.kind == "registry_exception")):
+            if d.decision_id not in ended:
+                out[(d.target or {}).get("violation")] = d.decision_id
+    return out
+
+
+def edge_violations(db: Session, a: Asset, name: str, b: Asset) -> list[str]:
+    """What adding the edge a —name→ b would break, given the edges that exist."""
+    from app.ledger.engine import SINGLE_RELATIONS
+    out = []
+    if name in DEPRECATED or (name == "assigned to" and b.type == "Work Package"):
+        out.append(f"'{name}' is deprecated")
+    ends = ENDPOINTS.get(name)
+    if ends and not _ok(ends[0], a.type):
+        out.append(f"'{name}' cannot start at type {a.type}")
+    if ends and not _ok(ends[1], b.type):
+        out.append(f"'{name}' cannot point to type {b.type}")
+    if _gone(b) and a.type not in RETIRE_EXEMPT_SOURCES:
+        out.append(f"'{name}' cannot point to a retired or merged record")
+    if name in CARDINALITY:
+        per_source, per_target = CARDINALITY[name]
+        existing = list(db.scalars(select(Relation).where(Relation.relation_type == name,
+                                                          (Relation.from_asset_uid == a.uid)
+                                                          | (Relation.to_asset_uid == b.uid))))
+        # A single-valued relation is replaced, not added to.
+        from_a = [r for r in existing if r.from_asset_uid == a.uid and r.to_asset_uid != b.uid]
+        to_b = [r for r in existing if r.to_asset_uid == b.uid and r.from_asset_uid != a.uid]
+        if per_source is not None and f"rel:{name}" not in SINGLE_RELATIONS and len(from_a) + 1 > per_source:
+            out.append(f"'{name}' allows {per_source} edge(s) from one record")
+        if per_target is not None and len(to_b) + 1 > per_target:
+            out.append(f"'{name}' allows {per_target} edge(s) to one record")
+    if name in ACYCLIC:
+        seen, todo = set(), [b.uid]
+        while todo:
+            u = todo.pop()
+            if u == a.uid:
+                out.append(f"'{name}' would close a cycle")
+                break
+            if u not in seen:
+                seen.add(u)
+                todo += list(db.scalars(select(Relation.to_asset_uid).where(Relation.from_asset_uid == u,
+                                                                            Relation.relation_type == name)))
+    return out
+
+
+def enforce_decision(db: Session, record: Asset, item: dict) -> None:
+    """In an enforce-mode workspace a decision that asserts a new edge must
+    satisfy the registry (I-REG)."""
+    from app.ledger.engine import InvariantError, resolve_ref
+    predicate = item.get("predicate") or ""
+    if not predicate.startswith("rel:"):
+        return
+    w = db.get(Workspace, record.workspace_id)
+    if w is None or w.registry_mode != "enforce":
+        return
+    value, member = item.get("value"), item.get("member")
+    if isinstance(value, dict) and value.get("ref"):
+        ref = value["ref"]
+    elif value == "present" and member:
+        ref = member
+    else:
+        return                                   # removing an edge never breaks the registry
+    target_uid = resolve_ref(db, ref)
+    target = db.get(Asset, target_uid) if target_uid else None
+    if target is None:
+        return
+    problems = edge_violations(db, record, predicate[4:], target)
+    if problems:
+        raise InvariantError("I-REG", f"the relation registry is enforced here: {'; '.join(problems)}")

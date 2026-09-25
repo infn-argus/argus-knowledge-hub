@@ -370,3 +370,47 @@ export function LedgerOnlyCard() {
     </Card>
   );
 }
+
+
+/** §13 S7: the relation registry warns, or, once every violation is fixed
+ * or accepted, enforces: a new edge that breaks it is refused. */
+export function RegistryCard() {
+  const queryClient = useQueryClient();
+  const rep = useQuery({ queryKey: ["registry"], queryFn: ledgerApi.registry, retry: false });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["registry"] });
+  const accept = useMutation({ mutationFn: (v: { id: string; reason: string }) => ledgerApi.acceptViolation(v.id, v.reason), onSuccess: refresh });
+  const mode = useMutation({ mutationFn: (v: { mode: "warn" | "enforce"; reason: string }) => ledgerApi.setRegistryMode(v.mode, v.reason), onSuccess: refresh });
+  if (!rep.data) return null;
+  const r = rep.data;
+  const enforce = r.mode === "enforce";
+  const open = r.violations.filter((v) => !v.explained_by);
+  return (
+    <Card
+      title="Relation registry (§6, §13 S7)"
+      action={<span className={`rounded px-2 py-0.5 text-xs ${enforce ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{String(r.mode)}</span>}
+    >
+      <p className="py-1 text-sm text-slate-600">
+        {r.total} violation(s), {r.unexplained} neither fixed nor accepted.{" "}
+        {enforce ? "Enforced: a new edge that breaks the registry is refused." : "Warn mode: violations are reported, not refused."}
+      </p>
+      <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto text-sm">
+        {open.slice(0, 50).map((v) => (
+          <li key={v.id} className="flex items-center gap-2 py-1">
+            <span className="rounded bg-slate-100 px-1.5 text-[11px] text-slate-600">{v.rule}</span>
+            <span className="flex-1 text-slate-700">{v.message}</span>
+            <button onClick={() => { const why = prompt("Why is this edge right although the registry would not allow it?"); if (why) accept.mutate({ id: v.id, reason: why }); }}
+                    className="text-xs text-indigo-700 hover:underline">Accept as exception</button>
+          </li>
+        ))}
+      </ul>
+      <button
+        onClick={() => { const why = prompt(enforce ? "Why go back to warn mode?" : "Why enforce the registry here?"); if (why) mode.mutate({ mode: enforce ? "warn" : "enforce", reason: why }); }}
+        disabled={!enforce && r.unexplained > 0}
+        className="mt-2 rounded-md border border-slate-300 px-3 py-1 text-xs disabled:opacity-40"
+      >
+        {enforce ? "Back to warn mode" : "Enforce"}
+      </button>
+      {(accept.isError || mode.isError) && <p className="mt-1 text-xs text-red-600">{errorText(accept.error ?? mode.error)}</p>}
+    </Card>
+  );
+}
