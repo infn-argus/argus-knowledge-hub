@@ -29,6 +29,7 @@ from app.routers import (
     schemas,
     sync,
     transfers,
+    workflows,
     workspaces,
 )
 
@@ -67,6 +68,8 @@ app.include_router(ledger.lookup_router)
 app.include_router(export.router)
 app.include_router(equipment.router)
 app.include_router(equipment.bulk_router)
+app.include_router(workflows.router)
+app.include_router(workflows.notifications_router)
 app.include_router(attribute_values.router)
 app.include_router(ai.router)
 app.include_router(mcp.router)

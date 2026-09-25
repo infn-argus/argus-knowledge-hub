@@ -20,6 +20,8 @@ import { AuthenticatedImage } from "../../components/AuthenticatedImage";
 import { TransferItemAction } from "../../components/TransferItemAction";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 import { TicketContextPanel } from "../../components/hub/ContextPanels";
+import { TicketWorkflowCard, WatchersCard } from "../../components/hub/WorkflowPanels";
+import { workflowApi } from "../../api/client";
 
 const STATE_STYLES: Record<string, string> = {
   new: "bg-slate-100 text-slate-600",
@@ -147,6 +149,8 @@ export function IssueDetail() {
     queryFn: () => issuesApi.get(uid!),
     enabled: !!uid,
   });
+  const moves = useQuery({ queryKey: ["ticket-transitions", uid], queryFn: () => workflowApi.transitions(uid!),
+                           enabled: !!uid });
   const comments = useQuery({
     queryKey: ["issue-comments", uid],
     queryFn: () => issuesApi.listComments(uid!),
@@ -179,6 +183,7 @@ export function IssueDetail() {
       issuesApi.update(uid!, patch),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["issues", uid] });
+      queryClient.invalidateQueries({ queryKey: ["ticket-transitions", uid] });
       queryClient.invalidateQueries({ queryKey: ["issues"] });
     },
   });
@@ -265,6 +270,14 @@ export function IssueDetail() {
 
   const i = issue.data;
   const currentStatus = statusOptions.find((o) => o.id === i.state);
+  // The quick status menu offers only moves the workflow allows without
+  // extra input; the Workflow card handles the rest.
+  const quickMoves = moves.data
+    ? [
+        { id: i.state, value: moves.data.state_name },
+        ...moves.data.transitions.filter((t) => t.requires.length === 0).map((t) => ({ id: t.to, value: t.to_name })),
+      ]
+    : null;
   const assignedMember = members.data?.find((m) => m.user_id === i.assignee);
   const priorityLabel = priorityOptions.find((o) => o.id === i.priority)?.value ?? i.priority;
   const attr = (key: string) => i.attributes?.[key];
@@ -336,7 +349,13 @@ export function IssueDetail() {
             }
             className={`rounded border-0 px-2 py-1 text-xs font-medium ${STATE_STYLES[i.state] ?? "bg-slate-100 text-slate-600"}`}
           >
-            {statusOptions.length > 0 ? (
+            {quickMoves ? (
+              quickMoves.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.value}
+                </option>
+              ))
+            ) : statusOptions.length > 0 ? (
               statusOptions.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.value}
@@ -710,6 +729,8 @@ export function IssueDetail() {
         </div>
 
         <div className="space-y-4">
+          <TicketWorkflowCard ticketUid={i.uid} />
+          <WatchersCard ticketUid={i.uid} />
           <TicketContextPanel ticketUid={i.uid} />
           <Panel title="People">
             <dl>

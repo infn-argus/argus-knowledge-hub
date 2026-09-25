@@ -87,6 +87,10 @@ import type {
 import type {
   AccessPointView,
   AddressUse,
+  NotificationView,
+  Rehearsal,
+  TicketTransitions,
+  WorkflowDef,
   AuditDigestView,
   AuditEntry,
   BulkChangeView,
@@ -839,6 +843,29 @@ export const auditApi = {
   seal: () => request<{ day: string; digest: string }>("/v1/ledger/audit/seal", { method: "POST" }),
   unmerge: (merge_decision_id: string, reason?: string) =>
     request<{ decision_id: string }>("/v1/ledger/identity/unmerge", { method: "POST", body: json({ merge_decision_id, reason }) }),
+};
+
+export const workflowApi = {
+  transitions: (uid: string) => request<TicketTransitions>(`/v1/issues/${uid}/transitions`),
+  transition: (uid: string, input: { to: string; comment?: string; resolution?: string; assignee?: string }) =>
+    request<Issue>(`/v1/issues/${uid}/transition`, { method: "POST", body: json(input) }),
+  watchers: (uid: string) => request<string[]>(`/v1/issues/${uid}/watchers`),
+  watch: (uid: string, user?: string) =>
+    request<string[]>(`/v1/issues/${uid}/watchers`, { method: "POST", body: json(user ? { user } : {}) }),
+  unwatch: (uid: string, user: string) =>
+    request<void>(`/v1/issues/${uid}/watchers/${encodeURIComponent(user)}`, { method: "DELETE" }),
+  list: () => request<{ workflows: WorkflowDef[]; builtin: WorkflowDef; default: string | null }>("/v1/workflows"),
+  create: (def: Omit<WorkflowDef, "uid">) => request<WorkflowDef>("/v1/workflows", { method: "POST", body: json(def) }),
+  importJira: (definition: unknown, is_default = false) =>
+    request<WorkflowDef>("/v1/workflows/import-jira", { method: "POST", body: json({ definition, is_default }) }),
+  bind: (uid: string, schema_uid: string) =>
+    request<{ ok: boolean }>(`/v1/workflows/${uid}/bind`, { method: "POST", body: json({ schema_uid }) }),
+  rehearsal: (uid: string) => request<Rehearsal>(`/v1/workflows/${uid}/rehearsal`),
+  escalate: () => request<{ escalated: number }>("/v1/workflows/escalate", { method: "POST" }),
+  notifications: (unread = false) =>
+    request<NotificationView[]>(`/v1/notifications${unread ? "?unread=true" : ""}`),
+  readNotification: (id: number) => request<{ ok: boolean }>(`/v1/notifications/${id}/read`, { method: "POST" }),
+  readAll: () => request<{ ok: boolean }>("/v1/notifications/read-all", { method: "POST" }),
 };
 
 export const domainsApi = {

@@ -313,3 +313,58 @@ export interface AuditDigestView {
   counts: Record<string, number>;
   sealed_at: string;
 }
+
+export interface WorkflowState {
+  key: string;
+  name: string;
+  category: "open" | "active" | "waiting" | "done";
+  sla_hours?: number;
+  escalate_to?: string;
+}
+
+export interface WorkflowTransition {
+  to: string;
+  name: string;
+  to_name: string;
+  category: string;
+  requires: ("assignee" | "resolution" | "comment")[];
+}
+
+export interface TicketTransitions {
+  workflow: { uid: string | null; name: string };
+  state: string;
+  state_name: string;
+  transitions: WorkflowTransition[];
+  states: WorkflowState[];
+}
+
+export interface WorkflowDef {
+  uid: string | null;
+  name: string;
+  initial: string;
+  is_default: boolean;
+  states: WorkflowState[];
+  transitions: { from: string; to: string; name?: string; requires?: string[] }[];
+  source?: Record<string, unknown> | null;
+  version?: number;
+}
+
+export interface Rehearsal {
+  workflow: string;
+  tickets: number;
+  transitions_checked: number;
+  unmapped_statuses: Record<string, number>;
+  disallowed: { from: string; to: string; count: number; example: string | null }[];
+  ok: boolean;
+}
+
+export interface NotificationView {
+  id: number;
+  kind: string;
+  title: string;
+  issue_uid: string | null;
+  detail: Record<string, unknown>;
+  actor: string | null;
+  created_at: string;
+  read: boolean;
+}

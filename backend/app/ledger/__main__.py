@@ -8,10 +8,26 @@
         print (and store) the chained digest of the audit log for a day
     python -m app.ledger verify-audit
         recompute the digest chain and report the first break, if any
+    python -m app.ledger escalate
+        escalate tickets that have outstayed their state's SLA, and send
+        pending notifications by e-mail when SMTP_HOST is set
+    python -m app.ledger export --workspace WS --out DIR
+        a complete JSON-lines bundle of a workspace (every grant)
+    python -m app.ledger load --dir DIR [--attachments DIR] [--workspace WS]
+        load a bundle into this (empty) instance
+    python -m app.ledger backup --out DIR [--attachments DIR]
+        pg_dump + attachments + a manifest with checksums and row counts
+    python -m app.ledger rehearse-restore MANIFEST
+        restore into a scratch database, check it, drop it
+    python -m app.ledger probe --base-url URL --token TOKEN --asset UID [...] [--edit UID]
+        measure the §19 performance targets against a running API; --edit
+        writes an `argus_probe` value on that (dedicated) record
 """
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 import time
 from datetime import date
@@ -62,6 +78,25 @@ def main(argv=None) -> int:
     a = sub.add_parser("audit-digest")
     a.add_argument("--day", type=date.fromisoformat, default=None)
     sub.add_parser("verify-audit")
+    sub.add_parser("escalate")
+    e = sub.add_parser("export")
+    e.add_argument("--workspace", required=True)
+    e.add_argument("--out", required=True)
+    ld = sub.add_parser("load")
+    ld.add_argument("--dir", required=True)
+    ld.add_argument("--attachments", default=None)
+    ld.add_argument("--workspace", default=None)
+    b = sub.add_parser("backup")
+    b.add_argument("--out", required=True)
+    b.add_argument("--attachments", default=os.environ.get("ATTACHMENTS_DIR"))
+    r = sub.add_parser("rehearse-restore")
+    r.add_argument("manifest")
+    pr = sub.add_parser("probe")
+    pr.add_argument("--base-url", required=True)
+    pr.add_argument("--token", required=True)
+    pr.add_argument("--asset", action="append", default=[])
+    pr.add_argument("--query", action="append", default=[])
+    pr.add_argument("--edit", default=None)
     args = parser.parse_args(argv)
     if args.command == "derive-worker":
         derive_worker(args.once, args.interval)
@@ -76,6 +111,54 @@ def main(argv=None) -> int:
             print(row.digest)
         finally:
             db.close()
+    elif args.command == "export":
+        from app.ledger import portability
+        db = SessionLocal()
+        try:
+            portability.everything()
+            print(json.dumps(portability.write_bundle(db, args.workspace, args.out)))
+        finally:
+            db.close()
+    elif args.command == "load":
+        from app.ledger import portability
+        bundle = portability.read_bundle(args.dir)
+        if args.attachments:
+            problems = portability.verify_files(bundle, args.attachments)
+            if problems:
+                print("attachments do not match their checksums:", *problems, sep="\n  ")
+                return 1
+        db = SessionLocal()
+        try:
+            print(json.dumps(portability.load_bundle(db, bundle, args.attachments, args.workspace)))
+            db.commit()
+        finally:
+            db.close()
+    elif args.command == "backup":
+        from app.ledger import ops
+        print(json.dumps(ops.backup(os.environ["DATABASE_URL"], args.out, args.attachments), indent=2))
+    elif args.command == "rehearse-restore":
+        from app.ledger import ops
+        report = ops.rehearse_restore(os.environ["DATABASE_URL"], args.manifest)
+        print(json.dumps(report, indent=2, default=str))
+        return 0 if report["ok"] else 1
+    elif args.command == "probe":
+        import httpx
+        from app.ledger import ops
+        with httpx.Client(base_url=args.base_url, timeout=60) as client:
+            result = ops.probe(client, {"Authorization": f"Bearer {args.token}"}, args.asset,
+                               args.query or ["pump", "SIP", "rack"], args.edit)
+        print(json.dumps(result, indent=2))
+        return 0 if all(result["meets"].values()) else 1
+    elif args.command == "escalate":
+        from app.services import notify
+        db = SessionLocal()
+        try:
+            n = notify.escalate_overdue(db)
+            sent = notify.deliver_pending(db)
+            db.commit()
+        finally:
+            db.close()
+        print(f"escalated {n} ticket(s); e-mailed {sent} notification(s)")
     elif args.command == "verify-audit":
         from app.ledger import audit
         db = SessionLocal()

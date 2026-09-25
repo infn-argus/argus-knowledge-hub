@@ -60,3 +60,4 @@ __all__ = [
     "User",
     "Workspace",
 ]
+from app.models import workflow  # noqa: F401,E402

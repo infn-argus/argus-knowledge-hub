@@ -7,6 +7,7 @@ import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
 import { CommandPalette, useCommandPaletteShortcut } from "../components/hub/CommandPalette";
 import { SchemaTree } from "../components/SchemaTree";
 import { WorkspaceSwitcher } from "../components/WorkspaceSwitcher";
+import { NotificationBell } from "../components/hub/WorkflowPanels";
 
 /**
  * One application, three kinds of record. Assets, the service desk and the
@@ -56,6 +57,7 @@ const SECTIONS: Record<SectionKey, SectionConfig> = {
       { to: "/tickets", label: "All tickets", end: true },
       { to: "/tickets/board", label: "Board" },
       { to: "/tickets/search", label: "Search" },
+      { to: "/tickets/workflows", label: "Workflows" },
     ],
     treeLabel: "Ticket types",
     newTypeTo: "/schemas/new?applies_to=tickets",
@@ -351,6 +353,7 @@ export function AppShell() {
             </kbd>
           </button>
           <div className="ml-auto flex items-center gap-3">
+            <NotificationBell />
             <NewMenu />
             {me.data && (
               <span className="hidden text-xs text-slate-500 md:inline" title={me.data.email ?? undefined}>

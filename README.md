@@ -104,11 +104,25 @@ currently valid* revision rather than to an arbitrary PDF.
   `python -m app.ledger verify-audit` finds the first altered day. Every record has an audit trail
   under *Provenance*. Restricted fields (an attribute definition with `"restricted": "<class>"`)
   are hidden, and kept intact on edit, for viewers without that grant.
+- **Ticket workflows.** Each ticket type follows its own workflow: states (open, active, waiting,
+  done), the transitions allowed between them, and what a move needs (an assignee, a resolution,
+  a comment). Jira workflows are imported as they are and rehearsed against the migrated tickets'
+  Jira history before the ticket cutover. Tickets without a workflow keep the built-in one.
+  Reporters and assignees watch their tickets; watchers, assignees and @mentioned people are
+  notified in-app (and by e-mail with `SMTP_HOST`), never about a ticket they may not read; a state
+  with an SLA escalates a ticket that outstays it. *Service desk → Workflows*; served by
+  `/v1/workflows`, `/v1/issues/{uid}/transition|transitions|watchers` and `/v1/notifications`.
+- **Operations.** Backups with a checksummed manifest and a restore rehearsal that checks
+  itself, a complete export that loads into an empty instance, and a probe of the performance
+  targets — see [docs/operations.md](docs/operations.md) for the jobs to schedule and
+  point-in-time recovery.
 - **Data integrity tools**: relink of unresolved references, and a report of missing
   references, dangling links and orphaned objects, with targeted cleanup actions.
 
 ## Design notes
 
+- [Operating ARGUS](docs/operations.md) — scheduled jobs, backups and point-in-time recovery,
+  export and load, performance targets.
 - [The asset model revision](docs/asset-model-revision.md) — positions and installations, the fact
   ledger, the relation registry, identity reconciliation, and ARGUS as the system of record that
   replaces Jira/Insight domain by domain. The implementation follows its plan (§13); the unified

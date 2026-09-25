@@ -33,6 +33,7 @@ import { LabelList } from "./pages/labels/List";
 import { ReviewQueuePage } from "./pages/review/Queue";
 import { MigrationPage } from "./pages/migration/Domains";
 import { BulkChangesPage } from "./pages/bulk/BulkChanges";
+import { WorkflowsPage } from "./pages/workflows/Workflows";
 import { LookupPage } from "./pages/lookup/Lookup";
 import { SchemaDetail } from "./pages/schemas/Detail";
 import { IconLibrary } from "./pages/icons/List";
@@ -80,6 +81,7 @@ export function App() {
 
           <Route path="/tickets" element={<IssueList />} />
           <Route path="/tickets/board" element={<IssueBoard />} />
+          <Route path="/tickets/workflows" element={<WorkflowsPage />} />
           <Route path="/tickets/search" element={<IssueSearch />} />
           <Route path="/tickets/new" element={<IssueForm />} />
           <Route path="/tickets/:uid" element={<IssueDetail />} />

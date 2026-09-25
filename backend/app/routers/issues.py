@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -38,6 +39,7 @@ from app.schemas.issue import (
     IssueUpdate,
 )
 from app.services.asset_ticket_links import ensure_asset_link, sync_subject_link
+from app.services import notify, workflows
 from app.services.visibility import can_see, hidden_fields, redacted_attributes, visible_issues_clause
 from app.services.issue_history import (
     TRACKED_FIELDS,
@@ -103,9 +105,15 @@ def create_issue(
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
     validate_attributes(db, schema, body.attributes, workspace_id, Issue)
     issue = Issue(workspace_id=workspace_id, **body.model_dump())
+    wf = workflows.workflow_for(db, workspace_id, issue.schema_uid)
+    if workflows.state_of(wf, issue.state) is None:
+        # A new ticket starts where its type's workflow starts.
+        issue.state = wf["initial"]
+    issue.attributes = {**(issue.attributes or {}), "argus_state_entered_at": workflows.now().isoformat()}
     db.add(issue)
     db.flush()
     record_issue_created(db, issue, current_user_id)
+    notify.on_created(db, issue, current_user_id)
     # A ticket raised on an object has to appear on that object, or the
     # link only exists in one direction.
     if issue.asset_uid:
@@ -140,9 +148,20 @@ def get_issue(
     return issue_out(db, _get_owned_issue(uid, workspace_id, db))
 
 
-def _apply_state(issue: Issue, new_state: str) -> None:
-    issue.state = new_state
-    issue.closed_at = datetime.now(timezone.utc) if new_state == "closed" else None
+def _move(db: Session, issue: Issue, target: str, actor: Optional[str]) -> None:
+    """A state change through the ticket type's workflow (§19 item 3)."""
+    wf = workflows.workflow_for(db, issue.workspace_id, issue.schema_uid)
+    try:
+        step = workflows.check_move(wf, issue.state, target)
+    except workflows.WorkflowError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": "workflow"})
+    if step["requires"]:
+        raise HTTPException(status_code=409, detail={
+            "error": f"{step['name']} needs {', '.join(step['requires'])}: use POST /v1/issues/{issue.uid}/transition",
+            "invariant": "workflow"})
+    before = issue.state
+    workflows.apply_state(issue, wf, target)
+    notify.on_transition(db, issue, actor, before, target)
 
 
 @router.put("/{uid}", response_model=IssueOut)
@@ -166,10 +185,13 @@ def update_issue(
         patch["attributes"] = {**{k: v for k, v in patch["attributes"].items() if k not in hidden},
                                **{k: v for k, v in (issue.attributes or {}).items() if k in hidden}}
 
-    if "state" in patch:
-        _apply_state(issue, patch.pop("state"))
+    if "state" in patch and patch["state"] != issue.state:
+        _move(db, issue, patch.pop("state"), current_user_id)
+    patch.pop("state", None)
+    previous_assignee = issue.assignee
     for field, value in patch.items():
         setattr(issue, field, value)
+    notify.on_assigned(db, issue, current_user_id, previous_assignee)
 
     record_issue_changes(db, issue, before, current_user_id)
     sync_subject_link(db, issue, previous_asset_uid)
@@ -546,7 +568,11 @@ def close_issue(
     uid: str, workspace_id: str = Depends(require_permission("modify", resource="tickets")), db: Session = Depends(get_db)
 ):
     issue = _get_owned_issue(uid, workspace_id, db)
-    _apply_state(issue, "closed")
+    wf = workflows.workflow_for(db, workspace_id, issue.schema_uid)
+    done = [s["key"] for s in wf["states"] if s["category"] == "done"]
+    target = "closed" if "closed" in done else done[-1]
+    if issue.state != target:
+        _move(db, issue, target, None)
     db.commit()
     db.refresh(issue)
     return issue
@@ -557,7 +583,9 @@ def reopen_issue(
     uid: str, workspace_id: str = Depends(require_permission("modify", resource="tickets")), db: Session = Depends(get_db)
 ):
     issue = _get_owned_issue(uid, workspace_id, db)
-    _apply_state(issue, "new")
+    wf = workflows.workflow_for(db, workspace_id, issue.schema_uid)
+    if issue.state != wf["initial"]:
+        _move(db, issue, wf["initial"], None)
     db.commit()
     db.refresh(issue)
     return issue
@@ -580,9 +608,85 @@ def create_issue_comment(
     workspace_id: str = Depends(require_permission("create", resource="tickets")),
     db: Session = Depends(get_db),
 ):
-    _get_owned_issue(uid, workspace_id, db)
+    issue = _get_owned_issue(uid, workspace_id, db)
     comment = IssueComment(issue_uid=uid, **body.model_dump())
     db.add(comment)
+    db.flush()
+    notify.on_comment(db, issue, body.author, body.body)
     db.commit()
     db.refresh(comment)
     return comment
+
+
+# --------------------------------------------------------------------------- workflow (§19 item 3)
+
+@router.get("/{uid}/transitions")
+def list_transitions(uid: str, workspace_id: str = Depends(require_permission("read", resource="tickets")),
+                     db: Session = Depends(get_db)):
+    """Where this ticket can go next, and what each move needs."""
+    issue = _get_owned_issue(uid, workspace_id, db)
+    wf = workflows.workflow_for(db, workspace_id, issue.schema_uid)
+    return {"workflow": {"uid": wf["uid"], "name": wf["name"]}, "state": issue.state,
+            "state_name": (workflows.state_of(wf, issue.state) or {}).get("name", issue.state),
+            "transitions": workflows.transitions_from(wf, issue.state), "states": wf["states"]}
+
+
+class TransitionIn(BaseModel):
+    to: str
+    comment: Optional[str] = None
+    resolution: Optional[str] = None
+    assignee: Optional[str] = None
+
+
+@router.post("/{uid}/transition", response_model=IssueOut)
+def transition_issue(uid: str, body: TransitionIn,
+                     workspace_id: str = Depends(require_permission("modify", resource="tickets")),
+                     current_user_id: Optional[str] = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    issue = _get_owned_issue(uid, workspace_id, db)
+    _guard_ticket_write(db, workspace_id, issue.schema_uid, issue.attributes)
+    previous_assignee = issue.assignee
+    try:
+        moved = workflows.transition(db, issue, body.to, current_user_id, comment=body.comment,
+                                     resolution=body.resolution, assignee=body.assignee)
+    except workflows.WorkflowError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": "workflow"})
+    notify.on_assigned(db, issue, current_user_id, previous_assignee)
+    notify.on_transition(db, issue, current_user_id, moved["from"], moved["to"])
+    if body.comment:
+        notify.on_comment(db, issue, current_user_id, body.comment)
+    derive_for_ticket(db, issue)
+    db.commit()
+    db.refresh(issue)
+    return issue_out(db, issue)
+
+
+@router.get("/{uid}/watchers")
+def list_watchers(uid: str, workspace_id: str = Depends(require_permission("read", resource="tickets")),
+                  db: Session = Depends(get_db)):
+    issue = _get_owned_issue(uid, workspace_id, db)
+    return notify.watchers(db, issue)
+
+
+class WatchIn(BaseModel):
+    user: Optional[str] = None
+
+
+@router.post("/{uid}/watchers", status_code=201)
+def add_watcher(uid: str, body: WatchIn, workspace_id: str = Depends(require_permission("read", resource="tickets")),
+                current_user_id: Optional[str] = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    issue = _get_owned_issue(uid, workspace_id, db)
+    who = body.user or current_user_id
+    if not who:
+        raise HTTPException(status_code=422, detail="name the watcher")
+    notify.watch(db, issue, who, "manual")
+    db.commit()
+    return notify.watchers(db, issue)
+
+
+@router.delete("/{uid}/watchers/{user}", status_code=204)
+def remove_watcher(uid: str, user: str, workspace_id: str = Depends(require_permission("read", resource="tickets")),
+                   db: Session = Depends(get_db)):
+    issue = _get_owned_issue(uid, workspace_id, db)
+    notify.unwatch(db, issue, user)
+    db.commit()
