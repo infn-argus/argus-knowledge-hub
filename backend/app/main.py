@@ -1,6 +1,7 @@
 import logging
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
@@ -25,6 +26,7 @@ from app.routers import (
     imports,
     issues,
     labels,
+    retirement,
     mcp,
     roles,
     schemas,
@@ -38,6 +40,7 @@ logging.basicConfig(level=logging.INFO)
 
 from app.auth import bind_grants  # noqa: E402
 import app.ledger.audit  # noqa: E402,F401  (append-only guards on create_all)
+from app.services import api_policy, legacy_hosts  # noqa: E402
 
 # Every request carries the viewer's restricted-class grants (I-ACL-1).
 app = FastAPI(title="ARGUS Asset Knowledge Hub API", version="1.0.0", dependencies=[Depends(bind_grants)])
@@ -49,7 +52,49 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-ARGUS-API-Version", "Deprecation", "Sunset", "Link"],
 )
+
+@app.middleware("http")
+async def api_policy_and_legacy_hosts(request: Request, call_next):
+    """The retired Jira host redirects to the lookup page (§19 item 11);
+    every response names the API version, and a deprecated endpoint says
+    so, until its sunset (§19 item 8)."""
+    host = request.headers.get("host")
+    if legacy_hosts.is_legacy(host):
+        return RedirectResponse(legacy_hosts.target(host, request.url.path, request.url.query,
+                                                    request.headers.get("x-forwarded-proto", "https")),
+                                status_code=301)
+    deprecated = api_policy.find(request.method, request.url.path)
+    if deprecated is not None and api_policy.is_past_sunset(deprecated):
+        response = JSONResponse(status_code=410, content={"detail": {
+            "error": f"{request.method} {deprecated.path} was retired on {deprecated.sunset}",
+            "successor": deprecated.successor}})
+    else:
+        response = await call_next(request)
+    if deprecated is not None:
+        response.headers.update(api_policy.headers(deprecated))
+    response.headers["X-ARGUS-API-Version"] = api_policy.API_VERSION
+    return response
+
+
+@app.get("/v1/meta/api", tags=["meta"])
+def api_meta():
+    """The API version, its deprecation policy and what is deprecated now."""
+    return api_policy.describe()
+
+
+@app.get("/legacy/jira/{path:path}", include_in_schema=False)
+def legacy_jira(path: str, request: Request):
+    """For a proxy that forwards the retired Jira host here rather than by
+    host name: the same redirect as the host itself."""
+    hosts = sorted(legacy_hosts.legacy_hosts())
+    forwarded = request.headers.get("x-forwarded-host")
+    host = forwarded if legacy_hosts.is_legacy(forwarded) else (hosts[0] if hosts else "jira")
+    return RedirectResponse(legacy_hosts.target(host, "/" + path, request.url.query,
+                                                request.headers.get("x-forwarded-proto", "https")),
+                            status_code=301)
+
 
 app.include_router(schemas.router)
 app.include_router(assets.router)
@@ -72,6 +117,7 @@ app.include_router(equipment.bulk_router)
 app.include_router(workflows.router)
 app.include_router(workflows.notifications_router)
 app.include_router(access_reviews.router)
+app.include_router(retirement.router)
 app.include_router(attribute_values.router)
 app.include_router(ai.router)
 app.include_router(mcp.router)

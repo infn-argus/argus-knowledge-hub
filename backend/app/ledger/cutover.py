@@ -90,6 +90,8 @@ def advance(db: Session, domain_id: str, stage: str, actor: str) -> LedgerDomain
             raise LedgerError("T3 starts by freezing the streams at the watermark")
         if stage in ("T4", "T5") and d.exited_at is None:
             raise LedgerError("the cutover exit must be signed first")
+        if stage == "T5":
+            raise LedgerError("T5 is reached by signing the Jira retirement, for every domain at once")
         engine._record_decision(db, "advance_domain", actor, d.workspace_id,
                                 target={"domain": d.id, "from": d.stage, "to": stage})
     d.stage = stage

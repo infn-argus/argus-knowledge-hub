@@ -4,7 +4,7 @@
  * Jira or Insight. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { auditApi, domainsApi, ledgerApi } from "../../api/client";
+import { ApiError, auditApi, domainsApi, ledgerApi, retirementApi } from "../../api/client";
 import type { DomainDetail, DomainView, ReconciliationDifference } from "../../api/ledgerTypes";
 import { errorText } from "../../components/hub/LedgerPanels";
 import { Card, Empty } from "../../components/hub/ui";
@@ -65,7 +65,89 @@ export function MigrationPage() {
         {current ? <DomainPanel id={current} /> : <Empty>Create a domain to start.</Empty>}
       </div>
       <AuditIntegrity />
+      <RetirementCard />
     </div>
+  );
+}
+
+/** §19 item 14: Jira is retired once, when every condition holds. Administrators only. */
+function RetirementCard() {
+  const queryClient = useQueryClient();
+  const status = useQuery({ queryKey: ["retirement"], queryFn: retirementApi.status, retry: false });
+  const [attested, setAttested] = useState<Record<string, boolean>>({});
+  const [retention, setRetention] = useState({ reference: "", jira_archive_until: "" });
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["retirement"] });
+    queryClient.invalidateQueries({ queryKey: ["domains"] });
+    queryClient.invalidateQueries({ queryKey: ["domain"] });
+  };
+  const record = useMutation({ mutationFn: () => retirementApi.recordRetention(retention), onSuccess: refresh });
+  const sign = useMutation({ mutationFn: () => retirementApi.sign(attested), onSuccess: refresh });
+  if (status.error instanceof ApiError && status.error.status === 403) return null;
+  if (!status.data) return null;
+  const s = status.data;
+  const observed = s.conditions.filter((c) => !c.attested);
+  const openCount = observed.filter((c) => !c.ok).length + Object.keys(s.attestations).filter((k) => !attested[k]).length;
+  const retentionOpen = observed.some((c) => c.id === "retention" && !c.ok);
+  return (
+    <Card
+      title="Jira retirement (§19 item 14)"
+      action={
+        s.retired ? (
+          <span className="rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">retired</span>
+        ) : (
+          <span className="text-xs text-slate-400">{openCount} open</span>
+        )
+      }
+    >
+      {s.retired ? (
+        <p className="py-1 text-sm text-slate-700">
+          Jira was retired on {new Date(s.retired_at!).toLocaleString()} by {s.signed_by}. Its links resolve through the lookup.
+        </p>
+      ) : (
+        <>
+          <ul className="space-y-1 py-1 text-sm">
+            {observed.map((c) => (
+              <li key={c.id} className="flex gap-2">
+                <span className={c.ok ? "text-emerald-600" : "text-red-600"}>{c.ok ? "✓" : "✗"}</span>
+                <span className="text-slate-700">{c.text}</span>
+                <span className="ml-auto text-[11px] text-slate-400">§19 {c.item}</span>
+              </li>
+            ))}
+            {Object.entries(s.attestations).map(([k, text]) => (
+              <li key={k}>
+                <label className="flex gap-2">
+                  <input type="checkbox" checked={!!attested[k]} onChange={(e) => setAttested({ ...attested, [k]: e.target.checked })} />
+                  <span className="text-slate-700">{text}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          {retentionOpen && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-slate-200 bg-slate-50 p-2 text-xs">
+              <span className="font-medium text-slate-700">Retention decision (U1)</span>
+              <input value={retention.reference} onChange={(e) => setRetention({ ...retention, reference: e.target.value })}
+                     placeholder="Records policy or legal basis" className="flex-1 rounded border border-slate-300 px-2 py-1" />
+              <label className="flex items-center gap-1 text-slate-600">
+                Jira archive kept until
+                <input type="date" value={retention.jira_archive_until}
+                       onChange={(e) => setRetention({ ...retention, jira_archive_until: e.target.value })}
+                       className="rounded border border-slate-300 px-2 py-1" />
+              </label>
+              <button disabled={!retention.reference || !retention.jira_archive_until} onClick={() => record.mutate()}
+                      className="rounded border border-slate-300 bg-white px-2 py-1 disabled:opacity-40">
+                Record
+              </button>
+            </div>
+          )}
+          <button disabled={openCount > 0 || sign.isPending} onClick={() => sign.mutate()}
+                  className="mt-3 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40">
+            Sign the retirement of Jira
+          </button>
+          {(record.isError || sign.isError) && <p className="mt-2 text-sm text-red-600">{errorText(record.error ?? sign.error)}</p>}
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -253,7 +335,10 @@ function DomainPanel({ id }: { id: string }) {
           {d.watermark && <span className="font-mono">W = {JSON.stringify(d.watermark)}</span>}
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          {next && next !== "T3" && (d.stage !== "T3" || d.authoritative) && (
+          {next === "T5" && (
+            <span className="text-xs text-slate-500">T5 is reached by signing the Jira retirement below, for every domain at once.</span>
+          )}
+          {next && next !== "T3" && next !== "T5" && (d.stage !== "T3" || d.authoritative) && (
             <button onClick={() => stage.mutate(next)} className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium">
               Move to {next} {d.stages[next]}
             </button>

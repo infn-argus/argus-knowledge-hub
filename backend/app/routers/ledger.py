@@ -721,21 +721,40 @@ def _readable_workspaces(db: Session, identity) -> list[str]:
             or resolve_permission(db, identity.user, w.id, "read", "tickets")]
 
 
-@lookup_router.get("/{identifier:path}")
-def lookup(identifier: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
-    """A Jira key, an old Jira or Insight URL, an Insight key or objectId:
-    the ARGUS record it became, or where it can still be read."""
+def _resolve_one(db: Session, identifier: str, workspaces: list[str]) -> dict:
     from app.ledger import lookup as lk
     from app.models.issue import Issue
-    workspaces = _readable_workspaces(db, identity)
     hit = lk.resolve(db, identifier, workspaces)
     if hit is not None:
         record = db.get(Issue, hit["uid"]) if hit["kind"] == "ticket" else db.get(Asset, hit["uid"])
         if record is not None and can_see(record):
             return {"status": "migrated", **hit}
-    archive = lk.archive_location(db, identifier, workspaces)
-    raise HTTPException(status_code=404, detail={"status": "not migrated", "identifier": identifier,
-                                                 "archive": archive})
+    return {"status": "not migrated", "identifier": identifier,
+            "archive": lk.archive_location(db, identifier, workspaces)}
+
+
+class LookupBatchIn(BaseModel):
+    identifiers: list[str]
+
+
+@lookup_router.post("/batch")
+def lookup_batch(body: LookupBatchIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Many identifiers at once, for an integration re-pointing its stored
+    Jira or Insight references (§19 item 8). Answers in the same order."""
+    if len(body.identifiers) > 1000:
+        raise HTTPException(status_code=422, detail="at most 1000 identifiers per call")
+    workspaces = _readable_workspaces(db, identity)
+    return [{"identifier": i, **_resolve_one(db, i, workspaces)} for i in body.identifiers]
+
+
+@lookup_router.get("/{identifier:path}")
+def lookup(identifier: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """A Jira key, an old Jira or Insight URL, an Insight key or objectId:
+    the ARGUS record it became, or where it can still be read."""
+    result = _resolve_one(db, identifier, _readable_workspaces(db, identity))
+    if result["status"] == "migrated":
+        return result
+    raise HTTPException(status_code=404, detail=result)
 
 
 @domains_router.post("/{domain_id}/reversion-export")

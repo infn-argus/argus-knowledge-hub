@@ -125,6 +125,14 @@ currently valid* revision rather than to an arbitrary PDF.
   tokens, open defaults and administrators. It shows what changed since the last review and
   is complete once enough distinct owners have signed it. *Access → access review*; served
   by `/v1/access-reviews`.
+- **Stable API and Jira retirement.** The API is versioned in its path, and a deprecated
+  endpoint announces its sunset in headers at least 180 days ahead
+  ([docs/api-policy.md](docs/api-policy.md)). Old Jira and Insight identifiers resolve one at a
+  time or in batches (`/v1/lookup`). After retirement the Jira host redirects every old link to
+  the lookup page. Jira itself is retired by one signed decision, once ARGUS has checked every
+  readiness condition: domains archived, exports verified, retention decided, access reviewed,
+  audit chain intact, workflows rehearsed, restore and performance evidence recent. That
+  decision moves every domain to T5.
 - **Operations.** Backups come with a checksummed manifest and a restore rehearsal that
   checks itself. A complete export loads into an empty instance. A probe checks the
   performance targets, and a volume generator runs them at 10× (50 000 records,
@@ -135,6 +143,7 @@ currently valid* revision rather than to an arbitrary PDF.
 
 ## Design notes
 
+- [API versions and deprecation](docs/api-policy.md) — what stays stable, how endpoints retire.
 - [Operating ARGUS](docs/operations.md) — scheduled jobs, backups and point-in-time recovery,
   export and load, performance targets.
 - [The asset model revision](docs/asset-model-revision.md) — positions and installations, the fact

@@ -92,6 +92,7 @@ import type {
   AttachmentCheck,
   RetentionClass,
   RetentionView,
+  RetirementStatus,
   RoleTemplate,
   Rehearsal,
   TicketTransitions,
@@ -888,6 +889,14 @@ export const accessReviewsApi = {
     request<AccessReviewView>("/v1/access-reviews", { method: "POST", body: json({ required_signers }) }),
   sign: (id: string, input: { signer?: string; comment?: string }) =>
     request<AccessReviewView>(`/v1/access-reviews/${id}/sign`, { method: "POST", body: json(input) }),
+};
+
+export const retirementApi = {
+  status: () => request<RetirementStatus>("/v1/retirement"),
+  recordRetention: (input: { reference: string; jira_archive_until: string; exports_until?: string; audit_until?: string; note?: string }) =>
+    request<{ decision_id: string }>("/v1/retirement/retention", { method: "POST", body: json(input) }),
+  sign: (attestations: Record<string, boolean>, reason?: string) =>
+    request<RetirementStatus>("/v1/retirement/sign", { method: "POST", body: json({ attestations, reason }) }),
 };
 
 export const domainsApi = {

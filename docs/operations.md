@@ -112,3 +112,55 @@ tickets whose links the ledger can move: those on positions, control devices
 and installed units, and those with no links yet. Before, it re-derived every
 ticket in the workspace. The own-edit time is the closest to its target;
 watch it first when the volume grows.
+
+## The Jira host after retirement
+
+When Jira is retired, point its host name at ARGUS. Every old link then
+opens the ARGUS lookup page, which resolves it with the reader's own
+access. The redirect itself shows nothing about what exists.
+
+```
+JIRA_LEGACY_HOSTS=jira.example.org,insight.example.org
+ARGUS_WEB_URL=https://argus.example.org
+```
+
+A request whose `Host` is one of these gets a 301 to
+`$ARGUS_WEB_URL/lookup/<the original URL>`. A proxy that cannot route by
+host name can forward the old host to `/legacy/jira/<path>` instead:
+
+```
+server {
+    server_name jira.example.org;
+    location / {
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://argus-api:8000/legacy/jira$request_uri;
+    }
+}
+```
+
+## Retiring Jira
+
+Jira is retired once, for the whole instance, from *Migration to ARGUS →
+Jira retirement* (administrators only; `GET/POST /v1/retirement`). ARGUS
+checks for itself:
+
+- every domain is past its signed exit and in T4;
+- every domain's export was attested as verified at its exit;
+- the retention decision (U1) is recorded, with the records policy it
+  comes from (`POST /v1/retirement/retention`);
+- every workspace with a domain has an access review signed in the last
+  year;
+- the audit chain verifies;
+- every Jira workflow of a ticket domain passes its rehearsal;
+- a restore rehearsal passed in the last quarter
+  (`python -m app.ledger rehearse-restore` records it);
+- a probe run in the last quarter measured and met all four targets,
+  re-projection included (`python -m app.ledger probe … --reproject <ws>`
+  records it);
+- the Jira host redirect is configured.
+
+The signer also attests three things ARGUS cannot see: a
+disaster-recovery drill, the owners' sign-off of the targets (U10), and
+their acceptance of items 1–13. Signing records one decision and moves
+every domain from T4 to T5. A domain reaches T5 in no other way.

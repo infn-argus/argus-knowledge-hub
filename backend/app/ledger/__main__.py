@@ -35,6 +35,17 @@ from datetime import date
 from app.db import SessionLocal
 
 
+def _keep_evidence(stage: str, report: dict, ok: bool) -> None:
+    """Operations runs are evidence for the Jira retirement (§19 item 14)."""
+    from app.services import retirement
+    db = SessionLocal()
+    try:
+        retirement.record_job(db, stage, json.loads(json.dumps(report, default=str)), ok)
+        db.commit()
+    finally:
+        db.close()
+
+
 def derive_worker(once: bool, interval: float) -> None:
     from app.ledger.engine import process_derive_requests
     while True:
@@ -142,6 +153,7 @@ def main(argv=None) -> int:
         from app.ledger import ops
         report = ops.rehearse_restore(os.environ["DATABASE_URL"], args.manifest)
         print(json.dumps(report, indent=2, default=str))
+        _keep_evidence("restore-rehearsal", report, report["ok"])
         return 0 if report["ok"] else 1
     elif args.command == "probe":
         import httpx
@@ -156,6 +168,8 @@ def main(argv=None) -> int:
             if db is not None:
                 db.close()
         print(json.dumps(result, indent=2))
+        # Evidence for the retirement only when every target was measured and met.
+        _keep_evidence("probe", result, set(result["meets"]) == set(ops.TARGETS) and all(result["meets"].values()))
         return 0 if all(result["meets"].values()) else 1
     elif args.command == "escalate":
         from app.services import notify

@@ -420,3 +420,20 @@ export interface AccessReviewView {
   summary: { people: number; groups: number; tokens: number; open_defaults: number };
   snapshot?: AccessSnapshot;
 }
+
+export interface RetirementCondition {
+  id: string;
+  item: string;
+  text: string;
+  ok: boolean;
+  attested?: boolean;
+  detail?: unknown;
+}
+
+export interface RetirementStatus {
+  retired: boolean;
+  retired_at: string | null;
+  signed_by: string | null;
+  conditions: RetirementCondition[];
+  attestations: Record<string, string>;
+}
