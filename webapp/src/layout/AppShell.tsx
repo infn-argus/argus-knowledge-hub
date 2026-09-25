@@ -290,6 +290,9 @@ export function AppShell() {
             <NavItem to="/bulk-changes">
               <span className="w-4 text-center text-slate-400">≡</span> Bulk changes
             </NavItem>
+            <NavItem to="/catalogue/equipment-classes">
+              <span className="w-4 text-center text-slate-400">◇</span> Equipment classes
+            </NavItem>
             <NavItem to="/migration">
               <span className="w-4 text-center text-slate-400">⇄</span> Migration to ARGUS
             </NavItem>

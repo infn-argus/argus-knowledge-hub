@@ -40,6 +40,21 @@ def _actor(identity) -> str:
     return "api-token"
 
 
+def _check_class(db: Session, type_name: str, attributes: dict, current: Optional[str]) -> None:
+    """§5.5: Other Equipment always has a class, and only an active class can
+    be given (I-CAT-1). A class it already has stays, even once deprecated."""
+    from app.services import equipment_classes as ec
+    if type_name != ec.OTHER:
+        return
+    if not attributes.get("equipment_class"):
+        attributes["equipment_class"] = ec.UNCLASSIFIED
+    if attributes["equipment_class"] != current:
+        try:
+            ec.assert_assignable(db, attributes["equipment_class"])
+        except ec.ClassError as exc:
+            raise HTTPException(status_code=422, detail={"error": str(exc), "invariant": "I-CAT-1"})
+
+
 def _ledger_only(db: Session, workspace_id: str) -> bool:
     w = db.get(Workspace, workspace_id)
     return bool(w and w.ledger_only)
@@ -97,6 +112,7 @@ def create_asset(
     if schema is None or (schema.workspace_id != workspace_id and not schema.is_global):
         raise HTTPException(status_code=422, detail="Unknown object type for this workspace")
     _assert_writable(db, workspace_id)
+    _check_class(db, body.type, body.attributes, None)
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
     validate_attributes(db, schema, body.attributes, workspace_id, Asset)
     _assert_unique(db, workspace_id, body.attributes)
@@ -200,6 +216,7 @@ def update_asset(
     schema = db.get(Schema, asset.schema_uid) if asset.schema_uid else None
     changes: dict = {}
     if new_attrs is not None:
+        _check_class(db, asset.type, new_attrs, (asset.attributes or {}).get("equipment_class"))
         stamp_current_user_attributes(db, schema, new_attrs, current_user_id)
         validate_attributes(db, schema, new_attrs, workspace_id, Asset, exclude_uid=uid)
         _assert_unique(db, workspace_id, new_attrs, exclude=uid)

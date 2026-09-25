@@ -461,6 +461,10 @@ _t("Spare Part", "Asset", "Held on a shelf for a product model.", [
     I("minimum_stock", "Minimum stock"),
     R("storage_location", "Stored in", "Storage Location")])
 
+_t("Other Equipment", "Asset", "Equipment no type of its own describes yet. Its class says what it is; "
+   "a class that grows (§5.5) is promoted to a type of its own.", [
+    S("equipment_class", "Equipment class", indexed=True)])
+
 # Plane C: catalogue --------------------------------------------------------------
 _t("Catalog Item", "Item", "What a thing is an instance of.", abstract=True)
 _t("Product Model", "Catalog Item", "A vendor's product. A procedure written once for it "

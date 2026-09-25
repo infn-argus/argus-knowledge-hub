@@ -398,3 +398,53 @@ The Jira, EPIK8s and PBS importers are not used on these workspaces:
 ARGUS is the source of truth for them. A workspace transfer into a
 ledger-only workspace fails at the database for the same reason: it copies
 records in directly.
+
+## Equipment classes (§5.5)
+
+Equipment that no type of its own describes is an *Other Equipment*
+record with an `equipment_class`. The class vocabulary belongs to the
+catalogue workspace, the one that holds the global `Asset` type. Only the
+catalogue adds a class, and only an active class can be given to an
+object (I-CAT-1). An object with no class is `Unclassified`.
+
+The vocabulary starts from the classes the sources name. A class the
+catalogue already has as a type of its own (PLC, I/O Module, Timing
+Module, Motion Controller, Laser System, Cryogenic Device, and Cable as
+Cable Run) starts out promoted. Nobody files a PLC as "Other Equipment,
+class PLC".
+
+The report is in *Equipment classes*, or at `GET
+/v1/catalogue/equipment-classes/report` from the catalogue. It shows:
+
+- objects per class, per workspace and per source;
+- the share of `Unclassified` among all Equipment, and its alert: more
+  than 5 % and at least 10 records, or more than 50;
+- how many objects of each class appear in tickets, and how many have a
+  causal relation (so the root-cause walk uses them);
+- the `key: value` lines people keep writing into descriptions;
+- the attributes people asked for.
+
+**Promotion reviews** open when a class meets any threshold: 25 active
+objects, objects in 2 workspaces, 3 requested attributes, or a causal
+role. A query or dashboard that filters on the class is the one threshold
+ARGUS cannot see, so anyone can open a review for it, with a reason. A
+declined class is reviewed again only when a new kind of threshold is met.
+
+**Promotion** does three things:
+
+- it creates a child type of `Asset` in the catalogue, shared, with the
+  requested attributes;
+- it retypes the class's objects in place, keeping their uids and writing
+  a `retyped` record event each, in ledger-only workspaces too;
+- the class stays in the vocabulary for history, but can no longer be
+  assigned.
+
+The monthly job opens the reviews that are due and notifies the catalogue
+owners about them and about the alert:
+
+```
+ARGUS_CATALOGUE=inventory-lead@example.org python -m app.ledger catalogue-report
+```
+
+Mapping source classes through a versioned table is the importers' part of
+§5.5. It is left out while ARGUS itself is the source of truth.

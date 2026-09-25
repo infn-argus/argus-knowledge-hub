@@ -97,6 +97,9 @@ import type {
   QueueDashboard,
   GoldenIncident,
   GoldenRun,
+  EquipmentClassView,
+  EquipmentClassReport,
+  ClassReview,
   MigrationRow,
   RoleTemplate,
   Rehearsal,
@@ -930,6 +933,26 @@ export const legacyMigrationApi = {
     if (!resp.ok) throw new ApiError(resp.status, await resp.text());
     return URL.createObjectURL(await resp.blob());
   },
+};
+
+export const catalogueApi = {
+  classes: () => request<EquipmentClassView[]>("/v1/catalogue/equipment-classes"),
+  addClass: (name: string, note?: string) =>
+    request<EquipmentClassView>("/v1/catalogue/equipment-classes", { method: "POST", body: json({ name, note }) }),
+  requestAttribute: (class_name: string, attribute: string, reason?: string) =>
+    request<{ id: number }>("/v1/catalogue/equipment-classes/requests", { method: "POST", body: json({ class_name, attribute, reason }) }),
+  report: () => request<EquipmentClassReport>("/v1/catalogue/equipment-classes/report"),
+  reviews: () => request<ClassReview[]>("/v1/catalogue/equipment-classes/reviews"),
+  runThresholds: () => request<ClassReview[]>("/v1/catalogue/equipment-classes/reviews/run", { method: "POST" }),
+  openReview: (class_name: string, reason: string) =>
+    request<ClassReview>("/v1/catalogue/equipment-classes/reviews", { method: "POST", body: json({ class_name, reason }) }),
+  decline: (id: number, reason: string) =>
+    request<ClassReview>(`/v1/catalogue/equipment-classes/reviews/${id}/decline`, { method: "POST", body: json({ reason }) }),
+  promote: (class_name: string, type_name: string, reason: string) =>
+    request<{ type: string; retyped: number }>("/v1/catalogue/equipment-classes/promote", {
+      method: "POST",
+      body: json({ class_name, type_name, reason }),
+    }),
 };
 
 export const retirementApi = {

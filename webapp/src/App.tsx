@@ -43,6 +43,7 @@ import { WorkspaceAccess } from "./pages/workspace/Access";
 import { WorkspaceMembers } from "./pages/workspace/Members";
 import { WorkspaceIntegrity } from "./pages/workspace/Integrity";
 import { AccessReviews } from "./pages/workspace/AccessReviews";
+import { EquipmentClassesPage } from "./pages/catalogue/EquipmentClasses";
 import { WorkspaceTransfer } from "./pages/workspace/Transfer";
 import { TransferList } from "./pages/workspace/TransferList";
 import { TransferStatus } from "./pages/workspace/TransferStatus";
@@ -98,6 +99,7 @@ export function App() {
           <Route path="/review" element={<ReviewQueuePage />} />
           <Route path="/migration" element={<MigrationPage />} />
           <Route path="/bulk-changes" element={<BulkChangesPage />} />
+          <Route path="/catalogue/equipment-classes" element={<EquipmentClassesPage />} />
           <Route path="/lookup/*" element={<LookupPage />} />
 
           <Route path="/labels" element={<LabelList />} />

@@ -90,6 +90,7 @@ def main(argv=None) -> int:
     a.add_argument("--day", type=date.fromisoformat, default=None)
     sub.add_parser("verify-audit")
     sub.add_parser("escalate")
+    sub.add_parser("catalogue-report", help="§5.5: the monthly equipment class report, reviews and alert")
     e = sub.add_parser("export")
     e.add_argument("--workspace", required=True)
     e.add_argument("--out", required=True)
@@ -171,6 +172,15 @@ def main(argv=None) -> int:
         # Evidence for the retirement only when every target was measured and met.
         _keep_evidence("probe", result, set(result["meets"]) == set(ops.TARGETS) and all(result["meets"].values()))
         return 0 if all(result["meets"].values()) else 1
+    elif args.command == "catalogue-report":
+        from app.services import equipment_classes
+        db = SessionLocal()
+        try:
+            out = equipment_classes.monthly(db)
+            db.commit()
+            print(json.dumps(out, indent=2, default=str))
+        finally:
+            db.close()
     elif args.command == "escalate":
         from app.services import notify
         db = SessionLocal()

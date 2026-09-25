@@ -140,6 +140,11 @@ currently valid* revision rather than to an arbitrary PDF.
   author in the record's audit trail. A workspace whose legacy records are migrated can be
   switched to ledger-only. The database then refuses any change to record facts or relations
   written around the ledger, and deleting a record retires it.
+- **Equipment classes (§5.5).** Equipment with no type of its own is *Other Equipment* with a
+  class from a vocabulary the catalogue owns. A monthly report shows the classes and the
+  `Unclassified` share with its alert. Promotion reviews open at the §5.5 thresholds, and a
+  promotion creates a type and retypes the objects in place. *Equipment classes*; served by
+  `/v1/catalogue/equipment-classes`.
 - **Review queues (§18.2).** Every open review item has an age in working days against its
   queue's targets. Overdue items go to the backup steward, then to the governance group
   (`ARGUS_GOVERNANCE`), once per level. The notification never names the record. The review

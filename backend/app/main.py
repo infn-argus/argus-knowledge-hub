@@ -9,6 +9,7 @@ from sqlalchemy.exc import DBAPIError
 from app.db import engine
 from app.routers import (
     access_reviews,
+    catalogue,
     ai,
     asset_subresources,
     assets,
@@ -132,6 +133,7 @@ app.include_router(workflows.router)
 app.include_router(workflows.notifications_router)
 app.include_router(access_reviews.router)
 app.include_router(retirement.router)
+app.include_router(catalogue.router)
 app.include_router(legacy_migration.router)
 app.include_router(attribute_values.router)
 app.include_router(ai.router)

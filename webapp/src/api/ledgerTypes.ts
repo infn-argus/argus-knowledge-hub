@@ -553,3 +553,48 @@ export interface GoldenRun {
   results: { incident: string; name: string; found: number; expected: number;
              causes: Record<string, { found: boolean; as: string | null; rank: number | null; more_precise: boolean }> }[];
 }
+
+export interface EquipmentClassView {
+  name: string;
+  status: "active" | "promoted" | "deprecated";
+  promoted_type: string | null;
+  added_by: string;
+  added_at: string;
+  note: string | null;
+}
+
+export interface ClassTrigger {
+  kind: string;
+  text: string;
+}
+
+export interface EquipmentClassReport {
+  at: string;
+  equipment: number;
+  other_equipment: number;
+  unclassified: { count: number; share: number; alert: boolean; rule: string };
+  classes: {
+    class: string;
+    status: string;
+    promoted_type: string | null;
+    objects: number;
+    workspaces: Record<string, number>;
+    sources: Record<string, number>;
+    in_tickets: number;
+    causal: number;
+    requested_attributes: string[];
+    description_keys: { key: string; count: number }[];
+    triggers: ClassTrigger[];
+  }[];
+}
+
+export interface ClassReview {
+  id: number;
+  class: string;
+  triggers: ClassTrigger[];
+  status: "open" | "promoted" | "declined";
+  opened_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  reason: string | null;
+}
