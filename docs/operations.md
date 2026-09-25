@@ -193,6 +193,8 @@ or an inferred record is not in a plan.
    The plan is `verified` when every item is applied and I-MIG-2 and
    I-MIG-3 hold across the plan.
 5. **Deep verification** (*Deep verify*, `POST /v1/migration/plans/{id}/verify`):
+   - **I-MIG-4:** runs the data invariant report over the plan's workspaces
+     (below). Every invariant must hold.
    - **I-MIG-5:** compares the relation registry's report with the
      baseline taken before the first item moved. The total number of
      violations must not grow; a rule that grew is named even when the
@@ -202,7 +204,8 @@ or an inferred record is not in a plan.
      A difference means something was written around the ledger.
 
    Finalizing needs a passing deep verification taken after the last
-   apply. People still check I-MIG-4 and I-MIG-7.
+   apply. People still check I-MIG-7: the root-cause walks on a golden set
+   of past incidents.
 6. **Roll back** at any point until the plan is finalized, and never after
    the domain has cut over:
    - records the migration created are retired by ledger decisions;
@@ -311,3 +314,31 @@ breaks the registry. It checks:
 Nothing is refused in warn mode. The report is what stewards triage
 before the registry moves to `enforce` (§13 S7), and it is the measure
 that I-MIG-5 compares.
+
+## Data invariant report
+
+`GET /v1/ledger/invariants/report` checks the workspace's data as it is,
+whatever wrote it. The ledger enforces these invariants when a decision is
+made; this report catches what the legacy importer, a migration or a write
+around the ledger left behind.
+
+| Invariants | What is checked |
+|---|---|
+| I-INS-1, I-INS-2 | no unit in two places, and no two units in one position, in definite overlap (Confirmed Installations) |
+| I-INS-3 | Confirmed intervals are not inverted |
+| I-INS-4 | an Installation is installed at an installable position, of Equipment |
+| I-INS-5 | an Installation is in its position's workspace |
+| I-INS-6 | a possible overlap has its review item |
+| I-AP-1 to I-AP-3 | one Active Access Point per address; one assignment each; no definite overlap of service |
+| I-AP-4 | an assigned Access Point has no asserted `implemented by` |
+| I-AP-5 | an Access Point lives in the workspace whose configuration names it |
+| I-PORT-1 | every derived `attached to` edge is exactly what the port matching gives now |
+| I-PORT-2 | a confirmed port map names a port of its Installation's unit |
+| I-PORT-3 | an unresolved mapping has its review item |
+| I-TKT-1 | each ticket has exactly one subject link |
+| I-TKT-2 | no ticket is counted twice on one record, and migration-split links stay possible |
+| I-TKT-3 | the derived links are exactly what a fresh derivation gives (recomputed in a savepoint) |
+| uniqueness | no serial (per manufacturer), inventory number, verified Insight objectId or QR code is held by two live records |
+
+I-INS-7 and I-PORT-4 hold by construction of the checks above. The report
+says which invariants they are covered by.

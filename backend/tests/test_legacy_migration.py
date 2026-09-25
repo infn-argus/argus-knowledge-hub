@@ -135,6 +135,8 @@ def test_apply_splits_records_routes_dependents_and_holds_the_invariants():
     by_key = {r["legacy_key"]: r for r in result["rows"]}
     matched = by_key[f"{L.fac}:AST:vac:SIP02"]["applied"]
     assert matched["equipment"] == L.inventory.uid and not matched["equipment_created"]
+    # §12.4: the serial belongs to the Equipment now, not to the Position as well.
+    assert "serial" not in db.get(Asset, L.matched.uid).attributes
     inst = db.get(Asset, matched["installation"])
     assert inst.attributes["installation_status"] == "Confirmed"
     # Its ticket stays on the position (I-TKT-2: counted once).
@@ -253,6 +255,7 @@ def test_the_registry_report_does_not_get_worse_and_a_rebuild_gives_the_migrated
     result = deep["deep_verification"]
     assert result["I-MIG-5"]["ok"] and result["I-MIG-5"]["after"] < result["I-MIG-5"]["before"]   # the pump is a position now
     assert result["I-MIG-6"]["ok"] and result["I-MIG-6"]["records"] >= 7
+    assert result["I-MIG-4"]["ok"], result["I-MIG-4"]
 
     # Someone writes around the ledger, and adds a deprecated edge: both are caught.
     db = SessionLocal()

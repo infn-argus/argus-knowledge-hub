@@ -37,7 +37,7 @@ from typing import Optional
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.ledger import engine, lookup, registry, service, temporal
+from app.ledger import engine, invariants, lookup, registry, service, temporal
 from app.ledger.engine import INSTALLATION, LedgerError, ParsedClaim, canonical
 from app.models.asset import Asset, Relation
 from app.models.asset_subresources import AssetComment, AssetHistory, AssetLabel, AssetTicket
@@ -500,6 +500,8 @@ def _apply_item(db: Session, p: LegacyMigrationPlan, item: LegacyMigrationItem, 
             done["position"] = r.uid
             roles.append(("position", r.uid))
         elif a["do"] == "equipment":
+            # §12.4: physical fields belong to the Equipment, functional ones stay on the Position.
+            r.attributes = {k: v for k, v in (r.attributes or {}).items() if k not in PHYSICAL}
             if a["match"]:
                 target = lookup._survivor(db, db.get(Asset, a["match"]))
                 if target is None:
@@ -626,9 +628,8 @@ def verify(db: Session, p: LegacyMigrationPlan) -> dict:
     return {"ok": all(checks.values()), "checks": checks,
             "summary": {"applied": len(applied), "open": len(open_items), "dangling_relations": dangling,
                         "untraced": len(untraced)},
-            "deep": "I-MIG-5 and I-MIG-6 run in the deep verification, required before finalizing",
-            "not_automated": ["I-MIG-4 (the installation, access point, port and ticket invariant reports)",
-                              "I-MIG-7 (root-cause walks on the golden incident set)"]}
+            "deep": "I-MIG-4, I-MIG-5 and I-MIG-6 run in the deep verification, required before finalizing",
+            "not_automated": ["I-MIG-7 (root-cause walks on the golden incident set)"]}
 
 
 def _state(db: Session, uids: list[str]) -> dict:
@@ -648,7 +649,8 @@ def _state(db: Session, uids: list[str]) -> dict:
 
 
 def deep_verify(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
-    """I-MIG-5 (the registry report does not get worse) and I-MIG-6 (a
+    """I-MIG-4 (the data invariants hold), I-MIG-5 (the registry report
+    does not get worse) and I-MIG-6 (a
     rebuild of the workspaces from the ledger gives exactly the migrated
     state). The rebuild runs in a savepoint and is rolled back."""
     p = _plan(db, plan_id)
@@ -679,10 +681,15 @@ def deep_verify(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
             fields = sorted(k for k in (was or {}) if (now_ or {}).get(k) != (was or {}).get(k))
             differences.append({"uid": uid, "fields": fields})
     mig6 = {"ok": not differences, "records": len(before_state), "differences": differences[:50]}
-    deep = {"at": now().isoformat(), "ok": mig5["ok"] and mig6["ok"], "I-MIG-5": mig5, "I-MIG-6": mig6}
+    inv = invariants.report(db, workspaces)
+    mig4 = {"ok": inv["ok"], "failing": inv["failing"],
+            "examples": {c: inv["invariants"][c]["examples"][:3] for c in inv["failing"]}}
+    deep = {"at": now().isoformat(), "ok": mig4["ok"] and mig5["ok"] and mig6["ok"], "I-MIG-4": mig4,
+            "I-MIG-5": mig5, "I-MIG-6": mig6}
     p.invariants = {**(p.invariants or {}), "deep_verification": deep}
     engine._record_decision(db, "migration_verify", actor, p.workspace_id, target={"plan": p.id},
-                            value={"ok": deep["ok"], "I-MIG-5": mig5["ok"], "I-MIG-6": mig6["ok"]})
+                            value={"ok": deep["ok"], "I-MIG-4": mig4["ok"], "I-MIG-5": mig5["ok"],
+                                   "I-MIG-6": mig6["ok"]})
     db.flush()
     return p
 
@@ -751,10 +758,10 @@ def finalize(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
         raise MigrationError("only a verified plan is finalized; resolve the open items or roll back")
     deep = (p.invariants or {}).get("deep_verification")
     if not deep or datetime.fromisoformat(deep["at"]) < p.applied_at:
-        raise MigrationError("run the deep verification (I-MIG-5, I-MIG-6) after the last apply")
+        raise MigrationError("run the deep verification (I-MIG-4, I-MIG-5, I-MIG-6) after the last apply")
     if not deep["ok"]:
         raise MigrationError("the deep verification failed: " + ", ".join(
-            k for k in ("I-MIG-5", "I-MIG-6") if not deep[k]["ok"]))
+            k for k in ("I-MIG-4", "I-MIG-5", "I-MIG-6") if not deep.get(k, {"ok": False})["ok"]))
     p.finalized_at, p.status = now(), "finalized"
     engine._record_decision(db, "migration_finalize", actor, p.workspace_id, target={"plan": p.id},
                             value={"report_hash": p.report_hash})

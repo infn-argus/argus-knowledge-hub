@@ -141,7 +141,7 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
           )}
           {open && p.applied_at && (
             <button onClick={() => verify.mutate()} disabled={verify.isPending} className="rounded border border-slate-300 px-2 py-1"
-                    title="Registry report before and after (I-MIG-5); rebuild from the ledger and compare (I-MIG-6)">
+                    title="Data invariants (I-MIG-4); registry report before and after (I-MIG-5); rebuild from the ledger and compare (I-MIG-6)">
               {verify.isPending ? "Verifying…" : "Deep verify"}
             </button>
           )}
@@ -160,6 +160,11 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
           ))}
           {deep ? (
             <>
+              {deep["I-MIG-4"] && (
+                <span className={`mr-3 ${deep["I-MIG-4"].ok ? "text-emerald-700" : "text-red-600"}`}>
+                  {deep["I-MIG-4"].ok ? "✓ I-MIG-4 (data invariants)" : `✗ I-MIG-4 (${deep["I-MIG-4"].failing.join(", ")})`}
+                </span>
+              )}
               <span className={`mr-3 ${deep["I-MIG-5"].ok ? "text-emerald-700" : "text-red-600"}`}
                     title={deep["I-MIG-5"].grew && Object.keys(deep["I-MIG-5"].grew).length ? `grew: ${Object.keys(deep["I-MIG-5"].grew).join(", ")}` : undefined}>
                 {deep["I-MIG-5"].ok ? "✓" : "✗"} I-MIG-5 (registry {deep["I-MIG-5"].before ?? "?"} → {deep["I-MIG-5"].after ?? "?"})
@@ -169,7 +174,7 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
               </span>
             </>
           ) : (
-            <span className="mr-3 text-slate-500">I-MIG-5, I-MIG-6: deep verification not run</span>
+            <span className="mr-3 text-slate-500">I-MIG-4, I-MIG-5, I-MIG-6: deep verification not run</span>
           )}
           <span className="text-slate-400">checked by people: {p.invariants.not_automated.map((x) => x.split(" ")[0]).join(", ")}</span>
         </p>

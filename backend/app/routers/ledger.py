@@ -247,6 +247,14 @@ def registry_report(workspace_id: str = Depends(require_permission("read")), db:
     return registry.report(db, [workspace_id])
 
 
+@router.get("/invariants/report")
+def invariants_report(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """The data invariants (installations, access points, ports, tickets,
+    identifier uniqueness) checked on the state as it is."""
+    from app.ledger import invariants
+    return invariants.report(db, [workspace_id])
+
+
 @router.get("/review/queues")
 def review_queues(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """§18.2: each queue's size, age distribution and escalation, and who owns it."""

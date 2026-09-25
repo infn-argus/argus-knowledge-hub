@@ -501,6 +501,7 @@ export interface MigrationPlanView {
     deep_verification?: {
       at: string;
       ok: boolean;
+      "I-MIG-4"?: { ok: boolean; failing: string[] };
       "I-MIG-5": { ok: boolean; before?: number; after?: number; grew?: Record<string, number[]>; reason?: string };
       "I-MIG-6": { ok: boolean; records: number; differences: { uid: string; fields: string[] }[] };
     };
