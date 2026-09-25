@@ -64,6 +64,21 @@ def create_domain(db: Session, workspace_id: str, domain_id: str, name: str, *, 
     return d
 
 
+def set_stewards(db: Session, domain_id: str, actor: str, steward: str, backup: str) -> LedgerDomain:
+    """D3: every domain has a primary steward and a backup."""
+    d = _domain(db, domain_id)
+    if not steward.strip() or not backup.strip():
+        raise LedgerError("name both the steward and the backup")
+    if steward == backup:
+        raise LedgerError("the backup must be someone other than the steward")
+    engine._record_decision(db, "set_stewards", actor, d.workspace_id, target={"domain": d.id},
+                            value={"steward": steward, "backup": backup,
+                                   "before": {"steward": d.steward, "backup": d.backup_steward}})
+    d.steward, d.backup_steward = steward, backup
+    db.flush()
+    return d
+
+
 def advance(db: Session, domain_id: str, stage: str, actor: str) -> LedgerDomain:
     """Move a domain one stage on. T3 is entered only by freezing, T4 only
     after the exit is signed; going back is an abort (before the exit)."""
@@ -129,20 +144,21 @@ def assert_writable(db: Session, workspace_id: str, resource: str = "objects") -
 
 # --------------------------------------------------------------------------- freeze (§17.3)
 
-def freeze(db: Session, domain_id: str, actor: str, watermark: dict, manifest: dict) -> LedgerDomain:
+def freeze(db: Session, domain_id: str, actor: str, watermark: dict, manifest: dict,
+           attestations: Optional[dict] = None, waivers: Optional[dict] = None) -> LedgerDomain:
     """Record W and the export manifest's hash on each stream's final
-    revision, then freeze the streams (I-SOR-1)."""
+    revision, then freeze the streams (I-SOR-1). Only once the entry
+    criteria hold (§17.4), each met or waived by the governance group."""
+    from app.ledger import entry
     d = _domain(db, domain_id)
     if d.stage not in ("T1", "T2"):
         raise LedgerError("a domain is frozen from T1 or T2")
     if not watermark:
         raise LedgerError("the watermark W is required")
-    # §17.4 criterion 4: the workspace's legacy records are migrated (§12).
-    from app.ledger import legacy
-    g = legacy.gate(db, d.workspace_id)
-    if not g["ok"]:
-        raise LedgerError(f"legacy migration not done: {len(g['blocked'])} M-BLOCK, {len(g['mixed_open'])} M-MIXED "
-                          f"not accepted, {g['unplanned']} inferred records not planned (§12, §17.4)")
+    criteria = entry.check(db, d, attestations, waivers)
+    unmet = [c for c in criteria if not c["ok"]]
+    if unmet:
+        raise LedgerError("entry criteria not met (§17.4): " + "; ".join(c["text"] for c in unmet))
     manifest_hash = hash_manifest(manifest)
     for sid in d.stream_ids:
         head = db.get(StreamHead, sid)
@@ -157,7 +173,9 @@ def freeze(db: Session, domain_id: str, actor: str, watermark: dict, manifest: d
         db.get(LedgerStream, sid).frozen_at = now()
     d.watermark, d.manifest_hash, d.frozen_at, d.stage = watermark, manifest_hash, now(), "T3"
     engine._record_decision(db, "freeze", actor, d.workspace_id, target={"domain": d.id, "streams": d.stream_ids},
-                            value={"watermark": watermark, "manifest_hash": manifest_hash})
+                            value={"watermark": watermark, "manifest_hash": manifest_hash,
+                                   "attestations": attestations or {},
+                                   "waived": {c["id"]: c["waiver"] for c in criteria if c["waived"]}})
     db.flush()
     return d
 
@@ -345,7 +363,8 @@ def domain_view(db: Session, d: LedgerDomain) -> dict:
     report = latest_report(db, d.id)
     return {"id": d.id, "workspace_id": d.workspace_id, "name": d.name, "resource": d.resource, "stage": d.stage,
             "stage_name": STAGE_NAMES[d.stage], "stream_ids": d.stream_ids, "pilot": d.pilot,
-            "archive_url": d.archive_url, "watermark": d.watermark, "manifest_hash": d.manifest_hash,
+            "archive_url": d.archive_url, "steward": d.steward, "backup_steward": d.backup_steward,
+            "watermark": d.watermark, "manifest_hash": d.manifest_hash,
             "frozen_at": d.frozen_at, "exited_at": d.exited_at, "authoritative": d.exited_at is not None,
             "latest_report": {"id": report.id, "passed": report.passed, "created_at": report.created_at,
                               "unexplained": report.body["unexplained"], "body_hash": report.body_hash}

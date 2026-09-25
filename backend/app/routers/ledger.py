@@ -605,8 +605,29 @@ def get_domain(domain_id: str, workspace_id: str = Depends(require_permission("r
     from app.ledger import cutover
     d = _owned_domain(db, domain_id, workspace_id)
     report = cutover.latest_report(db, domain_id)
+    from app.ledger import entry
     return {**cutover.domain_view(db, d), "exit_criteria": cutover.exit_criteria(db, domain_id),
+            "entry_criteria": entry.criteria(db, d) if d.stage in ("T0", "T1", "T2") else None,
+            "entry_attestations": entry.ATTESTATIONS,
             "report": report.body if report else None, "stages": cutover.STAGE_NAMES}
+
+
+class StewardsIn(BaseModel):
+    steward: str
+    backup: str
+
+
+@domains_router.put("/{domain_id}/stewards")
+def set_stewards(domain_id: str, body: StewardsIn, identity=Depends(get_identity),
+                 workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger import cutover
+    _owned_domain(db, domain_id, workspace_id)
+    try:
+        d = cutover.set_stewards(db, domain_id, actor_of(identity), body.steward, body.backup)
+    except LedgerError as exc:
+        _fail(db, exc)
+    db.commit()
+    return cutover.domain_view(db, d)
 
 
 class StageIn(BaseModel):
@@ -629,6 +650,8 @@ def set_stage(domain_id: str, body: StageIn, identity=Depends(get_identity),
 class FreezeIn(BaseModel):
     watermark: dict
     manifest: dict
+    attestations: dict[str, bool] = {}
+    waivers: dict[str, str] = {}          # criterion id → the governance group's reason
 
 
 @domains_router.post("/{domain_id}/freeze")
@@ -637,7 +660,8 @@ def freeze_domain(domain_id: str, body: FreezeIn, identity=Depends(get_identity)
     from app.ledger import cutover
     _owned_domain(db, domain_id, workspace_id)
     try:
-        d = cutover.freeze(db, domain_id, actor_of(identity), body.watermark, body.manifest)
+        d = cutover.freeze(db, domain_id, actor_of(identity), body.watermark, body.manifest,
+                           body.attestations, body.waivers)
     except LedgerError as exc:
         _fail(db, exc)
     db.commit()

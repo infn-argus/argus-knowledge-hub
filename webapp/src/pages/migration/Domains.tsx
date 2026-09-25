@@ -354,7 +354,7 @@ function DomainPanel({ id }: { id: string }) {
         {error && <p className="mt-2 text-sm text-red-600">{errorText(error)}</p>}
       </Card>
 
-      {(d.stage === "T1" || d.stage === "T2") && <FreezeForm id={id} onDone={refresh} />}
+      {(d.stage === "T1" || d.stage === "T2") && <FreezeForm d={d} onDone={refresh} />}
       {d.stage !== "T0" && <ReconcileCard d={d} onDone={refresh} />}
 
       {d.stage === "T3" && (
@@ -422,24 +422,79 @@ function parse(text: string): unknown {
   }
 }
 
-function FreezeForm({ id, onDone }: { id: string; onDone: () => void }) {
+/** §17.4: the domain is frozen only when the entry criteria hold, each met
+ * or waived by the governance group with a reason. */
+function FreezeForm({ d, onDone }: { d: DomainDetail; onDone: () => void }) {
   const [watermark, setWatermark] = useState('{"updated": "", "changelog_id": 0}');
   const [manifest, setManifest] = useState('{"objects": [], "issues": [], "users": []}');
-  const freeze = useMutation({ mutationFn: () => domainsApi.freeze(id, parse(watermark), parse(manifest)), onSuccess: onDone });
+  const [attested, setAttested] = useState<Record<string, boolean>>({});
+  const [waivers, setWaivers] = useState<Record<string, string>>({});
+  const [stewards, setStewards] = useState({ steward: d.steward ?? "", backup: d.backup_steward ?? "" });
+  const cleanWaivers = Object.fromEntries(Object.entries(waivers).filter(([, v]) => v.trim()));
+  const freeze = useMutation({
+    mutationFn: () => domainsApi.freeze(d.id, parse(watermark), parse(manifest), attested, cleanWaivers),
+    onSuccess: onDone,
+  });
+  const saveStewards = useMutation({ mutationFn: () => domainsApi.setStewards(d.id, stewards.steward, stewards.backup), onSuccess: onDone });
   const valid = parse(watermark) !== undefined && parse(manifest) !== undefined;
+  const criteria = d.entry_criteria ?? [];
+  const open = criteria.filter((c) => !(c.attested ? attested[c.id] : c.met || (c.waivable && waivers[c.id]?.trim()))).length;
   return (
-    <Card title="Freeze at the watermark (T3)">
-      <p className="text-xs text-slate-500">
-        Take this only after the source scope is read-only. W and the export manifest's hash are recorded on each
-        stream's final revision; the streams then refuse every later revision.
+    <Card title="Entry criteria and freeze (§17.4, T3)" action={<span className="text-xs text-slate-400">{open} open</span>}>
+      <ul className="space-y-1.5 py-1 text-sm">
+        {criteria.map((c) => (
+          <li key={c.id} className="flex flex-wrap items-start gap-2">
+            {c.attested ? (
+              <input type="checkbox" className="mt-1" checked={!!attested[c.id]} onChange={(e) => setAttested({ ...attested, [c.id]: e.target.checked })} />
+            ) : (
+              <span className={c.met ? "text-emerald-600" : waivers[c.id]?.trim() ? "text-amber-600" : "text-red-600"}>
+                {c.met ? "✓" : waivers[c.id]?.trim() ? "≈" : "✗"}
+              </span>
+            )}
+            <span className="flex-1 text-slate-700">
+              {c.text}
+              {c.id === "t2" && c.detail && (
+                <span className="block text-xs text-slate-500">
+                  {String(c.detail.days)} day(s) in T2 · {String(c.detail.clean_runs)} consecutive clean run(s)
+                  {c.detail.over_limit ? " · past 8 weeks: the governance group decides" : ""}
+                </span>
+              )}
+              {c.id === "queues_ageing" && c.detail && Number(c.detail.overdue) > 0 && (
+                <span className="block text-xs text-slate-500">{String(c.detail.overdue)} item(s) past their target</span>
+              )}
+              {c.id === "stewards" && (
+                <span className="mt-1 flex flex-wrap gap-1 text-xs">
+                  <input value={stewards.steward} onChange={(e) => setStewards({ ...stewards, steward: e.target.value })} placeholder="Steward" className="rounded border border-slate-300 px-2 py-0.5" />
+                  <input value={stewards.backup} onChange={(e) => setStewards({ ...stewards, backup: e.target.value })} placeholder="Backup" className="rounded border border-slate-300 px-2 py-0.5" />
+                  <button onClick={() => saveStewards.mutate()} className="rounded border border-slate-300 px-2 py-0.5">Save</button>
+                </span>
+              )}
+            </span>
+            <span className="text-[11px] text-slate-400">§17.4 ({c.criterion})</span>
+            {!c.met && !c.attested && c.waivable && (
+              <input
+                value={waivers[c.id] ?? ""}
+                onChange={(e) => setWaivers({ ...waivers, [c.id]: e.target.value })}
+                placeholder="Waiver: the governance group's reason"
+                className="basis-full rounded border border-slate-200 px-2 py-0.5 text-xs"
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-xs text-slate-500">
+        Take the freeze only after the source scope is read-only. W and the export manifest's hash are recorded on each
+        stream's final revision; the streams then refuse every later revision. Waivers are written into the freeze decision.
       </p>
       <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
         <JsonArea label="Watermark W" value={watermark} onChange={setWatermark} rows={3} />
         <JsonArea label="Export manifest" value={manifest} onChange={setManifest} rows={3} />
       </div>
-      {freeze.isError && <p className="mt-2 text-sm text-red-600">{errorText(freeze.error)}</p>}
+      {(freeze.isError || saveStewards.isError) && (
+        <p className="mt-2 text-sm text-red-600">{errorText(freeze.error ?? saveStewards.error)}</p>
+      )}
       <button
-        disabled={!valid || freeze.isPending}
+        disabled={!valid || open > 0 || freeze.isPending}
         onClick={() => freeze.mutate()}
         className="mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
       >

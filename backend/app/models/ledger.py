@@ -242,6 +242,8 @@ class LedgerDomain(Base):
     stream_ids: Mapped[list] = mapped_column(JSONB, default=list)
     pilot: Mapped[bool] = mapped_column(Boolean, default=False)
     archive_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)   # the read-only Jira/Insight archive
+    steward: Mapped[Optional[str]] = mapped_column(String, nullable=True)          # D3: primary steward
+    backup_steward: Mapped[Optional[str]] = mapped_column(String, nullable=True)   # D3: and a backup
     watermark: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     manifest_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     frozen_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)

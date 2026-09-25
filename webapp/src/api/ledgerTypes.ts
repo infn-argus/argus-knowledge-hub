@@ -221,6 +221,8 @@ export interface DomainView {
   stream_ids: string[];
   pilot: boolean;
   archive_url: string | null;
+  steward: string | null;
+  backup_steward: string | null;
   watermark: Record<string, unknown> | null;
   manifest_hash: string | null;
   frozen_at: string | null;
@@ -230,8 +232,23 @@ export interface DomainView {
   streams: { id: string; kind: string; frozen_at: string | null }[];
 }
 
+export interface EntryCriterion {
+  id: string;
+  criterion: string;
+  text: string;
+  ok: boolean;
+  met: boolean;
+  waived: boolean;
+  waiver: string | null;
+  waivable: boolean;
+  attested: boolean;
+  detail: Record<string, unknown> | null;
+}
+
 export interface DomainDetail extends DomainView {
   exit_criteria: ExitCriterion[];
+  entry_criteria: EntryCriterion[] | null;
+  entry_attestations: Record<string, string>;
   report: ReconciliationBody | null;
   stages: Record<string, string>;
 }

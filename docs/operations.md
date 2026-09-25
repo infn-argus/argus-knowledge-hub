@@ -213,3 +213,29 @@ What each outcome does:
 | M-MIXED | Position, plus Provisional Equipment (stated as the migration's inference), plus a Proposed Installation. A reviewer confirms both |
 | M-RETIRE | the importer no longer produces it and no person touched it: Retired, with its relations kept in the pre-image |
 | M-BLOCK | nothing moves |
+
+## Cutover entry criteria (§17.4)
+
+A domain is frozen for cutover (T3) only when every entry criterion holds.
+They are listed in *Migration to ARGUS → the domain → Entry criteria and
+freeze*, and in `GET /v1/domains/{id}` as `entry_criteria`.
+
+ARGUS checks these itself:
+
+| Criterion | What ARGUS checks |
+|---|---|
+| 2 stewards | a primary steward and a different backup, set with `PUT /v1/domains/{id}/stewards` and recorded as a decision |
+| 2 blocking queues | no blocking conflict and no held revision (never waived) |
+| 2 queue ageing | no open item past its §18.2 target, in working days: port mapping 5, identity candidate 10, retirement flag 10, other non-blocking 30. A safety-relevant port confirmation is never left open |
+| 3 shadow validation | the domain is in T2, entered at least 14 days ago, with 10 consecutive passing reconciliation runs since. Past 8 weeks it is flagged for the governance group |
+| 4 legacy migration | no M-BLOCK item, every M-MIXED item accepted, no inferred record unplanned (never waived) |
+| 5 restore | a restore rehearsal passed in the last 30 days (`python -m app.ledger rehearse-restore` records it) |
+| 7 performance | a probe run that met every target, in the last quarter |
+
+People attest the rest: the readiness items and tests A33–A41 pass for
+the domain's data (1), the users are trained (6), and the Jira
+read-only change is approved and scheduled (6).
+
+The governance group may waive a criterion with a reason, for example a
+rehearsal on staging, or a domain it decided to cut over at the T2 limit.
+The waivers and attestations are written into the `freeze` decision.

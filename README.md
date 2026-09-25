@@ -131,6 +131,10 @@ currently valid* revision rather than to an arbitrary PDF.
   First comes a decision report that changes nothing; then owners' overrides; then an apply
   that checks its invariants item by item. Rollback works until the plan is finalized. A domain
   cannot be frozen for cutover while any of its records is blocked, unreviewed or unplanned.
+  The freeze itself waits for the §17.4 entry criteria: a steward and a backup, empty blocking
+  queues, the other queues within their ageing targets, two weeks of shadow validation with
+  10 consecutive clean runs, a recent restore rehearsal and probe run, and the attested items.
+  The governance group can waive a criterion only with a reason, recorded in the freeze decision.
   *Migration to ARGUS → Legacy records*; served by `/v1/migration`.
 - **Stable API and Jira retirement.** The API is versioned in its path, and a deprecated
   endpoint announces its sunset in headers at least 180 days ahead

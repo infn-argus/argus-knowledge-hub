@@ -218,7 +218,13 @@ def test_a_domain_is_not_frozen_while_its_legacy_records_are_unmigrated():
     db = SessionLocal()
     d = cutover.create_domain(db, L.ws, f"pilot-{L.fac}", "Vacuum equipment", stream_ids=[])
     cutover.advance(db, d.id, "T1", "steward")
-    with pytest.raises(LedgerError, match="legacy migration not done"):
-        cutover.freeze(db, d.id, "steward", {"object_history_id": 1}, {"objects": []})
+    cutover.set_stewards(db, d.id, "owner", "steward", "backup")
+    from tests.test_ledger_transition import ENTRY
+    with pytest.raises(LedgerError, match="No legacy record is M-BLOCK"):
+        cutover.freeze(db, d.id, "steward", {"object_history_id": 1}, {"objects": []}, **ENTRY)
+    # The legacy criterion is never waived.
+    with pytest.raises(LedgerError, match="cannot be waived"):
+        cutover.freeze(db, d.id, "steward", {"object_history_id": 1}, {"objects": []},
+                       attestations=ENTRY["attestations"], waivers={**ENTRY["waivers"], "legacy": "pilot"})
     db.rollback()
     db.close()

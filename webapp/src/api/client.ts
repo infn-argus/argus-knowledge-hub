@@ -929,11 +929,14 @@ export const domainsApi = {
     request<DomainView>("/v1/domains", { method: "POST", body: json(input) }),
   stage: (id: string, stage: string) =>
     request<DomainView>(`/v1/domains/${encodeURIComponent(id)}/stage`, { method: "POST", body: json({ stage }) }),
-  freeze: (id: string, watermark: unknown, manifest: unknown) =>
+  freeze: (id: string, watermark: unknown, manifest: unknown, attestations: Record<string, boolean> = {},
+           waivers: Record<string, string> = {}) =>
     request<DomainView>(`/v1/domains/${encodeURIComponent(id)}/freeze`, {
       method: "POST",
-      body: json({ watermark, manifest }),
+      body: json({ watermark, manifest, attestations, waivers }),
     }),
+  setStewards: (id: string, steward: string, backup: string) =>
+    request<DomainView>(`/v1/domains/${encodeURIComponent(id)}/stewards`, { method: "PUT", body: json({ steward, backup }) }),
   reconcile: (id: string, manifest: unknown) =>
     request<ReconciliationBody & { id: string }>(`/v1/domains/${encodeURIComponent(id)}/reconcile`, {
       method: "POST",

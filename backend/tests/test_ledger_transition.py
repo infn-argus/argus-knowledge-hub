@@ -31,6 +31,9 @@ from tests.test_ledger_slice import T0, Slice
 client = TestClient(app)
 DAY = timedelta(days=1)
 ATTEST = {k: True for k in cutover.ATTESTATIONS}
+# A fixture has no two weeks of shadow runs, restore rehearsal or probe run: waived, as for a rehearsal.
+ENTRY = {"attestations": {"readiness": True, "users_trained": True, "jira_readonly_scheduled": True},
+         "waivers": {"t2": "fixture", "restore": "fixture", "performance": "fixture"}}
 
 
 def token(db, ws, grants=()):
@@ -52,7 +55,8 @@ def cut_over(db, s, domain_id=None, manifest=None):
     cutover.advance(db, d.id, "T1", "steward")
     cutover.advance(db, d.id, "T2", "steward")
     manifest = manifest or objects_manifest(s)
-    cutover.freeze(db, d.id, "steward", manifest["watermark"], manifest)
+    cutover.set_stewards(db, d.id, "owner", "steward", "backup")
+    cutover.freeze(db, d.id, "steward", manifest["watermark"], manifest, **ENTRY)
     report = cutover.reconcile(db, d.id, manifest, "steward")
     assert report.passed, report.body["differences"]
     cutover.sign_exit(db, d.id, "owner", ATTEST)
@@ -74,7 +78,8 @@ def test_A33_a_frozen_stream_refuses_revisions_and_editing_opens_at_the_exit():
         service.edit_value(db, s.inv, "someone", unit.uid, "attr:argus_location", "Rack B13")
     cutover.advance(db, d.id, "T2", "steward")
     manifest = objects_manifest(s)
-    cutover.freeze(db, d.id, "steward", manifest["watermark"], manifest)
+    cutover.set_stewards(db, d.id, "owner", "steward", "backup")
+    cutover.freeze(db, d.id, "steward", manifest["watermark"], manifest, **ENTRY)
     db.commit()
     frozen = db.scalar(select(RevisionEvent).where(RevisionEvent.stream_id == s.insight,
                                                    RevisionEvent.kind == "frozen"))
@@ -416,7 +421,8 @@ def test_A41_a_missing_attachment_fails_the_reconciliation_and_blocks_the_exit(t
                 "issues": [{"key": key, "status": "Done", "comments": 0, "attachments": [
                     {"name": "photo.jpg", "size": photo.stat().st_size, "sha256": stored.sha256},
                     {"name": "wiring.pdf", "size": 48213, "sha256": missing_sha}]}]}
-    cutover.freeze(db, d.id, "steward", manifest["watermark"], manifest)
+    cutover.set_stewards(db, d.id, "owner", "steward", "backup")
+    cutover.freeze(db, d.id, "steward", manifest["watermark"], manifest, **ENTRY)
     report = cutover.reconcile(db, d.id, manifest, "steward")
     db.commit()
     assert not report.passed and report.body["unexplained"] == 1
@@ -447,8 +453,21 @@ def test_the_cutover_runs_through_the_api_and_the_exit_lists_what_is_missing():
         assert client.post(f"/v1/domains/{domain}/stage", headers=headers, json={"stage": stage}).status_code == 200
     manifest = objects_manifest(s)
     manifest["objects"].append({"objectId": "404404", "key": "LNFMAC-GONE"})
-    assert client.post(f"/v1/domains/{domain}/freeze", headers=headers,
-                       json={"watermark": manifest["watermark"], "manifest": manifest}).json()["stage"] == "T3"
+    # §17.4: no freeze until the entry criteria are met or waived.
+    refused = client.post(f"/v1/domains/{domain}/freeze", headers=headers,
+                          json={"watermark": manifest["watermark"], "manifest": manifest})
+    assert refused.status_code == 422 and "entry criteria" in refused.json()["detail"]["error"]
+    entry = {c["id"]: c for c in client.get(f"/v1/domains/{domain}", headers=headers).json()["entry_criteria"]}
+    assert not entry["stewards"]["ok"] and not entry["t2"]["ok"] and entry["legacy"]["ok"]
+    assert client.put(f"/v1/domains/{domain}/stewards", headers=headers,
+                      json={"steward": "rossi", "backup": "rossi"}).status_code == 422
+    assert client.put(f"/v1/domains/{domain}/stewards", headers=headers,
+                      json={"steward": "rossi", "backup": "bianchi"}).json()["backup_steward"] == "bianchi"
+    assert client.post(f"/v1/domains/{domain}/freeze", headers=headers, json={
+        "watermark": manifest["watermark"], "manifest": manifest, **ENTRY,
+        "waivers": {**ENTRY["waivers"], "queues_blocking": "no"}}).status_code == 422   # never waived
+    assert client.post(f"/v1/domains/{domain}/freeze", headers=headers, json={
+        "watermark": manifest["watermark"], "manifest": manifest, **ENTRY}).json()["stage"] == "T3"
     report = client.post(f"/v1/domains/{domain}/reconcile", headers=headers, json={"manifest": manifest}).json()
     assert not report["passed"]
     [diff] = [d for d in report["differences"] if d["item"] == "LNFMAC-GONE"]
