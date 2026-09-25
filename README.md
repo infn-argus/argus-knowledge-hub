@@ -144,6 +144,11 @@ currently valid* revision rather than to an arbitrary PDF.
   verbs, wrong end types, cardinality, cycles, edges to retired records. A workspace switches to
   enforce mode once each violation is fixed or accepted as an exception with a reason. From
   then on, a new edge that breaks the registry is refused.
+- **Model extensions (§5.1, §13 S8).** New areas of the model (RF distribution, cabling,
+  safety, …) enter as declared extensions. An extension needs an owner, a source and a query
+  that gives the expected answer on its fixture, and the test suite runs every one. Its
+  relations must say how a failure travels. Admitting an extension into a catalogue adds its
+  types and is recorded as a decision. *Equipment classes → Extensions*.
 - **Serial line conversion (§9.1).** The old importer's Serial Lines are converted one at a time.
   Each line is retyped in place as a Bus Segment behind a Communication Path, running from its
   IOC to the Access Point. The port number becomes an advisory `required_port`, and the old

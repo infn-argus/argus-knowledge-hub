@@ -544,3 +544,71 @@ reason (`accept_golden_loss`). That reason is kept on the
 a failed converter reaches the devices through `implemented by`,
 `enters at` and `uses path`, and a broken segment reaches them through
 `continues on`.
+
+## Model extensions (§5.1, §13 S8)
+
+The model grows only in the areas the first revision set as triggers:
+
+- RF distribution;
+- diagnostics;
+- magnets and undulators;
+- cabling;
+- network topology;
+- consoles;
+- stores;
+- safety;
+- plant and electronics;
+- engineering.
+
+An extension for one of them enters only when it has **an owner, a source
+and a query**. The query is the question the extension exists to answer.
+It ships with a fixture and the answer expected on it.
+
+An extension is a Python module in `backend/app/extensions/`. It defines
+`EXTENSION` and is reviewed like the rule catalogue:
+
+```python
+from app import extensions as ext
+from app.services import causal_model as cm
+
+EXTENSION = ext.Extension(
+    id="cabling-signal", trigger="cabling",
+    owner="<the team that answers for it>",
+    source="ARGUS, entered by <team>",          # or a named ledger stream
+    summary="patch panels and where the cables land",
+    types=[ext.ExtType("Patch Panel", "Asset", "A panel cables land on",
+                       [("ports", "Ports", "integer")])],
+    relations=[ext.ExtRelation("lands on", "environment", cm.REVERSE, cm.FUNCTION,
+                               "cable → the panel it lands on: the panel goes, the cable is cut",
+                               target_types={"Patch Panel"})],
+    query=ext.ExtQuery("unlanded cables", "Which cables land nowhere?",
+                       run=..., fixture=..., expect=...),
+)
+```
+
+The gate (`app.extensions.check`) refuses an extension if:
+
+- it has no owner, source or query;
+- its trigger is not one of the list;
+- it adds a type or a relation that exists already;
+- a type hangs from a parent the catalogue does not have;
+- a relation does not say which way a failure travels along it, or what
+  the failure takes with it (§5.4). An unclassified relation is silently
+  ignored by every root-cause walk.
+
+`tests/test_extensions.py` runs the gate and the query on its fixture for
+every declared extension. A declared extension that fails there fails CI.
+
+The relations of a declared extension that passes the gate are known at
+once to the causal model and to the registry (endpoint types,
+cardinality). Its types reach a catalogue only when admitted there, under
+*Equipment classes → Extensions*, or with `POST
+/v1/catalogue/extensions/{id}/admit` and a reason. The gate runs again,
+and the query runs on its fixture in a workspace made for it, which is
+then thrown away. The admission is an `admit_extension` decision. `GET
+/v1/catalogue/extensions` lists each trigger with where it stands (add
+`?run_fixtures=true` to run the queries). `GET
+/v1/catalogue/extensions/{id}/query` asks an admitted extension's question
+of the current workspace.
+
+No extension is declared yet: each trigger is waiting for its owner.

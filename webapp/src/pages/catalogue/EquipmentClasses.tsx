@@ -2,7 +2,7 @@
  * catalogue reads monthly, promotion reviews and promotion. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ApiError, catalogueApi } from "../../api/client";
+import { ApiError, catalogueApi, extensionsApi } from "../../api/client";
 import type { ClassReview, EquipmentClassReport } from "../../api/ledgerTypes";
 import { errorText } from "../../components/hub/LedgerPanels";
 import { Card } from "../../components/hub/ui";
@@ -86,7 +86,66 @@ export function EquipmentClassesPage() {
           </div>
         </Card>
       </div>
+
+      <ExtensionsCard canAdmit={isCatalogue} />
     </div>
+  );
+}
+
+/** §5.1, §13 S8: the areas the model grows into. Each enters only with an
+ * owner, a source and a query that answers on its fixture. */
+function ExtensionsCard({ canAdmit }: { canAdmit: boolean }) {
+  const queryClient = useQueryClient();
+  const q = useQuery({ queryKey: ["extensions"], queryFn: () => extensionsApi.list(true), retry: false });
+  const admit = useMutation({
+    mutationFn: (v: { id: string; reason: string }) => extensionsApi.admit(v.id, v.reason),
+    onSuccess: () => queryClient.invalidateQueries(),
+  });
+  if (!q.data) return null;
+  return (
+    <Card title="Extensions (§5.1)">
+      <p className="py-1 text-sm text-slate-600">
+        The areas the model grows into. An extension for one enters when it has an owner, a source and a query, and
+        the query gives the expected answer on its fixture. Extensions are declared in code and reviewed; admitting one
+        adds its types to this catalogue.
+      </p>
+      <ul className="divide-y divide-slate-100 text-sm">
+        {q.data.triggers.map((t) => (
+          <li key={t.trigger} className="py-2">
+            <div className="flex items-center gap-2">
+              <span className="w-56 font-medium text-slate-800">{t.label}</span>
+              {t.extensions.length === 0 && <span className="text-xs text-slate-500">waiting for an owner, a source and a query</span>}
+            </div>
+            {t.extensions.map((e) => {
+              const passes = e.problems.length === 0 && (e.fixture?.ok ?? true);
+              return (
+                <div key={e.id} className="ml-56 mt-1 space-y-0.5 text-xs text-slate-600">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-slate-800">{e.id}</span>
+                    <span className={`rounded px-1.5 ${e.admitted ? "bg-emerald-50 text-emerald-700" : passes ? "bg-sky-50 text-sky-800" : "bg-red-50 text-red-700"}`}>
+                      {e.admitted ? "admitted" : passes ? "passes the gate" : "refused by the gate"}
+                    </span>
+                    <span className="flex-1" />
+                    {canAdmit && !e.admitted && passes && (
+                      <button onClick={() => { const why = prompt(`Why admit ${e.id}?`); if (why) admit.mutate({ id: e.id, reason: why }); }}
+                              className="rounded-md border border-slate-300 px-2 py-0.5">Admit</button>
+                    )}
+                  </div>
+                  <div>owner {e.owner || "—"} · source {e.source || "—"}</div>
+                  {e.query && <div>asks: {e.query.question}</div>}
+                  {e.types.length > 0 && <div>types: {e.types.map((x) => `${x.name} (under ${x.parent})`).join(", ")}</div>}
+                  {e.relations.length > 0 && <div>relations: {e.relations.map((r) => `${r.name} (${r.layer}, ${r.flows})`).join(", ")}</div>}
+                  {e.problems.map((p) => <div key={p} className="text-red-700">{p}</div>)}
+                  {e.fixture && !e.fixture.ok && <div className="text-red-700">its query does not give the expected answer on its fixture{e.fixture.error ? `: ${e.fixture.error}` : ""}</div>}
+                  {e.admitted && <div className="text-slate-500">admitted by {e.admitted.by}: {e.admitted.reason}</div>}
+                </div>
+              );
+            })}
+          </li>
+        ))}
+      </ul>
+      {admit.isError && <p className="mt-1 text-xs text-red-600">{errorText(admit.error)}</p>}
+    </Card>
   );
 }
 

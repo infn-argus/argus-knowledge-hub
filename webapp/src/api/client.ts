@@ -983,6 +983,29 @@ export const catalogueApi = {
     }),
 };
 
+/** One trigger of §5.1 and the extensions declared for it (§13 S8). */
+export type ExtensionTrigger = {
+  trigger: string;
+  label: string;
+  extensions: {
+    id: string; owner: string; source: string; summary: string;
+    query: { name: string; question: string } | null;
+    types: { name: string; parent: string }[];
+    relations: { name: string; layer: string; flows: string; carries: string | null }[];
+    problems: string[];
+    fixture?: { ok: boolean; rows: number; error?: string };
+    admitted: { decision_id: string; by: string; at: string; reason: string } | null;
+  }[];
+};
+
+export const extensionsApi = {
+  list: (runFixtures = false) =>
+    request<{ triggers: ExtensionTrigger[] }>(`/v1/catalogue/extensions${runFixtures ? "?run_fixtures=true" : ""}`),
+  admit: (id: string, reason: string) =>
+    request<{ extension: string; types: string[]; decision_id: string }>(
+      `/v1/catalogue/extensions/${encodeURIComponent(id)}/admit`, { method: "POST", body: json({ reason }) }),
+};
+
 export const retirementApi = {
   status: () => request<RetirementStatus>("/v1/retirement"),
   recordRetention: (input: { reference: string; jira_archive_until: string; exports_until?: string; audit_until?: string; note?: string }) =>

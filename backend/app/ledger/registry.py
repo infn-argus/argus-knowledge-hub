@@ -55,6 +55,17 @@ ACYCLIC = {"part of", "composed of"}
 RETIRE_EXEMPT_SOURCES = {INSTALLATION}
 
 
+
+def _with_extensions() -> None:
+    """Endpoint types and cardinality declared by extensions (§13 S8)."""
+    from app import extensions
+    endpoints, cardinality = extensions.registry_rules()
+    ENDPOINTS.update({k: v for k, v in endpoints.items() if k not in ENDPOINTS})
+    CARDINALITY.update({k: v for k, v in cardinality.items() if k not in CARDINALITY})
+
+
+_with_extensions()
+
 def _ok(rule, type_name: str) -> bool:
     if rule is None:
         return True

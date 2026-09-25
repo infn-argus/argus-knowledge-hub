@@ -137,6 +137,16 @@ SEMANTICS: dict = {
     "assigned to": RelationSemantics("provenance", NONE, None),
 }
 
+# The relations the model itself defines; an extension may not redefine them.
+BASE_SEMANTICS = dict(SEMANTICS)
+
+
+def _with_extensions() -> None:
+    """The relations declared by extensions that pass the gate (§13 S8)."""
+    from app import extensions
+    SEMANTICS.update(extensions.semantics())
+
+
 # The losses that may keep travelling after a hop that brought `state`. What a device has lost is
 # control, and control is nearly all it can hand on; what a chiller has lost is function, and that
 # can go anywhere. A lost permit stops there: an inhibited process does not break what it drives.
@@ -166,3 +176,6 @@ def dependency(source_uid: str, target_uid: str, relation_type: str) -> Optional
 def follows(state: str, hop_carries: str) -> bool:
     """May a node that has suffered `state` pass a loss of `hop_carries` along this hop?"""
     return hop_carries in _ONWARD.get(state, set())
+
+
+_with_extensions()
