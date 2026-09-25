@@ -8,7 +8,7 @@ import { ApiError, auditApi, domainsApi, ledgerApi, retirementApi } from "../../
 import type { DomainDetail, DomainView, ReconciliationDifference } from "../../api/ledgerTypes";
 import { errorText } from "../../components/hub/LedgerPanels";
 import { Card, Empty } from "../../components/hub/ui";
-import { LegacyMigrationCard } from "./LegacyMigration";
+import { LedgerOnlyCard, LegacyMigrationCard } from "./LegacyMigration";
 
 const STAGES = ["T0", "T1", "T2", "T3", "T4", "T5"] as const;
 const STAGE_HELP: Record<string, string> = {
@@ -66,6 +66,7 @@ export function MigrationPage() {
         {current ? <DomainPanel id={current} /> : <Empty>Create a domain to start.</Empty>}
       </div>
       <LegacyMigrationCard />
+      <LedgerOnlyCard />
       <AuditIntegrity />
       <RetirementCard />
     </div>

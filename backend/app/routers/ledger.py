@@ -247,6 +247,43 @@ def registry_report(workspace_id: str = Depends(require_permission("read")), db:
     return registry.report(db, [workspace_id])
 
 
+class LedgerOnlyIn(BaseModel):
+    enabled: bool
+    reason: str
+
+
+@router.get("/ledger-only")
+def ledger_only_status(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """§13 S5: whether this workspace's record facts change only through the
+    ledger, and whether it can be switched on (its legacy records migrated)."""
+    from app.ledger import legacy
+    from app.models.workspace import Workspace
+    w = db.get(Workspace, workspace_id)
+    return {"enabled": bool(w and w.ledger_only), "legacy": legacy.gate(db, workspace_id)}
+
+
+@router.put("/ledger-only")
+def set_ledger_only(body: LedgerOnlyIn, identity=Depends(get_identity),
+                    workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger import legacy
+    from app.models.workspace import Workspace
+    if not body.reason.strip():
+        raise HTTPException(status_code=422, detail={"error": "give a reason; it is recorded"})
+    w = db.get(Workspace, workspace_id)
+    if body.enabled:
+        g = legacy.gate(db, workspace_id)
+        if not g["ok"]:
+            raise HTTPException(status_code=409, detail={
+                "error": "migrate the workspace's legacy records first (§12): "
+                         f"{len(g['blocked'])} blocked, {len(g['mixed_open'])} to review, {g['unplanned']} unplanned",
+                "legacy": g})
+    engine._record_decision(db, "set_ledger_only", actor_of(identity), workspace_id,
+                            value={"enabled": body.enabled, "before": w.ledger_only}, reason=body.reason)
+    w.ledger_only = body.enabled
+    db.commit()
+    return {"enabled": w.ledger_only}
+
+
 @router.get("/invariants/report")
 def invariants_report(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """The data invariants (installations, access points, ports, tickets,

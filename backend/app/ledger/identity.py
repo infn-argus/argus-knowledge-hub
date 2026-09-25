@@ -29,6 +29,7 @@ from app.models.document import DocumentRelation
 from app.models.issue import Issue
 from app.models.ledger import (Conflict, ConflictEvent, Decision, IdentityBinding, LedgerStream, RecordEvent,
                                TicketLink)
+from app.ledger.writer import ledger_writer
 
 IMMUTABLE_ID_KINDS = {"insight", "jira"}
 INACTIVE = ("Merged", "Retired")
@@ -171,6 +172,7 @@ MOVABLE = ((Issue, "asset_uid", "uid"), (AssetTicket, "asset_uid", "uid"), (Asse
 OVERLAP = "merge_installation_overlap"
 
 
+@ledger_writer
 def merge(db: Session, workspace_id: str, actor: str, survivor_uid: str, loser_uid: str,
           reason: Optional[str] = None) -> Decision:
     """A steward's merge (§10): the survivor keeps its uid; everything that
@@ -239,6 +241,7 @@ def merge(db: Session, workspace_id: str, actor: str, survivor_uid: str, loser_u
     return decision
 
 
+@ledger_writer
 def unmerge(db: Session, workspace_id: str, actor: str, merge_decision_id: str,
             reason: Optional[str] = None) -> Decision:
     """Reverse a merge from what it recorded: every row it moved goes back to

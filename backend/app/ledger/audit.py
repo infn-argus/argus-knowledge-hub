@@ -59,6 +59,8 @@ def _attach_ddl() -> None:
     """Databases built with `create_all` (tests, first start) get the guards
     too; alembic installs them for migrated databases."""
     from app.db import Base
+    from app.ledger import writer
+    writer._attach_ddl()                  # and the ledger-only guard (§13 S5)
     for table in APPEND_ONLY_TABLES:
         t = Base.metadata.tables.get(table)
         if t is not None:

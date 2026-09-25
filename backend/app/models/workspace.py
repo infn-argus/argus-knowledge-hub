@@ -15,6 +15,8 @@ class Workspace(Base):
     # cascaded to is_global=True too — see seed_default_global_values's
     # sibling, _cascade_global_to_workspace, in this router.
     is_global: Mapped[bool] = mapped_column(Boolean, default=False)
+    # §13 S5: record facts and relations change only through the fact ledger (a trigger enforces it).
+    ledger_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     # Fallback rights for any authenticated user with no explicit Membership
     # row in this workspace. All unchecked by default — a workspace stays

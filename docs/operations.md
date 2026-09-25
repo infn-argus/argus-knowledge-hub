@@ -364,3 +364,37 @@ cause analysis on each incident. It reports which expected causes it
 finds, and at what rank. The set is also the regression suite for any
 change to the causal model or the relation registry, not only for
 migrations.
+
+## Ledger-only workspaces (§13 S5)
+
+Every record edit made through the API or the UI goes through the fact
+ledger:
+
+- creating a record is the creator's statements of its existence, name
+  and attributes, confirmed by them;
+- editing changes only the fields that differ, one confirmed statement
+  each, in one batch; removing a field is a statement that it has no
+  value;
+- adding or removing a relation is a statement that the edge holds, or no
+  longer holds. An edge from before the ledger is removed with a recorded
+  decision;
+- every change shows in the record's audit trail, with its author.
+
+A workspace can then be switched to ledger-only (*Migration to ARGUS →
+Ledger-only writes*, or `PUT /v1/ledger/ledger-only` with a reason). This
+is allowed once its legacy records are migrated (§12), and the switch is
+recorded as a decision. From then on:
+
+- a database trigger refuses any change to a record's attributes, name,
+  type, key, status or merge, and any change to a relation, unless the
+  ledger itself is writing. That covers scripts, direct SQL and anything
+  else written around the ledger;
+- the API answers such a refusal with 409 `{"invariant": "ledger-only"}`;
+- deleting a record retires it, and the record keeps its history;
+- display and caching fields (avatar, sharing, the relation caches) stay
+  editable directly: they are not facts.
+
+The Jira, EPIK8s and PBS importers are not used on these workspaces:
+ARGUS is the source of truth for them. A workspace transfer into a
+ledger-only workspace fails at the database for the same reason: it copies
+records in directly.

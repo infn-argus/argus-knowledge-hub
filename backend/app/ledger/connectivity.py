@@ -26,6 +26,7 @@ from app.ledger import engine, temporal
 from app.ledger.engine import (ACCESS_POINT, InvariantError, LedgerError, ParsedClaim, canonical, now)
 from app.models.asset import Asset, Relation
 from app.models.ledger import Claim, Conflict, ConflictEvent, FactState, IdentityBinding, LedgerStream, RecordEvent
+from app.ledger.writer import ledger_writer
 
 BUS_SEGMENT = "Bus Segment"
 EQUIPMENT_PORT = "Equipment Port"
@@ -113,6 +114,7 @@ def reconcile_access_points(db: Session, stream: LedgerStream, before: Iterable[
     return touched
 
 
+@ledger_writer
 def reassign(db: Session, old: Asset, position_uid: str, *, handover: dict, actor: str, cause: str,
              source_ref: Optional[str] = None) -> set[str]:
     """The reassignment batch (§9.2): the old Access Point keeps what it was

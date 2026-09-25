@@ -4,6 +4,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from app.db import engine
 from app.routers import (
@@ -77,6 +78,18 @@ async def api_policy_and_legacy_hosts(request: Request, call_next):
         response.headers.update(api_policy.headers(deprecated))
     response.headers["X-ARGUS-API-Version"] = api_policy.API_VERSION
     return response
+
+
+@app.exception_handler(DBAPIError)
+async def database_refusal(request: Request, exc: DBAPIError):
+    """The database's own refusals: an append-only audit table, or a
+    ledger-only workspace written around the ledger (§19 item 2, §13 S5)."""
+    code = getattr(exc.orig, "pgcode", None)
+    if code == "42501":
+        message = str(exc.orig).splitlines()[0]
+        return JSONResponse(status_code=409, content={"detail": {
+            "error": message, "invariant": "ledger-only" if "ledger-only" in message else "append-only"}})
+    raise exc
 
 
 @app.get("/v1/meta/api", tags=["meta"])

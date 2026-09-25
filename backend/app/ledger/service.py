@@ -140,3 +140,81 @@ def reassign_access_point(db: Session, workspace_id: str, actor: str, ap_uid: st
     engine.derive_all(db, [workspace_id])
     return next(v["uid"] for v in connectivity.access_points(db, workspace_id, (ap.attributes or {}).get("address"))
                 if v["record_status"] == "Active")
+
+
+# --------------------------------------------------------------------------- records through the ledger (§13 S5)
+
+def create_record(db: Session, workspace_id: str, actor: str, *, uid: str, schema_uid: str, key: str, name: str,
+                  type_name: str, attributes: dict, is_global: bool = False,
+                  avatar_icon_uid: Optional[str] = None) -> Asset:
+    """A person creating a record: the row, then their statements of its
+    existence, name and attributes, confirmed by them, and the projection."""
+    from app.ledger.cutover import assert_writable
+    from app.ledger.writer import writing
+    from app.models.ledger import RecordEvent
+    assert_writable(db, workspace_id, "objects")
+    with writing(db):
+        record = Asset(uid=uid, workspace_id=workspace_id, schema_uid=schema_uid, key=key, name=name, type=type_name,
+                       attributes={}, is_global=is_global, avatar_icon_uid=avatar_icon_uid, record_status="Active")
+        db.add(record)
+        db.flush()
+        db.add(RecordEvent(uid=uid, kind="created", after={"key": key, "type": type_name}, cause=f"created by {actor}",
+                           at=engine.now()))
+        ref = f"uid:{uid}"
+        claims = [ParsedClaim(ref, "exists", {"type": type_name, "key": key, "name": name}, method="manual"),
+                  ParsedClaim(ref, "name", name, method="manual")]
+        claims += [ParsedClaim(ref, f"attr:{k}", v, method="manual") for k, v in attributes.items() if v is not None]
+        engine.add_manual_claims(db, engine.person_stream(db, workspace_id, actor), claims,
+                                 cause=f"created by {actor}")
+        batch = [confirm_value(uid, "exists", "present"), confirm_value(uid, "name", name)]
+        batch += [confirm_value(uid, f"attr:{k}", v) for k, v in attributes.items() if v is not None]
+        engine.apply_decisions(db, workspace_id, actor, batch)
+    return record
+
+
+def edit_values(db: Session, workspace_id: str, actor: str, uid: str, changes: dict,
+                reason: Optional[str] = None) -> list:
+    """Several fields at once, as one batch: each a person's statement,
+    confirmed, replacing what was confirmed before. A value of None removes
+    the field."""
+    from app.ledger.cutover import assert_writable
+    assert_writable(db, workspace_id, "objects")
+    if not changes:
+        return []
+    stream = engine.person_stream(db, workspace_id, actor)
+    engine.add_manual_claims(db, stream, [ParsedClaim(f"uid:{uid}", p, v, method="manual")
+                                          for p, v in changes.items()], cause=f"edit by {actor}")
+    return engine.apply_decisions(db, workspace_id, actor, [
+        confirm_value(uid, p, v, replaces=_active(db, uid, p), reason=reason) for p, v in changes.items()])
+
+
+def relate(db: Session, workspace_id: str, actor: str, from_uid: str, relation_type: str, to_uid: str,
+           present: bool = True, reason: Optional[str] = None) -> list:
+    """Add or remove an asserted relation. A single-valued one is set or
+    cleared; a many-valued one gains or loses a member (§7.8.1)."""
+    from app.ledger.cutover import assert_writable
+    assert_writable(db, workspace_id, "objects")
+    predicate = f"rel:{relation_type}"
+    ref = f"uid:{to_uid}"
+    stream = engine.person_stream(db, workspace_id, actor)
+    if predicate in engine.SINGLE_RELATIONS:
+        value = {"ref": ref} if present else None
+        engine.add_manual_claims(db, stream, [ParsedClaim(f"uid:{from_uid}", predicate, value, method="manual")],
+                                 cause=f"edit by {actor}")
+        batch = [confirm_value(from_uid, predicate, value, replaces=_active(db, from_uid, predicate), reason=reason)]
+    else:
+        engine.add_manual_claims(db, stream, [ParsedClaim(f"uid:{from_uid}", predicate, {"ref": ref}, method="manual",
+                                                          polarity="present" if present else "absent")],
+                                 cause=f"edit by {actor}")
+        state = "present" if present else "absent"
+        batch = [confirm_value(from_uid, predicate, state, member=ref, replaces=_active(db, from_uid, predicate, ref),
+                               reason=reason)]
+    return engine.apply_decisions(db, workspace_id, actor, batch)
+
+
+def retire_record(db: Session, workspace_id: str, actor: str, uid: str, reason: Optional[str] = None) -> list:
+    """Retire, never erase: the record stays, with its history (I-SOR)."""
+    from app.ledger.cutover import assert_writable
+    assert_writable(db, workspace_id, "objects")
+    return engine.apply_decisions(db, workspace_id, actor, [
+        confirm_value(uid, "exists", "absent", replaces=_active(db, uid, "exists"), reason=reason)])

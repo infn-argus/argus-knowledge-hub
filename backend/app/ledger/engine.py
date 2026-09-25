@@ -40,6 +40,7 @@ from app.models.ledger import (Claim, ClaimEvent, Conflict, ConflictEvent, Decis
                                RecordEvent, RevisionEvent, SourceRevision, StatusEvent, StreamHead)
 from app.models.schema import Schema
 from app.models.workspace import Workspace
+from app.ledger.writer import ledger_writer
 
 PROJECTOR_VERSION = "projector/1"
 DERIVER_VERSION = "deriver/1"
@@ -340,6 +341,7 @@ def revision_state(db: Session, revision_id: str) -> str:
 
 # --------------------------------------------------------------------------- parse
 
+@ledger_writer
 def ingest(db: Session, stream_id: str, *, revision: str, content: bytes, observed_at, parser: str,
            cause: str = "import") -> dict:
     """The parse stage for one source revision (§7.6, §11)."""
@@ -438,6 +440,7 @@ def _write_diff(db: Session, stream_id: str, rev: SourceRevision, new_claims: di
     return {"appeared": appeared, "disappeared": disappeared, "evidence_changed": evidence_changed}
 
 
+@ledger_writer
 def add_manual_claims(db: Session, stream: LedgerStream, claims: list[ParsedClaim], cause: str) -> list[str]:
     """A person's statements: added to their stream without withdrawing the
     earlier ones (delta semantics), and published at once."""
@@ -526,6 +529,7 @@ def _guard_and_publish(db: Session, stream: LedgerStream, rev: SourceRevision) -
     return "published"
 
 
+@ledger_writer
 def publish(db: Session, stream: LedgerStream, rev: SourceRevision, *, cause: str, kind: str = "published") -> None:
     """Move the published head to `rev` and apply the net transition."""
     head = db.get(StreamHead, stream.id)
@@ -732,6 +736,7 @@ def _active_decisions(db: Session, uid: str, predicate: str, member: Optional[st
     return [d for d in db.scalars(q) if d.member == member and d.decision_id not in ended]
 
 
+@ledger_writer
 def apply_decisions(db: Session, workspace_id: str, actor: str, batch: list[dict], *,
                     defer_derive: bool = False) -> list[Decision]:
     """Apply a batch of decisions atomically (§7.4). The caller commits; on
@@ -992,6 +997,7 @@ def _project_key(db: Session, record: Asset, predicate: str, member: Optional[st
     return _Outcome(eff, True, statuses, conflicts)
 
 
+@ledger_writer
 def project_subject(db: Session, uid: str, cause: str, *, emit: bool = True) -> None:
     """Recompute every fact of one record from the ledger and write the
     projection: attributes, ledger edges, record status, fact state, conflicts."""
@@ -1039,6 +1045,9 @@ def project_subject(db: Session, uid: str, cause: str, *, emit: bool = True) -> 
             new_conflicts[cid] = (ctype, severity, predicate, member, detail)
         if predicate == "exists":
             exists_outcome = outcome
+        elif predicate == "name":
+            if outcome.has_effective and outcome.effective:
+                record.name = outcome.effective
         elif predicate.startswith("attr:"):
             name = predicate[5:]
             managed_attrs.add(name)
@@ -1298,6 +1307,7 @@ def pending_derive(db: Session, workspace_id: str) -> Optional[dict]:
     return None
 
 
+@ledger_writer
 def derive_all(db: Session, workspace_ids: Optional[Iterable[str]] = None) -> dict:
     """The derive stage: `realized by`, `implemented by`, `located in`, port
     attachment and ticket attribution."""
@@ -1407,6 +1417,7 @@ def snapshot(db: Session, workspace_id: str) -> dict:
     return {"records": records, "edges": edges, "conflicts": conflicts}
 
 
+@ledger_writer
 def rebuild(db: Session, workspace_id: str) -> None:
     """Drop the projections of a workspace's ledger records and recompute them
     from audit data alone (A16). No events are written."""

@@ -135,6 +135,11 @@ currently valid* revision rather than to an arbitrary PDF.
   queues, the other queues within their ageing targets, two weeks of shadow validation with
   10 consecutive clean runs, a recent restore rehearsal and probe run, and the attested items.
   The governance group can waive a criterion only with a reason, recorded in the freeze decision.
+- **Ledger-only writes (§13 S5).** Every record created or edited through the API or the UI
+  (attributes, name, relations) is a person's confirmed statement in the fact ledger, with its
+  author in the record's audit trail. A workspace whose legacy records are migrated can be
+  switched to ledger-only. The database then refuses any change to record facts or relations
+  written around the ledger, and deleting a record retires it.
 - **Review queues (§18.2).** Every open review item has an age in working days against its
   queue's targets. Overdue items go to the backup steward, then to the governance group
   (`ARGUS_GOVERNANCE`), once per level. The notification never names the record. The review

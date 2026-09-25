@@ -5,11 +5,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import flag_modified
 
-from app.auth import get_current_user_id, get_grants, require_permission
+from app.auth import OidcIdentity, get_current_user_id, get_grants, get_identity, require_permission
 from app.db import get_db
 from app.ledger.cutover import assert_writable
+from app.ledger import service as ledger_service
 from app.ledger.engine import LedgerError
 from app.ledger.identity import DuplicateIdentifier, assert_unique_at_creation
 from app.models.asset import Asset, Relation
@@ -32,6 +32,23 @@ from app.services.visibility import (asset_visible_in, hidden_fields, redacted_a
                                      visible_uids)
 
 router = APIRouter(prefix="/v1/assets", tags=["assets"])
+
+
+def _actor(identity) -> str:
+    if isinstance(identity, OidcIdentity):
+        return identity.user.email or identity.user.id
+    return "api-token"
+
+
+def _ledger_only(db: Session, workspace_id: str) -> bool:
+    w = db.get(Workspace, workspace_id)
+    return bool(w and w.ledger_only)
+
+
+def _ledger_failed(db: Session, exc: LedgerError):
+    db.rollback()
+    code = getattr(exc, "code", None)
+    raise HTTPException(status_code=409 if code else 422, detail={"error": str(exc), "invariant": code})
 
 ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
 
@@ -66,6 +83,7 @@ def asset_out(db: Session, asset: Asset) -> AssetOut:
 @router.post("", response_model=AssetOut, status_code=201)
 def create_asset(
     body: AssetCreate,
+    identity=Depends(get_identity),
     workspace_id: str = Depends(require_permission("create")),
     current_user_id: Optional[str] = Depends(get_current_user_id),
     db: Session = Depends(get_db),
@@ -88,8 +106,14 @@ def create_asset(
     workspace = db.get(Workspace, workspace_id)
     if "is_global" not in body.model_fields_set and workspace is not None and workspace.is_global:
         data["is_global"] = True
-    asset = Asset(workspace_id=workspace_id, **data)
-    db.add(asset)
+    # Through the fact ledger (§13 S5): the creator's statements, confirmed by them.
+    try:
+        asset = ledger_service.create_record(
+            db, workspace_id, _actor(identity), uid=data["uid"], schema_uid=data["schema_uid"], key=data["key"],
+            name=data["name"], type_name=data["type"], attributes=data["attributes"],
+            is_global=data.get("is_global", False), avatar_icon_uid=data.get("avatar_icon_uid"))
+    except LedgerError as exc:
+        _ledger_failed(db, exc)
     db.commit()
     db.refresh(asset)
     return asset
@@ -152,6 +176,7 @@ def get_asset(
 def update_asset(
     uid: str,
     body: AssetUpdate,
+    identity=Depends(get_identity),
     workspace_id: str = Depends(require_permission("modify")),
     current_user_id: Optional[str] = Depends(get_current_user_id),
     db: Session = Depends(get_db),
@@ -165,16 +190,29 @@ def update_asset(
         hidden = hidden_fields(db, asset)
         patch["attributes"] = {**{k: v for k, v in patch["attributes"].items() if k not in hidden},
                                **{k: v for k, v in (asset.attributes or {}).items() if k in hidden}}
+    # Facts (attributes, name) go through the fact ledger (§13 S5); display
+    # and caching fields (avatar, relation caches, sharing) are set here.
+    new_attrs = patch.pop("attributes", None)
+    new_name = patch.pop("name", None)
+    patch.pop("type", None)                # a record's type follows its schema, not a free edit
     for field, value in patch.items():
         setattr(asset, field, value)
-
     schema = db.get(Schema, asset.schema_uid) if asset.schema_uid else None
-    stamp_current_user_attributes(db, schema, asset.attributes, current_user_id)
-    flag_modified(asset, "attributes")
-
-    if "attributes" in patch or "schema_uid" in patch:
-        validate_attributes(db, schema, asset.attributes, workspace_id, Asset, exclude_uid=uid)
-        _assert_unique(db, workspace_id, asset.attributes, exclude=uid)
+    changes: dict = {}
+    if new_attrs is not None:
+        stamp_current_user_attributes(db, schema, new_attrs, current_user_id)
+        validate_attributes(db, schema, new_attrs, workspace_id, Asset, exclude_uid=uid)
+        _assert_unique(db, workspace_id, new_attrs, exclude=uid)
+        current = asset.attributes or {}
+        changes.update({f"attr:{k}": v for k, v in new_attrs.items() if current.get(k) != v})
+        changes.update({f"attr:{k}": None for k in current if k not in new_attrs})
+    if new_name is not None and new_name != asset.name:
+        changes["name"] = new_name
+    if changes:
+        try:
+            ledger_service.edit_values(db, workspace_id, _actor(identity), uid, changes)
+        except LedgerError as exc:
+            _ledger_failed(db, exc)
     db.commit()
     if global_changed:
         # Cross-workspace visibility just changed — this asset's neighbors
@@ -188,16 +226,25 @@ def update_asset(
 
 @router.delete("/{uid}", status_code=204)
 def delete_asset(
-    uid: str, workspace_id: str = Depends(require_permission("delete")), db: Session = Depends(get_db)
+    uid: str, identity=Depends(get_identity), workspace_id: str = Depends(require_permission("delete")),
+    db: Session = Depends(get_db)
 ):
     asset = _get_owned_asset(uid, workspace_id, db)
-    db.delete(asset)
+    if _ledger_only(db, workspace_id):
+        # A ledger-only workspace retires, never erases: the record keeps its history.
+        try:
+            ledger_service.retire_record(db, workspace_id, _actor(identity), uid, "deleted")
+        except LedgerError as exc:
+            _ledger_failed(db, exc)
+    else:
+        db.delete(asset)
     db.commit()
 
 
 @router.post("/bulk-delete", response_model=BulkDeleteResult)
 def bulk_delete_assets(
     body: BulkDeleteRequest,
+    identity=Depends(get_identity),
     workspace_id: str = Depends(require_permission("delete")),
     db: Session = Depends(get_db),
 ):
@@ -216,7 +263,10 @@ def bulk_delete_assets(
         if asset is None or asset.workspace_id != workspace_id:
             missing.append(uid)
             continue
-        db.delete(asset)
+        if _ledger_only(db, workspace_id):
+            ledger_service.retire_record(db, workspace_id, _actor(identity), uid, "deleted")
+        else:
+            db.delete(asset)
         deleted += 1
     db.commit()
     return BulkDeleteResult(deleted=deleted, not_found=missing)
@@ -306,6 +356,7 @@ def list_relations(
 @relations_router.post("", response_model=RelationOut, status_code=201)
 def create_relation(
     body: RelationCreate,
+    identity=Depends(get_identity),
     workspace_id: str = Depends(require_permission("create")),
     db: Session = Depends(get_db),
 ):
@@ -315,10 +366,18 @@ def create_relation(
     _get_owned_asset(body.from_asset_uid, workspace_id, db)
     _get_visible_asset(body.to_asset_uid, workspace_id, db)
 
-    relation = Relation(workspace_id=workspace_id, **body.model_dump())
-    db.add(relation)
+    # An asserted edge is a person's statement in the fact ledger (§13 S5).
+    try:
+        ledger_service.relate(db, workspace_id, _actor(identity), body.from_asset_uid, body.relation_type,
+                              body.to_asset_uid, present=True)
+    except LedgerError as exc:
+        _ledger_failed(db, exc)
     db.commit()
-    db.refresh(relation)
+    relation = db.scalar(select(Relation).where(
+        Relation.from_asset_uid == body.from_asset_uid, Relation.to_asset_uid == body.to_asset_uid,
+        Relation.relation_type == body.relation_type).order_by(Relation.id.desc()).limit(1))
+    if relation is None:
+        raise HTTPException(status_code=409, detail={"error": "the ledger did not project the relation"})
     rebuild_asset_relations(db, body.from_asset_uid)
     rebuild_asset_relations(db, body.to_asset_uid)
     db.commit()
@@ -328,20 +387,41 @@ def create_relation(
 @relations_router.delete("/{relation_id}", status_code=204)
 def delete_relation(
     relation_id: int,
+    identity=Depends(get_identity),
     workspace_id: str = Depends(require_permission("delete")),
     db: Session = Depends(get_db),
 ):
     relation = db.get(Relation, relation_id)
     if relation is None or relation.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Relation not found")
-    if relation.derivation is not None:
-        # Only the ledger writes these (I-PROJ-2): change the source, the
-        # installation or the decision behind the edge instead.
-        raise HTTPException(status_code=409, detail="This relation is maintained by the fact ledger "
+    if relation.derivation not in (None, "ledger"):
+        # Derived edges follow from other facts (I-PROJ-2): change the source,
+        # the installation or the decision behind the edge instead.
+        raise HTTPException(status_code=409, detail="This relation is derived by the fact ledger "
                                                     "and cannot be removed directly")
     from_uid, to_uid = relation.from_asset_uid, relation.to_asset_uid
-    db.delete(relation)
+    try:
+        if relation.derivation == "ledger":
+            # An asserted edge: the person states it no longer holds.
+            ledger_service.relate(db, workspace_id, _actor(identity), from_uid, relation.relation_type, to_uid,
+                                  present=False)
+        else:
+            _remove_legacy_edge(db, workspace_id, _actor(identity), relation)
+    except LedgerError as exc:
+        _ledger_failed(db, exc)
     db.commit()
     rebuild_asset_relations(db, from_uid)
     rebuild_asset_relations(db, to_uid)
     db.commit()
+
+
+def _remove_legacy_edge(db: Session, workspace_id: str, actor: str, relation: Relation) -> None:
+    """An edge from before the ledger has no claim to withdraw: its removal is
+    recorded as a decision, with the edge as it was, then made."""
+    from app.ledger import engine
+    from app.ledger.writer import writing
+    with writing(db):
+        engine._record_decision(db, "remove_legacy_edge", actor, workspace_id, subject_uid=relation.from_asset_uid,
+                                predicate=f"rel:{relation.relation_type}",
+                                target={"to": relation.to_asset_uid, "relation_id": relation.id})
+        db.delete(relation)

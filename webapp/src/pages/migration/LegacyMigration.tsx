@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { legacyMigrationApi } from "../../api/client";
+import { ledgerApi, legacyMigrationApi } from "../../api/client";
 import type { MigrationAction, MigrationOutcome, MigrationRow } from "../../api/ledgerTypes";
 import { errorText } from "../../components/hub/LedgerPanels";
 import { Card, Empty } from "../../components/hub/ui";
@@ -319,5 +319,54 @@ function Row({ r, open, onOverride }: { r: MigrationRow; open: boolean; onOverri
         {r.reason && <span className="block text-[11px] text-slate-500">{r.reason}</span>}
       </td>
     </tr>
+  );
+}
+
+
+/** §13 S5: once a workspace's legacy records are migrated, its record facts
+ * and relations can be made to change only through the fact ledger. The
+ * database refuses anything else. */
+export function LedgerOnlyCard() {
+  const queryClient = useQueryClient();
+  const status = useQuery({ queryKey: ["ledger-only"], queryFn: ledgerApi.ledgerOnly, retry: false });
+  const set = useMutation({
+    mutationFn: (v: { enabled: boolean; reason: string }) => ledgerApi.setLedgerOnly(v.enabled, v.reason),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ledger-only"] }),
+  });
+  if (!status.data) return null;
+  const s = status.data;
+  const toggle = (enabled: boolean) => {
+    const reason = prompt(enabled ? "Why switch this workspace to ledger-only?" : "Why switch ledger-only off?");
+    if (reason) set.mutate({ enabled, reason });
+  };
+  return (
+    <Card
+      title="Ledger-only writes (§13 S5)"
+      action={
+        <span className={`rounded px-2 py-0.5 text-xs ${s.enabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+          {s.enabled ? "on" : "off"}
+        </span>
+      }
+    >
+      <p className="py-1 text-sm text-slate-600">
+        {s.enabled
+          ? "Record attributes, names, types, status and relations change only through the fact ledger: every change is attributed to its author, and the database refuses anything written around it. Deleting a record retires it."
+          : "When on, record facts and relations change only through the fact ledger, and the database refuses anything written around it."}
+      </p>
+      {!s.enabled && !s.legacy.ok && (
+        <p className="text-xs text-amber-700">
+          Migrate the legacy records first: {s.legacy.blocked.length} blocked, {s.legacy.mixed_open.length} to review,{" "}
+          {s.legacy.unplanned} unplanned.
+        </p>
+      )}
+      <button
+        onClick={() => toggle(!s.enabled)}
+        disabled={!s.enabled && !s.legacy.ok}
+        className="mt-2 rounded-md border border-slate-300 px-3 py-1 text-xs disabled:opacity-40"
+      >
+        {s.enabled ? "Switch off" : "Switch on"}
+      </button>
+      {set.isError && <p className="mt-1 text-xs text-red-600">{errorText(set.error)}</p>}
+    </Card>
   );
 }

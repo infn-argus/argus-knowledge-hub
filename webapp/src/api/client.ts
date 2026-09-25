@@ -787,6 +787,11 @@ export const hubApi = {
 export const ledgerApi = {
   review: () => request<ReviewQueue>("/v1/ledger/review"),
   queues: () => request<QueueDashboard>("/v1/ledger/review/queues"),
+  ledgerOnly: () =>
+    request<{ enabled: boolean; legacy: { ok: boolean; blocked: string[]; mixed_open: string[]; unplanned: number } }>(
+      "/v1/ledger/ledger-only"),
+  setLedgerOnly: (enabled: boolean, reason: string) =>
+    request<{ enabled: boolean }>("/v1/ledger/ledger-only", { method: "PUT", body: json({ enabled, reason }) }),
   escalateReview: () =>
     request<{ backup: number; governance: number; without_recipient: number }>("/v1/ledger/review/escalate", { method: "POST" }),
   facts: (uid: string) => request<RecordFacts>(`/v1/ledger/records/${uid}/facts`),

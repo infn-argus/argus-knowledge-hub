@@ -47,6 +47,7 @@ from app.models.import_snapshot import ImportSnapshot
 from app.models.issue import Issue
 from app.models.ledger import IdentityBinding, LedgerDomain, MigrationMap
 from app.models.legacy_migration import LegacyMigrationItem, LegacyMigrationPlan
+from app.ledger.writer import ledger_writer
 
 SOURCE = "epik8s"
 POSITION = "Equipment Position"
@@ -569,6 +570,7 @@ def _item_invariants(db: Session, item: LegacyMigrationItem, done: dict) -> list
     return problems
 
 
+@ledger_writer
 def apply(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
     p = _plan(db, plan_id)
     _assert_open(db, p)
@@ -709,6 +711,7 @@ def _retire_by_decision(db: Session, workspace_id: str, actor: str, uid: str, re
         uid, "exists", "absent", replaces=service._active(db, uid, "exists"), reason=reason)])
 
 
+@ledger_writer
 def rollback(db: Session, plan_id: str, actor: str, item_ids: Optional[list[int]] = None) -> LegacyMigrationPlan:
     p = _plan(db, plan_id)
     _assert_open(db, p)
