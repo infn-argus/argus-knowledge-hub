@@ -26,6 +26,7 @@ from app.routers import (
     imports,
     issues,
     labels,
+    legacy_migration,
     retirement,
     mcp,
     roles,
@@ -118,6 +119,7 @@ app.include_router(workflows.router)
 app.include_router(workflows.notifications_router)
 app.include_router(access_reviews.router)
 app.include_router(retirement.router)
+app.include_router(legacy_migration.router)
 app.include_router(attribute_values.router)
 app.include_router(ai.router)
 app.include_router(mcp.router)

@@ -137,6 +137,12 @@ def freeze(db: Session, domain_id: str, actor: str, watermark: dict, manifest: d
         raise LedgerError("a domain is frozen from T1 or T2")
     if not watermark:
         raise LedgerError("the watermark W is required")
+    # §17.4 criterion 4: the workspace's legacy records are migrated (§12).
+    from app.ledger import legacy
+    g = legacy.gate(db, d.workspace_id)
+    if not g["ok"]:
+        raise LedgerError(f"legacy migration not done: {len(g['blocked'])} M-BLOCK, {len(g['mixed_open'])} M-MIXED "
+                          f"not accepted, {g['unplanned']} inferred records not planned (§12, §17.4)")
     manifest_hash = hash_manifest(manifest)
     for sid in d.stream_ids:
         head = db.get(StreamHead, sid)

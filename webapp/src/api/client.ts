@@ -93,6 +93,8 @@ import type {
   RetentionClass,
   RetentionView,
   RetirementStatus,
+  MigrationPlanView,
+  MigrationRow,
   RoleTemplate,
   Rehearsal,
   TicketTransitions,
@@ -889,6 +891,27 @@ export const accessReviewsApi = {
     request<AccessReviewView>("/v1/access-reviews", { method: "POST", body: json({ required_signers }) }),
   sign: (id: string, input: { signer?: string; comment?: string }) =>
     request<AccessReviewView>(`/v1/access-reviews/${id}/sign`, { method: "POST", body: json(input) }),
+};
+
+export const legacyMigrationApi = {
+  list: () => request<MigrationPlanView[]>("/v1/migration/plans"),
+  get: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}`),
+  plan: (inventory_workspace_id?: string) =>
+    request<MigrationPlanView>("/v1/migration/plans", { method: "POST", body: json({ inventory_workspace_id }) }),
+  override: (id: string, item: number, outcome: string, reason: string) =>
+    request<MigrationRow>(`/v1/migration/plans/${id}/items/${item}/override`, { method: "POST", body: json({ outcome, reason }) }),
+  apply: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/apply`, { method: "POST" }),
+  rollback: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/rollback`, { method: "POST", body: json({}) }),
+  finalize: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/finalize`, { method: "POST" }),
+  gate: () => request<{ ok: boolean; blocked: string[]; mixed_open: string[]; unplanned: number }>("/v1/migration/gate"),
+  /** The decision report as CSV (§12.5), as a download URL. */
+  reportUrl: async (id: string): Promise<string> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const resp = await fetch(`${session.baseUrl}/v1/migration/plans/${id}/report.csv`, { headers: authHeaders(session) });
+    if (!resp.ok) throw new ApiError(resp.status, await resp.text());
+    return URL.createObjectURL(await resp.blob());
+  },
 };
 
 export const retirementApi = {

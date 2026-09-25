@@ -164,3 +164,52 @@ The signer also attests three things ARGUS cannot see: a
 disaster-recovery drill, the owners' sign-off of the targets (U10), and
 their acceptance of items 1–13. Signing records one decision and moves
 every domain from T4 to T5. A domain reaches T5 in no other way.
+
+## Legacy migration (§12)
+
+This converts the records the old importer inferred (`argus_keywords:
+inferred`) into Positions, Equipment and Installations. It is done per
+workspace, before the workspace's domain is frozen for cutover: the freeze
+is refused while any item is M-BLOCK, an M-MIXED item is not yet accepted,
+or an inferred record is not in a plan.
+
+1. **Back up** (`python -m app.ledger backup`). Run it first on a restored
+   copy of production.
+2. **Plan**: *Migration to ARGUS → Legacy records → Plan the migration*, or
+   `POST /v1/migration/plans` with an optional `inventory_workspace_id`.
+   This is where Equipment that matches no inventory record gets created.
+   Nothing changes. Download the decision report (CSV) and give it to the
+   owners.
+3. **Review**: the owners override an outcome where they disagree. Each
+   override needs a reason and is recorded as a decision. An M-BLOCK item
+   (an identifier held by another record) is resolved at its source, then
+   re-planned or overridden.
+4. **Apply**: items are applied in dependency order, each in its own
+   savepoint:
+   - an item whose record changed since planning becomes `stale`;
+   - an item that breaks I-MIG-1 (nothing lost) or I-MIG-2 (traceable)
+     becomes `failed` and leaves nothing behind.
+
+   The plan is `verified` when every item is applied and I-MIG-2 and
+   I-MIG-3 hold across the plan. People still check I-MIG-4 to I-MIG-7.
+5. **Roll back** at any point until the plan is finalized, and never after
+   the domain has cut over:
+   - records the migration created are retired by ledger decisions;
+   - Installations are rejected;
+   - labels and photos move back;
+   - the legacy rows get their pre-images back.
+
+   `migration_map` is append-only, so its rows stay as history.
+6. **Finalize** after sign-off. From then on, corrections are ordinary
+   decisions.
+
+What each outcome does:
+
+| Outcome | Result |
+|---|---|
+| M-FUNC | a lattice element: kept |
+| M-POS | the row becomes an `Equipment Position` with key `FAC:POS:<tag>`. The old key is kept as a `former_key` label and still resolves through `/v1/lookup` |
+| M-PHYS | Position, plus the inventory's matching record or new Active Equipment, plus a Confirmed Installation. `valid_from` is the day a person set in `installed_on`, otherwise `before_records` |
+| M-MIXED | Position, plus Provisional Equipment (stated as the migration's inference), plus a Proposed Installation. A reviewer confirms both |
+| M-RETIRE | the importer no longer produces it and no person touched it: Retired, with its relations kept in the pre-image |
+| M-BLOCK | nothing moves |

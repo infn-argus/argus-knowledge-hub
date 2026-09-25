@@ -125,6 +125,13 @@ currently valid* revision rather than to an arbitrary PDF.
   tokens, open defaults and administrators. It shows what changed since the last review and
   is complete once enough distinct owners have signed it. *Access → access review*; served
   by `/v1/access-reviews`.
+- **Legacy migration (§12).** Records the old importer inferred are classified by their
+  evidence: serials and who wrote them, labels, inventory links, photos, edits, tickets and
+  history. Each becomes a Position, Equipment or an Installation, or is retired or blocked.
+  First comes a decision report that changes nothing; then owners' overrides; then an apply
+  that checks its invariants item by item. Rollback works until the plan is finalized. A domain
+  cannot be frozen for cutover while any of its records is blocked, unreviewed or unplanned.
+  *Migration to ARGUS → Legacy records*; served by `/v1/migration`.
 - **Stable API and Jira retirement.** The API is versioned in its path, and a deprecated
   endpoint announces its sunset in headers at least 180 days ahead
   ([docs/api-policy.md](docs/api-policy.md)). Old Jira and Insight identifiers resolve one at a

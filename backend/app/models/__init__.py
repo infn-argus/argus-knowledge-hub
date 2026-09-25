@@ -62,3 +62,4 @@ __all__ = [
 ]
 from app.models import workflow  # noqa: F401,E402
 from app.models import access_review  # noqa: F401,E402
+from app.models import legacy_migration  # noqa: F401,E402

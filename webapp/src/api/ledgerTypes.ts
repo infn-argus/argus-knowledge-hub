@@ -437,3 +437,47 @@ export interface RetirementStatus {
   conditions: RetirementCondition[];
   attestations: Record<string, string>;
 }
+
+export type MigrationOutcome = "M-BLOCK" | "M-FUNC" | "M-POS" | "M-PHYS" | "M-MIXED" | "M-RETIRE";
+
+export interface MigrationAction {
+  do: "keep" | "retire" | "retype" | "equipment" | "installation" | "move_labels" | "move_attachments";
+  key?: string;
+  match?: string | null;
+  workspace?: string;
+  status?: string;
+  labels?: string[];
+  attachments?: string[];
+}
+
+export interface MigrationRow {
+  item: number;
+  legacy_uid: string;
+  legacy_key: string;
+  legacy_type: string;
+  outcome: MigrationOutcome;
+  confidence: number;
+  evidence: Record<string, unknown>;
+  actions: MigrationAction[];
+  warnings: string[];
+  reviewer_required: boolean;
+  override: { outcome: string; by: string; reason: string } | null;
+  status: "planned" | "applied" | "failed" | "stale" | "rolled_back";
+  reason: string | null;
+  applied: Record<string, unknown> | null;
+}
+
+export interface MigrationPlanView {
+  id: string;
+  workspace_id: string;
+  inventory_workspace_id: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+  applied_at: string | null;
+  finalized_at: string | null;
+  invariants: { ok: boolean; checks: Record<string, boolean>; summary: Record<string, number>; not_automated: string[] } | null;
+  outcomes: Record<string, number>;
+  statuses: Record<string, number>;
+  rows?: MigrationRow[];
+}

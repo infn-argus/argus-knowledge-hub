@@ -138,8 +138,10 @@ def derive_for_ticket(db: Session, issue: Issue) -> list[TicketLink]:
             add(uid, "involved_equipment", c, "derived", detail)
         if not best and positions and source == "legacy_created_fallback":
             for p in positions:
-                for m in db.scalars(select(MigrationMap).where(MigrationMap.legacy_uid == p,
-                                                               MigrationMap.role == "equipment")):
+                # A rolled-back migration leaves its map rows; their records are retired.
+                for m in db.scalars(select(MigrationMap).join(Asset, Asset.uid == MigrationMap.new_uid).where(
+                        MigrationMap.legacy_uid == p, MigrationMap.role == "equipment",
+                        Asset.record_status != "Retired")):
                     add(m.new_uid, "involved_equipment", "possible", "migration-split", detail)
         if not positions and db.scalar(select(func.count()).select_from(Relation).where(
                 Relation.relation_type == "installation of", Relation.to_asset_uid == subject.uid)):
