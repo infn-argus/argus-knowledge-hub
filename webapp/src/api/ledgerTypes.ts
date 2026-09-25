@@ -504,6 +504,7 @@ export interface MigrationPlanView {
       "I-MIG-4"?: { ok: boolean; failing: string[] };
       "I-MIG-5": { ok: boolean; before?: number; after?: number; grew?: Record<string, number[]>; reason?: string };
       "I-MIG-6": { ok: boolean; records: number; differences: { uid: string; fields: string[] }[] };
+      "I-MIG-7"?: { ok: boolean | null; reason?: string; before?: number; after?: number; lost?: { incident: string; cause: string }[]; more_precise?: number };
     };
   } | null;
   outcomes: Record<string, number>;
@@ -531,4 +532,24 @@ export interface QueueDashboard {
   backup_steward: string | null;
   domain: string | null;
   governance: string[];
+}
+
+export interface GoldenIncident {
+  id: string;
+  name: string;
+  symptoms: string[];
+  expected_causes: string[];
+  symptom_kind: Record<string, string>;
+  healthy: string[];
+  ticket_uid: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface GoldenRun {
+  incidents: number;
+  found: number;
+  expected: number;
+  results: { incident: string; name: string; found: number; expected: number;
+             causes: Record<string, { found: boolean; as: string | null; rank: number | null; more_precise: boolean }> }[];
 }

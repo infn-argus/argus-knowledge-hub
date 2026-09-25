@@ -212,7 +212,11 @@ def test_rollback_restores_the_legacy_rows_and_finalize_closes_the_window():
     assert client.post(f"/v1/migration/plans/{plan2['id']}/finalize", headers=L.headers).status_code == 409
     deep = client.post(f"/v1/migration/plans/{plan2['id']}/verify", headers=L.headers).json()["invariants"]
     assert deep["deep_verification"]["ok"], deep["deep_verification"]
-    done = client.post(f"/v1/migration/plans/{plan2['id']}/finalize", headers=L.headers)
+    # No golden incidents here: I-MIG-7 was not checked, so finalizing needs a waiver with a reason.
+    unwaived = client.post(f"/v1/migration/plans/{plan2['id']}/finalize", headers=L.headers)
+    assert unwaived.status_code == 409 and "I-MIG-7" in unwaived.json()["detail"]["error"]
+    done = client.post(f"/v1/migration/plans/{plan2['id']}/finalize", headers=L.headers,
+                       json={"golden_waiver": "no incident history for this fixture beamline"})
     assert done.status_code == 200 and done.json()["status"] == "finalized"
     assert client.post(f"/v1/migration/plans/{plan2['id']}/rollback", headers=L.headers, json={}).status_code == 409
 

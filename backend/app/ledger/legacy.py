@@ -37,7 +37,7 @@ from typing import Optional
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.ledger import engine, invariants, lookup, registry, service, temporal
+from app.ledger import engine, golden, invariants, lookup, registry, service, temporal
 from app.ledger.engine import INSTALLATION, LedgerError, ParsedClaim, canonical
 from app.models.asset import Asset, Relation
 from app.models.asset_subresources import AssetComment, AssetHistory, AssetLabel, AssetTicket
@@ -578,7 +578,9 @@ def apply(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
         # I-MIG-5's baseline: the registry report before the first item moves.
         before = registry.report(db, {p.workspace_id, p.inventory_workspace_id})
         p.invariants = {**(p.invariants or {}),
-                        "registry_before": {"total": before["total"], "counts": before["counts"]}}
+                        "registry_before": {"total": before["total"], "counts": before["counts"]},
+                        # I-MIG-7's baseline: the golden incidents walked before anything moves.
+                        "golden_before": golden.run(db, p.workspace_id)}
     todo = [i for i in items(db, p.id) if i.status in ("planned", "failed")]
     removed: dict[int, dict] = {}         # relations this run removed with retired records
     for item in sorted(todo, key=lambda i: (ORDER[i.outcome], i.id)):
@@ -628,8 +630,8 @@ def verify(db: Session, p: LegacyMigrationPlan) -> dict:
     return {"ok": all(checks.values()), "checks": checks,
             "summary": {"applied": len(applied), "open": len(open_items), "dangling_relations": dangling,
                         "untraced": len(untraced)},
-            "deep": "I-MIG-4, I-MIG-5 and I-MIG-6 run in the deep verification, required before finalizing",
-            "not_automated": ["I-MIG-7 (root-cause walks on the golden incident set)"]}
+            "deep": "I-MIG-4 to I-MIG-7 run in the deep verification, required before finalizing",
+            "not_automated": []}
 
 
 def _state(db: Session, uids: list[str]) -> dict:
@@ -684,12 +686,18 @@ def deep_verify(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
     inv = invariants.report(db, workspaces)
     mig4 = {"ok": inv["ok"], "failing": inv["failing"],
             "examples": {c: inv["invariants"][c]["examples"][:3] for c in inv["failing"]}}
-    deep = {"at": now().isoformat(), "ok": mig4["ok"] and mig5["ok"] and mig6["ok"], "I-MIG-4": mig4,
-            "I-MIG-5": mig5, "I-MIG-6": mig6}
+    golden_before = (p.invariants or {}).get("golden_before")
+    if golden_before and golden_before["incidents"]:
+        mig7 = golden.compare(golden_before, golden.run(db, p.workspace_id))
+    else:
+        mig7 = {"ok": None, "reason": "no golden incidents were recorded for this workspace before the plan was "
+                                      "applied; finalizing needs a waiver"}
+    deep = {"at": now().isoformat(), "ok": mig4["ok"] and mig5["ok"] and mig6["ok"] and mig7["ok"] is not False,
+            "I-MIG-4": mig4, "I-MIG-5": mig5, "I-MIG-6": mig6, "I-MIG-7": mig7}
     p.invariants = {**(p.invariants or {}), "deep_verification": deep}
     engine._record_decision(db, "migration_verify", actor, p.workspace_id, target={"plan": p.id},
                             value={"ok": deep["ok"], "I-MIG-4": mig4["ok"], "I-MIG-5": mig5["ok"],
-                                   "I-MIG-6": mig6["ok"]})
+                                   "I-MIG-6": mig6["ok"], "I-MIG-7": mig7["ok"]})
     db.flush()
     return p
 
@@ -750,7 +758,7 @@ def rollback(db: Session, plan_id: str, actor: str, item_ids: Optional[list[int]
     return p
 
 
-def finalize(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
+def finalize(db: Session, plan_id: str, actor: str, golden_waiver: Optional[str] = None) -> LegacyMigrationPlan:
     p = _plan(db, plan_id)
     if p.finalized_at is not None:
         raise MigrationError("already finalized")
@@ -761,10 +769,12 @@ def finalize(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
         raise MigrationError("run the deep verification (I-MIG-4, I-MIG-5, I-MIG-6) after the last apply")
     if not deep["ok"]:
         raise MigrationError("the deep verification failed: " + ", ".join(
-            k for k in ("I-MIG-4", "I-MIG-5", "I-MIG-6") if not deep.get(k, {"ok": False})["ok"]))
+            k for k in ("I-MIG-4", "I-MIG-5", "I-MIG-6", "I-MIG-7") if deep.get(k, {"ok": False})["ok"] is False))
+    if deep.get("I-MIG-7", {}).get("ok") is None and not (golden_waiver or "").strip():
+        raise MigrationError("I-MIG-7 was not checked (no golden incidents); finalizing needs a waiver with a reason")
     p.finalized_at, p.status = now(), "finalized"
     engine._record_decision(db, "migration_finalize", actor, p.workspace_id, target={"plan": p.id},
-                            value={"report_hash": p.report_hash})
+                            value={"report_hash": p.report_hash, "golden_waiver": golden_waiver})
     db.flush()
     return p
 

@@ -52,3 +52,22 @@ class LegacyMigrationItem(Base):
     reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     applied: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class GoldenIncident(Base):
+    """A past incident with the causes the teams know were behind it
+    (§12.6 I-MIG-7). Symptoms and causes are held by uid, so they survive
+    re-keying; the root-cause walk must keep finding the causes, or more
+    precisely resolved ones, across a migration."""
+    __tablename__ = "golden_incidents"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String)
+    symptoms: Mapped[list] = mapped_column(JSONB, default=list)
+    symptom_kind: Mapped[dict] = mapped_column(JSONB, default=dict)
+    healthy: Mapped[list] = mapped_column(JSONB, default=list)
+    expected_causes: Mapped[list] = mapped_column(JSONB, default=list)
+    ticket_uid: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_by: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

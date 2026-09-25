@@ -130,13 +130,72 @@ def deep_verify(plan_id: str, identity=Depends(get_identity), workspace_id: str 
     return legacy.view(db, p)
 
 
+class FinalizeIn(BaseModel):
+    golden_waiver: Optional[str] = None     # why I-MIG-7 could not be checked
+
+
 @router.post("/plans/{plan_id}/finalize")
-def finalize(plan_id: str, identity=Depends(get_identity), workspace_id: str = Depends(require_permission("approve")),
-             db: Session = Depends(get_db)):
+def finalize(plan_id: str, body: Optional[FinalizeIn] = None, identity=Depends(get_identity),
+             workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
     _owned(db, plan_id, workspace_id)
     try:
-        p = legacy.finalize(db, plan_id, actor_of(identity))
+        p = legacy.finalize(db, plan_id, actor_of(identity), (body or FinalizeIn()).golden_waiver)
     except LedgerError as exc:
         _fail(db, exc)
     db.commit()
     return legacy.view(db, p)
+
+
+# --------------------------------------------------------------------------- golden incidents (I-MIG-7)
+
+class GoldenIn(BaseModel):
+    name: str
+    symptoms: list[str]
+    expected_causes: list[str]
+    symptom_kind: dict[str, str] = {}
+    healthy: list[str] = []
+    ticket_uid: Optional[str] = None
+
+
+def _golden_view(g) -> dict:
+    return {"id": g.id, "name": g.name, "symptoms": g.symptoms, "expected_causes": g.expected_causes,
+            "symptom_kind": g.symptom_kind, "healthy": g.healthy, "ticket_uid": g.ticket_uid,
+            "created_by": g.created_by, "created_at": g.created_at}
+
+
+@router.get("/golden-incidents")
+def list_golden(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    from app.ledger import golden
+    return [_golden_view(g) for g in golden.incidents(db, workspace_id)]
+
+
+@router.post("/golden-incidents", status_code=201)
+def create_golden(body: GoldenIn, identity=Depends(get_identity),
+                  workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger import golden
+    try:
+        g = golden.record(db, workspace_id, actor_of(identity), name=body.name, symptoms=body.symptoms,
+                          expected_causes=body.expected_causes, symptom_kind=body.symptom_kind,
+                          healthy=body.healthy, ticket_uid=body.ticket_uid)
+    except golden.GoldenError as exc:
+        raise HTTPException(status_code=422, detail={"error": str(exc)})
+    db.commit()
+    return _golden_view(g)
+
+
+@router.delete("/golden-incidents/{incident_id}", status_code=204)
+def delete_golden(incident_id: str, workspace_id: str = Depends(require_permission("approve")),
+                  db: Session = Depends(get_db)):
+    from app.models.legacy_migration import GoldenIncident
+    g = db.get(GoldenIncident, incident_id)
+    if g is None or g.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    db.delete(g)
+    db.commit()
+
+
+@router.post("/golden-incidents/run")
+def run_golden(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """Walk every golden incident now: which expected causes are found, and at what rank."""
+    from app.ledger import golden
+    return golden.run(db, workspace_id)

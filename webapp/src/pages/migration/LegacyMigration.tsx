@@ -82,7 +82,63 @@ export function LegacyMigrationCard() {
       </div>
       {create.isError && <p className="mt-2 text-sm text-red-600">{errorText(create.error)}</p>}
       {current ? <PlanDetail id={current} onChange={refresh} /> : <Empty>No plan yet.</Empty>}
+      <GoldenIncidents />
     </Card>
+  );
+}
+
+/** I-MIG-7: past incidents with the causes the teams know. The root-cause
+ * walk must keep finding them, or more precisely resolved ones. */
+function GoldenIncidents() {
+  const queryClient = useQueryClient();
+  const list = useQuery({ queryKey: ["golden"], queryFn: legacyMigrationApi.golden, retry: false });
+  const run = useMutation({ mutationFn: legacyMigrationApi.runGolden });
+  const [form, setForm] = useState({ name: "", symptoms: "", causes: "" });
+  const split = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
+  const add = useMutation({
+    mutationFn: () => legacyMigrationApi.addGolden({ name: form.name, symptoms: split(form.symptoms), expected_causes: split(form.causes) }),
+    onSuccess: () => { setForm({ name: "", symptoms: "", causes: "" }); queryClient.invalidateQueries({ queryKey: ["golden"] }); },
+  });
+  const results = Object.fromEntries((run.data?.results ?? []).map((r) => [r.incident, r]));
+  return (
+    <div className="mt-4 border-t border-slate-100 pt-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-900">Golden incidents (I-MIG-7)</h3>
+        <button onClick={() => run.mutate()} className="rounded border border-slate-300 px-2 py-0.5 text-xs">
+          {run.isPending ? "Walking…" : "Run the walk"}
+        </button>
+      </div>
+      <p className="text-xs text-slate-500">
+        Past incidents and the causes behind them. Their baseline is taken when a plan is first applied; the deep
+        verification fails if a cause is no longer found.
+      </p>
+      <ul className="mt-1 divide-y divide-slate-100 text-sm">
+        {(list.data ?? []).map((g) => {
+          const r = results[g.id];
+          return (
+            <li key={g.id} className="flex items-center gap-2 py-1">
+              <span className="flex-1 text-slate-800">{g.name}</span>
+              <span className="text-xs text-slate-500">{g.symptoms.length} symptom(s) · {g.expected_causes.length} cause(s)</span>
+              {r && (
+                <span className={`text-xs ${r.found === r.expected ? "text-emerald-700" : "text-red-600"}`}>
+                  {r.found} of {r.expected} found
+                </span>
+              )}
+            </li>
+          );
+        })}
+        {list.data?.length === 0 && <li className="py-1 text-xs text-slate-500">None recorded for this workspace.</li>}
+      </ul>
+      <div className="mt-2 flex flex-wrap gap-1 text-xs">
+        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Incident (name, date)" className="rounded border border-slate-300 px-2 py-1" />
+        <input value={form.symptoms} onChange={(e) => setForm({ ...form, symptoms: e.target.value })} placeholder="Symptoms (keys, comma-separated)" className="flex-1 rounded border border-slate-300 px-2 py-1" />
+        <input value={form.causes} onChange={(e) => setForm({ ...form, causes: e.target.value })} placeholder="Known causes (keys)" className="flex-1 rounded border border-slate-300 px-2 py-1" />
+        <button disabled={!form.name || !form.symptoms || !form.causes} onClick={() => add.mutate()} className="rounded bg-slate-900 px-2 py-1 font-medium text-white disabled:opacity-40">
+          Record
+        </button>
+      </div>
+      {(add.isError || run.isError) && <p className="mt-1 text-xs text-red-600">{errorText(add.error ?? run.error)}</p>}
+    </div>
   );
 }
 
@@ -92,7 +148,10 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
   const act = (fn: (id: string) => Promise<unknown>) => ({ mutationFn: () => fn(id), onSuccess: onChange });
   const apply = useMutation(act(legacyMigrationApi.apply));
   const rollback = useMutation(act(legacyMigrationApi.rollback));
-  const finalize = useMutation(act(legacyMigrationApi.finalize));
+  const finalize = useMutation({
+    mutationFn: (waiver?: string) => legacyMigrationApi.finalize(id, waiver),
+    onSuccess: onChange,
+  });
   const verify = useMutation(act(legacyMigrationApi.verify));
   const override = useMutation({
     mutationFn: (v: { item: number; outcome: string; reason: string }) => legacyMigrationApi.override(id, v.item, v.outcome, v.reason),
@@ -145,8 +204,15 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
               {verify.isPending ? "Verifying…" : "Deep verify"}
             </button>
           )}
-          {p.status === "verified" && (
-            <button onClick={() => confirm("After finalizing, the plan can no longer be rolled back.") && finalize.mutate()}
+          {p.status === "verified" && deep?.ok && (
+            <button
+              onClick={() => {
+                if (!confirm("After finalizing, the plan can no longer be rolled back.")) return;
+                if (deep?.["I-MIG-7"]?.ok === null) {
+                  const waiver = prompt("No golden incidents were checked (I-MIG-7). Why can the plan be finalized without them?");
+                  if (waiver) finalize.mutate(waiver);
+                } else finalize.mutate(undefined);
+              }}
                     className="rounded border border-slate-300 px-2 py-1">
               Finalize
             </button>
@@ -172,11 +238,20 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
               <span className={`mr-3 ${deep["I-MIG-6"].ok ? "text-emerald-700" : "text-red-600"}`}>
                 {deep["I-MIG-6"].ok ? "✓" : "✗"} I-MIG-6 (rebuild: {deep["I-MIG-6"].differences.length} of {deep["I-MIG-6"].records} differ)
               </span>
+              {deep["I-MIG-7"] && (
+                <span className={`mr-3 ${deep["I-MIG-7"].ok ? "text-emerald-700" : deep["I-MIG-7"].ok === null ? "text-amber-700" : "text-red-600"}`}
+                      title={deep["I-MIG-7"].reason ?? (deep["I-MIG-7"].lost ?? []).map((l) => `${l.incident}: lost ${l.cause}`).join("; ")}>
+                  {deep["I-MIG-7"].ok ? "✓" : deep["I-MIG-7"].ok === null ? "–" : "✗"} I-MIG-7 (golden incidents
+                  {deep["I-MIG-7"].ok === null ? ": none recorded" : `: ${deep["I-MIG-7"].before} → ${deep["I-MIG-7"].after} causes found`})
+                </span>
+              )}
             </>
           ) : (
             <span className="mr-3 text-slate-500">I-MIG-4, I-MIG-5, I-MIG-6: deep verification not run</span>
           )}
-          <span className="text-slate-400">checked by people: {p.invariants.not_automated.map((x) => x.split(" ")[0]).join(", ")}</span>
+          {p.invariants.not_automated.length > 0 && (
+            <span className="text-slate-400">checked by people: {p.invariants.not_automated.map((x) => x.split(" ")[0]).join(", ")}</span>
+          )}
         </p>
       )}
       {error && <p className="text-sm text-red-600">{errorText(error)}</p>}

@@ -141,8 +141,9 @@ currently valid* revision rather than to an arbitrary PDF.
   queue page shows each queue's size, age distribution and escalations.
   Before a plan is finalized, a deep verification checks three things: every data invariant
   holds (I-MIG-4, also served at `/v1/ledger/invariants/report`); the relation registry's
-  report got no worse (I-MIG-5); and rebuilding from the ledger gives exactly the migrated
-  state (I-MIG-6). The registry itself runs in warn mode (`/v1/ledger/registry/report`).
+  report got no worse (I-MIG-5); rebuilding from the ledger gives exactly the migrated state
+  (I-MIG-6); and the root-cause walk still finds every cause of the teams' golden incidents,
+  or a more precise one (I-MIG-7). The registry itself runs in warn mode (`/v1/ledger/registry/report`).
   *Migration to ARGUS → Legacy records*; served by `/v1/migration`.
 - **Stable API and Jira retirement.** The API is versioned in its path, and a deprecated
   endpoint announces its sunset in headers at least 180 days ahead

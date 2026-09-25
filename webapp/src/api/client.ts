@@ -95,6 +95,8 @@ import type {
   RetirementStatus,
   MigrationPlanView,
   QueueDashboard,
+  GoldenIncident,
+  GoldenRun,
   MigrationRow,
   RoleTemplate,
   Rehearsal,
@@ -906,7 +908,13 @@ export const legacyMigrationApi = {
     request<MigrationRow>(`/v1/migration/plans/${id}/items/${item}/override`, { method: "POST", body: json({ outcome, reason }) }),
   apply: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/apply`, { method: "POST" }),
   rollback: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/rollback`, { method: "POST", body: json({}) }),
-  finalize: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/finalize`, { method: "POST" }),
+  finalize: (id: string, golden_waiver?: string) =>
+    request<MigrationPlanView>(`/v1/migration/plans/${id}/finalize`, { method: "POST", body: json({ golden_waiver }) }),
+  golden: () => request<GoldenIncident[]>("/v1/migration/golden-incidents"),
+  addGolden: (input: { name: string; symptoms: string[]; expected_causes: string[]; symptom_kind?: Record<string, string> }) =>
+    request<GoldenIncident>("/v1/migration/golden-incidents", { method: "POST", body: json(input) }),
+  removeGolden: (id: string) => request<void>(`/v1/migration/golden-incidents/${id}`, { method: "DELETE" }),
+  runGolden: () => request<GoldenRun>("/v1/migration/golden-incidents/run", { method: "POST" }),
   verify: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/verify`, { method: "POST" }),
   gate: () => request<{ ok: boolean; blocked: string[]; mixed_open: string[]; unplanned: number }>("/v1/migration/gate"),
   /** The decision report as CSV (§12.5), as a download URL. */

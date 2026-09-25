@@ -203,9 +203,16 @@ or an inferred record is not in a plan.
      savepoint, compares every record the plan touched, then rolls back.
      A difference means something was written around the ledger.
 
+   - **I-MIG-7:** walks the workspace's golden incidents again (below) and
+     compares them with the walk taken at the first apply. Every cause
+     found before must still be found, either the same record or a more
+     precisely resolved one: what the migration made of it, or the unit
+     that realizes a Position.
+
    Finalizing needs a passing deep verification taken after the last
-   apply. People still check I-MIG-7: the root-cause walks on a golden set
-   of past incidents.
+   apply. A workspace with no golden incidents can be finalized only with
+   a waiver that gives a reason; the reason is recorded in the finalize
+   decision.
 6. **Roll back** at any point until the plan is finalized, and never after
    the domain has cut over:
    - records the migration created are retired by ledger decisions;
@@ -342,3 +349,18 @@ around the ledger left behind.
 
 I-INS-7 and I-PORT-4 hold by construction of the checks above. The report
 says which invariants they are covered by.
+
+## Golden incidents (I-MIG-7)
+
+The teams record past incidents: their symptoms, and the causes they know
+were behind them. Use *Migration to ARGUS → Legacy records → Golden
+incidents*, or `POST /v1/migration/golden-incidents` with `name`,
+`symptoms`, `expected_causes`, and optionally `symptom_kind`, `healthy`
+and `ticket_uid`. Keys, old keys and uids are accepted; everything is
+stored by uid, so incidents survive re-keying.
+
+*Run the walk* (`POST /v1/migration/golden-incidents/run`) runs the root
+cause analysis on each incident. It reports which expected causes it
+finds, and at what rank. The set is also the regression suite for any
+change to the causal model or the relation registry, not only for
+migrations.
