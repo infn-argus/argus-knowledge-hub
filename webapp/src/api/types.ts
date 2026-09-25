@@ -670,6 +670,9 @@ export interface AppDocument {
   /** Readable from every workspace. Never true for a riservato document. */
   is_global: boolean;
   current_revision_uid: string | null;
+  retention_class?: "permanent" | "10y" | "5y" | "2y" | "none";
+  retired_at?: string | null;
+  superseded_by_uid?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -13,6 +13,7 @@ class AttachmentOut(BaseModel):
     filename: str
     mime_type: Optional[str]
     file_size: Optional[int]
+    sha256: Optional[str] = None
     author: Optional[str]
     backend_id: Optional[str] = None
     backend_url: Optional[str] = None

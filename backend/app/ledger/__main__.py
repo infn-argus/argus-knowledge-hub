@@ -97,6 +97,8 @@ def main(argv=None) -> int:
     pr.add_argument("--asset", action="append", default=[])
     pr.add_argument("--query", action="append", default=[])
     pr.add_argument("--edit", default=None)
+    pr.add_argument("--reproject", default=None, metavar="WORKSPACE",
+                    help="also time a full re-projection of this workspace (rolled back)")
     args = parser.parse_args(argv)
     if args.command == "derive-worker":
         derive_worker(args.once, args.interval)
@@ -144,9 +146,15 @@ def main(argv=None) -> int:
     elif args.command == "probe":
         import httpx
         from app.ledger import ops
-        with httpx.Client(base_url=args.base_url, timeout=60) as client:
-            result = ops.probe(client, {"Authorization": f"Bearer {args.token}"}, args.asset,
-                               args.query or ["pump", "SIP", "rack"], args.edit)
+        db = SessionLocal() if args.reproject else None
+        try:
+            with httpx.Client(base_url=args.base_url, timeout=60) as client:
+                result = ops.probe(client, {"Authorization": f"Bearer {args.token}"}, args.asset,
+                                   args.query or ["pump", "SIP", "rack"], args.edit, db=db,
+                                   workspace_id=args.reproject)
+        finally:
+            if db is not None:
+                db.close()
         print(json.dumps(result, indent=2))
         return 0 if all(result["meets"].values()) else 1
     elif args.command == "escalate":

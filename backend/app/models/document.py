@@ -46,6 +46,13 @@ class Document(Base, WorkspaceScopedMixin, TimestampMixin):
     # written once; editing and deleting it still belong to the workspace
     # that owns it (workspace_id, unchanged).
     is_global: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Records retention (§19 item 4): how long the document must be kept once
+    # released — permanent | 10y | 5y | 2y | none. Counted from its last
+    # publication or its retirement, whichever is later.
+    retention_class: Mapped[str] = mapped_column(String, default="5y")
+    retired_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The document that replaces this one, when one does.
+    superseded_by_uid: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class DocumentRevision(Base, TimestampMixin):

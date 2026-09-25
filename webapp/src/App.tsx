@@ -42,6 +42,7 @@ import { WorkspaceAI } from "./pages/workspace/AI";
 import { WorkspaceAccess } from "./pages/workspace/Access";
 import { WorkspaceMembers } from "./pages/workspace/Members";
 import { WorkspaceIntegrity } from "./pages/workspace/Integrity";
+import { AccessReviews } from "./pages/workspace/AccessReviews";
 import { WorkspaceTransfer } from "./pages/workspace/Transfer";
 import { TransferList } from "./pages/workspace/TransferList";
 import { TransferStatus } from "./pages/workspace/TransferStatus";
@@ -121,6 +122,7 @@ export function App() {
           <Route path="/workspaces/:workspaceId/imports/:uid" element={<ImportStatus />} />
           <Route path="/workspaces/:workspaceId/ai" element={<WorkspaceAI />} />
           <Route path="/workspaces/:workspaceId/access" element={<WorkspaceAccess />} />
+          <Route path="/workspaces/:workspaceId/access-reviews" element={<AccessReviews />} />
           <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembers />} />
           <Route path="/workspaces/:workspaceId/integrity" element={<WorkspaceIntegrity />} />
           <Route path="/workspaces/:workspaceId/icons" element={<IconLibrary />} />

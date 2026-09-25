@@ -88,6 +88,11 @@ import type {
   AccessPointView,
   AddressUse,
   NotificationView,
+  AccessReviewView,
+  AttachmentCheck,
+  RetentionClass,
+  RetentionView,
+  RoleTemplate,
   Rehearsal,
   TicketTransitions,
   WorkflowDef,
@@ -544,6 +549,12 @@ export const documentsApi = {
   retire: (uid: string, reason: string) =>
     request<AppDocument>(`/v1/documents/${uid}/retire`, { method: "POST", body: json({ reason }) }),
   current: (uid: string) => request<DocumentRevision>(`/v1/documents/${uid}/current`),
+  retention: (uid: string) => request<RetentionView>(`/v1/documents/${uid}/retention`),
+  setRetention: (uid: string, retention_class: RetentionClass) =>
+    request<RetentionView>(`/v1/documents/${uid}/retention`, { method: "PUT", body: json({ retention_class }) }),
+  supersede: (uid: string, by_document_uid: string, reason: string) =>
+    request<AppDocument>(`/v1/documents/${uid}/supersede`, { method: "POST", body: json({ by_document_uid, reason }) }),
+  verifyAttachment: (attachmentUid: string) => request<AttachmentCheck>(`/v1/attachments/${attachmentUid}/verify`),
 
   listRevisions: (uid: string) => request<DocumentRevision[]>(`/v1/documents/${uid}/revisions`),
   createRevision: (uid: string, input: DocumentRevisionInput) =>
@@ -866,6 +877,17 @@ export const workflowApi = {
     request<NotificationView[]>(`/v1/notifications${unread ? "?unread=true" : ""}`),
   readNotification: (id: number) => request<{ ok: boolean }>(`/v1/notifications/${id}/read`, { method: "POST" }),
   readAll: () => request<{ ok: boolean }>("/v1/notifications/read-all", { method: "POST" }),
+};
+
+export const accessReviewsApi = {
+  templates: () => request<RoleTemplate[]>("/v1/access-reviews/templates"),
+  installTemplates: () => request<{ added: string[] }>("/v1/access-reviews/templates", { method: "POST" }),
+  list: () => request<AccessReviewView[]>("/v1/access-reviews"),
+  get: (id: string) => request<AccessReviewView>(`/v1/access-reviews/${id}`),
+  create: (required_signers = 2) =>
+    request<AccessReviewView>("/v1/access-reviews", { method: "POST", body: json({ required_signers }) }),
+  sign: (id: string, input: { signer?: string; comment?: string }) =>
+    request<AccessReviewView>(`/v1/access-reviews/${id}/sign`, { method: "POST", body: json(input) }),
 };
 
 export const domainsApi = {

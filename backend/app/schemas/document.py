@@ -21,6 +21,7 @@ class DocumentCreate(BaseModel):
     authority_level: AuthorityLevel = "informativo"
     confidentiality: Confidentiality = "interno"
     source: str = "manual"
+    retention_class: str = "5y"
     # Seeds the first Draft revision.
     body_markdown: Optional[str] = None
     steps: list = []
@@ -55,6 +56,9 @@ class DocumentOut(BaseModel):
     source: str
     is_global: bool = False
     current_revision_uid: Optional[str]
+    retention_class: str = "5y"
+    retired_at: Optional[datetime] = None
+    superseded_by_uid: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

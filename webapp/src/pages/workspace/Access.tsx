@@ -103,7 +103,11 @@ export function WorkspaceAccess() {
         <Link to={`/workspaces/${workspaceId}/members`} className="text-indigo-600 hover:underline">
           Older per-person permissions
         </Link>{" "}
-        still apply and are managed separately.
+        still apply and are managed separately. Every grant is re-certified in a signed{" "}
+        <Link to={`/workspaces/${workspaceId}/access-reviews`} className="text-indigo-600 hover:underline">
+          access review
+        </Link>
+        .
       </p>
 
       {directory.data?.is_test_data && (

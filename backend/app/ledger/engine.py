@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.ledger import temporal
@@ -306,18 +306,30 @@ def _carry_rejections(db: Session, workspace_id: str, old, new, actor: str) -> N
 # --------------------------------------------------------------------------- presence
 
 def _presence(db: Session, stream_id: str, upto: int) -> dict[str, dict]:
-    """claim_id -> latest evidence, for claims present at revision number `upto`."""
+    """claim_id -> latest evidence, for claims present at revision number `upto`.
+
+    Claim events are append-only, so the answer only moves when the stream
+    gains an event: it is cached on the session against the stream's last
+    seq. Projecting every subject of a large revision otherwise replays the
+    whole stream once per subject."""
+    last = db.scalar(select(func.max(ClaimEvent.seq)).where(ClaimEvent.stream_id == stream_id))
+    cache = db.info.setdefault("ledger_presence", {})
+    hit = cache.get((stream_id, upto))
+    if hit is not None and hit[0] == last:
+        return dict(hit[1])
     present: dict[str, dict] = {}
-    for ev in db.scalars(select(ClaimEvent).where(ClaimEvent.stream_id == stream_id,
-                                                  ClaimEvent.revision_number <= upto)
-                         .order_by(ClaimEvent.seq)):
-        if ev.kind == "appeared":
-            present[ev.claim_id] = {"evidence": ev.evidence, "seq": ev.seq}
-        elif ev.kind == "disappeared":
-            present.pop(ev.claim_id, None)
-        elif ev.kind == "evidence_changed" and ev.claim_id in present:
-            present[ev.claim_id] = {**present[ev.claim_id], "evidence": ev.evidence}
-    return present
+    rows = db.execute(select(ClaimEvent.claim_id, ClaimEvent.kind, ClaimEvent.evidence, ClaimEvent.seq)
+                      .where(ClaimEvent.stream_id == stream_id, ClaimEvent.revision_number <= upto)
+                      .order_by(ClaimEvent.seq))
+    for claim_id, kind, evidence, seq in rows:
+        if kind == "appeared":
+            present[claim_id] = {"evidence": evidence, "seq": seq}
+        elif kind == "disappeared":
+            present.pop(claim_id, None)
+        elif kind == "evidence_changed" and claim_id in present:
+            present[claim_id] = {**present[claim_id], "evidence": evidence}
+    cache[(stream_id, upto)] = (last, present)
+    return dict(present)
 
 
 def revision_state(db: Session, revision_id: str) -> str:

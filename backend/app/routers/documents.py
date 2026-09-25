@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -35,6 +36,7 @@ from app.schemas.document import (
     RetypeResult,
 )
 from app.services.attribute_validation import check_attributes
+from app.services import document_control
 from app.services.document_codes import next_code
 from app.services.drawings import (
     dwg_to_dxf,
@@ -156,12 +158,14 @@ def create_document(
             status_code=409, detail=f"A document with the code {code} already exists"
         )
 
+    if body.retention_class not in document_control.RETENTION_YEARS:
+        raise HTTPException(status_code=422, detail="Unknown retention class")
     doc = Document(
         uid=body.uid, workspace_id=workspace_id, code=code, title=body.title,
         document_type_uid=body.document_type_uid, owner_user_id=body.owner_user_id,
         responsible_service_asset_uid=body.responsible_service_asset_uid,
         authority_level=body.authority_level, confidentiality=body.confidentiality,
-        source=body.source,
+        source=body.source, retention_class=body.retention_class,
         # A globally-shared workspace shares what is written in it, including
         # documents created after the flag was set — the same rule types
         # already follow, so the workspace-level flag doesn't decay.
@@ -291,6 +295,10 @@ def delete_document(
     db: Session = Depends(get_db),
 ):
     doc = _get_owned_document(uid, workspace_id, db)
+    try:
+        document_control.assert_deletable(db, doc)
+    except document_control.ControlError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": "retention"})
     db.delete(doc)
     db.commit()
 
@@ -303,10 +311,21 @@ def bulk_delete_documents(
 ):
     deleted = 0
     missing: list[str] = []
+    retained = []
     for uid in body.uids:
         doc = db.get(Document, uid)
         if doc is None or doc.workspace_id != workspace_id:
             missing.append(uid)
+            continue
+        if not document_control.retention_view(db, doc)["deletable"]:
+            retained.append(doc.code)
+    if retained:
+        # All or nothing: a partial delete of a controlled set is worse than none.
+        raise HTTPException(status_code=409, detail={
+            "error": f"under retention, retire them instead: {', '.join(retained)}", "invariant": "retention"})
+    for uid in body.uids:
+        doc = db.get(Document, uid)
+        if doc is None or doc.workspace_id != workspace_id:
             continue
         db.delete(doc)
         deleted += 1
@@ -328,6 +347,7 @@ def retire_document(
             current.state = "retired"
             current.review_comment = body.reason
     doc.current_revision_uid = None
+    doc.retired_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(doc)
     return doc
@@ -474,6 +494,10 @@ def approve_revision(
     revision = _get_revision(uid, rev_uid, db)
     if revision.state != "in_review":
         raise HTTPException(status_code=409, detail="Only an in-review revision can be approved")
+    try:
+        document_control.assert_not_author(revision, _actor_user_id(identity))
+    except document_control.ControlError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": "separation-of-duties"})
     revision.state = "approved"
     revision.approved_by = _actor_user_id(identity)
     revision.approved_at = datetime.now(timezone.utc)
@@ -666,3 +690,50 @@ async def upload_revision_attachment(
     db.commit()
     db.refresh(attachment)
     return attachment
+
+
+# --------------------------------------------------------------------------- control (§19 item 4)
+
+@router.get("/{uid}/retention")
+def get_retention(uid: str, workspace_id: str = Depends(require_permission("read", resource="documents")),
+                  identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    doc = _get_visible_document(uid, workspace_id, identity, db)
+    return document_control.retention_view(db, doc)
+
+
+class RetentionIn(BaseModel):
+    retention_class: str
+
+
+@router.put("/{uid}/retention")
+def set_retention(uid: str, body: RetentionIn,
+                  workspace_id: str = Depends(require_permission("approve", resource="documents")),
+                  db: Session = Depends(get_db)):
+    doc = _get_owned_document(uid, workspace_id, db)
+    try:
+        document_control.set_retention(db, doc, body.retention_class)
+    except document_control.ControlError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": "retention"})
+    db.commit()
+    return document_control.retention_view(db, doc)
+
+
+class SupersedeIn(BaseModel):
+    by_document_uid: str
+    reason: str
+
+
+@router.post("/{uid}/supersede", response_model=DocumentOut)
+def supersede_document(uid: str, body: SupersedeIn,
+                       workspace_id: str = Depends(require_permission("approve", resource="documents")),
+                       db: Session = Depends(get_db)):
+    """`by_document_uid` replaces this document, which retires and points to it."""
+    old = _get_owned_document(uid, workspace_id, db)
+    new = _get_owned_document(body.by_document_uid, workspace_id, db)
+    try:
+        document_control.supersede(db, old, new, body.reason)
+    except document_control.ControlError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": "supersession"})
+    db.commit()
+    db.refresh(old)
+    return old

@@ -74,5 +74,41 @@ It reports the p95 of record pages and searches, how long an own edit takes to
 be visible, and whether each meets its target (record page < 500 ms, search
 < 1 s, own edit < 1 s). `--edit` writes an `argus_probe` value: point it at a
 record kept for the purpose. Run it at 10× the current volume before a
-cutover (§19 item 13); the full re-projection time of the largest workspace is
-measured in-process by `app.ledger.ops.probe(..., db=, workspace_id=)`.
+cutover (§19 item 13). `--reproject <workspace>` also times a full
+re-projection of that workspace in-process (rolled back, target < 30 min);
+it needs `DATABASE_URL`.
+
+### 10× volume run
+
+`scripts/generate_volume.py` builds a synthetic workspace of that size and
+prints the token and record uids to probe with:
+
+```
+cd backend
+PYTHONPATH=. python scripts/generate_volume.py --workspace volume --assets 50000 \
+    --tickets 20000 --documents 5000 --ledger-devices 2000 --token volume-token
+python -m app.ledger probe --base-url http://127.0.0.1:8000 --token volume-token \
+    --asset <uid> … --query "Ion Pump" --query SN0012345 --query "Rack C12" \
+    --edit <uid> --reproject volume
+```
+
+Measured on a development container (one uvicorn worker, Postgres 16 on the
+same host), with 50 000 records, 100 000 relations, 20 000 tickets,
+5 000 documents and a 2 000-device configuration ingested through the ledger:
+
+| Measure | Result | Target |
+|---|---|---|
+| Record page p95 (40 records) | 230 ms (median 82 ms) | 500 ms |
+| Search p95 (5 queries) | 188 ms | 1 s |
+| Own edit visible | 843 ms | 1 s |
+| Full re-projection of the workspace | 278 s | 30 min |
+| Ingest of the 2 000-device revision | 188 s | — |
+| Bulk load of the rest | 18 s | — |
+
+Two hot paths were fixed on the way. Claim presence is now cached per
+session against the stream's last event, where it used to replay the whole
+stream once per projected subject. And a publication re-derives only the
+tickets whose links the ledger can move: those on positions, control devices
+and installed units, and those with no links yet. Before, it re-derived every
+ticket in the workspace. The own-edit time is the closest to its target;
+watch it first when the volume grows.

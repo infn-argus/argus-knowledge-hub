@@ -112,10 +112,24 @@ currently valid* revision rather than to an arbitrary PDF.
   notified in-app (and by e-mail with `SMTP_HOST`), never about a ticket they may not read; a state
   with an SLA escalates a ticket that outstays it. *Service desk → Workflows*; served by
   `/v1/workflows`, `/v1/issues/{uid}/transition|transitions|watchers` and `/v1/notifications`.
-- **Operations.** Backups with a checksummed manifest and a restore rehearsal that checks
-  itself, a complete export that loads into an empty instance, and a probe of the performance
-  targets — see [docs/operations.md](docs/operations.md) for the jobs to schedule and
-  point-in-time recovery.
+- **Controlled documents.** Each document has a retention class (permanent, 10, 5 or 2 years,
+  or none), counted from its last publication or its retirement. A released document cannot
+  be deleted before its retention runs out, only retired. Its retention can be lengthened
+  but not shortened. The author of a revision cannot approve it. A document superseded by
+  another retires and points to its successor. An attachment can prove it is still the file
+  that was uploaded (`/v1/attachments/{uid}/verify`).
+- **Roles per domain and access reviews.** Ready-made roles cover inventory and IT stewards,
+  beamline operators, service-desk agents, document controllers, safety investigators,
+  procurement officers and auditors, each with the restricted classes it needs. An access
+  review snapshots every grant in a workspace: people directly and through groups, API
+  tokens, open defaults and administrators. It shows what changed since the last review and
+  is complete once enough distinct owners have signed it. *Access → access review*; served
+  by `/v1/access-reviews`.
+- **Operations.** Backups come with a checksummed manifest and a restore rehearsal that
+  checks itself. A complete export loads into an empty instance. A probe checks the
+  performance targets, and a volume generator runs them at 10× (50 000 records,
+  20 000 tickets and 5 000 documents): all were met. See [docs/operations.md](docs/operations.md)
+  for the results, the jobs to schedule and point-in-time recovery.
 - **Data integrity tools**: relink of unresolved references, and a report of missing
   references, dangling links and orphaned objects, with targeted cleanup actions.
 

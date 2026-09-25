@@ -69,6 +69,16 @@ def download_attachment(
     )
 
 
+@router.get("/{uid}/verify")
+def verify_attachment(uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """Whether the stored file still has the checksum recorded when it arrived."""
+    from app.models.attachment import file_sha256
+    attachment = _get_owned_attachment(uid, workspace_id, db)
+    now = file_sha256(attachment.storage_path)
+    return {"uid": uid, "recorded": attachment.sha256, "actual": now,
+            "ok": now is not None and now == attachment.sha256, "missing": now is None}
+
+
 @router.delete("/{uid}", status_code=204)
 def delete_attachment(
     uid: str, workspace_id: str = Depends(require_permission("delete")), db: Session = Depends(get_db)

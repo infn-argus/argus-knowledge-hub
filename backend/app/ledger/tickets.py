@@ -161,10 +161,16 @@ def derive_ticket_links(db: Session, *, workspace_ids: Optional[Iterable[str]] =
         q = q.where(Issue.uid.in_(list(ticket_uids)))
     elif workspace_ids is not None:
         ids = list(workspace_ids)
-        records = select(Asset.uid).where(Asset.workspace_id.in_(ids))
+        # Only a ticket on a position, a control device or an installed unit
+        # has links the ledger can move; the others keep the subject and
+        # related links written with the ticket, unless it has none yet.
+        records = select(Asset.uid).where(Asset.workspace_id.in_(ids),
+                                          Asset.type.in_([*engine.INSTALLABLE, "Control Device"]))
         units = select(Relation.to_asset_uid).where(Relation.relation_type == "installation of",
                                                    Relation.workspace_id.in_(ids))
-        q = q.where(Issue.asset_uid.in_(records) | Issue.asset_uid.in_(units))
+        linked = select(TicketLink.ticket_uid).where(TicketLink.workspace_id.in_(ids))
+        unlinked = select(Issue.uid).where(Issue.workspace_id.in_(ids), Issue.uid.not_in(linked))
+        q = q.where(Issue.asset_uid.in_(records) | Issue.asset_uid.in_(units) | Issue.uid.in_(unlinked))
     n = 0
     for issue in db.scalars(q):
         derive_for_ticket(db, issue)

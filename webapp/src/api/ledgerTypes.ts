@@ -368,3 +368,55 @@ export interface NotificationView {
   created_at: string;
   read: boolean;
 }
+
+export type RetentionClass = "permanent" | "10y" | "5y" | "2y" | "none";
+
+export interface RetentionView {
+  class: RetentionClass;
+  released_at: string | null;
+  retain_until: string | null;
+  permanent: boolean;
+  deletable: boolean;
+  retired_at: string | null;
+  superseded_by: string | null;
+}
+
+export interface AttachmentCheck {
+  uid: string;
+  recorded: string | null;
+  actual: string | null;
+  ok: boolean;
+  missing: boolean;
+}
+
+export interface RoleTemplate {
+  id: string;
+  name: string;
+  description: string;
+  permissions: Record<string, string[]>;
+}
+
+export interface AccessSnapshot {
+  workspace: string;
+  people: { user: string; email: string | null; name: string | null; active: boolean; roles: string[];
+            permissions: Record<string, string[]> }[];
+  groups: { group: string; name: string; roles: string[] }[];
+  tokens: { token: number; label: string | null; restricted_grants: string[]; created_at: string | null;
+            last_used_at: string | null; revoked: boolean }[];
+  open_defaults: string[];
+  administrators: string[];
+}
+
+export interface AccessReviewView {
+  id: string;
+  workspace_id: string;
+  created_by: string;
+  created_at: string;
+  snapshot_hash: string;
+  changes: { added: string[]; removed: string[]; changed: string[] };
+  signatures: { signer: string; at: string; comment: string | null }[];
+  required_signers: number;
+  completed_at: string | null;
+  summary: { people: number; groups: number; tokens: number; open_defaults: number };
+  snapshot?: AccessSnapshot;
+}

@@ -22,6 +22,8 @@ import { TransferItemAction } from "../../components/TransferItemAction";
 import { StepsEditor } from "../../components/StepsEditor";
 import { DocumentStep } from "../../api/types";
 import { DocumentContextPanel } from "../../components/hub/ContextPanels";
+import { DocumentControlCard, SupersededBanner, VerifyAttachment } from "../../components/hub/DocumentControl";
+import { errorText } from "../../components/hub/LedgerPanels";
 
 const STATE_STYLES: Record<string, string> = {
   draft: "bg-slate-100 text-slate-600",
@@ -134,6 +136,7 @@ export function DocumentDetail() {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["documents", uid] });
     queryClient.invalidateQueries({ queryKey: ["document-revisions", uid] });
+    queryClient.invalidateQueries({ queryKey: ["document-retention", uid] });
   };
 
   const saveMutation = useMutation({
@@ -150,7 +153,8 @@ export function DocumentDetail() {
   const approveMutation = useMutation({
     mutationFn: () => documentsApi.approveRevision(uid!, viewed!.uid),
     onSuccess: invalidate,
-    onError: () => alert("Approve failed — you may not have approval rights."),
+    // The author of a revision cannot approve it (separation of duties).
+    onError: (e) => alert(`Approve failed — ${errorText(e)}`),
   });
   const rejectMutation = useMutation({
     mutationFn: () => documentsApi.rejectRevision(uid!, viewed!.uid, rejectComment),
@@ -182,7 +186,7 @@ export function DocumentDetail() {
   const retireMutation = useMutation({
     mutationFn: (reason: string) => documentsApi.retire(uid!, reason),
     onSuccess: invalidate,
-    onError: () => alert("Retire failed."),
+    onError: (e) => alert(errorText(e)),
   });
   const addRelationMutation = useMutation({
     mutationFn: (input: { to_type: "asset" | "issue" | "document"; to_uid: string }) =>
@@ -220,7 +224,8 @@ export function DocumentDetail() {
   const deleteMutation = useMutation({
     mutationFn: () => documentsApi.delete(uid!),
     onSuccess: () => navigate("/documents"),
-    onError: () => alert("Delete failed."),
+    // A released document under retention is refused with the date it is kept until.
+    onError: (e) => alert(errorText(e)),
   });
 
   const sourceUrl = (viewed?.attributes?.argus_source_url as string | undefined) ?? null;
@@ -357,6 +362,8 @@ export function DocumentDetail() {
         </div>
       </div>
 
+      <SupersededBanner doc={doc} />
+      <DocumentControlCard doc={doc} />
       <DocumentContextPanel documentUid={doc.uid} />
 
       {/* Revision selector */}
@@ -633,6 +640,7 @@ export function DocumentDetail() {
                     {isDrawing(a.filename) && sheets.length === 0 && (
                       <span title={a.backend_url ?? undefined}>no preview</span>
                     )}
+                    <VerifyAttachment uid={a.uid} />
                     <button
                       type="button"
                       onClick={() => downloadAttachment(a.uid, a.filename)}
