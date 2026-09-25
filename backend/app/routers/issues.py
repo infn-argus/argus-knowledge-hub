@@ -10,6 +10,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth import get_current_user_id, require_permission
 from app.db import get_db
+from app.ledger.tickets import derive_for_ticket
 from app.models.asset import Asset
 from app.models.asset_subresources import AssetTicket
 from app.models.attachment import Attachment
@@ -87,6 +88,7 @@ def create_issue(
     # link only exists in one direction.
     if issue.asset_uid:
         sync_subject_link(db, issue, None)
+    derive_for_ticket(db, issue)
     db.commit()
     db.refresh(issue)
     return issue
@@ -150,6 +152,7 @@ def update_issue(
 
     if "attributes" in patch or "schema_uid" in patch:
         validate_attributes(db, schema, issue.attributes, workspace_id, Issue, exclude_uid=uid)
+    derive_for_ticket(db, issue)
     db.commit()
     db.refresh(issue)
     return issue
@@ -381,6 +384,7 @@ def link_issue_asset(
 
     now = datetime.now(timezone.utc)
     ensure_asset_link(db, issue, asset.uid, relation=body.relation)
+    derive_for_ticket(db, issue)
     db.add(IssueHistory(
         uid=str(uuid.uuid4()), issue_uid=issue.uid, type="updated",
         author=current_user_id or "api", field="Linked object",
@@ -412,6 +416,8 @@ def unlink_issue_asset(
     # The subject is a column on the ticket, not a link row.
     if issue.asset_uid == asset_uid:
         issue.asset_uid = None
+    db.flush()
+    derive_for_ticket(db, issue)
     db.commit()
 
 

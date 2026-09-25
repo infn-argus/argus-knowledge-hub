@@ -6,7 +6,8 @@ Pipeline, as implemented for the S1 vertical slice:
     infer   (inside parsers)  inferred claims carry method=inferred and a semantic rule id
     resolve run_resolvers()   source refs -> records; resolved claims (installation proposals)
     project project_subject() claims + decisions + policy -> attributes, edges, status, conflicts
-    derive  derive_workspace() realized-by edges from current Confirmed Installations
+    derive  derive_all()      realized-by and implemented-by edges, port attachment,
+                              ticket attribution (connectivity.py, tickets.py)
 
 Heads: every stream has a parsed head (what the source last said) and a
 published head (what projection consumes). A revision is guarded against the
@@ -35,8 +36,8 @@ from app.models.asset_subresources import AssetTicket
 from app.models.document import DocumentRelation
 from app.models.issue import Issue
 from app.models.ledger import (Claim, ClaimEvent, Conflict, ConflictEvent, Decision, FactState, IdentityBinding,
-                               IdentityEvent, JobRun, LedgerPolicy, LedgerStream, RecordEvent, RevisionEvent,
-                               SourceRevision, StatusEvent, StreamHead)
+                               IdentityEvent, JobRun, LedgerPolicy, LedgerRuleset, LedgerStream, RecordEvent,
+                               RevisionEvent, SourceRevision, StatusEvent, StreamHead)
 from app.models.schema import Schema
 from app.models.workspace import Workspace
 
@@ -44,13 +45,14 @@ PROJECTOR_VERSION = "projector/1"
 DERIVER_VERSION = "deriver/1"
 GUARD_SHARE = 0.10
 GUARD_MIN = 10
-INTERNAL_KINDS = {"person", "resolver"}
+INTERNAL_KINDS = {"person", "resolver", "system"}
 
 # Multi-valued predicates: each member is its own fact (§7.8). Relations are
 # multi-valued unless the registry says one per source.
 MULTI_ATTRS = {"attr:zones", "attr:networks", "attr:argus_keywords"}
-SINGLE_RELATIONS = {"rel:installed at", "rel:installation of"}
+SINGLE_RELATIONS = {"rel:installed at", "rel:installation of", "rel:assigned to"}
 INSTALLATION = "Installation"
+ACCESS_POINT = "Access Point"
 INSTALLABLE = {"Equipment Position", "Motion Axis", "Mirror", "Dipole", "Quadrupole", "Sextupole",
                "Corrector", "Solenoid", "Accelerating Structure", "RF Gun", "Beam Position Monitor"}
 
@@ -112,8 +114,10 @@ class ParsedClaim:
         return hashlib.sha256(payload.encode()).hexdigest()[:32]
 
 
-def fingerprint(stream_kind: str, claim: Claim) -> str:
-    payload = canonical([stream_kind, claim.rule_id, claim.source_ref, claim.predicate, claim.member,
+def fingerprint(stream_kind: str, claim: Claim, rule_id: Optional[str] = None) -> str:
+    """What a rejection by fingerprint remembers: the conclusion, whichever
+    revision states it. `rule_id` computes it as another rule would state it."""
+    payload = canonical([stream_kind, rule_id or claim.rule_id, claim.source_ref, claim.predicate, claim.member,
                          claim.polarity, claim.value])
     return hashlib.sha256(payload.encode()).hexdigest()[:32]
 
@@ -137,7 +141,7 @@ def person_stream(db: Session, workspace_id: str, user: str) -> LedgerStream:
 
 
 def current_vocabulary(db: Session) -> Vocabulary:
-    from app.ledger.sources import RULES
+    from app.ledger.rules import RULES
     schemas = list(db.scalars(select(Schema)))
     by_uid = {s.uid: s for s in schemas}
     types: dict[str, tuple] = {}
@@ -208,6 +212,97 @@ def active_policy(db: Session) -> tuple[Policy, LedgerPolicy]:
     return _POLICY_CACHE[key], row
 
 
+# --------------------------------------------------------------------------- rulesets (§7.9)
+
+def active_ruleset(db: Session, workspace_id: str):
+    from app.ledger.rules import DEFAULT_RULESET
+    from app.ledger.sources import Ruleset
+    rules, impl = dict(DEFAULT_RULESET), {}
+    for scope in ("*", workspace_id):
+        row = db.scalar(select(LedgerRuleset).where(LedgerRuleset.scope == scope)
+                        .order_by(LedgerRuleset.seq.desc()).limit(1))
+        if row is not None:
+            rules.update(row.rules)
+            impl.update(row.impl or {})
+    return Ruleset(rules, impl)
+
+
+def activate_ruleset(db: Session, scope: str, rules: dict, impl: Optional[dict] = None,
+                     actor: str = "system") -> dict:
+    """Switch rule ids or implementations for a workspace (or "*"), then run
+    inference again over what every affected stream last published. Each
+    stream's re-run is a revision like any other: guarded, and published as a
+    net transition (§7.9 Guard)."""
+    from app.ledger.rules import RULES
+    impl = dict(impl or {})
+    for family, rule_id in rules.items():
+        if rule_id not in RULES or RULES[rule_id]["family"] != family:
+            raise LedgerError(f"{rule_id!r} is not a rule of family {family!r}")
+    for rule_id, version in impl.items():
+        if rule_id not in RULES or version not in RULES[rule_id]["impl"]:
+            raise LedgerError(f"{rule_id!r} has no implementation {version!r}")
+    before = {ws: active_ruleset(db, ws) for ws in _ruleset_workspaces(db, scope)}
+    db.add(LedgerRuleset(scope=scope, rules=rules, impl=impl, activated_by=actor, activated_at=now()))
+    db.flush()
+    results = {}
+    for ws, old in before.items():
+        new = active_ruleset(db, ws)
+        _carry_rejections(db, ws, old, new, actor)
+        for stream in db.scalars(select(LedgerStream).where(LedgerStream.workspace_id == ws,
+                                                            LedgerStream.kind == "epik8s")):
+            results[stream.id] = reinfer(db, stream.id, cause=f"ruleset by {actor}")
+    return results
+
+
+def _ruleset_workspaces(db: Session, scope: str) -> list[str]:
+    q = select(LedgerStream.workspace_id).where(LedgerStream.kind == "epik8s").distinct()
+    if scope != "*":
+        q = q.where(LedgerStream.workspace_id == scope)
+    return sorted(db.scalars(q))
+
+
+def reinfer(db: Session, stream_id: str, cause: str) -> Optional[dict]:
+    """Parse what the stream last published again, with the active rules."""
+    head = db.get(StreamHead, stream_id)
+    rev = db.get(SourceRevision, head.published_head) if head and head.published_head else None
+    if rev is None or rev.content is None:
+        return None
+    parser = next(name for name, p in _parsers().items() if rev.parser_version.startswith(p.version))
+    return ingest(db, stream_id, revision=rev.revision, content=rev.content, observed_at=rev.observed_at,
+                  parser=parser, cause=cause)
+
+
+def _parsers():
+    from app.ledger.sources import PARSERS
+    return PARSERS
+
+
+def _carry_rejections(db: Session, workspace_id: str, old, new, actor: str) -> None:
+    """A rejection names a conclusion under one rule id, so it does not carry
+    to a new id — unless the new rule declares that it supersedes the old one
+    and `carries_rejections` (§7.9). The carried rejection is a `policy`
+    decision citing both ids."""
+    from app.ledger.rules import RULES
+    for family, rule_id in new.rules.items():
+        previous = old.rules.get(family)
+        spec = RULES[rule_id]
+        if previous == rule_id or spec.get("supersedes") != previous or not spec.get("carries_rejections"):
+            continue
+        dctx = _decision_context(db, workspace_id)
+        for d in db.scalars(select(Decision).where(Decision.workspace_id == workspace_id, Decision.kind == "reject")):
+            t = d.target or {}
+            if d.decision_id in dctx.ended or not t.get("fingerprint") or not t.get("claim_id"):
+                continue
+            claim = db.get(Claim, t["claim_id"])
+            if claim is None or claim.rule_id != previous:
+                continue
+            stream = db.get(LedgerStream, claim.stream_id)
+            _record_decision(db, "reject", "policy", workspace_id, subject_uid=d.subject_uid,
+                             target={"fingerprint": fingerprint(stream.kind, claim, rule_id),
+                                     "carried_from": d.decision_id, "rules": [previous, rule_id]},
+                             reason=f"rejection carried from {previous} to {rule_id} ({actor})")
+
+
 # --------------------------------------------------------------------------- presence
 
 def _presence(db: Session, stream_id: str, upto: int) -> dict[str, dict]:
@@ -243,9 +338,12 @@ def ingest(db: Session, stream_id: str, *, revision: str, content: bytes, observ
     observed = temporal.parse_instant(observed_at)
     head = db.get(StreamHead, stream_id)
     p = PARSERS[parser]
+    ruleset = active_ruleset(db, stream.workspace_id)
+    parser_version, impl_version = p.versions(ruleset)
     content_hash = hashlib.sha256(content).hexdigest()
     rev = SourceRevision(id=str(uuid.uuid4()), stream_id=stream_id, revision=revision, content_hash=content_hash,
-                         parser_version=p.version, observed_at=observed, retrieved_at=now(),
+                         parser_version=parser_version, impl_version=impl_version, content=content,
+                         observed_at=observed, retrieved_at=now(),
                          parent_revision_id=head.parsed_head, number=head.parsed_number + 1)
 
     if stream.frozen_at is not None:
@@ -268,27 +366,28 @@ def ingest(db: Session, stream_id: str, *, revision: str, content: bytes, observ
 
     prior = db.scalar(select(SourceRevision).where(
         SourceRevision.stream_id == stream_id, SourceRevision.content_hash == content_hash,
-        SourceRevision.parser_version == p.version, SourceRevision.ordering == "head")
+        SourceRevision.parser_version == parser_version, SourceRevision.impl_version == impl_version,
+        SourceRevision.ordering == "head")
         .order_by(SourceRevision.number.desc()).limit(1))
     if prior is not None:
-        # Identical bytes, same parser: reuse the claim set it produced.
+        # Identical bytes, same rules, same code: reuse the claim set it produced.
         rev.parse_skipped = True
         target = {cid: info for cid, info in _presence(db, stream_id, prior.number).items()}
         new_claims: dict[str, ParsedClaim] = {}
-        db.add(JobRun(stage="parse", stage_version=p.version, scope=stream_id, input_digest=content_hash,
-                      status="skipped", counts={}, at=now()))
+        db.add(JobRun(stage="parse", stage_version=parser_version, scope=stream_id, input_digest=content_hash,
+                      status="skipped", counts={"impl_version": impl_version}, at=now()))
     else:
-        parsed_claims = p.parse(content, stream)
+        parsed_claims = p.parse(content, stream, ruleset)
         new_claims = {}
         for c in parsed_claims:
             new_claims[c.claim_id(stream_id)] = c
         target = {cid: {"evidence": c.evidence} for cid, c in new_claims.items()}
-        db.add(JobRun(stage="parse", stage_version=p.version, scope=stream_id, input_digest=content_hash,
-                      status="ran", counts={"claims": len(new_claims)}, at=now()))
+        db.add(JobRun(stage="parse", stage_version=parser_version, scope=stream_id, input_digest=content_hash,
+                      status="ran", counts={"claims": len(new_claims), "impl_version": impl_version}, at=now()))
     db.add(rev)
     db.flush()
     counts = _write_diff(db, stream_id, rev, new_claims, target, _presence(db, stream_id, head.parsed_number),
-                         p.impl_version)
+                         impl_version)
     head.parsed_head, head.parsed_number = rev.id, rev.number
     db.add(RevisionEvent(revision_id=rev.id, stream_id=stream_id, kind="parsed", cause=cause, at=now()))
     db.flush()
@@ -420,6 +519,7 @@ def publish(db: Session, stream: LedgerStream, rev: SourceRevision, *, cause: st
     head = db.get(StreamHead, stream.id)
     before = _presence(db, stream.id, head.published_number)
     after = _presence(db, stream.id, rev.number)
+    previous = db.get(SourceRevision, head.published_head) if head.published_head else None
     lo, hi = sorted((head.published_number, rev.number))
     for other in db.scalars(select(SourceRevision).where(SourceRevision.stream_id == stream.id,
                                                          SourceRevision.number > lo,
@@ -436,7 +536,11 @@ def publish(db: Session, stream: LedgerStream, rev: SourceRevision, *, cause: st
         c = db.get(Claim, cid)
         if c.predicate == "exists":
             _ensure_record(db, stream, c.source_ref, _as_parsed(c), f"revision:{rev.id}")
-    subjects = {b.uid for ref in affected_refs if (b := db.get(IdentityBinding, ref)) is not None}
+    from app.ledger import connectivity
+    touched = connectivity.reconcile_access_points(db, stream, before, after,
+                                                   previous.observed_at if previous else None, rev.observed_at,
+                                                   f"revision:{rev.id}")
+    subjects = {b.uid for ref in affected_refs if (b := db.get(IdentityBinding, ref)) is not None} | touched
     for uid in sorted(subjects):
         project_subject(db, uid, f"revision:{rev.id}")
     if stream.kind != "resolver":
@@ -545,7 +649,8 @@ def _ensure_record(db: Session, stream: LedgerStream, source_ref: str, exists: O
     allowed = stream.may_create or []
     if type_name is None or ("*" not in allowed and type_name not in allowed):
         return None
-    key = exists.value.get("key") or f"{'INS' if type_name == INSTALLATION else 'REC'}-{ulid()}"
+    prefix = {INSTALLATION: "INS", ACCESS_POINT: "AP"}.get(type_name, "REC")
+    key = exists.value.get("key") or f"{prefix}-{ulid()}"
     existing = db.scalar(select(Asset).where(Asset.key == key))
     if existing is not None:
         if existing.workspace_id != stream.workspace_id or existing.type != type_name:
@@ -622,6 +727,8 @@ def apply_decisions(db: Session, workspace_id: str, actor: str, batch: list[dict
             if record is None or record.workspace_id != workspace_id:
                 raise LedgerError("the subject is not a record of this workspace")
             _check_installation_immutability(record, item["predicate"])
+            from app.ledger.connectivity import check_assignment_decision
+            check_assignment_decision(record, item["predicate"], db)
             if kind == "supersede" and not item.get("supersedes"):
                 raise LedgerError("supersede must name the confirmations it replaces")
         if kind in ("retract", "revoke") and not target.get("decisions"):
@@ -652,6 +759,8 @@ def apply_decisions(db: Session, workspace_id: str, actor: str, batch: list[dict
     for uid in sorted(subjects):
         project_subject(db, uid, f"decision-batch:{batch_id}")
     validate_installations(db, subjects, strict=True)
+    from app.ledger.connectivity import validate_access_points
+    validate_access_points(db, subjects)
     derive_all(db, _workspaces_of(db, subjects) | {workspace_id})
     return written
 
@@ -753,11 +862,11 @@ def _decision_context(db: Session, workspace_id: str) -> _DecisionContext:
 
 def _project_key(db: Session, record: Asset, predicate: str, member: Optional[str], claims: list,
                  decisions: list[Decision], policy: Policy, policy_row: LedgerPolicy,
-                 dctx: _DecisionContext) -> _Outcome:
+                 dctx: _DecisionContext, lineage: Optional[tuple] = None) -> _Outcome:
     ended = dctx.ended
     rejected_claims, rejected_prints, accepted_claims = dctx.rejected_claims, dctx.rejected_prints, \
         dctx.accepted_claims
-    lineage = _type_lineage(db, record)
+    lineage = lineage or _type_lineage(db, record)
     vocab_streams = set(policy_row.vocabulary.get("streams") or [])
     vocab_rules = set(policy_row.vocabulary.get("rules") or [])
 
@@ -880,9 +989,10 @@ def project_subject(db: Session, uid: str, cause: str, *, emit: bool = True) -> 
     exists_outcome: Optional[_Outcome] = None
     new_conflicts: dict[str, tuple] = {}
 
+    lineage = _type_lineage(db, record)
     for (predicate, member), entries in keys.items():
         outcome = _project_key(db, record, predicate, member, entries, decisions_by_key[(predicate, member)],
-                               policy, policy_row, dctx)
+                               policy, policy_row, dctx, lineage)
         for contributor, (status, rank, effective) in outcome.statuses.items():
             db.add(FactState(subject_uid=uid, predicate=predicate, member=member, contributor=contributor,
                              status=status, rank=rank, effective=effective))
@@ -980,9 +1090,13 @@ def _write_record_status(db: Session, record: Asset, outcome: Optional[_Outcome]
         record.record_status = new_status
 
 
+# Review items the validate and derive stages own; projection leaves them alone.
+DERIVED_CONFLICTS = ("possible_overlap", "port_mapping_unresolved", "port_confirmation_required", "port_map_invalid")
+
+
 def _write_conflicts(db: Session, record: Asset, new: dict, cause: str, emit: bool) -> None:
     existing = {c.conflict_id: c for c in db.scalars(select(Conflict).where(
-        Conflict.subject_uid == record.uid, Conflict.conflict_type != "possible_overlap"))}
+        Conflict.subject_uid == record.uid, Conflict.conflict_type.notin_(DERIVED_CONFLICTS)))}
     for cid, (ctype, severity, predicate, member, detail) in new.items():
         if cid in existing:
             existing[cid].detail = detail
@@ -1122,6 +1236,18 @@ def validate_installations(db: Session, subjects: Iterable[str], *, strict: bool
 
 
 def derive_all(db: Session, workspace_ids: Optional[Iterable[str]] = None) -> dict:
+    """The derive stage: `realized by`, `implemented by`, port attachment and
+    ticket attribution, all from Confirmed Installations."""
+    from app.ledger import connectivity, tickets
+    ids = None if workspace_ids is None else list(set(workspace_ids))
+    out = derive_realized_by(db, ids)
+    out.update(connectivity.derive_implemented_by(db, ids))
+    out.update(connectivity.derive_ports(db, ids))
+    out.update(tickets.derive_ticket_links(db, workspace_ids=ids))
+    return out
+
+
+def derive_realized_by(db: Session, workspace_ids: Optional[Iterable[str]] = None) -> dict:
     """Derived `realized by` edges: position -> the unit of its definitely
     Current, Confirmed Installation (I-PROJ-2). Installations live in their
     position's workspace, so a workspace is derived on its own."""

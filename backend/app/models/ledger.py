@@ -16,7 +16,7 @@ what the rest of the application reads.
 """
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,6 +54,10 @@ class SourceRevision(Base):
     parent_revision_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     ordering: Mapped[str] = mapped_column(String, default="head")          # head | historical
     parse_skipped: Mapped[bool] = mapped_column(Boolean, default=False)
+    impl_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)   # code that parsed it (§7.9)
+    # The bytes, kept so a ruleset change can re-run inference over what the
+    # source last said without asking the source again.
+    content: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
 
 
 class Claim(Base):
@@ -199,7 +203,49 @@ class JobRun(Base):
     at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class LedgerRuleset(Base):
+    """Which semantic rule id runs for each rule family, and with which
+    implementation (§7.9). The latest row for a workspace applies; a row with
+    scope "*" applies where a workspace has none."""
+    __tablename__ = "ledger_rulesets"
+
+    seq: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(String, index=True)
+    rules: Mapped[dict] = mapped_column(JSONB)          # family -> rule id
+    impl: Mapped[dict] = mapped_column(JSONB, default=dict)   # rule id -> implementation version
+    activated_by: Mapped[str] = mapped_column(String)
+    activated_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MigrationMap(Base):
+    """Permanent: every legacy uid resolves to all the records it became (§12.4)."""
+    __tablename__ = "ledger_migration_map"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    legacy_uid: Mapped[str] = mapped_column(String, index=True)
+    new_uid: Mapped[str] = mapped_column(String, index=True)
+    role: Mapped[str] = mapped_column(String)           # position | equipment | installation
+    plan_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+
 # --------------------------------------------------------------------------- projections
+
+class TicketLink(Base):
+    """A ticket's link to a record, with its role (§8.6). Subject links follow
+    the ticket; involved links are derived from Installations and incident
+    time and recomputed whenever either changes."""
+    __tablename__ = "ledger_ticket_links"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[str] = mapped_column(String, index=True)
+    ticket_uid: Mapped[str] = mapped_column(String, ForeignKey("issues.uid", ondelete="CASCADE"), index=True)
+    asset_uid: Mapped[str] = mapped_column(String, ForeignKey("assets.uid", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String)           # subject | related | involved_equipment | involved_position
+    certainty: Mapped[str] = mapped_column(String, default="definite")    # definite | possible
+    origin: Mapped[str] = mapped_column(String)         # ticket | derived | migration-split
+    derivation: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    detail: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
 
 class StreamHead(Base):
     __tablename__ = "ledger_stream_heads"

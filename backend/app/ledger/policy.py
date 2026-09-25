@@ -132,8 +132,10 @@ class Policy:
         self.body = body
         self.version = str(body.get("policy_version", "unversioned"))
         self.type_depth = type_depth or {}
+        # `reconciled`: what the pipeline itself establishes from the ledger
+        # (service intervals, successors); a person's confirmation still wins.
         self.defaults = {**{"manual": "authoritative", "stated": "contributory",
-                            "resolved": "contributory", "inferred": "advisory"},
+                            "resolved": "contributory", "inferred": "advisory", "reconciled": "authoritative"},
                          **(body.get("defaults") or {})}
         self.protected = body.get("protected") or []
         self.rules: list[Rule] = []
@@ -321,7 +323,7 @@ def validate(policy: Policy, vocab: Vocabulary, limit: int = 400_000) -> dict:
 # --------------------------------------------------------------------------- default
 
 DEFAULT_POLICY = {
-    "policy_version": "slice-2026.09.1",
+    "policy_version": "slice-2026.09.2",
     "defaults": {"manual": "authoritative", "stated": "contributory",
                  "resolved": "contributory", "inferred": "advisory"},
     "protected": [
@@ -339,8 +341,10 @@ DEFAULT_POLICY = {
         # A position inferred from a channel name exists as soon as it is read,
         # visibly unconfirmed (§7.3: name-rule inferences that make objects
         # are accepted, composition by name pairing is proposed).
-        {"id": "inferred-positions", "match": {"rule": "infer.vac.sip/1",
-                                               "predicate": ["exists", "attr:position_class", "rel:acts on"]},
+        {"id": "inferred-positions", "match": {"rule": ["infer.vac.sip/1", "infer.vac.sip/2", "infer.vac.sip/3",
+                                                        "infer.mag.ps/1"],
+                                               "predicate": ["exists", "attr:position_class", "rel:acts on",
+                                                             "rel:assigned to"]},
          "rank": "advisory", "auto_accept": True},
         # An Installation found from an asset: URL is only ever a proposal (§8.4).
         # The proposal is its existence; its position, unit and dates project

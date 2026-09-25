@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { hubApi } from "../../api/client";
 import type { HubDocument } from "../../api/hubTypes";
+import { AccessPointPanel, InvolvedTickets, SegmentPortPanel, TicketAttribution } from "./ConnectivityPanels";
 import { INSTALLABLE, InstallationHistory, ProvenancePanel } from "./LedgerPanels";
 import { Card, DocumentRow, Empty, StatTile, Tabs, TicketRow, VIA_META } from "./ui";
 
@@ -71,7 +72,17 @@ export function AssetContextPanel({ assetUid }: { assetUid: string }) {
               { key: "service", label: "Service", count: c.stats.open_tickets, alert: c.stats.open_tickets > 0 },
               { key: "knowledge", label: "Knowledge", count: c.stats.documents, alert: c.stats.documents_overdue > 0 },
               { key: "connections", label: "Connections", count: c.stats.relations },
-              { key: "installations", label: INSTALLABLE.has(c.asset.type) ? "Installed units" : "Installations" },
+              {
+                key: "installations",
+                label:
+                  c.asset.type === "Access Point"
+                    ? "Address history"
+                    : c.asset.type === "Bus Segment"
+                      ? "Port"
+                      : INSTALLABLE.has(c.asset.type)
+                        ? "Installed units"
+                        : "Installations",
+              },
               { key: "provenance", label: "Provenance" },
             ]}
           />
@@ -131,6 +142,8 @@ export function AssetContextPanel({ assetUid }: { assetUid: string }) {
               </>
             ))}
 
+          {tab === "service" && c.access.tickets && <InvolvedTickets uid={assetUid} />}
+
           {tab === "knowledge" &&
             (!c.access.documents ? (
               <Empty>You do not have access to documents in this workspace.</Empty>
@@ -156,7 +169,14 @@ export function AssetContextPanel({ assetUid }: { assetUid: string }) {
               </div>
             ))}
 
-          {tab === "installations" && <InstallationHistory uid={assetUid} type={c.asset.type} />}
+          {tab === "installations" &&
+            (c.asset.type === "Access Point" ? (
+              <AccessPointPanel uid={assetUid} />
+            ) : c.asset.type === "Bus Segment" ? (
+              <SegmentPortPanel uid={assetUid} />
+            ) : (
+              <InstallationHistory uid={assetUid} type={c.asset.type} />
+            ))}
           {tab === "provenance" && <ProvenancePanel uid={assetUid} />}
 
           {tab === "connections" &&
@@ -221,6 +241,7 @@ export function TicketContextPanel({ ticketUid }: { ticketUid: string }) {
             ))}
           </ul>
         )}
+        <TicketAttribution ticketUid={ticketUid} />
       </Card>
       {c.access.documents && c.assets.length > 0 && (
         <Card title="Relevant knowledge" action={<span className="text-xs text-slate-400">for this equipment</span>}>

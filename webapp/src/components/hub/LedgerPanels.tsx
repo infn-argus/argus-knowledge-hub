@@ -28,6 +28,8 @@ export function formatTemporal(v: TemporalValue | null | undefined, role: "from"
       return `before records (by ${d(v.bound)?.toLocaleDateString()})`;
     case "unknown_past":
       return `ended, date unknown (by ${d(v.bound)?.toLocaleDateString()})`;
+    case "range":
+      return `between ${d(v.earliest)?.toLocaleDateString()} and ${d(v.latest)?.toLocaleDateString()}`;
     default: {
       const at = d(v.nominal)!;
       if (v.precision === "year") return String(at.getUTCFullYear());
@@ -45,7 +47,7 @@ const STATUS_STYLE: Record<string, string> = {
   Withdrawn: "bg-slate-100 text-slate-500 ring-slate-200",
 };
 
-function errorText(e: unknown): string {
+export function errorText(e: unknown): string {
   if (e instanceof ApiError) {
     const d = (e.body as { detail?: { error?: string } | string } | null)?.detail;
     if (typeof d === "string") return d;

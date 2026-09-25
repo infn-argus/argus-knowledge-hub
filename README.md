@@ -63,6 +63,15 @@ currently valid* revision rather than to an arbitrary PDF.
   records, with swaps and "what was installed on date X" queries. A revision that would retire
   too much is held, and conflicts, inferred facts and proposed installations wait in the
   *Review queue*. Served by `/v1/ledger` and `/v1/installations`.
+- **Connectivity and attribution.** An address's Access Point is assigned to one position, once:
+  when the configuration moves the address, the old Access Point retires with a successor and
+  keeps its tickets, and "who used this address on date X" answers with a certainty around the
+  handover. Bus segments attach to the port of whichever unit is installed now, but only on a
+  unique, registry-backed, compatible match; safety-classed segments need a person to confirm
+  the port for each new installation. Tickets are linked to the unit installed at incident time,
+  and counts never add up the same ticket twice. Inference rules are versioned: a new meaning
+  needs a new rule id, which a CI check enforces (`python -m app.ledger.rules`). Served by
+  `/v1/access-points` and `/v1/ledger` (`segments`, `tickets`, `rules`, `rulesets`).
 - **Data integrity tools**: relink of unresolved references, and a report of missing
   references, dangling links and orphaned objects, with targeted cleanup actions.
 
@@ -72,7 +81,8 @@ currently valid* revision rather than to an arbitrary PDF.
   ledger, the relation registry, identity reconciliation, and ARGUS as the system of record that
   replaces Jira/Insight domain by domain. The implementation follows its plan (§13); the unified
   hub and the P0 import fixes are the first increment; the S1 vertical slice (fact ledger,
-  authority policy, installations, review queue) is the second.
+  authority policy, installations, review queue, Access Points, port mapping, ticket
+  attribution, rule versions; acceptance tests A1–A32) is the second.
 - [Object schema design for a large-scale accelerator](docs/asset-schema-design.md) — the
   type catalogue (122 types over four planes), the relation vocabulary, composite elements such
   as a screen station, and how a beamline's EPIK8s control configuration and a EuPRAXIA-style

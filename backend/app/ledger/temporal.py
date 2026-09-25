@@ -7,6 +7,7 @@ A temporal value is stored as a dict:
     {"kind": "unscheduled"}
     {"kind": "open"}
     {"kind": "unknown_past", "bound": "..."}
+    {"kind": "range", "earliest": "...", "latest": "..."}   # somewhere in between
 
 Every comparison uses the computed `earliest` and `latest` instants and never
 the nominal one (I-TIME-1). The true instant lies in [earliest, latest].
@@ -22,8 +23,8 @@ NEG_INF = datetime.min.replace(tzinfo=timezone.utc)
 POS_INF = datetime.max.replace(tzinfo=timezone.utc)
 _TICK = timedelta(microseconds=1)
 
-FROM_KINDS = {"date", "before_records", "unscheduled"}
-UNTIL_KINDS = {"date", "open", "unknown_past"}
+FROM_KINDS = {"date", "before_records", "unscheduled", "range"}
+UNTIL_KINDS = {"date", "open", "unknown_past", "range"}
 PRECISIONS = {"instant", "day", "month", "year"}
 
 
@@ -89,6 +90,9 @@ def bounds(value: Optional[dict], role: str, start: Optional[Bounds] = None) -> 
         precision = value.get("precision", "instant")
         start_at = parse_instant(value["nominal"])
         return Bounds(start_at, _bucket_end(start_at, precision))
+    if kind == "range":
+        # An inferred handover: after one observation, before the next (§9.2).
+        return Bounds(parse_instant(value["earliest"]), parse_instant(value["latest"]))
     if kind == "before_records":
         return Bounds(NEG_INF, parse_instant(value["bound"]))
     if kind == "unscheduled":

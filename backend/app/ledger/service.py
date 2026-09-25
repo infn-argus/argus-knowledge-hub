@@ -115,3 +115,23 @@ def swap(db: Session, workspace_id: str, actor: str, position_uid: str, new_asse
     batch.append(confirm_value(new_uid, "exists", "present"))
     engine.apply_decisions(db, workspace_id, actor, batch)
     return {"ended": [v["uid"] for v in current], "installation_uid": new_uid}
+
+
+def reassign_access_point(db: Session, workspace_id: str, actor: str, ap_uid: str, position_uid: str,
+                          at: dict) -> str:
+    """A person moves an address to another position (§9.2): the Access Point
+    retires with a successor, which serves the new position from `at`."""
+    from app.ledger import connectivity
+    ap = db.get(Asset, ap_uid)
+    if ap is None or ap.type != engine.ACCESS_POINT or ap.workspace_id != workspace_id:
+        raise LedgerError("not an Access Point of this workspace")
+    if db.get(Asset, position_uid) is None:
+        raise LedgerError("unknown position")
+    temporal.bounds(at, "from")
+    touched = connectivity.reassign(db, ap, position_uid, handover=at, actor=actor, cause=f"reassigned by {actor}")
+    for uid in sorted(touched):
+        engine.project_subject(db, uid, f"reassigned by {actor}")
+    connectivity.validate_access_points(db, touched)
+    engine.derive_all(db, [workspace_id])
+    return next(v["uid"] for v in connectivity.access_points(db, workspace_id, (ap.attributes or {}).get("address"))
+                if v["record_status"] == "Active")

@@ -85,11 +85,17 @@ import type {
   TicketContext,
 } from "./hubTypes";
 import type {
+  AccessPointView,
+  AddressUse,
   Decision as LedgerDecision,
   InstallationView,
   RecordFacts,
+  RecordTickets,
   ReviewQueue,
+  RuleEntry,
+  SegmentPort,
   TemporalValue,
+  TicketLinkView,
 } from "./ledgerTypes";
 
 export class ApiError extends Error {
@@ -774,4 +780,18 @@ export const ledgerApi = {
       method: "POST",
       body: json(input),
     }),
+  accessPoint: (uid: string) =>
+    request<{ access_point: AccessPointView; address_history: AccessPointView[] }>(`/v1/access-points/${uid}`),
+  whoUsed: (address: string, at: string) =>
+    request<{ access_points: AccessPointView[]; used_by: AddressUse[] }>(
+      `/v1/access-points?${new URLSearchParams({ address, at }).toString()}`,
+    ),
+  reassign: (uid: string, input: { position_uid: string; at: TemporalValue }) =>
+    request<AccessPointView>(`/v1/access-points/${uid}/reassign`, { method: "POST", body: json(input) }),
+  segmentPort: (uid: string) => request<SegmentPort>(`/v1/ledger/segments/${uid}/port`),
+  confirmPortMap: (uid: string, input: { installation_uid: string; port_uid: string }) =>
+    request<SegmentPort>(`/v1/ledger/segments/${uid}/port-map`, { method: "POST", body: json(input) }),
+  ticketLinks: (ticketUid: string) => request<TicketLinkView[]>(`/v1/ledger/tickets/${ticketUid}/links`),
+  recordTickets: (uid: string) => request<RecordTickets>(`/v1/ledger/records/${uid}/tickets`),
+  rules: () => request<{ rules: RuleEntry[]; check: string[] }>("/v1/ledger/rules"),
 };

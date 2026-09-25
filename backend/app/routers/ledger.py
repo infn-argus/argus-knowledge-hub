@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import OidcIdentity, get_identity, require_permission
 from app.db import get_db
-from app.ledger import engine, service, temporal
+from app.ledger import connectivity, engine, rules, service, temporal, tickets
 from app.ledger.engine import LedgerError
 from app.ledger.policy import PolicyError
 from app.models.asset import Asset
@@ -19,6 +19,7 @@ from app.models.ledger import (Claim, ClaimEvent, Conflict, Decision, FactState,
 
 router = APIRouter(prefix="/v1/ledger", tags=["ledger"])
 installations_router = APIRouter(prefix="/v1/installations", tags=["installations"])
+access_points_router = APIRouter(prefix="/v1/access-points", tags=["access points"])
 
 
 def actor_of(identity) -> str:
@@ -318,3 +319,138 @@ def activate(body: Optional[dict] = None, identity=Depends(get_identity),
         raise HTTPException(status_code=422, detail={"errors": exc.errors})
     db.commit()
     return {"version": row.version, "report": row.report}
+
+
+# --------------------------------------------------------------------------- rules (§7.9)
+
+@router.get("/rules")
+def rule_catalogue(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    active = engine.active_ruleset(db, workspace_id)
+    return {"rules": [{"rule_id": rid, "family": r["family"], "meaning": r["meaning"],
+                       "supersedes": r.get("supersedes"), "carries_rejections": bool(r.get("carries_rejections")),
+                       "implementations": r["impl"], "signature": rules.signature_hash(rid),
+                       "active": active.rules.get(r["family"]) == rid,
+                       "active_impl": active.impl_of(rid) if active.rules.get(r["family"]) == rid else None}
+                      for rid, r in sorted(rules.RULES.items())],
+            "check": rules.check_catalogue()}
+
+
+class RulesetIn(BaseModel):
+    rules: dict[str, str]
+    impl: dict[str, str] = {}
+
+
+@router.post("/rulesets")
+def activate_ruleset(body: RulesetIn, identity=Depends(get_identity),
+                     workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    try:
+        results = engine.activate_ruleset(db, workspace_id, body.rules, body.impl, actor_of(identity))
+    except LedgerError as exc:
+        _fail(db, exc)
+    db.commit()
+    return {"streams": results}
+
+
+# --------------------------------------------------------------------------- tickets (§8.6)
+
+@router.get("/tickets/{uid}/links")
+def ticket_links(uid: str, workspace_id: str = Depends(require_permission("read", resource="tickets")),
+                 db: Session = Depends(get_db)):
+    from app.models.issue import Issue
+    issue = db.get(Issue, uid)
+    if issue is None or issue.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return tickets.links_of_ticket(db, uid)
+
+
+@router.get("/records/{uid}/tickets")
+def record_tickets(uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """Tickets a record is involved in without being their subject, and its counts."""
+    record = db.get(Asset, uid)
+    if record is None or not (record.workspace_id == workspace_id or record.is_global):
+        raise HTTPException(status_code=404, detail="Record not found")
+    return {"counts": tickets.record_counts(db, uid), "involved": tickets.tickets_involving(db, uid)}
+
+
+# --------------------------------------------------------------------------- access points and ports (§9)
+
+def _ap_out(db: Session, v: dict) -> dict:
+    return {**{k: val for k, val in v.items() if k != "interval"},
+            "position": _record_brief(db, v["position_uid"]) if v["position_uid"] else None,
+            "successor_record": _record_brief(db, v["successor"]) if v.get("successor") else None}
+
+
+@access_points_router.get("")
+def list_access_points(address: Optional[str] = None, at: Optional[datetime] = Query(None),
+                       workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """Every Access Point for an address, and — with `at` — who used it then."""
+    out = {"access_points": [_ap_out(db, v) for v in connectivity.access_points(db, workspace_id, address)]}
+    if address and at is not None:
+        out["used_by"] = [{**r, "position": _record_brief(db, r["position_uid"]) if r["position_uid"] else None,
+                           "asset": _record_brief(db, r["asset_uid"]) if r["asset_uid"] else None}
+                          for r in connectivity.who_used(db, workspace_id, address, at)]
+    return out
+
+
+@access_points_router.get("/{uid}")
+def access_point_history(uid: str, workspace_id: str = Depends(require_permission("read")),
+                         db: Session = Depends(get_db)):
+    ap = db.get(Asset, uid)
+    if ap is None or ap.workspace_id != workspace_id or ap.type != engine.ACCESS_POINT:
+        raise HTTPException(status_code=404, detail="Access Point not found")
+    address = (ap.attributes or {}).get("address")
+    history = connectivity.access_points(db, workspace_id, address) if address else [
+        connectivity.access_point_view(db, ap)]
+    return {"access_point": _ap_out(db, connectivity.access_point_view(db, ap)),
+            "address_history": [_ap_out(db, v) for v in history]}
+
+
+class ReassignIn(BaseModel):
+    position_uid: str
+    at: dict
+
+
+@access_points_router.post("/{uid}/reassign")
+def reassign_access_point(uid: str, body: ReassignIn, identity=Depends(get_identity),
+                          workspace_id: str = Depends(require_permission("modify")), db: Session = Depends(get_db)):
+    actor = actor_of(identity)
+    try:
+        new_uid = service.reassign_access_point(db, workspace_id, actor, uid, body.position_uid, body.at)
+    except (LedgerError, temporal.TemporalError) as exc:
+        _fail(db, exc, workspace_id, actor, [{"kind": "reassign", "uid": uid, **body.model_dump(mode="json")}])
+    db.commit()
+    return _ap_out(db, connectivity.access_point_view(db, db.get(Asset, new_uid)))
+
+
+@router.get("/segments/{uid}/port")
+def segment_port(uid: str, at: Optional[datetime] = Query(None),
+                 workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """Where a Bus Segment attaches (now, or at `at`), and why."""
+    seg = db.get(Asset, uid)
+    if seg is None or seg.workspace_id != workspace_id or seg.type != connectivity.BUS_SEGMENT:
+        raise HTTPException(status_code=404, detail="Bus Segment not found")
+    m = connectivity.match_segment(db, seg, temporal.parse_instant(at) if at else None)
+    return {**m, "port": _record_brief(db, m["port_uid"]) if m.get("port_uid") else None,
+            "unit": _record_brief(db, m["unit_uid"]) if m.get("unit_uid") else None}
+
+
+class PortMapIn(BaseModel):
+    installation_uid: str
+    port_uid: str
+
+
+@router.post("/segments/{uid}/port-map")
+def confirm_port_map(uid: str, body: PortMapIn, identity=Depends(get_identity),
+                     workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    """A person identifies the intended port for this Installation. It never
+    authorizes an incompatible connection (§9.3 step 1)."""
+    actor = actor_of(identity)
+    batch = [connectivity.confirm_port_map(uid, body.installation_uid, body.port_uid,
+                                           connectivity.active_port_map_decisions(db, uid))]
+    try:
+        engine.apply_decisions(db, workspace_id, actor, batch)
+    except LedgerError as exc:
+        _fail(db, exc, workspace_id, actor, batch)
+    db.commit()
+    seg = db.get(Asset, uid)
+    return connectivity.match_segment(db, seg)

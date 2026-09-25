@@ -1,0 +1,216 @@
+"""Ticket attribution (asset-model-revision §8.6).
+
+A ticket has exactly one **subject**: the record it is about (`Issue.asset_uid`).
+What else it touches is derived, never typed in:
+
+* `involved_equipment` — for a subject position (or a Control Device, through
+  the positions it acts on), the units whose Confirmed Installation there
+  overlaps the incident time. One unit that definitely covers the whole
+  incident is `definite`; otherwise every overlapping unit is `possible`.
+* `involved_position` — for a subject unit, where it was installed.
+* `migration-split` — a legacy ticket nothing covers is linked, `possible`,
+  to the equipment its legacy object became (§12.4). Never counted.
+
+Counting (I-TKT-2) is over distinct tickets, from subject links and definite
+derived links only; a group is never the sum of its members.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from typing import Iterable, Optional
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
+
+from app.ledger import engine, temporal
+from app.models.asset import Asset, Relation
+from app.models.asset_subresources import AssetTicket
+from app.models.issue import Issue
+from app.models.ledger import MigrationMap, TicketLink
+
+LEGACY_WINDOW = timedelta(days=7)
+DERIVATION = "attribution/1"
+
+
+def ticket_key(issue: Issue) -> str:
+    return (issue.attributes or {}).get("argus_source_key") or issue.uid
+
+
+def _instant(value) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return temporal.parse_instant(value)
+    except ValueError:
+        try:
+            return datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%S.%f%z")
+        except ValueError:
+            return None
+
+
+def _endpoint(value, role: str) -> Optional[temporal.Bounds]:
+    if not value:
+        return None
+    if isinstance(value, dict):
+        return temporal.bounds(value, role)
+    t = _instant(value)
+    return temporal.Bounds(t, t) if t else None
+
+
+def incident_range(issue: Issue) -> tuple[datetime, datetime, str]:
+    """(earliest, latest, source) of the time the ticket is about (§8.6)."""
+    a = issue.attributes or {}
+    start = _endpoint(a.get("occurred_from"), "from")
+    if start is not None and start.placed:
+        end = _endpoint(a.get("occurred_until"), "until")
+        latest = end.latest if end is not None and end.latest != temporal.POS_INF else start.latest
+        return start.earliest, latest, "occurrence"
+    if a.get("argus_source"):
+        created = _instant(a.get("argus_source_created")) or issue.created_at
+        return created - LEGACY_WINDOW, created, "legacy_created_fallback"
+    reported = _instant(a.get("reported_at")) or issue.created_at
+    return reported, reported, "reported_at"
+
+
+def _classify(views: list[dict], earliest: datetime, latest: datetime, key: str) -> list[tuple[str, str]]:
+    """[(uid, certainty)] of the units (or positions) involved."""
+    covering, overlapping = [], []
+    for v in views:
+        iv = v["interval"]
+        if not iv.placed:
+            continue
+        if iv.start.latest <= earliest and latest < iv.end.earliest:
+            covering.append(v[key])
+        if iv.start.earliest <= latest and earliest < iv.end.latest:
+            overlapping.append(v[key])
+    if len(set(covering)) == 1:
+        return [(covering[0], "definite")]
+    return [(uid, "possible") for uid in sorted(set(overlapping))]
+
+
+def _positions_of(db: Session, subject: Asset) -> list[str]:
+    if subject.type in engine.INSTALLABLE:
+        return [subject.uid]
+    if subject.type == "Control Device":
+        return list(db.scalars(select(Relation.to_asset_uid).where(
+            Relation.from_asset_uid == subject.uid, Relation.relation_type == "acts on",
+            Relation.derivation == "ledger")))
+    return []
+
+
+def derive_for_ticket(db: Session, issue: Issue) -> list[TicketLink]:
+    db.execute(delete(TicketLink).where(TicketLink.ticket_uid == issue.uid))
+    subject = db.get(Asset, issue.asset_uid) if issue.asset_uid else None
+    links: list[TicketLink] = []
+
+    def add(uid: str, role: str, certainty: str, origin: str, detail: Optional[dict] = None):
+        links.append(TicketLink(workspace_id=issue.workspace_id, ticket_uid=issue.uid, asset_uid=uid, role=role,
+                                certainty=certainty, origin=origin,
+                                derivation=DERIVATION if origin != "ticket" else None, detail=detail))
+
+    if subject is not None:
+        add(subject.uid, "subject", "definite", "ticket")
+    for uid in db.scalars(select(AssetTicket.asset_uid).where(AssetTicket.ticket_key == ticket_key(issue))):
+        if subject is None or uid != subject.uid:
+            add(uid, "related", "definite", "ticket")
+    earliest, latest, source = incident_range(issue)
+    attrs = dict(issue.attributes or {})
+    if source == "legacy_created_fallback":
+        if attrs.get("occurrence_source") != source:
+            attrs["occurrence_source"] = source
+            issue.attributes = attrs
+    elif attrs.pop("occurrence_source", None) is not None:
+        issue.attributes = attrs
+    detail = {"incident": [earliest.isoformat(), latest.isoformat()], "source": source}
+    if subject is not None:
+        positions = _positions_of(db, subject)
+        involved = []
+        for p in positions:
+            involved += _classify(engine.installations(db, position_uid=p, status="Confirmed"),
+                                  earliest, latest, "asset_uid")
+        # A unit that is definitely involved through one position and possibly
+        # through another is reported once, with its strongest certainty.
+        best: dict[str, str] = {}
+        for uid, c in involved:
+            best[uid] = "definite" if "definite" in (c, best.get(uid)) else "possible"
+        for uid, c in sorted(best.items()):
+            add(uid, "involved_equipment", c, "derived", detail)
+        if not best and positions and source == "legacy_created_fallback":
+            for p in positions:
+                for m in db.scalars(select(MigrationMap).where(MigrationMap.legacy_uid == p,
+                                                               MigrationMap.role == "equipment")):
+                    add(m.new_uid, "involved_equipment", "possible", "migration-split", detail)
+        if not positions and db.scalar(select(func.count()).select_from(Relation).where(
+                Relation.relation_type == "installation of", Relation.to_asset_uid == subject.uid)):
+            for uid, c in _classify(engine.installations(db, asset_uid=subject.uid, status="Confirmed"),
+                                    earliest, latest, "position_uid"):
+                if uid:
+                    add(uid, "involved_position", c, "derived", detail)
+    db.add_all(links)
+    db.flush()
+    return links
+
+
+def derive_ticket_links(db: Session, *, workspace_ids: Optional[Iterable[str]] = None,
+                        ticket_uids: Optional[Iterable[str]] = None) -> dict:
+    """Recompute the links of the tickets whose subject lives in these
+    workspaces, or is a unit installed in them (I-TKT-3)."""
+    q = select(Issue).where(Issue.deleted_at.is_(None), Issue.asset_uid.isnot(None))
+    if ticket_uids is not None:
+        q = q.where(Issue.uid.in_(list(ticket_uids)))
+    elif workspace_ids is not None:
+        ids = list(workspace_ids)
+        records = select(Asset.uid).where(Asset.workspace_id.in_(ids))
+        units = select(Relation.to_asset_uid).where(Relation.relation_type == "installation of",
+                                                   Relation.workspace_id.in_(ids))
+        q = q.where(Issue.asset_uid.in_(records) | Issue.asset_uid.in_(units))
+    n = 0
+    for issue in db.scalars(q):
+        derive_for_ticket(db, issue)
+        n += 1
+    return {"tickets_attributed": n}
+
+
+def _counted():
+    """I-TKT-2: subject links and definite derived links; never related,
+    possible or migration-split links."""
+    return (TicketLink.role == "subject") | (
+        TicketLink.role.in_(("involved_equipment", "involved_position"))
+        & (TicketLink.certainty == "definite") & (TicketLink.origin == "derived"))
+
+
+def record_counts(db: Session, uid: str) -> dict:
+    subject = db.scalar(select(func.count(func.distinct(TicketLink.ticket_uid))).where(
+        TicketLink.asset_uid == uid, TicketLink.role == "subject"))
+    involved = db.scalar(select(func.count(func.distinct(TicketLink.ticket_uid))).where(
+        TicketLink.asset_uid == uid, TicketLink.role.in_(("involved_equipment", "involved_position")),
+        TicketLink.certainty == "definite", TicketLink.origin == "derived"))
+    return {"subject": subject or 0, "involved": involved or 0}
+
+
+def group_count(db: Session, uids: Iterable[str]) -> int:
+    """Distinct tickets over a group's members — never a sum (§8.6)."""
+    return db.scalar(select(func.count(func.distinct(TicketLink.ticket_uid))).where(
+        TicketLink.asset_uid.in_(list(uids)), _counted())) or 0
+
+
+def links_of_ticket(db: Session, ticket_uid: str) -> list[dict]:
+    out = []
+    for link in db.scalars(select(TicketLink).where(TicketLink.ticket_uid == ticket_uid).order_by(TicketLink.id)):
+        a = db.get(Asset, link.asset_uid)
+        out.append({"asset_uid": link.asset_uid, "name": a.name if a else None, "key": a.key if a else None,
+                    "type": a.type if a else None, "role": link.role, "certainty": link.certainty,
+                    "origin": link.origin, "detail": link.detail})
+    return out
+
+
+def tickets_involving(db: Session, asset_uid: str) -> list[dict]:
+    out = []
+    for link in db.scalars(select(TicketLink).where(TicketLink.asset_uid == asset_uid,
+                                                    TicketLink.role != "subject")):
+        issue = db.get(Issue, link.ticket_uid)
+        if issue is None:
+            continue
+        out.append({"ticket_uid": issue.uid, "key": ticket_key(issue), "title": issue.title, "state": issue.state,
+                    "role": link.role, "certainty": link.certainty, "origin": link.origin})
+    return out

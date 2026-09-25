@@ -1,10 +1,13 @@
-/** Types of the fact ledger API (`/v1/ledger`, `/v1/installations`). */
+/** Types of the fact ledger API (`/v1/ledger`, `/v1/installations`, `/v1/access-points`). */
 
 export interface TemporalValue {
-  kind: "date" | "before_records" | "unscheduled" | "open" | "unknown_past";
+  kind: "date" | "before_records" | "unscheduled" | "open" | "unknown_past" | "range";
   nominal?: string;
   precision?: "instant" | "day" | "month" | "year";
   bound?: string;
+  /** kind "range": an inferred instant somewhere between these two observations. */
+  earliest?: string;
+  latest?: string;
 }
 
 export interface RecordBrief {
@@ -100,4 +103,81 @@ export interface Decision {
   supersedes?: string[];
   target?: Record<string, unknown>;
   reason?: string;
+}
+
+export interface AccessPointView {
+  uid: string;
+  key: string;
+  address: string | null;
+  record_status: string;
+  position_uid: string | null;
+  position: RecordBrief | null;
+  in_service_from: TemporalValue | null;
+  in_service_until: TemporalValue | null;
+  successor: string | null;
+  successor_record: RecordBrief | null;
+}
+
+export interface AddressUse {
+  access_point_uid: string;
+  position: RecordBrief | null;
+  asset: RecordBrief | null;
+  certainty: "definite" | "possible";
+}
+
+export interface PortCandidate {
+  port_uid: string;
+  label: string;
+}
+
+export interface SegmentPort {
+  status: "attached" | "unresolved" | "confirmation_required" | "invalid" | "not_applicable";
+  position_uid?: string | null;
+  installation_uid?: string;
+  unit_uid?: string;
+  unit?: RecordBrief | null;
+  port_uid?: string;
+  port?: RecordBrief | null;
+  required?: Record<string, unknown>;
+  reason?: string;
+  failed?: string;
+  candidates?: PortCandidate[];
+  ports?: (PortCandidate & { failed: string | null })[];
+  evidence?: Record<string, unknown>;
+}
+
+export interface TicketLinkView {
+  asset_uid: string;
+  name: string | null;
+  key: string | null;
+  type: string | null;
+  role: "subject" | "related" | "involved_equipment" | "involved_position";
+  certainty: "definite" | "possible";
+  origin: "ticket" | "derived" | "migration-split";
+  detail: { incident?: [string, string]; source?: string } | null;
+}
+
+export interface RecordTickets {
+  counts: { subject: number; involved: number };
+  involved: {
+    ticket_uid: string;
+    key: string;
+    title: string;
+    state: string;
+    role: string;
+    certainty: "definite" | "possible";
+    origin: string;
+  }[];
+}
+
+export interface RuleEntry {
+  rule_id: string;
+  family: string;
+  meaning: string;
+  supersedes: string | null;
+  carries_rejections: boolean;
+  implementations: string[];
+  signature: string;
+  active: boolean;
+  active_impl: string | null;
 }

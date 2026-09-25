@@ -32,6 +32,18 @@ const CONFLICT_TEXT: Record<string, { title: string; explain: string }> = {
     title: "Installations may overlap",
     explain: "Their dates are not precise enough to tell. Give an exact date to one of them.",
   },
+  port_confirmation_required: {
+    title: "A bus segment needs its port confirmed",
+    explain: "The segment carries a safety class, or the only match is not backed by the IT registry. Pick the port for the unit installed now; the choice applies to this installation only.",
+  },
+  port_mapping_unresolved: {
+    title: "No single port matches a bus segment",
+    explain: "The unit installed now has no port, or several, that meet the requirement. Fix the IT registry or confirm the port.",
+  },
+  port_map_invalid: {
+    title: "A confirmed port is no longer compatible",
+    explain: "The port confirmed for this installation fails a hard check. A confirmation never overrides compatibility.",
+  },
   retirement_blocked: {
     title: "A source dropped a position that is still occupied",
     explain: "The position stays active because a confirmed installation is current. End the installation if the unit was removed.",
@@ -69,7 +81,12 @@ export function ReviewQueuePage() {
   const rejectInst = useMutation({ mutationFn: (uid: string) => ledgerApi.rejectInstallation(uid), onSuccess: done });
   const approve = useMutation({ mutationFn: (id: string) => ledgerApi.approveRevision(id), onSuccess: done });
   const rejectRev = useMutation({ mutationFn: (id: string) => ledgerApi.rejectRevision(id), onSuccess: done });
-  const error = [decide, confirmInst, rejectInst, approve, rejectRev].find((m) => m.isError)?.error;
+  const portMap = useMutation({
+    mutationFn: (v: { segment: string; installation: string; port: string }) =>
+      ledgerApi.confirmPortMap(v.segment, { installation_uid: v.installation, port_uid: v.port }),
+    onSuccess: done,
+  });
+  const error = [decide, confirmInst, rejectInst, approve, rejectRev, portMap].find((m) => m.isError)?.error;
 
   if (review.isLoading) return <p className="text-sm text-slate-500">Loading the review queue…</p>;
   if (!review.data) return <p className="text-sm text-red-600">The review queue could not be loaded.</p>;
@@ -168,6 +185,31 @@ export function ReviewQueuePage() {
                       ))}
                     </div>
                   )}
+                  {c.type.startsWith("port_") && c.record && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {((c.detail.candidates as { port_uid: string; label: string }[] | undefined) ?? []).map((p) => (
+                        <button
+                          key={p.port_uid}
+                          onClick={() =>
+                            portMap.mutate({
+                              segment: c.record!.uid,
+                              installation: String(c.detail.installation_uid),
+                              port: p.port_uid,
+                            })
+                          }
+                          className="rounded border border-slate-300 bg-white px-3 py-1 text-xs hover:bg-slate-50"
+                        >
+                          Use {p.label}
+                        </button>
+                      ))}
+                      {typeof c.detail.failed === "string" && (
+                        <span className="text-xs text-red-700">failed: {c.detail.failed}</span>
+                      )}
+                      <Link to={`/assets/${c.record.uid}#installations`} className="text-xs text-indigo-700 hover:underline">
+                        See why each port was ruled out
+                      </Link>
+                    </div>
+                  )}
                   {c.type === "source_vs_confirmed" && (
                     <p className="mt-1 text-xs text-slate-600">
                       Confirmed: <span className="font-mono">{show(c.detail.confirmed)}</span> · sources say{" "}
@@ -241,6 +283,8 @@ export function ReviewQueuePage() {
         )}
       </Card>
 
+      <RulesCard />
+
       {q.provisional_records.length > 0 && (
         <Card title="Provisional records">
           <ul className="flex flex-wrap gap-2 py-1">
@@ -255,5 +299,40 @@ export function ReviewQueuePage() {
         </Card>
       )}
     </div>
+  );
+}
+
+/** Which semantic rule runs for each inference family, and whether the
+ * catalogue passes its signature check (§7.9). */
+function RulesCard() {
+  const rules = useQuery({ queryKey: ["ledger-rules"], queryFn: ledgerApi.rules });
+  if (!rules.data) return null;
+  const active = rules.data.rules.filter((r) => r.active);
+  return (
+    <Card
+      title="Inference rules in force"
+      action={
+        rules.data.check.length === 0 ? (
+          <span className="text-xs text-emerald-700">catalogue check passes</span>
+        ) : (
+          <span className="text-xs text-red-700">{rules.data.check.length} catalogue problem(s)</span>
+        )
+      }
+    >
+      <ul className="divide-y divide-slate-100">
+        {active.map((r) => (
+          <li key={r.rule_id} className="py-2 text-sm">
+            <span className="font-mono text-xs text-slate-900">{r.rule_id}</span>
+            <span className="ml-2 text-xs text-slate-500">implementation {r.active_impl}</span>
+            <p className="text-xs text-slate-600">{r.meaning}</p>
+          </li>
+        ))}
+      </ul>
+      {rules.data.check.map((e) => (
+        <p key={e} className="text-xs text-red-700">
+          {e}
+        </p>
+      ))}
+    </Card>
   );
 }
