@@ -1029,6 +1029,7 @@ def project_subject(db: Session, uid: str, cause: str, *, emit: bool = True) -> 
     managed_attrs: set[str] = set()
     exists_outcome: Optional[_Outcome] = None
     new_conflicts: dict[str, tuple] = {}
+    type_fact = None                    # None: no type statement; False: none in effect; else the type
 
     lineage = _type_lineage(db, record)
     for (predicate, member), entries in keys.items():
@@ -1050,6 +1051,8 @@ def project_subject(db: Session, uid: str, cause: str, *, emit: bool = True) -> 
         elif predicate == "name":
             if outcome.has_effective and outcome.effective:
                 record.name = outcome.effective
+        elif predicate == "type":
+            type_fact = outcome.effective if outcome.has_effective and outcome.effective else False
         elif predicate.startswith("attr:"):
             name = predicate[5:]
             managed_attrs.add(name)
@@ -1083,11 +1086,43 @@ def project_subject(db: Session, uid: str, cause: str, *, emit: bool = True) -> 
         else:
             attrs.pop(name, None)
 
+    if type_fact is not None:
+        _write_type(db, record, type_fact, cause, emit)
     _write_edges(db, uid, desired_edges)
     _write_record_status(db, record, exists_outcome, attrs, cause, new_conflicts)
     record.attributes = attrs
     db.flush()
     _write_conflicts(db, record, new_conflicts, cause, emit)
+
+
+def _original_type(db: Session, record: Asset) -> str:
+    """The type the record had before a type statement last took effect: the
+    `before` of the first event in the latest run of statement-driven retypes
+    (a promotion in between starts a new run)."""
+    start = None
+    for e in db.scalars(select(RecordEvent).where(RecordEvent.uid == record.uid, RecordEvent.kind == "retyped")
+                        .order_by(RecordEvent.seq)):
+        if (e.after or {}).get("by") == "type statement":
+            start = start or e
+        else:
+            start = None
+    return (start.before or {}).get("type", record.type) if start is not None else record.type
+
+
+def _write_type(db: Session, record: Asset, type_fact, cause: str, emit: bool) -> None:
+    """A confirmed `type` statement retypes the record in place (same uid and
+    key). With none in effect (revoked), it goes back to its original type."""
+    wanted = type_fact or _original_type(db, record)
+    if wanted == record.type:
+        return
+    before = {"type": record.type, "schema_uid": record.schema_uid}
+    record.type = wanted
+    record.schema_uid = ensure_type(db, record.workspace_id, wanted).uid
+    if emit:
+        db.add(RecordEvent(uid=record.uid, kind="retyped", before=before,
+                           after={"type": wanted, "schema_uid": record.schema_uid,
+                                  "by": "type statement" if type_fact else "type statement revoked"},
+                           cause=cause, at=now()))
 
 
 def _write_edges(db: Session, uid: str, desired: set[tuple]) -> None:

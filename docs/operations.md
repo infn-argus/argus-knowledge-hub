@@ -524,7 +524,11 @@ and an `access_point_uid` when the line names several Access Points) makes
 these changes, all through the ledger:
 
 1. The line is retyped in place as a **Bus Segment**, so its uid, key,
-   tickets and documents stay the same. A `retyped` record event says so.
+   tickets and documents stay the same. The retype is a statement of the
+   record's `type`, confirmed with the conversion's reason, and the
+   projection applies it and writes a `retyped` record event. A rebuild
+   from the ledger keeps it. Withdrawing the statement (stating `type` as
+   empty) puts the record back to the type it had before.
 2. Each path is created (`PATH:<ioc>:<line>`). The path `enters at` the
    Access Point and `continues on` the segment. The segment is
    `served by` the path, and each device `uses path`.

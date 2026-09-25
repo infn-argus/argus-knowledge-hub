@@ -26,7 +26,6 @@ from sqlalchemy.orm import Session
 from app.ledger import engine, golden, service
 from app.ledger.engine import LedgerError
 from app.models.asset import Asset, Relation
-from app.models.ledger import RecordEvent
 
 SERIAL_LINE = "Serial Line"
 BUS_SEGMENT = "Bus Segment"
@@ -126,13 +125,10 @@ def convert(db: Session, workspace_id: str, actor: str, line_uid: str, *, access
     before = golden.run(db, workspace_id)
     built = {"paths": [], "segment": line.uid, "removed": [], "required_port": p["required_port"]}
 
-    # The line becomes the Bus Segment, in place (same uid, key, tickets, documents).
-    from app.ledger.writer import writing
-    with writing(db):
-        db.add(RecordEvent(uid=line.uid, kind="retyped", before={"type": SERIAL_LINE}, after={"type": BUS_SEGMENT},
-                           cause=f"serial line conversion by {actor}", at=engine.now()))
-        line.type = BUS_SEGMENT
-        line.schema_uid = engine.ensure_type(db, workspace_id, BUS_SEGMENT).uid
+    # The line becomes the Bus Segment, in place (same uid, key, tickets, documents),
+    # as a confirmed statement: a rebuild keeps it, revoking the decision undoes it.
+    engine.ensure_type(db, workspace_id, BUS_SEGMENT)
+    service.retype(db, workspace_id, actor, line.uid, BUS_SEGMENT, reason=reason)
     if p["required_port"]:
         # Advisory only (§9.3): an inferred statement nobody has confirmed.
         engine.add_manual_claims(db, engine.person_stream(db, workspace_id, actor), [

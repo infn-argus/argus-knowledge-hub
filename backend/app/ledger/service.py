@@ -188,6 +188,21 @@ def edit_values(db: Session, workspace_id: str, actor: str, uid: str, changes: d
         confirm_value(uid, p, v, replaces=_active(db, uid, p), reason=reason) for p, v in changes.items()])
 
 
+def retype(db: Session, workspace_id: str, actor: str, uid: str, type_name: str,
+           reason: Optional[str] = None) -> list:
+    """Change what a record is, in place: a person's statement of its type,
+    confirmed, so the change has an author and a reason, a rebuild keeps it
+    and revoking the decision undoes it."""
+    from sqlalchemy import select
+    from app.models.schema import Schema
+    known = db.scalar(select(Schema.uid).where(
+        Schema.name == type_name, Schema.applies_to == "objects",
+        (Schema.workspace_id == workspace_id) | Schema.is_global.is_(True)).limit(1))
+    if known is None:
+        raise engine.LedgerError(f"there is no type '{type_name}' here")
+    return edit_values(db, workspace_id, actor, uid, {"type": type_name}, reason=reason)
+
+
 def relate(db: Session, workspace_id: str, actor: str, from_uid: str, relation_type: str, to_uid: str,
            present: bool = True, reason: Optional[str] = None) -> list:
     """Add or remove an asserted relation. A single-valued one is set or

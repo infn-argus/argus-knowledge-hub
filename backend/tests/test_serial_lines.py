@@ -5,13 +5,14 @@ the old edges gone, and the root-cause walk still finding what it found."""
 import secrets
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.db import SessionLocal
 from app.ledger import engine, service
 from app.main import app
 from app.models.asset import Asset, Relation
-from app.models.ledger import Decision
+from app.models.ledger import Decision, RecordEvent
 from app.models.workspace import Workspace
 from app.services.root_cause import root_causes
 from tests.test_ledger_transition import token
@@ -167,4 +168,60 @@ def test_an_unclear_line_asks_first_and_a_ledger_only_workspace_converts_through
     path = r.json()["paths"][0]["uid"]
     assert {e.from_asset_uid for e in edges(db, "uses path", b=path)} == {ids["g1"], ids["g2"], ids["g3"]}
     assert not edges(db, "on line", b=ids["line"])
+    db.close()
+
+
+def test_the_retype_is_a_ledger_fact_a_rebuild_keeps_and_withdrawing_it_undoes():
+    ws, headers, ids = world()
+    r = client.post(f"/v1/ledger/serial-lines/{ids['line']}/convert", headers=headers, json={"reason": "bus"})
+    assert r.status_code == 200, r.text
+    db = SessionLocal()
+    d = db.query(Decision).filter_by(workspace_id=ws, subject_uid=ids["line"], predicate="type", kind="confirm").one()
+    assert d.value == "Bus Segment" and d.reason == "bus"
+    events = db.query(RecordEvent).filter_by(uid=ids["line"], kind="retyped").all()
+    assert [(e.before["type"], e.after["type"]) for e in events] == [("Serial Line", "Bus Segment")]
+    bus_schema = db.get(Asset, ids["line"]).schema_uid
+
+    engine.rebuild(db, ws)
+    line = db.get(Asset, ids["line"])
+    assert line.type == "Bus Segment" and line.schema_uid == bus_schema
+    db.commit()
+
+    # Withdrawing the statement undoes it: the record is what it was before.
+    service.edit_values(db, ws, "tester", ids["line"], {"type": None}, reason="wrong line")
+    db.commit()
+    line = db.get(Asset, ids["line"])
+    assert line.type == "Serial Line" and line.key == f"{ws}-MOXA:4003"
+    assert db.query(RecordEvent).filter_by(uid=ids["line"], kind="retyped").count() == 2
+    engine.rebuild(db, ws)
+    assert db.get(Asset, ids["line"]).type == "Serial Line"
+    db.rollback()
+    db.close()
+
+
+def test_a_record_cannot_be_retyped_to_a_type_that_does_not_exist():
+    ws, headers, ids = world()
+    db = SessionLocal()
+    with pytest.raises(engine.LedgerError):
+        service.retype(db, ws, "tester", ids["line"], "Flux Capacitor", reason="no")
+    db.rollback()
+    db.close()
+
+
+def test_withdrawing_a_type_statement_goes_back_to_the_type_before_it_not_before_a_promotion():
+    ws, headers, ids = world()
+    db = SessionLocal()
+    rec = record(db, ws, "Other Equipment", f"{ws}-BOX")
+    engine.ensure_type(db, ws, "Timing Module")
+    engine.ensure_type(db, ws, "Bus Segment")
+    from app.ledger.writer import writing
+    with writing(db):                                   # a class promotion retypes directly
+        db.add(RecordEvent(uid=rec.uid, kind="retyped", before={"type": "Other Equipment"},
+                           after={"type": "Timing Module"}, cause="promotion", at=engine.now()))
+        rec.type = "Timing Module"
+    service.retype(db, ws, "tester", rec.uid, "Bus Segment", reason="it is the bus")
+    assert db.get(Asset, rec.uid).type == "Bus Segment"
+    service.edit_values(db, ws, "tester", rec.uid, {"type": None}, reason="no, it is not")
+    assert db.get(Asset, rec.uid).type == "Timing Module"
+    db.rollback()
     db.close()
