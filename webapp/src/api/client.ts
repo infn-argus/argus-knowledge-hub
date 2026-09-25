@@ -907,6 +907,7 @@ export const legacyMigrationApi = {
   apply: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/apply`, { method: "POST" }),
   rollback: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/rollback`, { method: "POST", body: json({}) }),
   finalize: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/finalize`, { method: "POST" }),
+  verify: (id: string) => request<MigrationPlanView>(`/v1/migration/plans/${id}/verify`, { method: "POST" }),
   gate: () => request<{ ok: boolean; blocked: string[]; mixed_open: string[]; unplanned: number }>("/v1/migration/gate"),
   /** The decision report as CSV (§12.5), as a download URL. */
   reportUrl: async (id: string): Promise<string> => {

@@ -206,6 +206,10 @@ def test_rollback_restores_the_legacy_rows_and_finalize_closes_the_window():
                 json={"outcome": "M-POS", "reason": "duplicate"})
     assert client.post(f"/v1/migration/plans/{plan2['id']}/finalize", headers=L.headers).status_code == 409
     assert client.post(f"/v1/migration/plans/{plan2['id']}/apply", headers=L.headers).json()["status"] == "verified"
+    # Finalizing needs the deep verification (I-MIG-5, I-MIG-6) after the last apply.
+    assert client.post(f"/v1/migration/plans/{plan2['id']}/finalize", headers=L.headers).status_code == 409
+    deep = client.post(f"/v1/migration/plans/{plan2['id']}/verify", headers=L.headers).json()["invariants"]
+    assert deep["deep_verification"]["ok"], deep["deep_verification"]
     done = client.post(f"/v1/migration/plans/{plan2['id']}/finalize", headers=L.headers)
     assert done.status_code == 200 and done.json()["status"] == "finalized"
     assert client.post(f"/v1/migration/plans/{plan2['id']}/rollback", headers=L.headers, json={}).status_code == 409
@@ -228,3 +232,42 @@ def test_a_domain_is_not_frozen_while_its_legacy_records_are_unmigrated():
                        attestations=ENTRY["attestations"], waivers={**ENTRY["waivers"], "legacy": "pilot"})
     db.rollback()
     db.close()
+
+
+def test_the_registry_report_does_not_get_worse_and_a_rebuild_gives_the_migrated_state():
+    from app.ledger import registry
+    L = Legacy()
+    db = SessionLocal()
+    # A legacy `powers` edge from an Ion Pump: the registry wants a position at its source.
+    db.add(Relation(workspace_id=L.ws, from_asset_uid=L.pos.uid, to_asset_uid=L.element.uid, relation_type="powers"))
+    db.commit()
+    before = registry.report(db, [L.ws])
+    assert any(v["rule"] == "source_type" and v["relation"] == "powers" for v in before["violations"])
+    db.close()
+    plan = client.post("/v1/migration/plans", headers=L.headers, json={}).json()
+    item = outcomes(plan)["vac:SIP04"]["item"]
+    client.post(f"/v1/migration/plans/{plan['id']}/items/{item}/override", headers=L.headers,
+                json={"outcome": "M-POS", "reason": "duplicate"})
+    client.post(f"/v1/migration/plans/{plan['id']}/apply", headers=L.headers)
+    deep = client.post(f"/v1/migration/plans/{plan['id']}/verify", headers=L.headers).json()["invariants"]
+    result = deep["deep_verification"]
+    assert result["I-MIG-5"]["ok"] and result["I-MIG-5"]["after"] < result["I-MIG-5"]["before"]   # the pump is a position now
+    assert result["I-MIG-6"]["ok"] and result["I-MIG-6"]["records"] >= 7
+
+    # Someone writes around the ledger, and adds a deprecated edge: both are caught.
+    db = SessionLocal()
+    by_key = {r["legacy_key"]: r for r in client.get(f"/v1/migration/plans/{plan['id']}", headers=L.headers).json()["rows"]}
+    eq = db.get(Asset, by_key[f"{L.fac}:AST:vac:SIP03"]["applied"]["equipment"])
+    eq.attributes = {**eq.attributes, "serial": "typed over"}
+    db.add(Relation(workspace_id=L.ws, from_asset_uid=L.created.uid, to_asset_uid=L.matched.uid, relation_type="spare for"))
+    db.add(Relation(workspace_id=L.ws, from_asset_uid=L.mixed.uid, to_asset_uid=L.matched.uid, relation_type="spare for"))
+    db.commit()
+    db.close()
+    bad = client.post(f"/v1/migration/plans/{plan['id']}/verify", headers=L.headers).json()["invariants"]["deep_verification"]
+    assert not bad["I-MIG-6"]["ok"] and bad["I-MIG-6"]["differences"][0]["fields"] == ["attributes"]
+    assert not bad["I-MIG-5"]["ok"] and "deprecated" in bad["I-MIG-5"]["grew"]
+    refused = client.post(f"/v1/migration/plans/{plan['id']}/finalize", headers=L.headers)
+    assert refused.status_code == 409 and "I-MIG-5" in refused.json()["detail"]["error"]
+    # The warn-mode report itself.
+    rep = client.get("/v1/ledger/registry/report", headers=L.headers).json()
+    assert rep["mode"] == "warn" and rep["counts"]["deprecated"] == 2

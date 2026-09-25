@@ -37,7 +37,7 @@ from typing import Optional
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.ledger import engine, lookup, service, temporal
+from app.ledger import engine, lookup, registry, service, temporal
 from app.ledger.engine import INSTALLATION, LedgerError, ParsedClaim, canonical
 from app.models.asset import Asset, Relation
 from app.models.asset_subresources import AssetComment, AssetHistory, AssetLabel, AssetTicket
@@ -572,6 +572,11 @@ def apply(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
     _assert_open(db, p)
     if p.status in ("rolled_back",):
         raise MigrationError("a rolled-back plan is not applied again; plan afresh")
+    if "registry_before" not in (p.invariants or {}):
+        # I-MIG-5's baseline: the registry report before the first item moves.
+        before = registry.report(db, {p.workspace_id, p.inventory_workspace_id})
+        p.invariants = {**(p.invariants or {}),
+                        "registry_before": {"total": before["total"], "counts": before["counts"]}}
     todo = [i for i in items(db, p.id) if i.status in ("planned", "failed")]
     removed: dict[int, dict] = {}         # relations this run removed with retired records
     for item in sorted(todo, key=lambda i: (ORDER[i.outcome], i.id)):
@@ -597,7 +602,7 @@ def apply(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
         item.updated_at = now()
     db.flush()
     p.applied_at = now()
-    p.invariants = verify(db, p)
+    p.invariants = {**(p.invariants or {}), **verify(db, p)}
     p.status = "verified" if p.invariants["ok"] else "needs_attention"
     engine._record_decision(db, "migration_apply", actor, p.workspace_id, target={"plan": p.id},
                             value={"status": p.status, "invariants": p.invariants["summary"]})
@@ -621,10 +626,65 @@ def verify(db: Session, p: LegacyMigrationPlan) -> dict:
     return {"ok": all(checks.values()), "checks": checks,
             "summary": {"applied": len(applied), "open": len(open_items), "dangling_relations": dangling,
                         "untraced": len(untraced)},
-            "not_automated": ["I-MIG-4 (run the registry and invariant reports)",
-                              "I-MIG-5 (compare the registry violation report before and after)",
-                              "I-MIG-6 (rebuild the workspace projection and compare)",
+            "deep": "I-MIG-5 and I-MIG-6 run in the deep verification, required before finalizing",
+            "not_automated": ["I-MIG-4 (the installation, access point, port and ticket invariant reports)",
                               "I-MIG-7 (root-cause walks on the golden incident set)"]}
+
+
+def _state(db: Session, uids: list[str]) -> dict:
+    """What the projection says about these records: identity, status,
+    attributes and the edges the ledger wrote."""
+    out = {}
+    for uid in sorted(set(uids)):
+        a = db.get(Asset, uid)
+        if a is None:
+            out[uid] = None
+            continue
+        edges = sorted((r.relation_type, r.to_asset_uid, r.derivation) for r in db.scalars(
+            select(Relation).where(Relation.from_asset_uid == uid, Relation.derivation.isnot(None))))
+        out[uid] = {"key": a.key, "type": a.type, "record_status": a.record_status,
+                    "attributes": json.loads(canonical(a.attributes or {})), "edges": [list(e) for e in edges]}
+    return out
+
+
+def deep_verify(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
+    """I-MIG-5 (the registry report does not get worse) and I-MIG-6 (a
+    rebuild of the workspaces from the ledger gives exactly the migrated
+    state). The rebuild runs in a savepoint and is rolled back."""
+    p = _plan(db, plan_id)
+    if p.applied_at is None:
+        raise MigrationError("apply the plan first")
+    workspaces = sorted({p.workspace_id, p.inventory_workspace_id})
+    after = registry.report(db, workspaces)
+    baseline = (p.invariants or {}).get("registry_before")
+    mig5 = registry.compare(baseline, after) if baseline else {"ok": False, "reason": "no baseline was taken"}
+
+    touched = []
+    for i in items(db, p.id):
+        if i.status == "applied":
+            done = i.applied or {}
+            touched += [u for u in (i.legacy_uid, done.get("equipment"), done.get("installation")) if u]
+    before_state = _state(db, touched)
+    savepoint = db.begin_nested()
+    try:
+        for w in workspaces:
+            engine.rebuild(db, w)
+        rebuilt = _state(db, touched)
+    finally:
+        savepoint.rollback()
+    differences = []
+    for uid, was in before_state.items():
+        now_ = rebuilt.get(uid)
+        if was != now_:
+            fields = sorted(k for k in (was or {}) if (now_ or {}).get(k) != (was or {}).get(k))
+            differences.append({"uid": uid, "fields": fields})
+    mig6 = {"ok": not differences, "records": len(before_state), "differences": differences[:50]}
+    deep = {"at": now().isoformat(), "ok": mig5["ok"] and mig6["ok"], "I-MIG-5": mig5, "I-MIG-6": mig6}
+    p.invariants = {**(p.invariants or {}), "deep_verification": deep}
+    engine._record_decision(db, "migration_verify", actor, p.workspace_id, target={"plan": p.id},
+                            value={"ok": deep["ok"], "I-MIG-5": mig5["ok"], "I-MIG-6": mig6["ok"]})
+    db.flush()
+    return p
 
 
 # --------------------------------------------------------------------------- rollback and finalize
@@ -689,6 +749,12 @@ def finalize(db: Session, plan_id: str, actor: str) -> LegacyMigrationPlan:
         raise MigrationError("already finalized")
     if p.status != "verified":
         raise MigrationError("only a verified plan is finalized; resolve the open items or roll back")
+    deep = (p.invariants or {}).get("deep_verification")
+    if not deep or datetime.fromisoformat(deep["at"]) < p.applied_at:
+        raise MigrationError("run the deep verification (I-MIG-5, I-MIG-6) after the last apply")
+    if not deep["ok"]:
+        raise MigrationError("the deep verification failed: " + ", ".join(
+            k for k in ("I-MIG-5", "I-MIG-6") if not deep[k]["ok"]))
     p.finalized_at, p.status = now(), "finalized"
     engine._record_decision(db, "migration_finalize", actor, p.workspace_id, target={"plan": p.id},
                             value={"report_hash": p.report_hash})

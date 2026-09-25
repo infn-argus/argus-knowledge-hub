@@ -493,7 +493,18 @@ export interface MigrationPlanView {
   created_at: string;
   applied_at: string | null;
   finalized_at: string | null;
-  invariants: { ok: boolean; checks: Record<string, boolean>; summary: Record<string, number>; not_automated: string[] } | null;
+  invariants: {
+    ok: boolean;
+    checks: Record<string, boolean>;
+    summary: Record<string, number>;
+    not_automated: string[];
+    deep_verification?: {
+      at: string;
+      ok: boolean;
+      "I-MIG-5": { ok: boolean; before?: number; after?: number; grew?: Record<string, number[]>; reason?: string };
+      "I-MIG-6": { ok: boolean; records: number; differences: { uid: string; fields: string[] }[] };
+    };
+  } | null;
   outcomes: Record<string, number>;
   statuses: Record<string, number>;
   rows?: MigrationRow[];

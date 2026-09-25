@@ -93,6 +93,7 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
   const apply = useMutation(act(legacyMigrationApi.apply));
   const rollback = useMutation(act(legacyMigrationApi.rollback));
   const finalize = useMutation(act(legacyMigrationApi.finalize));
+  const verify = useMutation(act(legacyMigrationApi.verify));
   const override = useMutation({
     mutationFn: (v: { item: number; outcome: string; reason: string }) => legacyMigrationApi.override(id, v.item, v.outcome, v.reason),
     onSuccess: onChange,
@@ -108,7 +109,8 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
   const p = plan.data;
   const rows = (p.rows ?? []).filter((r) => !filter || r.outcome === filter || r.status === filter);
   const open = p.status !== "finalized" && p.status !== "rolled_back";
-  const error = [apply, rollback, finalize, override].find((m) => m.isError)?.error;
+  const error = [apply, rollback, finalize, override, verify].find((m) => m.isError)?.error;
+  const deep = p.invariants?.deep_verification;
   return (
     <div className="mt-3 space-y-3">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -137,6 +139,12 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
               Roll back
             </button>
           )}
+          {open && p.applied_at && (
+            <button onClick={() => verify.mutate()} disabled={verify.isPending} className="rounded border border-slate-300 px-2 py-1"
+                    title="Registry report before and after (I-MIG-5); rebuild from the ledger and compare (I-MIG-6)">
+              {verify.isPending ? "Verifying…" : "Deep verify"}
+            </button>
+          )}
           {p.status === "verified" && (
             <button onClick={() => confirm("After finalizing, the plan can no longer be rolled back.") && finalize.mutate()}
                     className="rounded border border-slate-300 px-2 py-1">
@@ -150,6 +158,19 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
           {Object.entries(p.invariants.checks).map(([k, ok]) => (
             <span key={k} className={`mr-3 ${ok ? "text-emerald-700" : "text-red-600"}`}>{ok ? "✓" : "✗"} {k}</span>
           ))}
+          {deep ? (
+            <>
+              <span className={`mr-3 ${deep["I-MIG-5"].ok ? "text-emerald-700" : "text-red-600"}`}
+                    title={deep["I-MIG-5"].grew && Object.keys(deep["I-MIG-5"].grew).length ? `grew: ${Object.keys(deep["I-MIG-5"].grew).join(", ")}` : undefined}>
+                {deep["I-MIG-5"].ok ? "✓" : "✗"} I-MIG-5 (registry {deep["I-MIG-5"].before ?? "?"} → {deep["I-MIG-5"].after ?? "?"})
+              </span>
+              <span className={`mr-3 ${deep["I-MIG-6"].ok ? "text-emerald-700" : "text-red-600"}`}>
+                {deep["I-MIG-6"].ok ? "✓" : "✗"} I-MIG-6 (rebuild: {deep["I-MIG-6"].differences.length} of {deep["I-MIG-6"].records} differ)
+              </span>
+            </>
+          ) : (
+            <span className="mr-3 text-slate-500">I-MIG-5, I-MIG-6: deep verification not run</span>
+          )}
           <span className="text-slate-400">checked by people: {p.invariants.not_automated.map((x) => x.split(" ")[0]).join(", ")}</span>
         </p>
       )}

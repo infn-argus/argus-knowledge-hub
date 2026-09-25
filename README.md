@@ -139,6 +139,9 @@ currently valid* revision rather than to an arbitrary PDF.
   queue's targets. Overdue items go to the backup steward, then to the governance group
   (`ARGUS_GOVERNANCE`), once per level. The notification never names the record. The review
   queue page shows each queue's size, age distribution and escalations.
+  Before a plan is finalized, a deep verification checks that the relation registry's report
+  got no worse (I-MIG-5) and that rebuilding from the ledger gives exactly the migrated state
+  (I-MIG-6). The registry itself runs in warn mode (`/v1/ledger/registry/report`).
   *Migration to ARGUS → Legacy records*; served by `/v1/migration`.
 - **Stable API and Jira retirement.** The API is versioned in its path, and a deprecated
   endpoint announces its sunset in headers at least 180 days ahead

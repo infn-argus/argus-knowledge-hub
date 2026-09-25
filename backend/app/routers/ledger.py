@@ -240,6 +240,13 @@ def review(workspace_id: str = Depends(require_permission("read")), db: Session 
                        "installation_proposals": len(installations)}}
 
 
+@router.get("/registry/report")
+def registry_report(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """The relation registry in warn mode (§6, S3b): every edge that breaks it."""
+    from app.ledger import registry
+    return registry.report(db, [workspace_id])
+
+
 @router.get("/review/queues")
 def review_queues(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """§18.2: each queue's size, age distribution and escalation, and who owns it."""

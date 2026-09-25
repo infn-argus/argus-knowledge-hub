@@ -117,6 +117,19 @@ def rollback(plan_id: str, body: RollbackIn, identity=Depends(get_identity),
     return legacy.view(db, p)
 
 
+@router.post("/plans/{plan_id}/verify")
+def deep_verify(plan_id: str, identity=Depends(get_identity), workspace_id: str = Depends(require_permission("approve")),
+                db: Session = Depends(get_db)):
+    """I-MIG-5 and I-MIG-6; needed before finalizing."""
+    _owned(db, plan_id, workspace_id)
+    try:
+        p = legacy.deep_verify(db, plan_id, actor_of(identity))
+    except LedgerError as exc:
+        _fail(db, exc)
+    db.commit()
+    return legacy.view(db, p)
+
+
 @router.post("/plans/{plan_id}/finalize")
 def finalize(plan_id: str, identity=Depends(get_identity), workspace_id: str = Depends(require_permission("approve")),
              db: Session = Depends(get_db)):

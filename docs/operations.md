@@ -191,8 +191,19 @@ or an inferred record is not in a plan.
      becomes `failed` and leaves nothing behind.
 
    The plan is `verified` when every item is applied and I-MIG-2 and
-   I-MIG-3 hold across the plan. People still check I-MIG-4 to I-MIG-7.
-5. **Roll back** at any point until the plan is finalized, and never after
+   I-MIG-3 hold across the plan.
+5. **Deep verification** (*Deep verify*, `POST /v1/migration/plans/{id}/verify`):
+   - **I-MIG-5:** compares the relation registry's report with the
+     baseline taken before the first item moved. The total number of
+     violations must not grow; a rule that grew is named even when the
+     total fell.
+   - **I-MIG-6:** rebuilds the plan's workspaces from the ledger inside a
+     savepoint, compares every record the plan touched, then rolls back.
+     A difference means something was written around the ledger.
+
+   Finalizing needs a passing deep verification taken after the last
+   apply. People still check I-MIG-4 and I-MIG-7.
+6. **Roll back** at any point until the plan is finalized, and never after
    the domain has cut over:
    - records the migration created are retired by ledger decisions;
    - Installations are rejected;
@@ -200,7 +211,7 @@ or an inferred record is not in a plan.
    - the legacy rows get their pre-images back.
 
    `migration_map` is append-only, so its rows stay as history.
-6. **Finalize** after sign-off. From then on, corrections are ordinary
+7. **Finalize** after sign-off. From then on, corrections are ordinary
    decisions.
 
 What each outcome does:
@@ -281,3 +292,22 @@ restricted record is not disclosed. The dashboard (`GET
 
 Migration items are not in a queue of their own: they are due before the
 domain's cutover, and the freeze enforces that (§12, §17.4).
+
+## The relation registry, in warn mode (§6)
+
+`GET /v1/ledger/registry/report` lists every edge of the workspace that
+breaks the registry. It checks:
+
+- deprecated verbs (`replaced`, `carried by`, `on line`, `spare for`, and
+  `assigned to` a Work Package);
+- the types each end may have (`installed at`, `installation of`,
+  `realized by`, `assigned to`, `powers`, `acts on`, `port of`, `runs on`,
+  `part of`);
+- cardinality: one position per unit at any instant, one Installation
+  edge each way, one `part of`, exclusive `composed of`;
+- cycles in `part of` and `composed of`;
+- edges pointing at retired or merged records.
+
+Nothing is refused in warn mode. The report is what stewards triage
+before the registry moves to `enforce` (§13 S7), and it is the measure
+that I-MIG-5 compares.
