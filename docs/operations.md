@@ -450,8 +450,13 @@ declined class is reviewed again only when a new kind of threshold is met.
 
 - it creates a child type of `Asset` in the catalogue, shared, with the
   requested attributes;
-- it retypes the class's objects in place, keeping their uids and writing
-  a `retyped` record event each, in ledger-only workspaces too;
+- it retypes the class's objects in place, keeping their uids. Each
+  retype is a confirmed statement of the object's `type` in its own
+  workspace, carrying the promotion's reason. The projection applies it
+  and writes a `retyped` record event. This works in ledger-only
+  workspaces, and in scopes that are read-only mirrors during cutover,
+  because type names belong to the catalogue. A rebuild keeps the new
+  type. Withdrawing an object's statement puts it back to Other Equipment;
 - the class stays in the vocabulary for history, but can no longer be
   assigned.
 

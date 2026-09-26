@@ -192,15 +192,32 @@ def retype(db: Session, workspace_id: str, actor: str, uid: str, type_name: str,
            reason: Optional[str] = None) -> list:
     """Change what a record is, in place: a person's statement of its type,
     confirmed, so the change has an author and a reason, a rebuild keeps it
-    and revoking the decision undoes it."""
+    and withdrawing the statement undoes it."""
+    return retype_many(db, workspace_id, actor, [uid], type_name, reason)
+
+
+def retype_many(db: Session, workspace_id: str, actor: str, uids: list, type_name: str,
+                reason: Optional[str] = None, *, catalogue_decision: bool = False) -> list:
+    """Several records of one workspace, as one batch. A catalogue decision
+    (a class promotion) retypes even where the scope is a read-only mirror:
+    what a type is called is the catalogue's, not the mirrored source's."""
     from sqlalchemy import select
+    from app.ledger.cutover import assert_writable
     from app.models.schema import Schema
+    if not uids:
+        return []
+    if not catalogue_decision:
+        assert_writable(db, workspace_id, "objects")
     known = db.scalar(select(Schema.uid).where(
         Schema.name == type_name, Schema.applies_to == "objects",
         (Schema.workspace_id == workspace_id) | Schema.is_global.is_(True)).limit(1))
     if known is None:
         raise engine.LedgerError(f"there is no type '{type_name}' here")
-    return edit_values(db, workspace_id, actor, uid, {"type": type_name}, reason=reason)
+    engine.add_manual_claims(db, engine.person_stream(db, workspace_id, actor),
+                             [ParsedClaim(f"uid:{u}", "type", type_name, method="manual") for u in uids],
+                             cause=f"retype by {actor}")
+    return engine.apply_decisions(db, workspace_id, actor, [
+        confirm_value(u, "type", type_name, replaces=_active(db, u, "type"), reason=reason) for u in uids])
 
 
 def relate(db: Session, workspace_id: str, actor: str, from_uid: str, relation_type: str, to_uid: str,

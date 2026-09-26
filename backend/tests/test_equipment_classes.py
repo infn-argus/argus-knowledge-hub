@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 from app.db import SessionLocal
 from app.main import app
 from app.models.asset import Asset
-from app.models.ledger import RecordEvent
+from app.ledger import engine, service
+from app.models.ledger import Decision, RecordEvent
 from app.models.schema import Schema
 from app.models.workspace import Workspace
 from app.services import asset_types, equipment_classes as ec
@@ -123,6 +124,14 @@ def test_promotion_retypes_the_objects_in_place_and_retires_the_class(catalogue)
         rec = db.get(Asset, uid)
         assert rec.type == type_name and rec.schema_uid == schema.uid
         assert db.query(RecordEvent).filter_by(uid=uid, kind="retyped").count() == 1
+        # The retype is a confirmed statement with the promotion's reason, in the object's own workspace.
+        d = db.query(Decision).filter_by(subject_uid=uid, predicate="type", kind="confirm").one()
+        assert d.value == type_name and d.workspace_id == rec.workspace_id and "used in two beamlines" in d.reason
+    engine.rebuild(db, c["other"])
+    assert db.get(Asset, theirs).type == type_name                      # a rebuild keeps it
+    service.edit_values(db, c["ws"], "tester", ours, {"type": None}, reason="not a PDU after all")
+    assert db.get(Asset, ours).type == ec.OTHER                          # withdrawing it undoes it
+    db.rollback()
     db.close()
     refused = make(c, h, {"equipment_class": name}, status=422)
     assert type_name in refused["detail"]["error"]

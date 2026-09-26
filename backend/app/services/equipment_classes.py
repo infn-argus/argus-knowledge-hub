@@ -275,8 +275,6 @@ def promote(db: Session, catalogue_workspace_id: str, actor: str, class_name: st
     place; the class is no longer assignable."""
     import uuid
     from app.ledger import engine
-    from app.ledger.writer import writing
-    from app.models.ledger import RecordEvent
     c = db.get(EquipmentClass, class_name)
     if c is None or c.status != "active" or class_name == UNCLASSIFIED:
         raise ClassError(f"'{class_name}' cannot be promoted")
@@ -304,11 +302,16 @@ def promote(db: Session, catalogue_workspace_id: str, actor: str, class_name: st
     decision = engine._record_decision(db, "promote_equipment_class", actor, catalogue_workspace_id,
                                        value={"class": class_name, "type": type_name, "objects": len(objects),
                                               "attributes": requested}, reason=reason)
-    with writing(db):
-        for a in objects:
-            db.add(RecordEvent(uid=a.uid, kind="retyped", before={"type": OTHER, "equipment_class": class_name},
-                               after={"type": type_name}, cause=f"promotion {decision.decision_id}", at=now()))
-            a.type, a.schema_uid = type_name, schema.uid
+    # Each object's type becomes a confirmed statement, per workspace: a rebuild
+    # keeps it, and withdrawing it puts the object back to Other Equipment.
+    from app.ledger import service
+    by_workspace: dict[str, list[str]] = {}
+    for a in objects:
+        by_workspace.setdefault(a.workspace_id, []).append(a.uid)
+    for ws, uids in sorted(by_workspace.items()):
+        service.retype_many(db, ws, actor, uids, type_name,
+                            reason=f"promotion of '{class_name}' ({decision.decision_id}): {reason}",
+                            catalogue_decision=True)
     c.status, c.promoted_type = "promoted", type_name
     for r in db.scalars(select(EquipmentClassReview).where(EquipmentClassReview.class_name == class_name,
                                                            EquipmentClassReview.status == "open")):
