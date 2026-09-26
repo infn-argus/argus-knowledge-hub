@@ -27,7 +27,7 @@ export function AssetForm() {
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
   const [isGlobal, setIsGlobal] = useState(false);
   const [assisted, setAssisted] = useState<AssistResult | null>(null);
-  const draft = { schema_uid: schemaUid, name, key, type, attributes };
+  const draft = { uid: uid ?? null, schema_uid: schemaUid, name, key, type, attributes };
 
   /** Values from the checklist or the assistant, by field name. */
   const apply = (values: Record<string, unknown>) => {
@@ -76,7 +76,7 @@ export function AssetForm() {
     },
     onSuccess: async (asset) => {
       // Which suggestions were kept or corrected: provenance, never a blocker.
-      if (assisted && !isEditing) {
+      if (assisted) {
         await intakeApi.outcome(assisted.run_id, asset!.uid, finalFor(assisted, draft)).catch(() => undefined);
       }
       queryClient.invalidateQueries({ queryKey: ["assets"] });
@@ -85,7 +85,7 @@ export function AssetForm() {
   });
 
   return (
-    <div className={isEditing ? "max-w-2xl" : "max-w-6xl"}>
+    <div className="max-w-6xl">
       <h1 className="text-2xl font-semibold text-slate-900">
         {isEditing ? "Edit asset" : "New asset"}
       </h1>
@@ -95,7 +95,7 @@ export function AssetForm() {
         </p>
       )}
 
-      <div className={isEditing ? "" : "mt-2 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]"}>
+      <div className="mt-2 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <div>
       <form
         onSubmit={(e) => {
@@ -202,11 +202,9 @@ export function AssetForm() {
         )}
       </form>
       </div>
-      {!isEditing && (
-        <aside className="lg:sticky lg:top-4 lg:self-start">
-          <GuidedEntry kind="asset" draft={draft} onApply={apply} onAssist={setAssisted} />
-        </aside>
-      )}
+      <aside className="lg:sticky lg:top-4 lg:self-start">
+        <GuidedEntry kind="asset" draft={draft} onApply={apply} onAssist={setAssisted} />
+      </aside>
       </div>
     </div>
   );

@@ -124,6 +124,7 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
         "attributes.equipment_class": "What kind of equipment is it, in a word or two?",
     }
     name, key = (draft.get("name") or "").strip(), (draft.get("key") or "").strip()
+    own = draft.get("uid")                       # editing: the record is not its own duplicate
     attrs = dict(draft.get("attributes") or {})
     schema = db.get(Schema, draft.get("schema_uid")) if draft.get("schema_uid") else None
     kind = None
@@ -161,7 +162,7 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
         checks.append(_check(ERROR, "Give it a key: a unique identifier, such as the label on it.", "key"))
     else:
         taken = db.scalar(select(Asset).where(Asset.key == key))
-        if taken is not None:
+        if taken is not None and taken.uid != own:
             if asset_visible_in(taken, workspace_id, grants):
                 checks.append(_check(ERROR, f"The key {key} already belongs to {taken.name}. Is this the same "
                                      "thing? Open it instead of creating a second record.", "key",
@@ -204,7 +205,7 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
                 questions.setdefault(f"attributes.{k}", f"What is its {attr.get('name') or k}?")
                 checks.append(_check(ERROR, f"{attr.get('name') or k} is required.", f"attributes.{k}"))
         for msg in check_attributes(db, schema, {k: v for k, v in attrs.items() if v not in (None, "")},
-                                    workspace_id, Asset, skip_unique=False):
+                                    workspace_id, Asset, exclude_uid=own, skip_unique=False):
             if not msg.endswith("is required"):
                 checks.append(_check(ERROR, msg, None, id=f"attr-{len(checks)}"))
         steps["details"] = not required_missing
@@ -231,7 +232,7 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
                                  "a label.", "attributes.serial", id="identifiers"))
         strict = authoritative(db, workspace_id, "objects")
         for ident, value in ids:
-            holders = _holders(db, ident, value)
+            holders = _holders(db, ident, value, exclude=own)
             if not holders:
                 continue
             seen = [h for h in holders if asset_visible_in(h, workspace_id, grants)]
@@ -255,7 +256,7 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
             visible_assets_clause(workspace_id, grants), Asset.type == schema.name,
             Asset.record_status.notin_(("Retired", "Merged")),
             or_(*[Asset.name.ilike(f"%{w}%") for w in _words(name)] or [Asset.name.ilike(name)])).limit(200)))
-        rows = [r for r in rows if r.key != key]
+        rows = [r for r in rows if r.key != key and r.uid != own]
         similar = _similar(rows, name, "name", threshold=0.75)
         if similar:
             steps["duplicates"] = False
@@ -339,6 +340,7 @@ def guide_ticket(db: Session, workspace_id: str, draft: dict, grants=None) -> di
         if draft.get("asset_uid"):
             same = [r for r in rows if r.asset_uid == draft["asset_uid"]]
             rows = same + [r for r in rows if r not in same]
+        rows = [r for r in rows if r.uid != draft.get("uid")]
         similar = _similar(rows, title, "title", threshold=0.6)
         if similar:
             steps["duplicates"] = False
@@ -382,7 +384,7 @@ def guide_document(db: Session, workspace_id: str, draft: dict, grants=None) -> 
     elif db.get(Schema, type_uid) is None:
         checks.append(_check(ERROR, "That document type does not exist.", "document_type_uid"))
     if code:
-        if db.scalar(select(Document.uid).where(Document.code == code)):
+        if db.scalar(select(Document.uid).where(Document.code == code, Document.uid != (draft.get("uid") or ""))):
             checks.append(_check(ERROR, f"The code {code} is already used. Leave it empty to get the next "
                                  "free one.", "code"))
     else:
@@ -396,6 +398,7 @@ def guide_document(db: Session, workspace_id: str, draft: dict, grants=None) -> 
             Document.workspace_id == workspace_id, Document.confidentiality != "riservato",
             or_(*[Document.title.ilike(f"%{w}%") for w in _words(title)] or [Document.title.ilike(title)])
         ).limit(200)))
+        rows = [r for r in rows if r.uid != draft.get("uid")]
         similar = _similar(rows, title, "title", threshold=0.7)
         if similar:
             steps["duplicates"] = False

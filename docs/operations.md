@@ -683,6 +683,63 @@ one is rejected with that reason. The person's own confirmed values stay
 the effective facts. `GET /v1/intake/provenance/{record_uid}` shows what a
 model suggested for a record and what the person did with it.
 
+**Files.** *Add a photo or file* reads a nameplate photo (assets, with a vision
+model), a PDF datasheet, a Word or Excel file, an email or a text file
+(`POST /v1/intake/assist/{kind}/file`). Each piece of text keeps its origin,
+such as a page, a sheet and row, or a paragraph, and the run records it.
+A PDF with no text layer (a scan) is refused with a message. Formulas are
+read as their cached values, and hidden sheets are skipped. An email
+contributes its subject, date and body, but not its sender.
+
+**Existing records.** The same panel is on the edit forms. The checklist
+never reports a record as its own duplicate. On an asset's page, *Complete
+from a file* takes a datasheet, a photo or a note and proposes every value
+that differs from the record (`POST /v1/intake/propose/asset/{uid}`). The
+proposals are AI claims that wait in the review queue, and nothing on the
+record changes. The queue shows each one with its confidence, the words it
+was read from, the value it would replace, the model and who asked. The
+actions (`POST /v1/intake/proposals/{claim_id}`) are:
+
+- *Confirm*: makes the value the reviewer's own confirmed statement and
+  accepts the proposal;
+- *Correct*: confirms the reviewer's value and rejects the proposal as
+  `corrected`;
+- *Reject*: needs a reason.
+
+**Model profiles and the gate.** *Workspace settings → AI endpoint →
+Models for guided entry* manages which model describes assets, tickets or
+documents. The steps are:
+
+1. **Add a candidate** (a model name, and for assets optionally a vision
+   model).
+2. **Evaluate it** on the golden dataset in
+   `backend/app/intake/golden/*.json`. The cases are reviewed like code, in
+   English and Italian, and include injected instructions and secrets. The
+   evaluation runs the real intake code in a scratch workspace with a fixed
+   vocabulary, and rolls everything back. It reports:
+   - accuracy per field and per tag (language, domain);
+   - whether any injected instruction changed a suggestion;
+   - whether any secret reached the model;
+   - p95 latency;
+   - regressions against the active profile on the same dataset.
+3. **Activate it** with a reason. This is an `activate_ai_profile` decision.
+
+The proposed gates, for sign-off (U15), are:
+- overall accuracy of at least 85 %;
+- serial and inventory numbers at least 98 % right;
+- no field more than one point worse than the active profile;
+- no language or domain more than five points below overall.
+
+A profile that misses the gate is activated only with a stated exception.
+A security failure, or an evaluation whose cases did not run, cannot be
+activated at all. A new golden dataset version needs a new evaluation.
+
+Once active, the profile's model is used for that kind. Its id is part of
+each run's rule id (`ai.asset.describe/1#<profile>`), so a new model never
+alters earlier claims. *Suspend* retires a profile, and intake falls back to
+the endpoint's default model. Suggestions from a model that has not been
+evaluated are labelled as such in the form and in the queue.
+
 **Without a model** everything still works. The checklist runs, the form
 saves, and a failed assist call leaves the form untouched and writes a
 `failed` run. AI streams are internal, like person streams, and AI methods

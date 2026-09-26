@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ApiError, ledgerApi } from "../../api/client";
-import type { Decision, RecordBrief, ReviewQueue } from "../../api/ledgerTypes";
+import { ApiError, intakeApi, ledgerApi } from "../../api/client";
+import type { Decision, LedgerReviewProposal, RecordBrief, ReviewQueue } from "../../api/ledgerTypes";
 import { Card, Empty, StatTile } from "../../components/hub/ui";
 import { formatTemporal } from "../../components/hub/LedgerPanels";
 import { QueueAgeingCard } from "../../components/hub/QueueAgeing";
@@ -281,7 +281,9 @@ export function ReviewQueuePage() {
           <Empty>No inferred or proposed fact waits for a decision.</Empty>
         ) : (
           <ul className="divide-y divide-slate-100">
-            {q.proposals.map((p) => (
+            {q.proposals.map((p) => p.ai ? (
+              <AIProposal key={p.claim_id} p={p} onDone={done} />
+            ) : (
               <li key={p.claim_id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
                 <div className="min-w-0 text-sm">
                   <RecordLink r={p.record} /> <span className="font-mono text-xs text-slate-500">{p.predicate}</span>{" "}
@@ -406,5 +408,52 @@ function IdentityActions({
         </button>
       </div>
     </div>
+  );
+}
+
+
+/** A value an assistant read from a file or a note (asset-model-revision §23.11): shown with where it was
+ * read and what it would replace. Confirming makes it the reviewer's own statement; editing confirms the
+ * corrected value; either way the proposal stays in the record's history. */
+function AIProposal({ p, onDone }: { p: LedgerReviewProposal; onDone: () => void }) {
+  const decide = useMutation({
+    mutationFn: (v: { action: "confirm" | "edit" | "reject"; value?: unknown; reason?: string }) =>
+      intakeApi.decide(p.claim_id, v.action, v.value, v.reason),
+    onSuccess: onDone,
+  });
+  const ai = p.ai!;
+  const field = p.predicate.replace(/^attr:/, "");
+  return (
+    <li className="flex flex-wrap items-start justify-between gap-3 py-2.5">
+      <div className="min-w-0 text-sm">
+        <RecordLink r={p.record} /> <span className="text-xs text-slate-500">{field}</span>{" "}
+        <span className="font-medium">{show(p.value)}</span>
+        {ai.current !== null && ai.current !== undefined && ai.current !== "" && (
+          <span className="text-xs text-slate-400"> (now {show(ai.current)})</span>
+        )}
+        <p className="text-xs text-slate-500">
+          <span className="rounded bg-violet-50 px-1 text-violet-700">AI proposal</span>{" "}
+          {ai.confidence !== null ? `${Math.round(ai.confidence * 100)}% · ` : ""}
+          {ai.quote ? (ai.grounded ? `read from “${ai.quote}”` : "could not point to where it read this") : "no evidence given"}
+          {ai.model ? ` · ${ai.model}${ai.profile_id ? "" : " (not evaluated)"}` : ""}
+          {ai.requested_by ? ` · asked by ${ai.requested_by}` : ""}
+        </p>
+        {decide.isError && <p className="text-xs text-red-600">{(decide.error as Error).message}</p>}
+      </div>
+      <div className="flex gap-2">
+        <button onClick={() => decide.mutate({ action: "confirm" })}
+                className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white">Confirm</button>
+        <button onClick={() => {
+                  const v = prompt(`The right value for ${field}:`, String(p.value ?? ""));
+                  if (v) decide.mutate({ action: "edit", value: v });
+                }}
+                className="rounded border border-slate-300 px-3 py-1.5 text-xs">Correct</button>
+        <button onClick={() => {
+                  const why = prompt("Why is it wrong?");
+                  if (why) decide.mutate({ action: "reject", reason: why });
+                }}
+                className="rounded border border-slate-300 px-3 py-1.5 text-xs">Reject</button>
+      </div>
+    </li>
   );
 }

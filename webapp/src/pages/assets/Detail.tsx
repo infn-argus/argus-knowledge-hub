@@ -1,4 +1,5 @@
 import { OwnerBadge } from "../../components/OwnerBadge";
+import { SuggestFromFile } from "../../components/SuggestFromFile";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -247,6 +248,10 @@ export function AssetDetail() {
       </div>
 
       <AssetContextPanel assetUid={a.uid} />
+
+      <div className="mt-6">
+        <SuggestFromFile assetUid={a.uid} />
+      </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SectionCard title="Attributes">

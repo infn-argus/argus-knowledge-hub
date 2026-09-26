@@ -33,6 +33,7 @@ class IntakeRun(Base):
     provider: Mapped[Optional[str]] = mapped_column(String, nullable=True)   # the endpoint's host
     model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     prompt_version: Mapped[str] = mapped_column(String)
+    profile_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)   # the activated model profile, if any
     input_refs: Mapped[list] = mapped_column(JSONB, default=list)
     input_hashes: Mapped[list] = mapped_column(JSONB, default=list)
     redactions: Mapped[dict] = mapped_column(JSONB, default=dict)
@@ -57,3 +58,25 @@ class IntakeOutcome(Base):
     fields: Mapped[dict] = mapped_column(JSONB, default=dict)
     decided_by: Mapped[str] = mapped_column(String)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class IntakeProfile(Base):
+    """One operation bound to a model and a prompt version (§23.8). A
+    candidate is evaluated on the golden dataset; it is used only once an
+    `activate_ai_profile` decision, referencing that evaluation, makes it
+    active (§23.12)."""
+    __tablename__ = "intake_profiles"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String, index=True)
+    kind: Mapped[str] = mapped_column(String)                 # asset | ticket | document
+    model: Mapped[str] = mapped_column(String)
+    vision_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    prompt_version: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="candidate")   # candidate | active | retired
+    evaluation: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    exception_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_by: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    activated_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    activated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

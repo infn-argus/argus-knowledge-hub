@@ -19,3 +19,5 @@ ezdxf==1.4.4
 pillow==11.3.0
 # Reads the engineering breakdown (PBS) workbooks.
 openpyxl==3.1.5
+# Reads the text of PDF datasheets and documents for guided entry (AI Intake).
+pypdf==5.1.0

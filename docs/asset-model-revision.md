@@ -2705,21 +2705,27 @@ Each domain enables intake separately, after its cutover or during shadow valida
 disable intake at any time without affecting its data.
 
 **Built so far** (`docs/operations.md`, *Guided and AI-assisted entry*):
-- **From AI0:** the `intake_runs` and `intake_outcomes` audit tables; the AI claim methods, the
-  internal `ai` stream kind and the `ai.*.describe/1` rules; advisory policy defaults.
-- **From AI1:** the secret scanner and delimited untrusted input.
-- **Guided entry for all three kinds**, used by the forms:
-  - the deterministic checklist, which needs no model;
-  - `asset.describe`, `ticket.describe` and `document.describe`, which cover part of
-    `asset.nameplate`, `asset.classify`, `ticket.draft` and `doc.metadata`/`doc.classify`, with
-    evidence checking.
-- **Outcome recording**, as ledger claims for assets.
+- **AI0 foundations:** intake runs and outcomes, the AI claim methods, the internal `ai` stream
+  kind and the `ai.*.describe/1` rules, advisory defaults, and model profiles with
+  `activate_ai_profile` and `retire_ai_profile`.
+- **AI1 safety harness:**
+  - the secret scanner and delimited untrusted input;
+  - the golden dataset (assets, tickets and documents, in English and Italian, with injection and
+    secret cases);
+  - the evaluation runner and the activation gate, with non-exceptable security failures.
+- **AI2 to AI4, in part:**
+  - guided entry on the new and edit forms, with the deterministic checklist;
+  - reading photos, PDFs, Word, Excel, email and text files;
+  - proposals on existing assets, reviewed in the queue with confirm, correct and reject;
+  - outcomes recorded as ledger claims for assets.
 
 **Not yet built:**
-- model profiles and `activate_ai_profile`;
-- the golden dataset and its gates;
-- the provider registry beyond the existing endpoint configuration;
-- the review screen for AI proposals made outside a form.
+- the provider registry beyond the existing endpoint configuration (residency, retention and cost
+  limits: U11–U14);
+- bulk review and any R2-auto rule (AI5);
+- production monitoring dashboards;
+- AI operations beyond `*.describe`: `asset.match`, `doc.compare`, `ticket.similar` as a model
+  operation, `ticket.hypotheses` over the graph.
 
 ### 23.15 Acceptance tests
 

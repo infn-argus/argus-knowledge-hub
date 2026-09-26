@@ -107,6 +107,9 @@ export function GuidedEntry({
   const ai = status.data;
   const canAssist = !!ai?.validated;
   const canSee = canAssist && kind === "asset" && !!ai?.has_vision;
+  const profiles = useQuery({ queryKey: ["intake-status"], queryFn: intakeApi.status, enabled: canAssist, staleTime: 60_000 });
+  const profile = profiles.data?.[kind];
+  const accept = (canSee ? "image/*," : "") + ".pdf,.docx,.xlsx,.xlsm,.eml,.txt,.md,.csv";
 
   const [text, setText] = useState("");
   const [result, setResult] = useState<AssistResult | null>(null);
@@ -123,7 +126,7 @@ export function GuidedEntry({
 
   const assist = useMutation({
     mutationFn: (file?: File) =>
-      file ? intakeApi.assistPhoto(file, text, draft) : intakeApi.assist(kind, text, draft),
+      file ? intakeApi.assistFile(kind, file, text, draft) : intakeApi.assist(kind, text, draft),
     onSuccess: (r) => {
       setResult(r);
       setUsed(new Set());
@@ -187,34 +190,37 @@ export function GuidedEntry({
               >
                 {assist.isPending ? "Reading…" : "Fill the form"}
               </button>
-              {canSee && (
-                <>
-                  <button
-                    type="button"
-                    disabled={assist.isPending}
-                    onClick={() => photo.current?.click()}
-                    className="rounded border border-slate-300 px-3 py-1.5 text-xs disabled:opacity-40"
-                  >
-                    Add a photo
-                  </button>
-                  <input
-                    ref={photo}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = "";
-                      if (!file) return;
-                      setPreview(URL.createObjectURL(file));
-                      assist.mutate(file);
-                    }}
-                  />
-                </>
-              )}
+              <button
+                type="button"
+                disabled={assist.isPending}
+                onClick={() => photo.current?.click()}
+                className="rounded border border-slate-300 px-3 py-1.5 text-xs disabled:opacity-40"
+                title={canSee ? "A nameplate photo, a datasheet, a Word or Excel file, an email" : "A datasheet, a Word or Excel file, an email"}
+              >
+                {canSee ? "Add a photo or file" : "Add a file"}
+              </button>
+              <input
+                ref={photo}
+                type="file"
+                accept={accept}
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setPreview(file.type.startsWith("image/") ? URL.createObjectURL(file) : null);
+                  assist.mutate(file);
+                }}
+              />
               <span className="text-[11px] text-slate-400">suggestions only — you decide what is saved</span>
             </div>
+            {profiles.isSuccess && (
+              <p className="mt-1 text-[11px] text-slate-400">
+                {profile
+                  ? `Model ${profile.model}, evaluated on the golden dataset${profile.exception ? " (activated with an exception)" : ""}.`
+                  : "The model in use here has not been evaluated on the golden dataset yet: check every suggestion."}
+              </p>
+            )}
           </>
         ) : (
           <p className="mt-1 text-xs text-slate-500">

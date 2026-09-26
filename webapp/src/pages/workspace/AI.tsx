@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { IntakeProfiles } from "../../components/IntakeProfiles";
 import { useEffect, useState } from "react";
 import { aiApi } from "../../api/client";
 
@@ -300,6 +301,7 @@ export function WorkspaceAI() {
           </p>
         )}
       </div>
+      <IntakeProfiles />
     </div>
   );
 }

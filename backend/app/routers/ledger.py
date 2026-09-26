@@ -213,9 +213,21 @@ def review(workspace_id: str = Depends(require_permission("read")), db: Session 
         if f.subject_uid not in ws_uids or not f.contributor.startswith("claim:") or _hidden(db, f.subject_uid):
             continue
         claim = db.get(Claim, f.contributor[6:])
-        proposals.append({"claim_id": claim.claim_id, "predicate": f.predicate, "member": f.member,
-                          "value": claim.value, "method": claim.method, "rule_id": claim.rule_id,
-                          "stream_id": claim.stream_id, "record": _record_brief(db, f.subject_uid)})
+        item = {"claim_id": claim.claim_id, "predicate": f.predicate, "member": f.member,
+                "value": claim.value, "method": claim.method, "rule_id": claim.rule_id,
+                "stream_id": claim.stream_id, "record": _record_brief(db, f.subject_uid)}
+        if claim.method.startswith("ai_"):
+            # An AI proposal shows where it was read, how sure the reading is, and what it would replace (§23.11).
+            from app.intake.proposals import evidence_of
+            from app.models.intake import IntakeRun
+            ev = evidence_of(db, claim.claim_id)
+            run = db.get(IntakeRun, (ev["evidence"] or {}).get("intake_run") or "")
+            item["ai"] = {"confidence": ev["confidence"], "quote": (ev["evidence"] or {}).get("quote"),
+                          "grounded": (ev["evidence"] or {}).get("grounded"),
+                          "current": (ev["evidence"] or {}).get("current"),
+                          "model": run.model if run else None, "requested_by": run.requested_by if run else None,
+                          "profile_id": run.profile_id if run else None}
+        proposals.append(item)
     held = []
     for s in db.scalars(select(LedgerStream).where(LedgerStream.workspace_id == workspace_id)):
         for r in db.scalars(select(SourceRevision).where(SourceRevision.stream_id == s.id)):

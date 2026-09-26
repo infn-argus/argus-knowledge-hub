@@ -732,6 +732,7 @@ export type GuideResult = {
 };
 export type AssistResult = {
   run_id: string;
+  profile_id?: string | null;
   fields: Record<string, IntakeSuggestion>;
   dropped: { field: string; reason: string; link?: IntakeLink }[];
   hypotheses: { text: string; class: string }[];
@@ -740,27 +741,88 @@ export type AssistResult = {
   guide: GuideResult;
 };
 
+export type ProposeResult = {
+  run_id: string;
+  profile_id: string | null;
+  proposed: { field: string; value: unknown; label: string | null; current: unknown; confidence: number | null; evidence: string | null }[];
+  unchanged: string[];
+  dropped: { field: string; reason: string; link?: IntakeLink }[];
+  message?: string | null;
+};
+export type ProfileEvaluation = {
+  dataset_version: string;
+  passed: boolean;
+  overall: number | null;
+  failures: string[];
+  fields: Record<string, { expected: number; hit: number; wrong: number; missing: number; accuracy: number | null }>;
+  by_tag: Record<string, number>;
+  security: { injection_cases: number; injection_failures: unknown[]; secret_cases: number; secret_failures: unknown[] };
+  latency_ms_p95: number | null;
+  cases: number;
+  errors: { case: string; error: string }[];
+  regressions: { field: string; before: number; after: number }[];
+  at: string;
+};
+export type IntakeProfileView = {
+  id: string;
+  kind: IntakeKind;
+  model: string;
+  vision_model: string | null;
+  prompt_version: string;
+  status: "candidate" | "active" | "retired";
+  created_by: string;
+  created_at: string;
+  activated_by: string | null;
+  activated_at: string | null;
+  exception_reason: string | null;
+  evaluation: ProfileEvaluation | null;
+  current_dataset: string;
+};
+export type ProfilesView = {
+  profiles: IntakeProfileView[];
+  gates: Record<string, unknown>;
+  prompt_version: string;
+  datasets: Record<IntakeKind, { version: string; cases: number }>;
+};
+
+/** A multipart POST with the session's headers. */
+async function upload<T>(path: string, fields: Record<string, string | File | undefined>): Promise<T> {
+  const session = await loadSession();
+  if (!session) throw new Error("Not signed in");
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) if (v !== undefined) form.append(k, v);
+  const resp = await fetch(`${session.baseUrl}${path}`, { method: "POST", headers: authHeaders(session), body: form });
+  const data = await resp.json();
+  if (!resp.ok) throw new ApiError(resp.status, data);
+  return data as T;
+}
+
 export const intakeApi = {
   guide: (kind: IntakeKind, draft: Record<string, unknown>) =>
     request<GuideResult>(`/v1/intake/guide/${kind}`, { method: "POST", body: json({ draft }) }),
   assist: (kind: IntakeKind, text: string, draft: Record<string, unknown>) =>
     request<AssistResult>(`/v1/intake/assist/${kind}`, { method: "POST", body: json({ text, draft }) }),
-  assistPhoto: async (file: File, text: string, draft: Record<string, unknown>): Promise<AssistResult> => {
-    const session = await loadSession();
-    if (!session) throw new Error("Not signed in");
-    const form = new FormData();
-    form.append("file", file);
-    form.append("text", text);
-    form.append("draft", JSON.stringify(draft));
-    const resp = await fetch(`${session.baseUrl}/v1/intake/assist/asset/photo`, {
+  /** A file: a nameplate photo (assets), a datasheet, a Word or Excel file, an email. */
+  assistFile: async (kind: IntakeKind, file: File, text: string, draft: Record<string, unknown>): Promise<AssistResult> =>
+    upload<AssistResult>(`/v1/intake/assist/${kind}/file`, { file, text, draft: JSON.stringify(draft) }),
+  /** What a file or a note says about an existing asset, as proposals for its owner. */
+  propose: (assetUid: string, input: { file?: File; text?: string }) =>
+    upload<ProposeResult>(`/v1/intake/propose/asset/${assetUid}`, { file: input.file, text: input.text ?? "" }),
+  decide: (claimId: string, action: "confirm" | "edit" | "reject", value?: unknown, reason?: string) =>
+    request<{ action: string }>(`/v1/intake/proposals/${claimId}`, {
       method: "POST",
-      headers: authHeaders(session),
-      body: form,
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new ApiError(resp.status, data);
-    return data as AssistResult;
-  },
+      body: json({ action, value, reason }),
+    }),
+  status: () => request<Record<IntakeKind, { profile_id: string; model: string; passed: boolean | null; exception: string | null } | null>>(
+    "/v1/intake/status"),
+  profiles: () => request<ProfilesView>("/v1/intake/profiles"),
+  createProfile: (input: { kind: IntakeKind; model: string; vision_model?: string }) =>
+    request<IntakeProfileView>("/v1/intake/profiles", { method: "POST", body: json(input) }),
+  evaluateProfile: (id: string) => request<ProfileEvaluation>(`/v1/intake/profiles/${id}/evaluate`, { method: "POST" }),
+  activateProfile: (id: string, reason: string, exception?: string) =>
+    request<IntakeProfileView>(`/v1/intake/profiles/${id}/activate`, { method: "POST", body: json({ reason, exception }) }),
+  retireProfile: (id: string, reason: string) =>
+    request<IntakeProfileView>(`/v1/intake/profiles/${id}/retire`, { method: "POST", body: json({ reason }) }),
   outcome: (runId: string, recordUid: string, final: Record<string, unknown>) =>
     request<{ counts: Record<string, number> }>(`/v1/intake/runs/${runId}/outcome`, {
       method: "POST",

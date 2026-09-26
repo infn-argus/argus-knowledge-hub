@@ -69,16 +69,7 @@ export interface ReviewQueue {
     detail: Record<string, unknown>;
     record: RecordBrief | null;
   }[];
-  proposals: {
-    claim_id: string;
-    predicate: string;
-    member: string | null;
-    value: unknown;
-    method: string;
-    rule_id: string | null;
-    stream_id: string;
-    record: RecordBrief | null;
-  }[];
+  proposals: LedgerReviewProposal[];
   held_revisions: { revision_id: string; stream_id: string; revision: string; observed_at: string; reasons: string[] }[];
   provisional_records: RecordBrief[];
   installation_proposals: (Omit<InstallationView, "temporal_state" | "temporal_certainty"> & {
@@ -601,3 +592,24 @@ export interface ClassReview {
   decided_at: string | null;
   reason: string | null;
 }
+
+/** A fact waiting for confirmation; `ai` is set on an AI proposal (asset-model-revision §23.11). */
+export type LedgerReviewProposal = {
+  claim_id: string;
+  predicate: string;
+  member: string | null;
+  value: unknown;
+  method: string;
+  rule_id: string | null;
+  stream_id: string;
+  record: RecordBrief | null;
+  ai?: {
+    confidence: number | null;
+    quote: string | null;
+    grounded: boolean | null;
+    current: unknown;
+    model: string | null;
+    requested_by: string | null;
+    profile_id: string | null;
+  };
+};

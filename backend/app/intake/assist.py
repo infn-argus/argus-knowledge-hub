@@ -141,9 +141,12 @@ def _field(value, label, data, field, text, from_image, method) -> dict:
 
 def _record(db: Session, workspace_id: str, actor: str, kind: str, endpoint: Optional[Endpoint], *,
             input_refs: list, hashes: list, redactions: dict, output: Optional[dict], validations: list,
-            outcome: str, error: Optional[str], started: float, model: Optional[str] = None) -> IntakeRun:
+            outcome: str, error: Optional[str], started: float, model: Optional[str] = None,
+            profile_id: Optional[str] = None) -> IntakeRun:
+    # A model profile is part of the rule id (§23.8): another model is another rule, never the same claims.
+    rule = RULES[kind] + (f"#{profile_id[:8]}" if profile_id else "")
     run = IntakeRun(id=str(uuid.uuid4()), workspace_id=workspace_id, requested_by=actor, kind=kind,
-                    operation=f"{kind}.describe", rule_id=RULES[kind], prompt_version=PROMPT_VERSION,
+                    operation=f"{kind}.describe", rule_id=rule, prompt_version=PROMPT_VERSION, profile_id=profile_id,
                     provider=_host(endpoint) if endpoint else None,
                     model=model or (endpoint.model if endpoint else None), input_refs=input_refs,
                     input_hashes=hashes, redactions=redactions, output=output, validations=validations,
@@ -241,7 +244,8 @@ GENERIC_ASSET = [
 
 def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint, *, text: str = "",
                  image: Optional[bytes] = None, mime_type: str = "image/jpeg", draft: Optional[dict] = None,
-                 grants=None) -> dict:
+                 grants=None, profile_id: Optional[str] = None, file_refs: Optional[list] = None,
+                 trace: Optional[list] = None) -> dict:
     from app.services.llm import complete, look
     from app.services.visibility import asset_visible_in
     started = time.monotonic()
@@ -259,11 +263,14 @@ def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint,
     if image:
         refs.append({"kind": "image", "bytes": len(image), "mime_type": mime_type})
         hashes.append(_sha(image))
+    refs += file_refs or []
+    if trace is not None:
+        trace.append(user)
     try:
         reply = (look(endpoint, image, mime_type, ASSET_SYSTEM, user, max_tokens=900) if image
                  else complete(endpoint, ASSET_SYSTEM, user, max_tokens=900))
     except LLMError as exc:
-        _record(db, workspace_id, actor, "asset", endpoint, input_refs=refs, hashes=hashes, redactions=redactions,
+        _record(db, workspace_id, actor, "asset", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes, redactions=redactions,
                 output=None, validations=[], outcome="failed", error=str(exc), started=started,
                 model=endpoint.vision_model if image else None)
         raise
@@ -271,11 +278,11 @@ def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint,
     validations, dropped, fields = [], [], {}
     if data is None:
         validations.append({"step": "schema", "result": "fail"})
-        run = _record(db, workspace_id, actor, "asset", endpoint, input_refs=refs, hashes=hashes,
+        run = _record(db, workspace_id, actor, "asset", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes,
                       redactions=redactions, output=None, validations=validations, outcome="draft_only",
                       error="the answer was not a JSON object", started=started,
                       model=endpoint.vision_model if image else None)
-        return {"run_id": run.id, "fields": {}, "dropped": [], "hypotheses": [],
+        return {"run_id": run.id, "profile_id": profile_id, "fields": {}, "dropped": [], "hypotheses": [],
                 "message": "The assistant's answer could not be read. Nothing was filled in.",
                 "guide": guide.guide_asset(db, workspace_id, draft, grants)}
     validations.append({"step": "schema", "result": "pass"})
@@ -321,10 +328,10 @@ def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint,
                     {"step": "evidence", "result": "pass",
                      "ungrounded": [f for f, v in fields.items() if not v["grounded"]]}]
     output = {"fields": fields, "dropped": dropped}
-    run = _record(db, workspace_id, actor, "asset", endpoint, input_refs=refs, hashes=hashes, redactions=redactions,
+    run = _record(db, workspace_id, actor, "asset", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes, redactions=redactions,
                   output=output, validations=validations, outcome="proposed" if fields else "draft_only",
                   error=None, started=started, model=endpoint.vision_model if image else None)
-    return {"run_id": run.id, "fields": fields, "dropped": dropped, "hypotheses": [],
+    return {"run_id": run.id, "profile_id": profile_id, "fields": fields, "dropped": dropped, "hypotheses": [],
             "redacted": sum(redactions.values()),
             "guide": guide.guide_asset(db, workspace_id, apply(draft, fields), grants)}
 
@@ -332,7 +339,8 @@ def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint,
 # --------------------------------------------------------------------------- tickets
 
 def assist_ticket(db: Session, workspace_id: str, actor: str, endpoint: Endpoint, *, text: str,
-                  draft: Optional[dict] = None, grants=None) -> dict:
+                  draft: Optional[dict] = None, grants=None, profile_id: Optional[str] = None,
+                  file_refs: Optional[list] = None, trace: Optional[list] = None) -> dict:
     from app.ledger import temporal
     from app.services.llm import complete
     from app.services.ticket_types import BASE_ATTRIBUTES
@@ -347,20 +355,22 @@ def assist_ticket(db: Session, workspace_id: str, actor: str, endpoint: Endpoint
             if k not in ("argus_root_cause", "argus_corrective_action", "occurred_from", "occurred_until")}
     user = ("Ticket types:\n" + (", ".join(by_name) or "(none)") + "\n\nAttributes:\n" + _describe_menu(menu)
             + f"\n\n<input>\n{clean}\n</input>")
-    refs, hashes = [{"kind": "text", "chars": len(clean)}], [_sha(clean)]
+    refs, hashes = [{"kind": "text", "chars": len(clean)}] + (file_refs or []), [_sha(clean)]
+    if trace is not None:
+        trace.append(user)
     try:
         reply = complete(endpoint, TICKET_SYSTEM, user, max_tokens=900)
     except LLMError as exc:
-        _record(db, workspace_id, actor, "ticket", endpoint, input_refs=refs, hashes=hashes, redactions=redactions,
+        _record(db, workspace_id, actor, "ticket", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes, redactions=redactions,
                 output=None, validations=[], outcome="failed", error=str(exc), started=started)
         raise
     data = _payload(reply)
     fields, dropped, hypotheses = {}, [], []
     if data is None:
-        run = _record(db, workspace_id, actor, "ticket", endpoint, input_refs=refs, hashes=hashes,
+        run = _record(db, workspace_id, actor, "ticket", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes,
                       redactions=redactions, output=None, validations=[{"step": "schema", "result": "fail"}],
                       outcome="draft_only", error="the answer was not a JSON object", started=started)
-        return {"run_id": run.id, "fields": {}, "dropped": [], "hypotheses": [],
+        return {"run_id": run.id, "profile_id": profile_id, "fields": {}, "dropped": [], "hypotheses": [],
                 "message": "The assistant's answer could not be read. Nothing was filled in.",
                 "guide": guide.guide_ticket(db, workspace_id, draft, grants)}
     title = data.get("title")
@@ -414,20 +424,21 @@ def assist_ticket(db: Session, workspace_id: str, actor: str, endpoint: Endpoint
         fields["description"] = {"value": clean, "label": None, "confidence": None, "evidence": None,
                                  "grounded": True, "method": "person"}
     output = {"fields": fields, "dropped": dropped, "hypotheses": hypotheses}
-    run = _record(db, workspace_id, actor, "ticket", endpoint, input_refs=refs, hashes=hashes,
+    run = _record(db, workspace_id, actor, "ticket", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes,
                   redactions=redactions, output=output,
                   validations=[{"step": "schema", "result": "pass"},
                                {"step": "vocabulary", "result": "pass", "dropped": len(dropped)}],
                   outcome="proposed" if fields else "draft_only", error=None, started=started)
     merged = apply(draft, fields)
-    return {"run_id": run.id, "fields": fields, "dropped": dropped, "hypotheses": hypotheses,
+    return {"run_id": run.id, "profile_id": profile_id, "fields": fields, "dropped": dropped, "hypotheses": hypotheses,
             "redacted": sum(redactions.values()), "guide": guide.guide_ticket(db, workspace_id, merged, grants)}
 
 
 # --------------------------------------------------------------------------- documents
 
 def assist_document(db: Session, workspace_id: str, actor: str, endpoint: Endpoint, *, text: str,
-                    draft: Optional[dict] = None, grants=None) -> dict:
+                    draft: Optional[dict] = None, grants=None, profile_id: Optional[str] = None,
+                    file_refs: Optional[list] = None, trace: Optional[list] = None) -> dict:
     from app.services.llm import complete
     started = time.monotonic()
     draft = dict(draft or {})
@@ -435,11 +446,13 @@ def assist_document(db: Session, workspace_id: str, actor: str, endpoint: Endpoi
     types = _visible_types(db, workspace_id, "documents")
     by_name = {s.name: s for s in types}
     user = "Document types:\n" + (", ".join(by_name) or "(none)") + f"\n\n<input>\n{clean}\n</input>"
-    refs, hashes = [{"kind": "text", "chars": len(clean)}], [_sha(clean)]
+    refs, hashes = [{"kind": "text", "chars": len(clean)}] + (file_refs or []), [_sha(clean)]
+    if trace is not None:
+        trace.append(user)
     try:
         reply = complete(endpoint, DOCUMENT_SYSTEM, user, max_tokens=700)
     except LLMError as exc:
-        _record(db, workspace_id, actor, "document", endpoint, input_refs=refs, hashes=hashes,
+        _record(db, workspace_id, actor, "document", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes,
                 redactions=redactions, output=None, validations=[], outcome="failed", error=str(exc),
                 started=started)
         raise
@@ -463,12 +476,12 @@ def assist_document(db: Session, workspace_id: str, actor: str, endpoint: Endpoi
             fields["attributes.argus_keywords"] = {"value": words, "label": "Keywords", "confidence": None,
                                                    "evidence": None, "grounded": True, "method": "draft"}
     output = {"fields": fields, "dropped": dropped} if data is not None else None
-    run = _record(db, workspace_id, actor, "document", endpoint, input_refs=refs, hashes=hashes,
+    run = _record(db, workspace_id, actor, "document", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes,
                   redactions=redactions, output=output,
                   validations=[{"step": "schema", "result": "pass" if data is not None else "fail"}],
                   outcome="proposed" if fields else "draft_only",
                   error=None if data is not None else "the answer was not a JSON object", started=started)
-    return {"run_id": run.id, "fields": fields, "dropped": dropped, "hypotheses": [],
+    return {"run_id": run.id, "profile_id": profile_id, "fields": fields, "dropped": dropped, "hypotheses": [],
             "redacted": sum(redactions.values()),
             "message": None if data is not None else "The assistant's answer could not be read. Nothing was filled in.",
             "guide": guide.guide_document(db, workspace_id, apply(draft, fields), grants)}
