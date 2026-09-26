@@ -118,6 +118,8 @@ Three feeders assert facts about related records, each under a versioned authori
    semantic rule id, evidence, and authority status; low-confidence composition is proposed.
 3. **A person or matrix contributes** design, model, place, and engineering values. Conflicts are
    resolved by policy and explicit decisions rather than “fill blanks” or last-writer-wins.
+4. **The AI Intake proposes** what a person would otherwise type from a matrix, a datasheet or a
+   photograph (§4.1). Its output is a ledger proposal, never a written value.
 
 Physical Equipment is created and maintained in ARGUS inventory. A matrix row or migrated Insight
 record may identify that unit; the configuration never manufactures it from a channel name.
@@ -162,6 +164,30 @@ hold 91 `asset:` links into Service Desk Insight that name a `typeId`:
 migration the object id binds to ARGUS Equipment and remains an alias after cutover. On an IOC or
 device the link is evidence for a proposed Installation at the inferred Position; on a template it
 is evidence for a Product Model. It is not a permanent call back to Jira.
+
+### 4.1 AI-supported extraction from matrices and photographs
+
+The *Only by hand* column above is where the AI Intake
+([`asset-model-revision.md`](asset-model-revision.md) §23) saves the most typing. Its output is
+always a **ledger proposal**: an AI claim with its evidence, routed to the record's owner. It is
+never a value written into the attribute bag, and never a fill-blanks rule.
+
+| Input | What the model proposes | Evidence kept | What it does not do |
+|---|---|---|---|
+| a matrix row (ELI Utility Matrix, EuAPS workbook, PBS) | attribute values for the types above (a magnet's twelve electrical and cooling figures, a modulator's power figures), a rack, a cable, a vendor or Product Model match | sheet, row and cell, and the column header as read | invent an attribute the type lacks. A figure with no home (the `Magnet Assembly` gap in point 1) is reported as missing, and the schema change comes first |
+| a matrix description (*Ion pump 75 l/s*, *Agilent IMG300*) | normalized values (pumping speed with its unit; manufacturer and model), and a Product Model candidate | the cell and the quoted text | guess units that the matrix does not state. The control limits flagged above with **units not stated** stay proposals without a unit, for a person to settle |
+| a photograph of a nameplate or a rack | manufacturer, model, serial, inventory number (risk R2); a Position or Installation candidate (R4) | the image region | create Equipment from a channel or a PV; confirm a serial; start an Installation |
+| a delivery note or datasheet page | the Product Model's specifications; the unit's serial | page and text span | overwrite a confirmed value. A difference opens a conflict |
+
+**Matrix extraction is a proposal, and so is a deterministic reader.** Where a matrix column maps
+one-to-one to an attribute, a deterministic importer under a semantic rule id (revision §7.9)
+remains the better feeder: it is reproducible and needs no model. The AI Intake is for what a
+rule cannot read: free-text descriptions, inconsistent layouts, photographs, one-off
+spreadsheets. When both read the same cell, the deterministic claim ranks higher by policy, and
+a disagreement between them is a conflict for a person.
+
+**Spreadsheets are untrusted content.** A cell that reads as an instruction, a formula that calls
+out, or a hidden sheet is data to be extracted or flagged, never followed (revision §23.10).
 
 ---
 

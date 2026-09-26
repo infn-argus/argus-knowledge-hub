@@ -20,7 +20,9 @@ In the current target model:
 - Access Points remain beamline or IT control-plane records and are never reused as Equipment;
 - DNS prefixes and the Moxa `4000 + N` convention are advisory evidence until their owners confirm
   them; neither can establish physical identity or a port attachment by itself;
-- IT imports, people, and resolvers write ledger claims. They do not overwrite attribute bags.
+- IT imports, people, and resolvers write ledger claims. They do not overwrite attribute bags;
+- AI assistance proposes hostnames, IT Equipment, addresses and port maps as reviewable claims
+  (§6.1). It never bypasses IT authority over protected predicates or the port-safety rules.
 
 ---
 
@@ -395,6 +397,39 @@ Two behaviour changes the model needs:
 2. **The resolver looks across workspaces.** `NetworkIndex` reads only the importing workspace's
    own objects. It has to read the objects of global types visible from it, or the IT workspace is
    invisible to every import.
+
+### 6.1 AI assistance for IT records
+
+> **Normative source:** [`asset-model-revision.md`](asset-model-revision.md) §23. This section
+> says what that means for IT records.
+
+The AI Intake helps IT staff enter what they would otherwise type from a rack photograph, a
+delivery note, a switch configuration or a spreadsheet of addresses. Everything it produces is
+a **proposal**, recorded as an AI claim with its evidence and routed to the IT steward (revision
+§18.1). IT's authority does not change.
+
+| Proposal | Method, risk | What makes it authoritative | Never |
+|---|---|---|---|
+| a hostname for a new device, following the DNS convention (§4.4) | `ai_inferred`, R1 | the IT person creating the record. The convention stays advisory until IT approves it (D12) | assigning a name that is registered to another record: that is an identity candidate |
+| the class of an unknown endpoint, from its hostname prefix | `ai_classified`, R1 | IT review. The deterministic prefix rule is evaluated first, and the model only adds evidence | concluding Equipment from a hostname; a hostname names a **Position**, never a box |
+| IT Equipment (Serial Converter, Switch, Server) from a nameplate or delivery note | `ai_extracted`, R2 | an IT person, with the serial and MAC confirmed | creating Equipment from a DNS name, an IP or a configuration entry |
+| `ip`, `mac`, `fqdn` values | `ai_extracted`, R2 | **protected predicates** (owners: IT registry, person). A person confirms them, or the DNS/DHCP export states them | auto-acceptance by any policy (revision §23.9 ceilings) |
+| a match between an address and an existing Address Record or IT Equipment | `ai_resolved` candidate | the resolver re-checks it deterministically; ambiguous matches go to IT review | a merge |
+| an Access Point `assigned to` an IT Position | `ai_inferred`, R4 | IT. The assignment is write-once (revision §9.2) | reassigning an existing Access Point: that retires it and creates a successor, by decision |
+| an Installation of a converter or server at an IT Position, or a swap | `ai_inferred`, R4 | IT, as the owner of IT Positions | ending or starting an Installation without the owner's decision |
+| a port map (which segment is on which Equipment Port) from a photograph of labelled cables or a configuration export | `ai_inferred`, R4; **R5** when the segment's `safety_class ≠ none` | IT, and the safety owner for safety-classed segments (D14), scoped to one Installation (revision §9.3) | attaching a segment. `attached to` stays **derived**: from a unique, registry-backed, fully compatible match, or from a **confirmed** Installation-scoped port map |
+
+**Port safety is unchanged.** A port map the model proposes is only a candidate for the
+`confirm port_map` decision (revision §9.3). Until a person confirms it, there is no
+`attached to` edge. After confirmation, hard electrical and configured-mode compatibility is
+still checked (revision §0.5). The Moxa `4000 + N` convention remains evidence only: the model
+may cite it, but it cannot authorize an attachment.
+
+**Configuration and exports are untrusted content.** A switch configuration, a DHCP export or a
+YAML file passed to the model is data. A comment inside it that reads as an instruction changes
+nothing (revision §23.10). Secrets in such files (`token:`, `password:`, SNMP communities,
+pre-shared keys) are removed by the secret scanner before submission, as the import filter
+removes them before claims (AS §9.4).
 
 ---
 

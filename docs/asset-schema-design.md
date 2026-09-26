@@ -20,6 +20,10 @@ The current model makes four corrections that are essential when reading this do
    is a target ontology whose extensions are activated only with a source, owner, and query.
 4. ARGUS replaces Jira and Insight as the system of record. Their identifiers and history are
    migrated as aliases and evidence; they are not continuing authorities after domain cutover.
+5. AI-assisted entry (photographs, nameplates, datasheets, spreadsheets) produces **proposals**,
+   not records. An extracted serial, model or type is an AI claim that a person confirms. An
+   Equipment record or an Installation exists only by an authorized decision (§16 below;
+   revision §23).
 
 ---
 
@@ -1791,7 +1795,43 @@ named stakeholders answer them.
 
 ---
 
-## 16. Summary
+## 16. AI extraction versus authoritative Equipment and Installations
+
+> **Normative source:** [`asset-model-revision.md`](asset-model-revision.md) §23. This section
+> applies its rules to the types and attributes of this catalogue.
+
+The AI Intake reads what people would otherwise type: a nameplate photographed in a rack, a
+datasheet, a delivery note, an inventory spreadsheet. What it reads is a **proposal** about a
+record, never the record itself.
+
+| What the model reads or suggests | What it becomes | What makes it authoritative |
+|---|---|---|
+| `manufacturer`, `model` from a nameplate or datasheet (§5.3) | an `ai_extracted` claim with the image region or text span | the owner's confirmation. The `photo-serial` rule keeps the value advisory until then |
+| `serial`, `inventory_number` | an `ai_extracted` claim, risk R2. These are **protected predicates** (owner: Inventory) | a person with edit rights on the Equipment. No policy may auto-accept them |
+| an object key or an Insight objectId read from a label | an `ai_resolved` binding candidate | auto-accepted only on an exact, unique, immutable-identifier match that a second field corroborates (R2-auto); otherwise reviewed |
+| the type (`Ion Pump`, `Turbo Pump`, `Other Equipment` + `equipment_class`) | an `ai_classified` claim, restricted to the types usable in the workspace (§8) | the person creating or editing the record |
+| `product_model` | a candidate match to an existing Product Model, or a proposal for a new one, which goes to the catalogue steward | the catalogue steward (revision §5.5) |
+| technical specifications | proposals for attributes the type declares. A specification with no attribute is reported as missing, never stored as an ad-hoc key | the owner |
+| "this unit is at `GUNSIP01`" | an Installation **proposal** (risk R4), with the evidence (photograph location, label, ticket) | the owner of the Position's workspace (revision §4.1), through the Installation workflow (revision §8) |
+| "this unit replaced that one" | a swap proposal: ending one Installation and starting another as one batch | the Position's owner. Port maps and safety-classed segments also need the specialist (revision §9.3, D14) |
+| a duplicate of an existing record | an identity candidate | a reviewer (revision §10). Never an automatic merge |
+
+**What a channel name never becomes.** The inference rules of §9.5 read a channel into a
+**Position**, and so does the AI Intake. Neither creates Equipment from `GUNSIP01`,
+`QUATB002`, a hostname or a PV. From a channel, the model may propose a Position under the
+granularity rule (revision §5.3, D5) and candidate links to Equipment that already exists.
+A physical unit enters ARGUS as Equipment only when a person creates it, or confirms a proposal
+to create it from physical evidence such as a nameplate, a delivery or an inventory record.
+
+**The schema constrains the model.** The output schema of every intake operation is generated
+from this catalogue: the types usable in the workspace, their declared attributes with data
+types, enumerations and regexes, and the relation types of the registry. A value outside them is
+rejected by validation (revision §23.4), not stored under a new key. This keeps the reserved keys
+of §5 and the naming rules of §7 intact under AI entry.
+
+---
+
+## 17. Summary
 
 This table summarizes the baseline design and measurements. It is not the production acceptance
 manifest. The current core hierarchy, governed relations, and recomputation of disputed counts are

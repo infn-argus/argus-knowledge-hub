@@ -120,6 +120,41 @@ Two graph views are required during migration and whenever valid time is uncerta
   each labelled with confidence and provenance; useful to operators, never used silently for an
   automated decision.
 
+### 3.1 Graph consequences are not AI hypotheses
+
+The AI Intake ([`asset-model-revision.md`](asset-model-revision.md) §23) can suggest impact and
+possible root causes for a ticket. Those suggestions and what the walk computes are different
+kinds of statement, and they are never presented as the same thing. Every statement about a
+ticket's cause or impact carries exactly one of four evidence classes (revision §23.7, I-AI-9):
+
+| Evidence class | Produced by | Graph view | Can drive automation |
+|---|---|---|---|
+| **confirmed evidence** | confirmed ledger facts and recorded observations (a Confirmed Installation, an alarm) | — | yes, as today |
+| **deterministic graph consequence** | `root_cause.py` on the **confirmed** view, returned with its path and the rule of each hop | confirmed | yes, within the limits of the confirmed view above: impact counts and automation |
+| **model inference** | the model reading text or patterns (an operator's note, a ticket history), with evidence spans | — | no |
+| **unresolved hypothesis** | a candidate cause the model or the walk proposes and nobody has confirmed; **anything computed on the investigative view** | investigative | no |
+
+The rules that keep them apart:
+
+- **The model does not compute consequences.** A statement that a failure *reaches* an object is
+  a graph consequence only if `root_cause.py` returns it on the confirmed view. The model may
+  explain or rank what the walk returned, and may point at what the walk did not cover, but that
+  is a model inference.
+- **AI-proposed edges stay out of the confirmed view.** An edge the AI Intake proposed (method
+  `ai_inferred`) is a proposed edge until someone confirms it, so it appears only in the
+  investigative view, labelled with its provenance. A walk over the investigative view yields
+  hypotheses, never consequences.
+- **A hypothesis becomes a cause only by decision.** The person responsible for the ticket
+  confirms a cause. Until then, the ticket stores it as a proposal (revision §23.7). Confirmed
+  causes are what a future per-object prior (§8, item 6) may learn from; unconfirmed hypotheses
+  are not.
+- **Permissions apply to the walk the model sees.** `ticket.hypotheses` and `ask` run the walk
+  under the requesting user's permissions. A restricted neighbour is an anonymous node, and the
+  model receives no key, name or type for it (I-ACL-1, revision §23.10).
+- **The ranking stays explainable.** The hypothesis ranking of §4 (fit, parsimony, evidence) is
+  what the user sees. A model may summarize it, but it does not replace the ranking with a
+  score of its own.
+
 ---
 
 ## 4. The analysis: `root_cause.py`
@@ -297,6 +332,8 @@ generator, which is the largest by *function*: 17.
    Access Point assignments, IT Positions and Installations. It deepens the control layer where most
    failures start without confusing a hostname or port with a physical unit.
 6. **Weigh history**: once the hub holds enough tickets with a stated cause, a per-object prior.
+   Only causes a person **confirmed** count. AI hypotheses and unconfirmed candidates are
+   excluded (§3.1).
 
 **Decisions for you.** Whether the analysis should treat the symptom object itself as a candidate
 (it does, ranked by parsimony); whether `part of` should carry a failure at all (it does, weakly, as
