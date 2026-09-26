@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ApiError, documentsApi, schemasApi } from "../../api/client";
+import { ApiError, documentsApi, intakeApi, schemasApi, type AssistResult } from "../../api/client";
+import { finalFor, GuidedEntry } from "../../components/GuidedEntry";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 import { AttributeInput } from "../../components/AttributeInput";
 import { DocumentAssistant } from "../../components/DocumentAssistant";
@@ -33,6 +34,22 @@ export function DocumentForm() {
   const [bodyMarkdown, setBodyMarkdown] = useState("");
   const [steps, setSteps] = useState<DocumentStep[]>([]);
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
+  const [assisted, setAssisted] = useState<AssistResult | null>(null);
+  const draft = { title, document_type_uid: documentTypeUid, code, body_markdown: bodyMarkdown, attributes };
+
+  /** Values from the checklist or the assistant, by field name. */
+  const apply = (values: Record<string, unknown>) => {
+    for (const [field, value] of Object.entries(values)) {
+      if (field === "title") setTitle(String(value ?? ""));
+      else if (field === "document_type_uid") setDocumentTypeUid(String(value ?? ""));
+      else if (field === "code") setCode(String(value ?? ""));
+      else if (field === "summary") setBodyMarkdown((b) => (b.trim() ? b : `${String(value)}\n`));
+      else if (field.startsWith("attributes.")) {
+        const k = field.slice(11);
+        setAttributes((prev) => ({ ...prev, [k]: value }));
+      }
+    }
+  };
 
   const schema = documentSchemas.find((s) => s.uid === documentTypeUid);
   const attrDefs = effectiveAttributes(schema, schemas.data);
@@ -110,6 +127,9 @@ export function DocumentForm() {
       });
     },
     onSuccess: async (doc) => {
+      if (assisted && doc) {
+        await intakeApi.outcome(assisted.run_id, doc.uid, finalFor(assisted, draft)).catch(() => undefined);
+      }
       // Opened from an asset ("Write a document"): the new document applies
       // to that asset, so it appears in the asset's Knowledge tab at once.
       if (relateAsset && doc) {
@@ -124,8 +144,13 @@ export function DocumentForm() {
   });
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-7xl">
       <h1 className="text-2xl font-semibold text-slate-900">New document</h1>
+      <p className="mt-1 text-sm text-slate-500">
+        Describe the document or paste its text, and its title, type and keywords are suggested; the checklist
+        catches duplicates and anything that must not be stored.
+      </p>
+      <div className="mt-2 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
 
       <form
         onSubmit={(e) => {
@@ -306,6 +331,10 @@ export function DocumentForm() {
               : "Create document"}
         </button>
       </form>
+      <aside className="xl:sticky xl:top-4 xl:self-start">
+        <GuidedEntry kind="document" draft={draft} onApply={apply} onAssist={setAssisted} />
+      </aside>
+      </div>
     </div>
   );
 }

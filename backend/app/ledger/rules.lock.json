@@ -1,4 +1,7 @@
 {
+  "ai.asset.describe/1": "7600ecbf24b4fed2",
+  "ai.document.describe/1": "ea4628db70ee880d",
+  "ai.ticket.describe/1": "c9b3a8d8de02a1e4",
   "epik8s.device/1": "b0f050ea7de1fcdd",
   "epik8s.endpoint/1": "3a520ac49786779d",
   "epik8s.ioc/1": "4f5c03eda1dc8131",

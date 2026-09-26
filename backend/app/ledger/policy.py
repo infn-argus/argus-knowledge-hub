@@ -135,7 +135,10 @@ class Policy:
         # `reconciled`: what the pipeline itself establishes from the ledger
         # (service intervals, successors); a person's confirmation still wins.
         self.defaults = {**{"manual": "authoritative", "stated": "contributory",
-                            "resolved": "contributory", "inferred": "advisory", "reconciled": "authoritative"},
+                            "resolved": "contributory", "inferred": "advisory", "reconciled": "authoritative",
+                            # AI Intake (§23.9): a proposal until a person accepts it.
+                            "ai_extracted": "advisory", "ai_resolved": "advisory", "ai_classified": "advisory",
+                            "ai_inferred": "advisory"},
                          **(body.get("defaults") or {})}
         self.protected = body.get("protected") or []
         self.rules: list[Rule] = []

@@ -28,6 +28,7 @@ APPEND_ONLY_TABLES = (
     "ledger_decisions", "ledger_status_events", "ledger_identity_events", "ledger_record_events",
     "ledger_conflict_events", "ledger_job_runs", "ledger_rulesets", "ledger_migration_map",
     "ledger_reconciliation_reports", "ledger_audit_digests",
+    "intake_runs", "intake_outcomes",
 )
 
 GUARD_FUNCTION = """

@@ -27,6 +27,26 @@ from typing import Optional
 LOCK_PATH = Path(__file__).with_name("rules.lock.json")
 
 RULES: dict[str, dict] = {
+    # AI Intake operations (asset-model-revision §23.8): what a model may propose from a description.
+    "ai.asset.describe/1": {
+        "family": "ai.asset.describe",
+        "meaning": "fields of an asset read by a model from a person's description or photograph",
+        "signature": {"outputs": ["name", "type", "attr:*"], "methods": ["ai_extracted", "ai_classified"]},
+        "impl": ["1"],
+    },
+    "ai.ticket.describe/1": {
+        "family": "ai.ticket.describe",
+        "meaning": "ticket fields read by a model from a person's report; causes only as hypotheses",
+        "signature": {"outputs": ["title", "type", "attr:*"], "methods": ["ai_extracted", "ai_classified"]},
+        "impl": ["1"],
+    },
+    "ai.document.describe/1": {
+        "family": "ai.document.describe",
+        "meaning": "document title, type, summary and keywords read by a model from a person's text",
+        "signature": {"outputs": ["title", "type", "summary", "keywords"],
+                      "methods": ["ai_extracted", "ai_classified"]},
+        "impl": ["1"],
+    },
     "epik8s.ioc/1": {
         "family": "epik8s.ioc",
         "meaning": "an IOC entry is a control-plane IOC record",

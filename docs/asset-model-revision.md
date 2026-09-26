@@ -2704,6 +2704,23 @@ domain transitions (§17). Its stages are:
 Each domain enables intake separately, after its cutover or during shadow validation (T2). It can
 disable intake at any time without affecting its data.
 
+**Built so far** (`docs/operations.md`, *Guided and AI-assisted entry*):
+- **From AI0:** the `intake_runs` and `intake_outcomes` audit tables; the AI claim methods, the
+  internal `ai` stream kind and the `ai.*.describe/1` rules; advisory policy defaults.
+- **From AI1:** the secret scanner and delimited untrusted input.
+- **Guided entry for all three kinds**, used by the forms:
+  - the deterministic checklist, which needs no model;
+  - `asset.describe`, `ticket.describe` and `document.describe`, which cover part of
+    `asset.nameplate`, `asset.classify`, `ticket.draft` and `doc.metadata`/`doc.classify`, with
+    evidence checking.
+- **Outcome recording**, as ledger claims for assets.
+
+**Not yet built:**
+- model profiles and `activate_ai_profile`;
+- the golden dataset and its gates;
+- the provider registry beyond the existing endpoint configuration;
+- the review screen for AI proposals made outside a form.
+
 ### 23.15 Acceptance tests
 
 | # | Given | When | Then | Validates |

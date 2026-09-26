@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { assetsApi, schemasApi } from "../../api/client";
+import { assetsApi, intakeApi, schemasApi, type AssistResult } from "../../api/client";
 import { AttributeInput } from "../../components/AttributeInput";
-import { IdentifyFromPhoto } from "../../components/IdentifyFromPhoto";
+import { finalFor, GuidedEntry } from "../../components/GuidedEntry";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 
 export function AssetForm() {
@@ -26,6 +26,21 @@ export function AssetForm() {
   const [type, setType] = useState("");
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
   const [isGlobal, setIsGlobal] = useState(false);
+  const [assisted, setAssisted] = useState<AssistResult | null>(null);
+  const draft = { schema_uid: schemaUid, name, key, type, attributes };
+
+  /** Values from the checklist or the assistant, by field name. */
+  const apply = (values: Record<string, unknown>) => {
+    for (const [field, value] of Object.entries(values)) {
+      if (field === "schema_uid") setSchemaUid(String(value ?? ""));
+      else if (field === "name") setName(String(value ?? ""));
+      else if (field === "key") setKey(String(value ?? ""));
+      else if (field.startsWith("attributes.")) {
+        const k = field.slice(11);
+        setAttributes((prev) => ({ ...prev, [k]: value }));
+      }
+    }
+  };
 
   useEffect(() => {
     if (existing.data) {
@@ -38,6 +53,7 @@ export function AssetForm() {
     }
   }, [existing.data]);
 
+  const objectSchemas = (schemas.data ?? []).filter((s) => (s.applies_to ?? "objects") === "objects");
   const schema = schemas.data?.find((s) => s.uid === schemaUid);
   const attrDefs = effectiveAttributes(schema, schemas.data);
 
@@ -58,47 +74,29 @@ export function AssetForm() {
         is_global: isGlobal,
       });
     },
-    onSuccess: (asset) => {
+    onSuccess: async (asset) => {
+      // Which suggestions were kept or corrected: provenance, never a blocker.
+      if (assisted && !isEditing) {
+        await intakeApi.outcome(assisted.run_id, asset!.uid, finalFor(assisted, draft)).catch(() => undefined);
+      }
       queryClient.invalidateQueries({ queryKey: ["assets"] });
       navigate(`/assets/${asset!.uid}`);
     },
   });
 
   return (
-    <div className="max-w-2xl">
+    <div className={isEditing ? "max-w-2xl" : "max-w-6xl"}>
       <h1 className="text-2xl font-semibold text-slate-900">
         {isEditing ? "Edit asset" : "New asset"}
       </h1>
-
       {!isEditing && (
-        <div className="mt-4">
-          <IdentifyFromPhoto
-            onUse={(result) => {
-              // Only what is missing: a photograph is a starting point, not
-              // an overwrite of something somebody already typed.
-              if (result.type_uid && !schemaUid) setSchemaUid(result.type_uid);
-              if (result.name && !name) setName(result.name);
-              const notes = [result.manufacturer, result.model, result.serial]
-                .filter(Boolean)
-                .join(" · ");
-              if (notes || result.description) {
-                setAttributes((prev) => ({
-                  ...prev,
-                  ...(prev.description || !result.description
-                    ? {}
-                    : { description: result.description }),
-                  ...(prev.manufacturer || !result.manufacturer
-                    ? {}
-                    : { manufacturer: result.manufacturer }),
-                  ...(prev.model || !result.model ? {} : { model: result.model }),
-                  ...(prev.serial || !result.serial ? {} : { serial: result.serial }),
-                }));
-              }
-            }}
-          />
-        </div>
+        <p className="mt-1 text-sm text-slate-500">
+          Describe it or photograph its nameplate, and the form fills itself; the checklist keeps the entry correct.
+        </p>
       )}
 
+      <div className={isEditing ? "" : "mt-2 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]"}>
+      <div>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -116,7 +114,7 @@ export function AssetForm() {
             className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"
           >
             <option value="">Select a schema…</option>
-            {schemas.data?.map((s) => (
+            {objectSchemas.map((s) => (
               <option key={s.uid} value={s.uid}>
                 {s.name}
               </option>
@@ -199,7 +197,17 @@ export function AssetForm() {
         >
           {saveMutation.isPending ? "Saving…" : "Save asset"}
         </button>
+        {saveMutation.isError && (
+          <p className="text-sm text-red-600">{(saveMutation.error as Error).message}</p>
+        )}
       </form>
+      </div>
+      {!isEditing && (
+        <aside className="lg:sticky lg:top-4 lg:self-start">
+          <GuidedEntry kind="asset" draft={draft} onApply={apply} onAssist={setAssisted} />
+        </aside>
+      )}
+      </div>
     </div>
   );
 }

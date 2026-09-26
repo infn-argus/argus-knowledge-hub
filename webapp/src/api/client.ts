@@ -704,6 +704,70 @@ export const attributeValuesApi = {
     ),
 };
 
+/** Guided and AI-assisted entry (asset-model-revision §23). */
+export type IntakeKind = "asset" | "ticket" | "document";
+export type IntakeSuggestion = {
+  value: unknown;
+  label: string | null;
+  confidence: number | null;
+  evidence: string | null;
+  grounded: boolean;
+  method: string;
+};
+export type IntakeLink = { uid: string; key: string; name: string; path: string; matched_on?: string };
+export type GuideCheck = {
+  id: string;
+  level: "error" | "warning" | "info" | "ok";
+  message: string;
+  field: string | null;
+  fix?: { field: string; value?: unknown; options?: (string | { uid: string; name: string; key?: string })[] };
+  links?: IntakeLink[];
+};
+export type GuideResult = {
+  kind: IntakeKind;
+  ready: boolean;
+  checks: GuideCheck[];
+  steps: { id: string; label: string; done: boolean }[];
+  next: { field: string; question: string } | null;
+};
+export type AssistResult = {
+  run_id: string;
+  fields: Record<string, IntakeSuggestion>;
+  dropped: { field: string; reason: string; link?: IntakeLink }[];
+  hypotheses: { text: string; class: string }[];
+  message?: string | null;
+  redacted?: number;
+  guide: GuideResult;
+};
+
+export const intakeApi = {
+  guide: (kind: IntakeKind, draft: Record<string, unknown>) =>
+    request<GuideResult>(`/v1/intake/guide/${kind}`, { method: "POST", body: json({ draft }) }),
+  assist: (kind: IntakeKind, text: string, draft: Record<string, unknown>) =>
+    request<AssistResult>(`/v1/intake/assist/${kind}`, { method: "POST", body: json({ text, draft }) }),
+  assistPhoto: async (file: File, text: string, draft: Record<string, unknown>): Promise<AssistResult> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const form = new FormData();
+    form.append("file", file);
+    form.append("text", text);
+    form.append("draft", JSON.stringify(draft));
+    const resp = await fetch(`${session.baseUrl}/v1/intake/assist/asset/photo`, {
+      method: "POST",
+      headers: authHeaders(session),
+      body: form,
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new ApiError(resp.status, data);
+    return data as AssistResult;
+  },
+  outcome: (runId: string, recordUid: string, final: Record<string, unknown>) =>
+    request<{ counts: Record<string, number> }>(`/v1/intake/runs/${runId}/outcome`, {
+      method: "POST",
+      body: json({ record_uid: recordUid, final }),
+    }),
+};
+
 export const aiApi = {
   getConfig: () => request<LLMConfig | null>("/v1/ai/config"),
   saveConfig: (input: LLMConfigInput) =>

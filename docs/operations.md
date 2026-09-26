@@ -621,3 +621,70 @@ then thrown away. The admission is an `admit_extension` decision. `GET
 of the current workspace.
 
 No extension is declared yet: each trigger is waiting for its owner.
+
+## Guided and AI-assisted entry (§23)
+
+The forms for a new asset, a new ticket and a new document have a side
+panel with two parts.
+
+**The checklist** works in every workspace and needs no model. As the person
+types, it checks the draft (`POST /v1/intake/guide/{asset|ticket|document}`)
+and shows:
+
+- the steps done so far;
+- the next question worth answering;
+- what is wrong or worth knowing, with one-click fixes where there is one.
+
+| Kind | What the checklist checks |
+|---|---|
+| asset | the type is usable and concrete (a category offers its kinds); whether the type is a physical unit or a place in the machine; name and key, with a taken key linked to its record; a control-channel or PV name typed as physical equipment; Other Equipment without a class; required and invalid attributes; MAC and identifier normalization; a serial without its manufacturer; no serial or inventory number; a serial or inventory number another record holds (refused after cutover, a duplicate review before); similar records of the same type |
+| ticket | a one-line title; a description that says what was seen; the kind of ticket; when an operational incident happened (I-TKT-4); the affected record, suggested from the records the report names; open tickets that look like the same problem; secrets in the text |
+| document | a title; the kind of document; the code it will get, or a code already used; documents with similar titles; secrets in the text; the records it mentions |
+
+A record the person cannot read is never named in a check. A taken key or
+identifier on such a record is reported as taken, without a link (I-ACL-1).
+
+**Describe it** appears when the workspace's AI endpoint is configured,
+enabled and checked. The person writes what they know, or photographs a
+nameplate for an asset, and the assistant suggests values for the form.
+Endpoints: `POST /v1/intake/assist/{asset|ticket|document}` and
+`/v1/intake/assist/asset/photo`.
+
+- **Suggestions only.** Nothing reaches the form until the person clicks
+  *Use* or *Use all in empty fields*, and nothing is saved until they save
+  the form. *Use all* never overwrites what they typed.
+- **Evidence.** Each suggestion shows its confidence and the words of the
+  input it was read from. When the model cannot point to those words,
+  the confidence is capped at 50 % and the suggestion says so.
+- **Vocabulary.** The model answers only in the types and attributes usable
+  in the workspace. Anything else is dropped and listed with the reason.
+  So is a key that belongs to an existing record, with a link to it.
+- **Ticket causes.** For a ticket, suspected causes are shown as
+  *unresolved hypotheses*, never written into the root-cause field. The
+  person's report becomes the description, and the affected record is
+  matched from the text, not guessed by the model.
+- **Secrets.** Passwords, keys, tokens and credentials in URLs are removed
+  before anything is sent to the model.
+- **Untrusted input.** The input is passed as data, and the model is told to
+  ignore any instructions in it.
+
+**Provenance.** Every call writes an `intake_runs` row: requester, model,
+endpoint host, prompt version, rule id, input hashes, redaction counts,
+validated output and outcome. When the record is saved, `POST
+/v1/intake/runs/{id}/outcome` writes an `intake_outcomes` row saying, for
+each suggested field, whether it was kept, corrected or left out. Both
+tables are append-only.
+
+For an asset, the suggestions also enter the fact ledger. They are AI
+claims (`ai_extracted` or `ai_classified`, rule `ai.asset.describe/1`) in
+the stream `ai:<workspace>:asset.describe`, with their evidence and
+confidence. A kept suggestion is accepted, and a corrected or left-out
+one is rejected with that reason. The person's own confirmed values stay
+the effective facts. `GET /v1/intake/provenance/{record_uid}` shows what a
+model suggested for a record and what the person did with it.
+
+**Without a model** everything still works. The checklist runs, the form
+saves, and a failed assist call leaves the form untouched and writes a
+`failed` run. AI streams are internal, like person streams, and AI methods
+default to `advisory` in the authority policy. No AI claim becomes
+effective without a decision.

@@ -46,7 +46,7 @@ PROJECTOR_VERSION = "projector/1"
 DERIVER_VERSION = "deriver/1"
 GUARD_SHARE = 0.10
 GUARD_MIN = 10
-INTERNAL_KINDS = {"person", "resolver", "system"}
+INTERNAL_KINDS = {"person", "resolver", "system", "ai"}   # ai: the AI Intake, per workspace and operation (§23.8)
 
 # Multi-valued predicates: each member is its own fact (§7.8). Relations are
 # multi-valued unless the registry says one per source.

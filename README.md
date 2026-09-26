@@ -144,6 +144,13 @@ currently valid* revision rather than to an arbitrary PDF.
   verbs, wrong end types, cardinality, cycles, edges to retired records. A workspace switches to
   enforce mode once each violation is fixed or accepted as an exception with a reason. From
   then on, a new edge that breaks the registry is refused.
+- **Guided and AI-assisted entry (§23).** New asset, ticket and document forms have a checklist that
+  works without a model. It flags missing and invalid fields, taken keys and identifiers, likely
+  duplicates, channel names typed as equipment, and incident times, and it asks the next question.
+  Where an AI endpoint is configured, the person describes the item or photographs its nameplate
+  and the form is filled with suggestions that show their evidence and confidence. Secrets are
+  removed first, and ticket causes stay hypotheses. Each call and what the person kept are
+  recorded; for assets, the suggestions are AI claims in the ledger.
 - **Model extensions (§5.1, §13 S8).** New areas of the model (RF distribution, cabling,
   safety, …) enter as declared extensions. An extension needs an owner, a source and a query
   that gives the expected answer on its fixture, and the test suite runs every one. Its

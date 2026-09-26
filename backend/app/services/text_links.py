@@ -44,7 +44,11 @@ def objects_mentioned(db: Session, workspace_id: str, *texts: str) -> list[dict]
     found: dict[str, dict] = {}
     keys_in_text = set(KEY_PATTERN.findall(upper))
 
+    from app.services.visibility import can_see
     for asset in assets:
+        # A restricted record is never named to someone without its grant (I-ACL-1).
+        if not can_see(asset):
+            continue
         if asset.key and asset.key.upper() in keys_in_text:
             found[asset.uid] = {
                 "uid": asset.uid,

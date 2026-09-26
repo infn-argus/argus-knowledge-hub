@@ -7,8 +7,12 @@ import {
   issueLinksApi,
   issuesApi,
   membersApi,
+  intakeApi,
   schemasApi,
+  type AssistResult,
 } from "../../api/client";
+import { finalFor, GuidedEntry } from "../../components/GuidedEntry";
+import { OccurrenceInput, type TemporalValue } from "../../components/OccurrenceInput";
 import { AssetMultiPicker } from "../../components/AssetMultiPicker";
 import { TicketAssistant } from "../../components/TicketAssistant";
 import { AttributeInput } from "../../components/AttributeInput";
@@ -49,6 +53,24 @@ export function IssueForm() {
   const [labels, setLabels] = useState<string[]>([]);
   const labelSuggestions = useQuery({ queryKey: ["issue-labels"], queryFn: issuesApi.labels });
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
+  const [assisted, setAssisted] = useState<AssistResult | null>(null);
+  const draft = { schema_uid: schemaUid, title, description, asset_uid: assetUids[0] ?? null, attributes };
+
+  /** Values from the checklist or the assistant, by field name. */
+  const apply = (values: Record<string, unknown>) => {
+    for (const [field, value] of Object.entries(values)) {
+      if (field === "schema_uid") setSchemaUid(String(value ?? ""));
+      else if (field === "title") setTitle(String(value ?? ""));
+      else if (field === "description") setDescription(String(value ?? ""));
+      else if (field === "asset_uid" && value) {
+        const uid = String(value);
+        setAssetUids((current) => [uid, ...current.filter((u) => u !== uid)]);
+      } else if (field.startsWith("attributes.")) {
+        const k = field.slice(11);
+        setAttributes((prev) => ({ ...prev, [k]: value }));
+      }
+    }
+  };
 
 
 
@@ -79,6 +101,8 @@ export function IssueForm() {
   }, [existingLinks.data]);
 
   const schema = ticketSchemas.find((s) => s.uid === schemaUid);
+  // An operational incident says when it happened (I-TKT-4).
+  const isIncident = ["operational incident", "operational-incident"].includes((schema?.name ?? "").toLowerCase());
   const attrDefs = effectiveAttributes(schema, schemas.data);
 
   const saveMutation = useMutation({
@@ -112,7 +136,10 @@ export function IssueForm() {
       }
       return saved;
     },
-    onSuccess: (issue) => {
+    onSuccess: async (issue) => {
+      if (assisted && !isEdit) {
+        await intakeApi.outcome(assisted.run_id, issue!.uid, finalFor(assisted, draft)).catch(() => undefined);
+      }
       queryClient.invalidateQueries({ queryKey: ["issues"] });
       if (isEdit) queryClient.invalidateQueries({ queryKey: ["issues", uid] });
       queryClient.invalidateQueries({ queryKey: ["issue-links", uid] });
@@ -121,10 +148,16 @@ export function IssueForm() {
   });
 
   return (
-    <div className="max-w-xl">
+    <div className={isEdit ? "max-w-xl" : "max-w-6xl"}>
       <h1 className="text-2xl font-semibold text-slate-900">
         {isEdit ? "Edit ticket" : "New ticket"}
       </h1>
+      {!isEdit && (
+        <p className="mt-1 text-sm text-slate-500">
+          Say what happened in your own words and the ticket fills itself; the checklist makes sure it can be acted on.
+        </p>
+      )}
+      <div className={isEdit ? "" : "mt-2 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]"}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -161,6 +194,19 @@ export function IssueForm() {
             className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
           />
         </div>
+
+        <OccurrenceInput
+          value={attributes.occurred_from as TemporalValue | undefined}
+          required={isIncident}
+          onChange={(v) =>
+            setAttributes((prev) => {
+              const next = { ...prev };
+              if (v) next.occurred_from = v;
+              else delete next.occurred_from;
+              return next;
+            })
+          }
+        />
 
         <div>
           <label className="block text-sm font-medium text-slate-700">Description</label>
@@ -199,6 +245,7 @@ export function IssueForm() {
           )}
         </div>
 
+        {isEdit && (
         <TicketAssistant
           title={title}
           description={description}
@@ -229,6 +276,7 @@ export function IssueForm() {
             }
           }}
         />
+        )}
 
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -293,7 +341,16 @@ export function IssueForm() {
         >
           {saveMutation.isPending ? "Saving…" : isEdit ? "Save changes" : "Create ticket"}
         </button>
+        {saveMutation.isError && (
+          <p className="text-sm text-red-600">{(saveMutation.error as Error).message}</p>
+        )}
       </form>
+      {!isEdit && (
+        <aside className="lg:sticky lg:top-4 lg:self-start">
+          <GuidedEntry kind="ticket" draft={draft} onApply={apply} onAssist={setAssisted} />
+        </aside>
+      )}
+      </div>
     </div>
   );
 }

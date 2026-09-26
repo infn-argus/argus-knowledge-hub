@@ -64,3 +64,4 @@ from app.models import workflow  # noqa: F401,E402
 from app.models import access_review  # noqa: F401,E402
 from app.models import legacy_migration  # noqa: F401,E402
 from app.models import equipment_class  # noqa: F401,E402
+from app.models import intake  # noqa: F401,E402
