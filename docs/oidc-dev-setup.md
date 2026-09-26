@@ -161,6 +161,8 @@ with its real data → Sign out → the sign-in screen → INFN login again asks
   groups; record- and field-level restrictions; review-queue ownership; and approval of protected
   predicates. The six users above remain useful for basic workspace enforcement but are not the
   production authorization acceptance suite.
+- **No mobile client.** Mobile PKCE, deep-link, revocation and restricted-data tests need the
+  `argus-mobile` client and the fixtures in §6.2.
 - **No AI authorization fixtures.** AI retrieval and proposal creation need the tests in §6.1,
   with restricted records, steward and specialist users, and a deterministic model stub.
 
@@ -195,6 +197,38 @@ this stack yet.
 - a workspace with `allow_confidential` off on the shared AI endpoint;
 - a model stub that returns fixed structured outputs, including malformed ones and ones naming
   records the user cannot read, so the tests are deterministic and need no external provider.
+
+### 6.2 Tests for the mobile field client
+
+The Flutter field client (revision §24, [`flutter-app-design.md`](flutter-app-design.md)) signs in
+against the same realm. None of these tests has been run yet; they are the plan for phases M0–M4.
+
+**Realm setup.**
+- Add a public client `argus-mobile` with:
+  - PKCE required (`pkce.code.challenge.method = S256`);
+  - no client secret;
+  - short access tokens (10 min), with refresh-token rotation on;
+  - redirect URIs for the app scheme or the app link (e.g. `https://<argus-host>/auth/mobile`),
+    and nothing else.
+- Keep separate clients per environment (development, staging, production).
+
+| # | User | Action | Expected |
+|---|---|---|---|
+| MOB-1 | any | start sign-in without a PKCE challenge, or with a redirect URI not registered | refused by Keycloak |
+| MOB-2 | `contributor.test` | sign in through the system browser; open `/asset/<uid>` of a `sparc` record from an e-mail link | the app opens the record after sign-in |
+| MOB-3 | `contributor.test` | open `/asset/<uid>` of an `eli` record (no binding) | "not found", the same as a missing record |
+| MOB-4 | `viewer.test` | scan and read on `eli`; submit a ticket or a replacement | reading allowed; the submission refused (403), the draft kept on the device |
+| MOB-5 | `curator.test` | queue a replacement offline on `btf`; an admin removes the Curator binding; sync | `rejected`, `forbidden` (A62); nothing applied |
+| MOB-6 | `owner.test` | revoke the user's sessions in Keycloak (or the device in ARGUS); the app refreshes | refresh fails; the app wipes its cache, drafts and tokens (A71) |
+| MOB-7 | a user without a restricted grant | assigned a ticket linked to a restricted record | the record is absent from the cache and screens; the push is generic (A72) |
+| MOB-8 | `outsider.test` | sign in | no workspace offered; nothing cached |
+| MOB-9 | any | a QR code holding a URL outside ARGUS | not opened (A67) |
+
+**Fixtures to add:**
+- the `argus-mobile` client;
+- a restricted record linked to an assigned ticket;
+- a steward and a specialist user, for replacement and port confirmation;
+- a device registry entry to revoke.
 
 ## 7. Pointing this at the real thing, later
 

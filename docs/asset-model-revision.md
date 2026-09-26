@@ -3,10 +3,10 @@
 *A review of `asset-schema-design.md` and `it-model-design.md`, checked against the code that
 implements them, and a revised model that keeps their architecture and makes it operable:
 positions and installations, fact-level provenance, a governed relation registry, identity
-reconciliation, non-destructive retirement, a staged catalogue and governed AI-assisted data
-entry.*
+reconciliation, non-destructive retirement, a staged catalogue, governed AI-assisted data
+entry and a mobile field client.*
 
-Status: **proposal, sixth revision**. Where this document and the two design notes disagree,
+Status: **proposal, seventh revision**. Where this document and the two design notes disagree,
 this one states the intended model. It refers to them by section (`AS §n` =
 `asset-schema-design.md`, `IT §n` = `it-model-design.md`).
 
@@ -128,6 +128,22 @@ mechanism. Its central rule:
 | 7 | A model or prompt version is activated only after a golden-dataset evaluation, an impact report and a passing security suite | §23.12, I-AI-5 |
 | 8 | ARGUS remains fully usable without a model; intake failures never block manual entry and never leave partial writes | §23.13, I-AI-6 |
 
+### 0.7 What the seventh revision decides
+
+The seventh revision adds a **Flutter field application** as a first-class companion to the web
+application (§24, [`flutter-app-design.md`](flutter-app-design.md)). It changes no mechanism:
+the field client is another client of the same API.
+
+| # | Decision | Section |
+|---|---|---|
+| 1 | Flutter is an API-driven mobile field client: capture, lookup, inspections, guided maintenance and swaps, AI-assisted intake, tickets. Governance, bulk operations, document control, reconciliation and graph administration stay web-first. No parity is required, and the web frontend is not replaced | §24.1 |
+| 2 | Both clients use one API and one source of truth. That means a versioned OpenAPI contract, generated Dart and TypeScript clients, idempotency keys, record versions and one error shape. No rule is duplicated in client code | §24.3, I-MOB-1 |
+| 3 | Offline work is a pending command, not a fact. The server re-checks permission and version when the command is applied, and never uses last-write-wins for Installations, identity, retirement, assignments, protected predicates, port maps, document approval or ticket closure | §24.4, I-MOB-3…5 |
+| 4 | OIDC with PKCE; tokens in the platform keystore; encrypted, minimal, expiring local data; remote revocation and wipe; content-free notifications | §24.5, I-MOB-7…8 |
+| 5 | AI extraction, matching, policy and ledger writes stay on the server. The device captures, checks quality and decodes barcodes | §24.6 |
+| 6 | Stable universal links and QR labels that encode a lookup URL or an opaque uid, never a mutable name or a serial | §24.7 |
+| 7 | A narrow MVP piloted on SPARC vacuum equipment, with measured exit criteria signed by the operational owner | §24.9 |
+
 ---
 
 ## 1. Architectural assessment
@@ -226,6 +242,10 @@ not objects (§3.3). Ordered hops and permit thresholds remain deferred (§9.1, 
     classifications, relationships, matches and drafts. Only deterministic validation, the
     authority policy and authorized human decisions make them authoritative. AI assistance is
     optional, and every AI proposal is reviewable and attributable (§23).
+14. **One backend, many clients; offline work is a request.** The web application and the
+    Flutter field client use the same API, permissions, ledger, policies, registry and
+    projections. No client reaches the database or holds a rule of its own. Work done offline
+    is a pending command until the server accepts it (§24).
 
 ### 2.2 Terms
 
@@ -254,6 +274,9 @@ not objects (§3.3). Ordered hops and permit thresholds remain deferred (§9.1, 
 | **Draft / proposal** | AI output a person edits before saving (a draft, never a claim), or a structured AI claim routed for review (a proposal) (§23.4) |
 | **Intake run** | the audit record of one AI operation: model, prompt, inputs, validations and outcome (§23.8) |
 | **Model profile** | one operation bound to a provider, model, model version and prompt template version; activated by a decision after evaluation (§23.8, §23.12) |
+| **Field client** | the Flutter application for work next to the equipment, a client of the ARGUS API like the web application (§24) |
+| **Pending command** | a mutation captured by a client, usually offline, with its idempotency key and the version seen; not a fact until the server accepts it (§24.4) |
+| **Record version** | the version of a record a client saw (its latest ledger sequence number, or a ticket's `version`), sent back as a precondition (§24.3) |
 
 ---
 
@@ -348,6 +371,7 @@ are. The owner of a piece of equipment can **propose** decisions about any Insta
 | Insight IT import (**migration only**), and DNS/DHCP exports (continuing) | IT Equipment, Equipment Ports, Address Records, IT positions and their Installations | — | Access Points |
 | Jira issue import (**migration only**) | tickets, with their comments, attachments, history and links | subjects and related objects | — |
 | Person, in ARGUS | anything their workspace owns. **After cutover, this is the primary way Equipment, Installations, Locations, tickets and documents are created** | decisions on records in other workspaces | — |
+| Field client, on behalf of a person (§24) | what the person could create through the web, through the same API and checks. Offline, only pending commands, which the server applies or refuses later | the same proposals as the web | Equipment from a Position, channel, hostname or scanned name (I-MOB-6); merges, retirement and document approval offline |
 | AI Intake, on behalf of a person (§23) | nothing: it creates no record and confirms no fact | AI claims (proposals) on records the requesting person may read, in the stream `ai:<workspace>:<operation>`; drafts in the person's editor | Equipment from a channel, hostname or PV; merges; Installations; retirements; decisions of any kind |
 
 Provisional IT Equipment may be created only when all four conditions from the first revision
@@ -1681,6 +1705,7 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 | **S7 enforce** | registry in `enforce` mode; retirement guard live on all streams | S5 | — |
 | **S8 extensions** | one per trigger | S5 | an owner, a source and a query in the test suite |
 | **S9 AI Intake** | AI0–AI5 (§23.14): provenance and claim methods, the safety harness and golden dataset, then assets, documents and tickets, then limited automation | S5 | A42–A56 (§23.15); each domain enables intake separately |
+| **S10 field client** | M0–M5 (§24.9): server foundations (contract, idempotency, versions, devices, links, uploads), a read-only client, capture and tickets, replacement and review, offline, the SPARC vacuum pilot | S5; AI0–AI2 for capture | A57–A72 (§24.10); pilot exit signed by the operational owner |
 
 **How this plan meets the Jira transition.** Domain transitions (§17) build on this plan:
 
@@ -1757,7 +1782,8 @@ S1 vertical slice (fixture workspace) ─┬─▶ S2 shadow pipeline ─┼─�
 
 **Transition and readiness tests.** A33–A41 gate the pilot domain's cutover (§17.4). They are not
 part of the vertical slice. **AI Intake tests** A42–A56 are in §23.15. They gate the AI stages
-(§23.14), not any domain's cutover: AI assistance is optional.
+(§23.14), not any domain's cutover: AI assistance is optional. **Field client tests** A57–A72
+are in §24.10 and gate the field client's phases (§24.9).
 
 | # | Given | When | Then | Validates |
 |---|---|---|---|---|
@@ -1804,6 +1830,7 @@ part of the vertical slice. **AI Intake tests** A42–A56 are in §23.15. They g
 | I-SOR-2 | ARGUS performs no write to Jira or Insight. The only outbound path is the pilot reversion export (§17.7), which is a one-off, manual, audited export |
 | I-ACL-1 | a restricted record or field never appears, directly or through counts, derived views, exports, notifications or tools, to a role without the grant |
 | I-UX-1 | a committed user edit is visible on the next read. Derived state that is still pending is labelled as such |
+| I-MOB-1…8 | §24.11: writes only through the API; idempotent replays; pending commands are not facts; no last-write-wins for protected kinds; checks at application time; no Equipment from a name; minimal, wiped device data; no restricted details in notifications or diagnostics |
 | I-AI-1…9 | §23.16: no AI write to projections; provenance per claim; automation ceilings; permission-filtered context; activation gate; all-or-nothing runs; content is never instructions; no autonomous actions; evidence classes on tickets |
 
 ---
@@ -1831,6 +1858,7 @@ read-only (shadow). Systems other than Jira keep the roles listed below.
 | Authority policy, relation registry, catalogue types, protected predicates | **ARGUS configuration**, versioned in its repository | the governance group (§18) | — | — |
 | Audit ledger | **ARGUS** | operated by the platform team; the ledger content belongs to its domain owners | — | Jira history is imported as ledger history |
 | Historical Jira and Insight records | the ARGUS copy (imported), the read-only Jira archive and immutable exports | the owner of each migrated domain | — | read-only archive until retirement |
+| Field-client local data (cache, drafts, pending commands, media) | **never a system of record.** A copy for the person's work, encrypted and expiring; a pending command becomes data only when the server accepts it (§24.4) | the person using the device; the platform team for the device registry | — | — |
 | AI proposals, drafts and intake runs | **never a system of record for any fact.** The ledger keeps AI claims and `intake_run` records as audit evidence; the facts they propose become authoritative only by decision (§23) | the owner of each subject record; the governance group for model profiles | AI Intake, on a person's request | — |
 
 ---
@@ -1988,6 +2016,7 @@ Review items are routed by workspace, record type and predicate.
 | engineering records, costs | work-package owners | PBS-stream conflicts and held revisions |
 | restricted classes | the security and safety officers | grants, classification changes |
 | policy, registry, protected predicates, thresholds | the governance group | policy changes (§18.3) |
+| Field client: product scope, releases, minimum versions, device registry, pilot | a named mobile product owner with the platform team; the operational owner of each pilot domain signs its exit (U20) | synchronization conflicts go to the owner of the affected record, as review items; device revocations to the platform team |
 | AI Intake: model profiles, AI policy rules, golden dataset, provider bindings | the governance group, with the owners of affected protected predicates; the data-protection officer for provider bindings | profile activations and suspensions; golden-dataset changes; gate exceptions (§23.12) |
 | software operation | the ARGUS platform team | pipeline failures, job backlogs. **It owns no domain data** |
 
@@ -2008,6 +2037,7 @@ the backup, then the governance group. The targets below are proposed defaults i
 | AI proposal R1–R2 (classification, OCR identifier) | 10 | 15 | 30 |
 | AI proposal R4 (Position, Installation, replacement) | as for installation proposals: 10 | 15 | 30 |
 | AI proposal R5 (safety, interlock, critical port) | before the equipment returns to operation | at the due point | 1 day after |
+| synchronization conflict (a field command that could not be applied) | 2 | 3 | 5 |
 | non-blocking conflict; possible overlap | 30 | 45 | 90 |
 | retirement flag (a position with an Installation) | 10 | 15 | 30 |
 
@@ -2065,6 +2095,7 @@ Performance and recovery targets are proposed defaults for sign-off (U10).
 | 13 | Performance at production scale | record page p95 < 500 ms; own edit visible in < 1 s (I-UX-1); full re-projection of the largest workspace < 30 min; final cutover import within the cutover window | D |
 | 14 | Retirement conditions | all domains past T4; immutable exports verified; retention decision (U1) taken; items 1–13 met | R |
 | 15 | AI Intake (optional; needed only where a domain enables it) | AI0 and AI1 complete; A42–A51 pass; an activated profile per enabled operation with its evaluation report; provider bindings approved (U11–U13); manual entry proven with intake disabled (A54) | before a domain enables intake |
+| 16 | Field client (optional; needed only where a domain uses it) | M0 complete; A57–A72 pass; device registry and revocation tested; distribution through the approved channel (U19); the domain's pilot exit signed (U20) | before a domain relies on the field client |
 
 ---
 
@@ -2129,6 +2160,21 @@ Performance and recovery targets are proposed defaults for sign-off (U10).
 - **U17. Personal data in inputs.** Tickets, emails and photographs may contain personal data.
   The data-protection officer decides what may be sent to a model, and whether people named in
   inputs must be pseudonymized first.
+- **U18. Field devices.** Which devices and OS versions are supported, and are they all
+  institution-owned? An Android-only first release is acceptable if so.
+- **U19. Distribution and device management.** Which MDM, private store or enterprise channel?
+  Which policies (wipe, screenshots, offline copies) does it enforce?
+- **U20. Pilot ownership.** Who owns the field-client pilot (proposed: SPARC vacuum equipment),
+  who are the pilot technicians, and who signs the exit?
+- **U21. Notification infrastructure.** Push through FCM/APNs via a server relay, through the MDM,
+  or in-app only? Where does the relay run, and what may the push provider see?
+- **U22. Offline retention.** How long may cached data and pending commands stay on a device, and
+  may any restricted class be cached at all?
+- **U23. Media limits.** Maximum photo and video size and duration, retention of field media, and
+  whether image metadata (EXIF, GPS) is ever kept.
+- **U24. Certificate pinning.** Pin the ARGUS endpoint, or rely on the managed trust store?
+- **U25. Field-client targets.** Sign-off of the pilot measures and targets in
+  `flutter-app-design.md` §16.
 
 ---
 
@@ -2142,6 +2188,10 @@ and no prolonged dual-write period.
 AI-assisted data entry is a first-class, optional capability. The LLM may propose facts,
 classifications, relationships, matches and drafts. Only deterministic validation, ARGUS authority
 policy and authorized human decisions make them authoritative (§23).
+
+A Flutter field client is a first-class companion to the web application for work next to the
+equipment. Both use the same API and rules; offline work is a pending command until the server
+accepts it; governance and bulk work stay in the web application (§24).
 
 ---
 
@@ -2760,3 +2810,254 @@ disable intake at any time without affecting its data.
 | **I-AI-7** | content retrieved or uploaded never grants permissions, selects tools, changes routing or addresses recipients |
 | **I-AI-8** | the model never closes, deletes, retires, notifies externally or executes an action. Such actions happen only through an explicit authorized decision |
 | **I-AI-9** | every statement about a ticket's cause or impact is labelled with one evidence class, and a hypothesis is never stored as a confirmed cause |
+
+---
+
+## 24. The field client: a Flutter companion application
+
+This section introduces a **Flutter field application** as a first-class client of ARGUS, beside
+the web application. The product and engineering design is in
+[`flutter-app-design.md`](flutter-app-design.md). This section states the rules the design must
+keep. No mechanism above changes: the field client is one more way for a person to send
+requests to the same API.
+
+### 24.1 The decision
+
+- **What it is:** Flutter is an API-driven **mobile field client** for work done next to the
+  equipment:
+  - asset capture, lookup and inspections;
+  - guided maintenance and equipment swaps;
+  - AI-assisted intake;
+  - ticket handling.
+- **What stays in the web application:** governance, bulk operations, document control, advanced
+  reconciliation and graph administration.
+- **No replacement, no parity:** the web frontend is not replaced in the first phase, and the two
+  clients are not held to feature parity.
+
+**Principle 14.** *One backend, many clients; offline work is a request, not a fact.* Every
+client uses the same API, permissions, ledger, policies, registry and projections. No client
+connects to the database, writes a projection or holds a rule of its own. Work done offline is a
+**pending command** until the server accepts it through the ordinary ledger path.
+
+### 24.2 Architecture and trust boundaries
+
+```
+ Web application ──┐                     ┌── Flutter field client (Android, iOS)
+ generated TS      │                     │   generated Dart client · encrypted local store
+ client            ▼                     ▼   pending commands · media cache · keystore tokens
+            ┌────────────────────────────────────────────────────────────┐
+            │ ARGUS API /v1  (versioned OpenAPI contract)                │
+            │  authN (OIDC) · authZ (roles, restricted grants)           │
+            │  commands: idempotency keys, version preconditions         │
+            │  ledger & decisions · policy · registry · identity         │
+            │  projection · derive · reconcile · AI Intake (§23)         │
+            │  media · notifications (in-app, e-mail, push relay)        │
+            └──────────────────────────────┬─────────────────────────────┘
+                                           ▼
+                                PostgreSQL (never reachable from a client)
+```
+
+| Boundary | Rule |
+|---|---|
+| person → device | scans, labels, photos, comments and documents are untrusted input (§23.10). A QR payload is resolved through lookup, never opened as an arbitrary URL |
+| device storage | cached records, pending commands, media and tokens are encrypted, minimal (§4.3 restrictions applied by the server first) and wiped on logout, revocation or expiry |
+| device → API | every call is authenticated and authorized by the server, whatever the client checked |
+| API → ledger | the same path as the web. A field command becomes claims and decisions under the same policies and invariants |
+| API → model provider | AI Intake runs on the server only; the device holds no provider credential and no protected prompt |
+| API → push provider | a push carries an opaque id and a generic text only |
+
+### 24.3 API requirements
+
+The field client depends on these server capabilities (`flutter-app-design.md` §3). Each is
+built once, for both clients.
+
+1. **Contract:** a committed, versioned **OpenAPI contract**, with generated Dart and TypeScript
+   clients. Changes follow `docs/api-policy.md`: additive within `/v1`, deprecation headers, 410
+   after sunset.
+2. **Idempotency keys:** `Idempotency-Key` on every mutating request. A replay with the same key
+   and body returns the stored result and writes nothing; the same key with another body is
+   refused (I-MOB-2).
+3. **Record versions:** every record read carries a **record version**, its latest ledger sequence
+   number or a ticket's `version`. Commands carry the version seen, and the server decides:
+   - apply;
+   - refuse as `stale`;
+   - open a review item (§24.4).
+4. **One problem shape** for errors, with a machine-readable `code`, the invariant, the field and
+   the current state.
+5. **Devices and versions:**
+   - a device registry with revocation;
+   - a minimum-client-version check (426 with the minimum version);
+   - the `X-ARGUS-Client` header on every request.
+6. **Universal links:** a resolver for `/asset/<uid>`, `/position/<uid>`, `/installation/<uid>`,
+   `/document/<uid>`, `/ticket/<key>`, `/review/<uid>` and `/lookup/<external-key>`, which the web
+   application also answers.
+7. **Uploads:** resumable uploads with a client hash that the server verifies, and size and type
+   limits (U23).
+8. **Push relay:** content-free notifications to registered devices (U21).
+
+### 24.4 Pending commands and synchronization
+
+- **Every offline mutation is a pending command.** It is stored encrypted on the device with:
+  - its idempotency key;
+  - the user and device;
+  - the workspace, the target and the version seen;
+  - the operation and its payload;
+  - the device time and the offset from server time;
+  - attachment hashes and dependencies;
+  - its retry count and status.
+- **It is not a fact.** It is visible only to its author, labelled *pending*, and reflected in no
+  projection until accepted (I-MOB-3).
+- **Synchronization.** Commands are processed in dependency order. For each one, the server:
+  1. re-authenticates the person and checks their **current** permission;
+  2. verifies the attachments;
+  3. checks the version;
+  4. applies the command through the ordinary ledger path;
+  5. answers `accepted`, `rejected` or `conflict`. A conflict comes with a review item for the
+     owner.
+
+  A retry with the same key never writes twice. The device keeps the draft until the server
+  confirms it.
+- **Never last-write-wins** for:
+  - Installations and equipment replacements;
+  - identity merges and retirement;
+  - Position and Access Point assignment;
+  - safety, interlock and protected predicates (§7.7, D14);
+  - critical port maps (§9.3);
+  - controlled-document approval;
+  - ticket closure and a confirmed root cause.
+
+  A changed version on any of these produces a **reviewable conflict**, never an overwrite
+  (I-MOB-4). Merges, retirement and document approval are not offered offline at all. A ticket
+  closure recorded offline arrives as a proposed transition that the person confirms online.
+- **Offline replacements** arrive as proposals. The server confirms one only when all of these
+  hold:
+  - the Position's current Installation is still the one the person saw;
+  - the person holds the owner's rights;
+  - no protected port needs confirmation.
+
+  Otherwise it opens a review item with the captured evidence.
+- **Expiry:** cached data and pending commands expire after the offline-retention period (U22).
+  An expired command is not applied, and its author is told.
+
+### 24.5 Authentication and security
+
+- **OIDC:** Authorization Code with PKCE through the system browser. Access tokens are short-lived
+  and refresh tokens are rotated. Both are kept only in the platform keystore.
+- **Local store:** an encrypted local database and media cache, whose key is in the keystore.
+  Everything is deleted on logout, remote revocation, a user change or expiry.
+- **Minimum data:** only the person's assigned and recently opened records, assigned tickets and
+  review items, and documents explicitly authorized for offline use. Record- and field-level
+  restrictions are applied by the server before anything is sent (I-ACL-1).
+- **No leaks:** no restricted data in notifications. No secrets, tokens, record values or free
+  text in logs, analytics or crash reports.
+- **Configuration:**
+  - separate development, staging and production environments, with separate OIDC clients, set by
+    build flavour or managed configuration;
+  - institutional trust store, with pinning optional (U24);
+  - MDM policies honoured (U19).
+- **Server-side permissions:** search, lookup, AI Intake, retrieval, document previews and graph
+  summaries run under the requesting person's permissions on the server (A48–A51, A72).
+
+### 24.6 Mobile AI intake
+
+The field client captures and the server decides. That split is:
+
+- **On the device:**
+  - photographing;
+  - cropping, compression and quality checks (blur, glare, darkness);
+  - barcode decoding;
+  - optionally, on-device OCR as a quick reading that is never authoritative.
+- **On the server:**
+  - extraction, matching and validation (§23.4);
+  - policy and ledger writes.
+
+The review screen shows:
+- the original photo, the evidence regions and the proposed values with their confidence;
+- conflicting values and duplicate candidates;
+- the required reviewer, and the Installation and graph consequences;
+- accept, edit, reject and defer.
+
+Corrections follow §23.11: the person's value is a manual confirmed fact, and the proposal stays
+in the history.
+
+### 24.7 Deep links and QR labels
+
+- **Universal links:** the paths of §24.3 item 6 are stable and open the same record in the web
+  application, on Android and on iOS, and from e-mail, notifications and the retired Jira host's
+  redirects (§19 item 11).
+- **Access:** opening one needs current authorization. A record the person cannot read answers
+  exactly as a missing one does.
+- **New QR labels** encode a stable ARGUS lookup URL or an opaque uid. They never encode a
+  mutable name, a serial number or a location.
+- **Labels already printed** carry the label value. It is resolved through `/v1/lookup`, and
+  several matches are shown as candidates, never guessed.
+
+### 24.8 Field workflows that touch identity and safety
+
+- **Guided replacement** (`flutter-app-design.md` §8) is one atomic command. It ends the old
+  Installation and confirms or proposes the new one (§8.4). The server checks, before submission:
+  - identity, duplicates, ownership, current installation elsewhere (I-INS-1) and compatibility;
+  - protected ports (§9.3, D14).
+
+  An outgoing unit that differs from the recorded one becomes a review item, never a silent
+  correction.
+- **No Equipment from a name.** No Equipment is created from a Position, channel, hostname or
+  scanned name (I-MOB-6). An unknown incoming unit goes through guided registration.
+- **Tickets from the field** follow:
+  - §8.6: the canonical subject is Position-first, and involved Equipment is derived;
+  - I-TKT-4: occurrence time;
+  - §23.7: evidence classes, and causes as hypotheses.
+- **Never from the field client, and never from the model:**
+  - confirming a root cause;
+  - closing a safety-related ticket;
+  - assigning blame;
+  - retiring Equipment;
+  - triggering a corrective action.
+
+### 24.9 Implementation (S10)
+
+| Phase | Scope | Exit |
+|---|---|---|
+| **M0** server foundations | OpenAPI contract and generated clients, idempotency, record versions and preconditions, problem shape, device registry and revocation, universal-link resolver, resumable uploads, minimum client version | A57–A61 |
+| **M1** read-only client | sign-in, workspace, scan, lookup, details, current Installation, document reading, diagnostics | A66, A67 |
+| **M2** capture and tickets | AI nameplate capture, guided registration, incidents with media and occurrence time, comments, transitions, push | A69, A70 |
+| **M3** replacement and review | guided replacement online; assigned review items | A68 |
+| **M4** offline | pending commands, synchronization, conflicts, retention, wipe | A62–A65, A71, A72 |
+| **M5** pilot | SPARC vacuum equipment (U20) | the pilot exit criteria of `flutter-app-design.md` §16, signed by the operational owner |
+
+S10 depends on S5 (ledger-only writes) and on AI0–AI2 (§23.14) for capture. It does not gate any
+domain's cutover.
+
+### 24.10 Acceptance tests
+
+| # | Given | When | Then | Validates |
+|---|---|---|---|---|
+| A57 | a ticket create with `Idempotency-Key: K` | send it twice; then send K with a different body | one ticket, the same response twice; the second body refused with `idempotency_mismatch` | I-MOB-2 |
+| A58 | Equipment at version v1; someone changes its location (v2) | a command changing its condition with `seen_version` v1; then one changing its location with v1 | the condition change is applied; the location change answers `stale` with the current value | version preconditions |
+| A59 | a Position with Installation I1, viewed at v1; I1 replaced online by another technician | an offline replacement submitted with v1 | a review item with the captured evidence; no Installation ended or started by the command | I-MOB-4 |
+| A60 | each error kind | trigger it | the problem shape with its `code` | one error shape |
+| A61 | the minimum client version raised | a request from an older client | 426 with the minimum version; drafts and pending commands kept on the device | forced minimum version |
+| A62 | a queued command; the person's modify grant removed while offline | synchronize | `rejected`, `code: forbidden`; the draft kept for the person | current permission at sync |
+| A63 | a replacement accepted, its answer lost | the device retries | the stored answer returned; one ledger batch, not two | I-MOB-2 |
+| A64 | an offline ticket and two comments on it | synchronize, with the comments first in the queue | the ticket first, then the comments on the new ticket | dependency order |
+| A65 | a pending command older than the retention period | synchronize | `expired`; nothing applied; the author told | U22 retention |
+| A66 | `/asset/<uid>`, `/ticket/SPARC-123`, `/lookup/129573`; one record restricted | open each in the web and in the app | each opens its record; the restricted one answers exactly as a missing one | universal links, I-ACL-1 |
+| A67 | QR codes holding an external URL, a `javascript:` URL and a serial held by two units | scan them | nothing opened for the first two; the serial shows both candidates and opens neither | untrusted QR input |
+| A68 | the replacement flow at GUNSIP01, an interlock segment behind it | scan a wrong outgoing unit; scan an unknown incoming unit; submit | a discrepancy review item; guided registration offered, no unit created from the Position name; the replacement submitted as a proposal pending port confirmation | §24.8, I-MOB-6, D14 |
+| A69 | a nameplate photo containing a written password | AI capture on the device | proposals with evidence regions; the password redacted before the model (§23.10); no provider credential or prompt in the application package (static check of the build) | §24.6, I-MOB-7 |
+| A70 | an operational-incident draft without occurrence time; an offline closure of a safety ticket | submit; synchronize | the first refused (I-TKT-4); the closure arrives as a proposed transition, not a closed ticket | §24.8 |
+| A71 | a signed-in device with cached records and pending commands | revoke the device from the web; the device calls the API | 401 `revoked`; cache, drafts, media and tokens wiped; the person told what was lost | revocation, wipe |
+| A72 | a user without the security grant, assigned a ticket linked to a restricted record | sync the cache; receive the assignment push | the restricted record absent from the cache and from every screen; the push says only that there is a new assignment | I-ACL-1, I-MOB-8 |
+
+### 24.11 Invariants
+
+| Id | Invariant |
+|---|---|
+| **I-MOB-1** | a client writes only through the ARGUS API. No client reaches the database or writes a projection |
+| **I-MOB-2** | a mutating request with an idempotency key is applied at most once. A replay returns the stored result |
+| **I-MOB-3** | a pending command is not a fact. No projection, count, graph view or other person's screen reflects it before the server accepts it |
+| **I-MOB-4** | a command of a protected kind (§24.4) is never applied over a changed version; it becomes a reviewable conflict |
+| **I-MOB-5** | permission, version and validity are decided by the server when the command is applied, not when it was captured |
+| **I-MOB-6** | no Equipment is created from a Position, channel, hostname or scanned name alone |
+| **I-MOB-7** | a device holds no provider credential, no protected prompt and no data beyond the person's grants and the retention period; it is wiped on logout, revocation or expiry |
+| **I-MOB-8** | notifications, logs, analytics, crash reports and diagnostic exports carry no restricted details and no record values |

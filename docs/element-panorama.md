@@ -189,6 +189,24 @@ a disagreement between them is a conflict for a person.
 **Spreadsheets are untrusted content.** A cell that reads as an instruction, a formula that calls
 out, or a hidden sheet is data to be extracted or flagged, never followed (revision §23.10).
 
+### 4.2 Mobile capture as another evidence source
+
+The Flutter field client ([`flutter-app-design.md`](flutter-app-design.md)) adds a source the
+matrices never had: a technician at the equipment.
+
+- **What it captures:** a nameplate photo, a scanned inventory barcode, the condition seen, and
+  the unit actually found in a slot.
+- **What it fills:** the *Only by hand* column above (serials, installed dates, what is really in
+  the rack), where the matrices and configurations say nothing.
+- **What it is:** a photo is evidence with its image region, and an extracted value is an AI
+  claim (revision §23.8). "The unit in this slot is s/n 84321" is an Installation proposal, or a
+  review item when it contradicts the recorded Installation.
+- **How it ranks:** field capture does not outrank the matrices by default. It is another source
+  under the authority policy. A disagreement with a matrix value or a confirmed fact is a conflict
+  for the owner, never an overwrite.
+- **Offline:** captures made offline are pending commands until the server accepts them
+  (revision §24.4).
+
 ---
 
 ## 5. What would follow, in order

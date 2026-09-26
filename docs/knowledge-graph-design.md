@@ -155,6 +155,26 @@ The rules that keep them apart:
   what the user sees. A model may summarize it, but it does not replace the ranking with a
   score of its own.
 
+### 3.2 Graph results in field workflows
+
+The Flutter field client (revision §24) shows graph results in two places. Both keep the
+distinction of §3.1.
+
+- **Before a replacement,** it shows what depends on the Position: Access Points, paths,
+  segments, documents and open tickets. These come from the **confirmed** view, labelled
+  *consequence*, and computed by the server at the time of the request.
+  - Edges the confirmed view does not have are listed apart, as *not confirmed*. Examples are a
+    proposed edge, or an Installation of uncertain date.
+- **In an incident,** the impact summary is labelled with the four evidence classes. A candidate
+  cause is an *unresolved hypothesis* until the person responsible confirms it on the ticket; the
+  field client cannot confirm it offline (revision §24.4).
+- **Offline,** the last consequences fetched are shown with their time and marked *may be out of
+  date*. They are never recomputed on the device, because the rules live on the server.
+- **Permissions:** the walk runs under the technician's permissions. A restricted neighbour is an
+  anonymous node, and it is never cached or sent in a notification (I-ACL-1, I-MOB-8).
+- **Web-first:** graph editing and exploration beyond these summaries stay in the web
+  application.
+
 ---
 
 ## 4. The analysis: `root_cause.py`

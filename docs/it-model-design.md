@@ -431,6 +431,39 @@ nothing (revision §23.10). Secrets in such files (`token:`, `password:`, SNMP c
 pre-shared keys) are removed by the secret scanner before submission, as the import filter
 removes them before claims (AS §9.4).
 
+### 6.2 Field work on IT records
+
+> **Normative source:** [`asset-model-revision.md`](asset-model-revision.md) §24 and
+> [`flutter-app-design.md`](flutter-app-design.md). This section applies them to IT.
+
+- **Scanning.** A technician scans a QR label, an inventory barcode, or a MAC or serial barcode on
+  the unit.
+  - New ARGUS labels resolve by lookup URL.
+  - A scanned MAC or serial is looked up, never trusted as identity. Several matches are shown as
+    candidates. No match offers guided registration.
+  - A hostname label names an **IT Position**, never a unit (§4.4).
+- **IT swaps.** Replacing a serial converter, a switch or a server is the guided replacement of
+  the field client: scan the IT Position, the outgoing unit and the incoming unit, then submit one
+  atomic command. The app shows, from the confirmed graph, the consequences behind the Position:
+  - the Access Points `assigned to` it;
+  - the Communication Paths that enter at them;
+  - the Bus Segments whose `attached to` edges will be re-derived.
+
+  After the swap, `implemented by` follows the new Installation, and `attached to` waits for a
+  unique compatible match or a confirmed port map (revision §9.3).
+- **Ports and protected connectivity.**
+  - The technician may photograph cable labels and patch panels. These are evidence for a port
+    map **proposal**.
+  - A port map for a segment with `safety_class ≠ none` needs the specialist's confirmation (D14),
+    online and scoped to the new Installation.
+  - A port confirmation is never applied from an offline command. Offline, it arrives as a review
+    item with the photos.
+  - `ip`, `mac` and `fqdn` stay protected predicates: the field client proposes them, and only IT
+    or the registry export makes them authoritative.
+- **Reassigning an address.** Moving an address to another IT Position is not a field action.
+  It retires the Access Point and creates a successor (revision §9.2), and it is done by IT in the
+  web application.
+
 ---
 
 ## 7. Mapping from the existing Insight types

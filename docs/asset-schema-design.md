@@ -24,6 +24,9 @@ The current model makes four corrections that are essential when reading this do
    not records. An extracted serial, model or type is an AI claim that a person confirms. An
    Equipment record or an Installation exists only by an authorized decision (§16 below;
    revision §23).
+6. The Flutter field client ([`flutter-app-design.md`](flutter-app-design.md)) goes through the
+   same ledger. A unit registered or replaced at the rack is a request to the API, and offline it
+   is a pending command. It never establishes physical identity directly (§16 below; revision §24).
 
 ---
 
@@ -1828,6 +1831,17 @@ from this catalogue: the types usable in the workspace, their declared attribute
 types, enumerations and regexes, and the relation types of the registry. A value outside them is
 rejected by validation (revision §23.4), not stored under a new key. This keeps the reserved keys
 of §5 and the naming rules of §7 intact under AI entry.
+
+**Capture in the field.** The Flutter field client (revision §24) uses the same rules as the web
+form, with the same checklist and the same AI Intake.
+- **Registration:** a technician who photographs a nameplate and registers a unit sends the same
+  create request, with the same identifier checks (I-ID-1, A35).
+- **Replacement:** a technician who replaces a unit sends one replacement command, which the
+  server confirms, or turns into a proposal for the Position's owner.
+- **Offline:** registrations and replacements recorded offline are pending commands. The server
+  applies them later, after checking permission, identity and the version the technician saw.
+- **Never from a name:** a scanned Position label, channel name or hostname never yields
+  Equipment (I-MOB-6).
 
 ---
 
