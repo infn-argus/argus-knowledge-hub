@@ -3,7 +3,8 @@
 *A mobile client for the work done next to the equipment. It is built on the same API, permissions,
 ledger, policies and registry as the web application, and it does not replace the web application.*
 
-Status: **proposal**. [`asset-model-revision.md`](asset-model-revision.md) §24 is normative. It
+Status: **M1 built** (read-only client, `mobile/`); M0 server foundations **partly built** (§15).
+[`asset-model-revision.md`](asset-model-revision.md) §24 is normative. It
 states the rules this client must keep: trust boundaries, pending commands, conflict handling,
 invariants I-MOB-1…8 and acceptance tests A57–A72. Where this document and §24 disagree, §24
 wins. This document is the product and engineering design for the client.
@@ -136,9 +137,9 @@ are not held to feature parity. Each is designed for where it is used:
 | Need | Exists today | Change required |
 |---|---|---|
 | Versioned API, additive changes, deprecation headers | yes: `/v1`, `X-ARGUS-API-Version`, `Deprecation`/`Sunset`, 410 after sunset (`docs/api-policy.md`) | none |
-| OpenAPI contract | yes: FastAPI publishes `/openapi.json` | **commit the contract to the repository**; CI fails when it changes without a version note; publish it per release |
-| Generated clients | no: the web client is hand-written (`webapp/src/api/client.ts`) | generate **Dart** (for Flutter) and **TypeScript** clients from the committed contract. The web client migrates to the generated one feature by feature |
-| Identifier lookup | yes: `GET /v1/lookup/{identifier}`, `POST /v1/lookup/batch`, following merges, restriction-aware | a **universal-link resolver** for the paths in §7 |
+| OpenAPI contract | **built:** `backend/openapi/openapi.json` and the field subset `field-client.json`, committed; a test fails when they drift from the API | publish it per release |
+| Generated clients | **built for Dart** (`mobile/packages/argus_api`, OpenAPI Generator `dart`); the web client is still hand-written | the TypeScript client; the web client migrates to it feature by feature |
+| Identifier lookup | yes: `GET /v1/lookup/{identifier}`, `POST /v1/lookup/batch`, following merges, restriction-aware | **built:** the universal-link resolver `GET /v1/links/resolve` for the paths in §7, with label values (serial, inventory number, MAC) and `ambiguous` candidates |
 | Idempotency | no | an `Idempotency-Key` header on every mutating call (§3.2) |
 | Version preconditions | tickets have `version`; ledger records have no exposed version | each record exposes a **version** (its latest ledger sequence number, or the ticket's `version`) as `ETag`. Commands carry it as `If-Match`, or as `expected_version` in a command body (§3.3) |
 | One error shape | mostly `{"detail": {"error", "invariant"}}` | one documented **problem shape** for all errors (§3.4) |
@@ -146,8 +147,8 @@ are not held to feature parity. Each is designed for where it is used:
 | AI Intake | yes: `/v1/intake/guide`, `/assist`, `/assist/{kind}/file`, `/propose/asset/{uid}`, `/proposals/{claim_id}` | none beyond idempotency. Mobile uploads use the same endpoints |
 | Media upload | yes, per record (attachments, revision attachments) | **resumable** upload with client-supplied SHA-256, size limits and server-side verification (§5.5) |
 | Notifications | in-app rows and e-mail (`app.services.notify`) | device registration and a **push relay** that sends content-free notifications (§11) |
-| Minimum client version | no | `X-ARGUS-Client: flutter/<version>/<build>`. The server answers **426** with the minimum version when a client is too old (§12) |
-| Session revocation | tokens expire; no device list | a **device registry**: register, list, revoke. Revocation invalidates the refresh token and tells the device to wipe on next contact (§6) |
+| Minimum client version | **built:** `X-ARGUS-Client: flutter/<version>/<platform>`; **426** `client_too_old` with the minimum (`ARGUS_MIN_FLUTTER_VERSION`) | none |
+| Session revocation | **built:** the device registry (`/v1/devices`: register, list, revoke); a revoked `X-ARGUS-Device` answers 401 `revoked` and the app wipes | invalidating the refresh token at the identity provider |
 
 ### 3.2 Idempotency
 
@@ -240,12 +241,14 @@ ripple into screens, and a change to the local schema does not ripple into the A
 | `sync` | the pending-command queue, upload of attachments, conflict presentation |
 | `settings_diagnostics` | settings, cache state, diagnostics screen and export (§13) |
 
-### 4.3 Technical choices (to confirm in phase M0)
+### 4.3 Technical choices
 
-| Concern | Candidate | Why |
+M1 confirmed the first six rows; the others are still candidates.
+
+| Concern | Choice or candidate | Why |
 |---|---|---|
-| State and dependencies | Riverpod | testable view models, no global singletons |
-| API client | OpenAPI Generator (`dart-dio`) | generated from the committed contract |
+| State and dependencies | Riverpod 3 (chosen), go_router for navigation | testable view models, no global singletons |
+| API client | OpenAPI Generator `dart` (chosen; `dart-dio` would need build_runner) | generated from the committed contract |
 | Local database | Drift on SQLite with SQLCipher | typed queries and migrations, encrypted at rest |
 | Secure storage | `flutter_secure_storage` (Keychain, Keystore) | tokens and the database key |
 | OIDC | `flutter_appauth` (AppAuth) | Authorization Code with PKCE, system browser, no embedded web view |
@@ -656,6 +659,36 @@ contains no record data, and the person can review it before sharing it with sup
 |---|---|---|
 | **M0 foundations (server)** | committed OpenAPI contract and generated clients; idempotency keys; record versions and preconditions; the problem shape; the device registry and revocation; the universal-link resolver and web redirects; resumable uploads; 426 minimum version | A57–A61 pass against the API; the web still passes its suite |
 | **M1 read-only field client** | sign-in, workspace, scanning, lookup, details, current Installation, documents to read, diagnostics | A66 and A67 pass; a technician finds a unit by scanning in under 10 s (median) |
+
+**Built so far.**
+
+M0, in part:
+- the committed contract and the field subset;
+- the generated Dart client;
+- the client header and 426;
+- the device registry and revocation;
+- the link resolver, with label values and ambiguous candidates;
+- the web redirects for the link paths.
+
+M0 still needs idempotency keys, record versions and preconditions, the one problem shape across
+all errors, and resumable uploads.
+
+M1, in `mobile/app`:
+- sign-in (OIDC with PKCE, or a token in non-production builds) and device registration;
+- the workspace choice;
+- search, scanning, and typed labels checked by the label parser;
+- Equipment and Positions with the current Installation and its history, open tickets and
+  documents;
+- tickets, and documents with their state shown first;
+- universal links, which survive sign-in;
+- diagnostics;
+- the revoked and update screens.
+
+Tests:
+- 24 unit and widget tests run against responses recorded from a real API;
+- the web build was checked in a browser against a local API.
+
+Android and iOS builds, and the 10-second scan measure, still need a device.
 | **M2 capture and tickets** | guided registration with AI nameplate capture; incident tickets with media and occurrence time; comments and transitions; push | A69 and A70 pass; AI proposals are reviewable end to end |
 | **M3 replacement and review** | the guided replacement (online), assigned review items | A68 passes; replacements appear correctly in the web and the graph |
 | **M4 offline** | the pending-command queue, synchronization, conflicts, retention and wipe | A62–A65 and A71 pass; no duplicate writes in a week of pilot use |

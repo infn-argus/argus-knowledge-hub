@@ -1,0 +1,73 @@
+{
+    "query": "GUNSIP",
+    "assets": [
+        {
+            "uid": "1bc838cd-4154-4945-8c94-a86e327eba5c",
+            "key": "S7C415E:DEV:vac-gunvpc:GUNSIP02",
+            "name": "GUNSIP02",
+            "type": "Control Device",
+            "schema_uid": "slice-20463f:ledger:control-device",
+            "workspace_id": "slice-20463f",
+            "lifecycle": null,
+            "system": null,
+            "updated_at": "2026-09-28T20:17:13.648005+00:00"
+        },
+        {
+            "uid": "322e6b6d-5d48-4dbb-9885-5b890aede61b",
+            "key": "S7C415E:DEV:vac-gunvpc:GUNSIP01",
+            "name": "GUNSIP01",
+            "type": "Control Device",
+            "schema_uid": "slice-20463f:ledger:control-device",
+            "workspace_id": "slice-20463f",
+            "lifecycle": null,
+            "system": null,
+            "updated_at": "2026-09-28T20:17:13.667140+00:00"
+        },
+        {
+            "uid": "799375f6-81d5-41f4-a068-067d125c3a5a",
+            "key": "S7C415E:POS:GUNSIP02",
+            "name": "GUNSIP02",
+            "type": "Equipment Position",
+            "schema_uid": "slice-20463f:ledger:equipment-position",
+            "workspace_id": "slice-20463f",
+            "lifecycle": null,
+            "system": null,
+            "updated_at": "2026-09-28T20:17:13.704881+00:00"
+        },
+        {
+            "uid": "a78bd57f-b4c8-4959-a2ff-9cb3b4589448",
+            "key": "S7C415E:POS:GUNSIP00",
+            "name": "GUNSIP00",
+            "type": "Equipment Position",
+            "schema_uid": "slice-20463f:ledger:equipment-position",
+            "workspace_id": "slice-20463f",
+            "lifecycle": null,
+            "system": null,
+            "updated_at": "2026-09-28T20:17:13.715757+00:00"
+        },
+        {
+            "uid": "b3bc26da-32af-4d88-9551-612592db3359",
+            "key": "S7C415E:POS:GUNSIP01",
+            "name": "GUNSIP01",
+            "type": "Equipment Position",
+            "schema_uid": "slice-20463f:ledger:equipment-position",
+            "workspace_id": "slice-20463f",
+            "lifecycle": null,
+            "system": null,
+            "updated_at": "2026-09-28T20:17:13.730752+00:00"
+        },
+        {
+            "uid": "bf0a1afb-8dc2-492c-8ddb-1e79b31876b8",
+            "key": "S7C415E:DEV:vac-gunvpc:GUNSIP00",
+            "name": "GUNSIP00",
+            "type": "Control Device",
+            "schema_uid": "slice-20463f:ledger:control-device",
+            "workspace_id": "slice-20463f",
+            "lifecycle": null,
+            "system": null,
+            "updated_at": "2026-09-28T20:17:13.745918+00:00"
+        }
+    ],
+    "tickets": [],
+    "documents": []
+}

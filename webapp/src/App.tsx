@@ -35,6 +35,7 @@ import { MigrationPage } from "./pages/migration/Domains";
 import { BulkChangesPage } from "./pages/bulk/BulkChanges";
 import { WorkflowsPage } from "./pages/workflows/Workflows";
 import { LookupPage } from "./pages/lookup/Lookup";
+import { LinkRedirect } from "./pages/lookup/LinkRedirect";
 import { SchemaDetail } from "./pages/schemas/Detail";
 import { IconLibrary } from "./pages/icons/List";
 import { SchemaForm } from "./pages/schemas/Form";
@@ -102,6 +103,9 @@ export function App() {
           <Route path="/bulk-changes" element={<BulkChangesPage />} />
           <Route path="/catalogue/equipment-classes" element={<EquipmentClassesPage />} />
           <Route path="/lookup/*" element={<LookupPage />} />
+          {["/asset/:id", "/position/:id", "/installation/:id", "/document/:id", "/ticket/*", "/review/:id"].map((p) => (
+            <Route key={p} path={p} element={<LinkRedirect />} />
+          ))}
 
           <Route path="/labels" element={<LabelList />} />
 

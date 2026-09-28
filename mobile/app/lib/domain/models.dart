@@ -1,0 +1,191 @@
+/// What the screens work with. Transfer objects (generated from the API contract) and local
+/// persistence records are mapped to these at the repository boundary (flutter-app-design §4.1).
+library;
+
+class WorkspaceChoice {
+  const WorkspaceChoice({required this.id, required this.name, required this.canCreate, required this.canReadTickets});
+
+  final String id;
+  final String name;
+  final bool canCreate;
+  final bool canReadTickets;
+}
+
+enum RecordKind { asset, position, installation, document, ticket, review }
+
+/// Where a link, a scanned label or a search hit leads.
+class LinkTarget {
+  const LinkTarget({required this.kind, required this.uid, this.title, this.subtitle, this.recordUid});
+
+  final RecordKind kind;
+  final String uid;
+  final String? title;
+  final String? subtitle;
+  final String? recordUid; // for a review item: the record it is about
+
+  String get route => switch (kind) {
+        RecordKind.asset || RecordKind.position => '/asset/$uid',
+        RecordKind.installation => '/asset/${recordUid ?? uid}',
+        RecordKind.document => '/document/$uid',
+        RecordKind.ticket => '/ticket/$uid',
+        RecordKind.review => '/asset/${recordUid ?? uid}',
+      };
+}
+
+class SearchResults {
+  const SearchResults({this.assets = const [], this.tickets = const [], this.documents = const []});
+
+  final List<LinkTarget> assets;
+  final List<LinkTarget> tickets;
+  final List<LinkTarget> documents;
+
+  bool get isEmpty => assets.isEmpty && tickets.isEmpty && documents.isEmpty;
+}
+
+/// A temporal value as ARGUS stores it (revision §8.2): a nominal instant and its precision.
+class When {
+  const When(this.nominal, this.precision);
+
+  final DateTime? nominal;
+  final String precision; // instant | day | month | year | open
+
+  static When? fromJson(Object? v) {
+    if (v is! Map) return null;
+    if (v['kind'] == 'open') return const When(null, 'open');
+    final nominal = v['nominal'] is String ? DateTime.tryParse(v['nominal'] as String) : null;
+    return When(nominal, (v['precision'] ?? 'instant').toString());
+  }
+}
+
+/// The other side of an Installation, as briefly as the record screen needs it.
+class RecordBrief {
+  const RecordBrief({this.uid, this.key, this.name, this.type, this.restricted = false});
+
+  final String? uid; // null when restricted
+  final String? key;
+  final String? name;
+  final String? type;
+  final bool restricted;
+
+  String get label => restricted ? 'Restricted record' : [key, name].whereType<String>().join(' · ');
+}
+
+class InstallationInfo {
+  const InstallationInfo({
+    required this.uid,
+    required this.status,
+    required this.temporalState,
+    this.certainty,
+    this.position,
+    this.asset,
+    this.from,
+    this.until,
+  });
+
+  final String uid;
+  final String status; // Proposed | Confirmed | Rejected
+  final String temporalState; // Planned | Current | Future | Ended
+  final String? certainty; // definite | possible
+  final RecordBrief? position;
+  final RecordBrief? asset;
+  final When? from;
+  final When? until;
+
+  bool get current => temporalState == 'Current';
+}
+
+class TicketSummary {
+  const TicketSummary({required this.uid, required this.title, required this.state, this.priority, this.open = true});
+
+  final String uid;
+  final String title;
+  final String state;
+  final String? priority;
+  final bool open;
+}
+
+class DocumentSummary {
+  const DocumentSummary({required this.uid, required this.code, required this.title, this.state, this.reviewOverdue = false});
+
+  final String uid;
+  final String code;
+  final String title;
+  final String? state;
+  final bool reviewOverdue;
+}
+
+/// Everything the record screen shows about Equipment or a Position.
+class AssetDetail {
+  const AssetDetail({
+    required this.uid,
+    required this.key,
+    required this.name,
+    required this.type,
+    required this.typePath,
+    required this.recordStatus,
+    required this.attributes,
+    required this.isPosition,
+    this.installations = const [],
+    this.tickets = const [],
+    this.documents = const [],
+    this.processing = false,
+    this.restricted,
+  });
+
+  final String uid;
+  final String key;
+  final String name;
+  final String type;
+  final List<String> typePath;
+  final String recordStatus;
+  final Map<String, Object?> attributes;
+  final bool isPosition;
+  final List<InstallationInfo> installations;
+  final List<TicketSummary> tickets;
+  final List<DocumentSummary> documents;
+  final bool processing;
+  final String? restricted;
+
+  List<InstallationInfo> get current => installations.where((i) => i.current && i.status != 'Rejected').toList();
+}
+
+class TicketDetail {
+  const TicketDetail({required this.uid, required this.title, required this.state, this.description, this.priority, this.assetUid, this.occurredFrom});
+
+  final String uid;
+  final String title;
+  final String state;
+  final String? description;
+  final String? priority;
+  final String? assetUid;
+  final When? occurredFrom;
+}
+
+class DocumentDetail {
+  const DocumentDetail({
+    required this.uid,
+    required this.code,
+    required this.title,
+    required this.authorityLevel,
+    this.revisionState,
+    this.revisionNumber,
+    this.body,
+    this.nextReviewDue,
+    this.supersededBy,
+    this.steps = const [],
+  });
+
+  final String uid;
+  final String code;
+  final String title;
+  final String authorityLevel;
+  final String? revisionState;
+  final int? revisionNumber;
+  final String? body;
+  final DateTime? nextReviewDue;
+  final String? supersededBy;
+  final List<String> steps;
+
+  bool get approved => revisionState == 'published' || revisionState == 'approved';
+  bool get outdated => supersededBy != null || (nextReviewDue != null && nextReviewDue!.isBefore(DateTime.now()));
+}

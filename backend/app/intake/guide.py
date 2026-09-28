@@ -71,6 +71,9 @@ def _similar(rows, text: str, attr: str, threshold: float = 0.6, limit: int = 5)
 
 # --------------------------------------------------------------------------- assets
 
+LEDGER_POSITION = "Equipment Position"
+
+
 def lineage(db: Session, schema: Schema) -> list[str]:
     names, seen, cur = [], set(), schema
     while cur is not None and cur.uid not in seen:
@@ -85,7 +88,8 @@ def nature(db: Session, schema: Schema) -> str:
     names = lineage(db, schema)
     if EQUIPMENT_ROOT in names:
         return "equipment"
-    if FUNCTIONAL_ROOT in names:
+    # The ledger's own Position type (app.ledger.sources) sits outside the catalogue tree.
+    if FUNCTIONAL_ROOT in names or (names and names[0] == LEDGER_POSITION):
         return "position"
     if CONTROL_ROOT in names:
         return "control"

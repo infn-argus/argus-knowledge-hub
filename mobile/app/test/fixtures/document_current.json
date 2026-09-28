@@ -1,0 +1,21 @@
+{
+    "uid": "1ee032b4-5a00-4716-a269-8adce879fd8c-r1",
+    "document_uid": "1ee032b4-5a00-4716-a269-8adce879fd8c",
+    "revision_number": 1,
+    "state": "published",
+    "body_markdown": "1. Close the gate valves.\n2. Switch off the HV controller.\n3. Replace the pump.",
+    "steps": [],
+    "attributes": {},
+    "valid_from": null,
+    "valid_until": null,
+    "next_review_due": null,
+    "authored_by": null,
+    "approved_by": null,
+    "submitted_at": "2026-09-28T20:17:14.182366Z",
+    "approved_at": "2026-09-28T20:17:14.196237Z",
+    "published_at": "2026-09-28T20:17:14.208481Z",
+    "review_comment": "ok",
+    "superseded_by_uid": null,
+    "created_at": "2026-09-28T20:17:14.153593Z",
+    "updated_at": "2026-09-28T20:17:14.209551Z"
+}

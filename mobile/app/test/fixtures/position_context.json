@@ -1,0 +1,113 @@
+{
+    "asset": {
+        "uid": "b3bc26da-32af-4d88-9551-612592db3359",
+        "key": "S7C415E:POS:GUNSIP01",
+        "name": "GUNSIP01",
+        "type": "Equipment Position",
+        "schema_uid": "slice-20463f:ledger:equipment-position",
+        "workspace_id": "slice-20463f",
+        "lifecycle": null,
+        "system": null,
+        "updated_at": "2026-09-28T20:17:36.984465+00:00"
+    },
+    "nature": "position",
+    "processing": null,
+    "restricted": null,
+    "merged": null,
+    "type_path": [
+        "Equipment Position"
+    ],
+    "access": {
+        "tickets": true,
+        "documents": true
+    },
+    "stats": {
+        "open_tickets": 1,
+        "tickets": 1,
+        "external_tickets": 0,
+        "documents": 2,
+        "documents_overdue": 0,
+        "relations": 2
+    },
+    "tickets": [
+        {
+            "uid": "3ad8eae6-5a19-4c15-9e2e-be4ab4b6f983",
+            "title": "Pressure spike on gun ion pump",
+            "state": "new",
+            "priority": "High",
+            "assignee": null,
+            "asset_uid": "b3bc26da-32af-4d88-9551-612592db3359",
+            "open": true,
+            "source_key": null,
+            "created_at": "2026-09-28T20:17:14.110296+00:00",
+            "updated_at": "2026-09-28T20:17:14.110300+00:00",
+            "due_date": null
+        }
+    ],
+    "external_tickets": [],
+    "documents": [
+        {
+            "uid": "1ee032b4-5a00-4716-a269-8adce879fd8c",
+            "code": "DOC-0001",
+            "title": "Ion pump replacement",
+            "authority_level": "informativo",
+            "workspace_id": "slice-20463f",
+            "is_global": false,
+            "state": "published",
+            "next_review_due": null,
+            "review_overdue": false,
+            "updated_at": "2026-09-28T20:17:14.208894+00:00",
+            "via": "asset",
+            "via_label": "applies_to"
+        },
+        {
+            "uid": "a0f68206-97f9-49cd-9fb8-f3f0fd322f6c",
+            "code": "DOC-0002",
+            "title": "Ion pump bake-out",
+            "authority_level": "informativo",
+            "workspace_id": "slice-20463f",
+            "is_global": false,
+            "state": null,
+            "next_review_due": null,
+            "review_overdue": false,
+            "updated_at": "2026-09-28T20:17:14.223285+00:00",
+            "via": "asset",
+            "via_label": "applies_to"
+        }
+    ],
+    "relations": {
+        "total": 2,
+        "by_relation": {
+            "in:acts on": 1,
+            "in:installed at": 1
+        },
+        "items": [
+            {
+                "relation": "acts on",
+                "direction": "in",
+                "uid": "322e6b6d-5d48-4dbb-9885-5b890aede61b",
+                "key": "S7C415E:DEV:vac-gunvpc:GUNSIP01",
+                "name": "GUNSIP01",
+                "type": "Control Device",
+                "schema_uid": "slice-20463f:ledger:control-device",
+                "workspace_id": "slice-20463f",
+                "lifecycle": null,
+                "system": null,
+                "updated_at": "2026-09-28T20:17:13.667140+00:00"
+            },
+            {
+                "relation": "installed at",
+                "direction": "in",
+                "uid": "a54b9136-c75f-4840-9d0e-1830186774dc",
+                "key": "INS-01M3MTM6768A8HE1ZQFE397AR0",
+                "name": "INS-01M3MTM6768A8HE1ZQFE397AR0",
+                "type": "Installation",
+                "schema_uid": "slice-20463f:ledger:installation",
+                "workspace_id": "slice-20463f",
+                "lifecycle": null,
+                "system": null,
+                "updated_at": "2026-09-28T20:17:14.047080+00:00"
+            }
+        ]
+    }
+}

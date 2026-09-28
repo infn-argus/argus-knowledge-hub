@@ -1,0 +1,30 @@
+[
+    {
+        "uid": "a54b9136-c75f-4840-9d0e-1830186774dc",
+        "key": "INS-01M3MTM6768A8HE1ZQFE397AR0",
+        "status": "Confirmed",
+        "valid_from": {
+            "kind": "date",
+            "nominal": "2026-01-12T00:00:00+00:00",
+            "precision": "day"
+        },
+        "valid_until": null,
+        "removal_reason": null,
+        "temporal_state": "Current",
+        "temporal_certainty": "definite",
+        "position": {
+            "uid": "b3bc26da-32af-4d88-9551-612592db3359",
+            "key": "S7C415E:POS:GUNSIP01",
+            "name": "GUNSIP01",
+            "type": "Equipment Position",
+            "record_status": "Active"
+        },
+        "asset": {
+            "uid": "506c63d7-f353-4b5f-9e6d-a0528d4e679f",
+            "key": "S7C415EINV-84321",
+            "name": "Ion pump 84321",
+            "type": "Ion Pump",
+            "record_status": "Active"
+        }
+    }
+]

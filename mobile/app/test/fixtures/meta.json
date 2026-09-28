@@ -1,0 +1,12 @@
+{
+    "version": "1",
+    "min_notice_days": 180,
+    "policy": [
+        "The major version is in the path (/v1). Within it, changes are additive only.",
+        "Removing or renaming a field, an endpoint or an accepted value needs a new version.",
+        "A deprecated endpoint keeps working for at least 180 days and says so in its Deprecation, Sunset and Link headers.",
+        "After its sunset a deprecated endpoint answers 410 Gone and names its successor.",
+        "Jira keys, Jira URLs, Insight keys and objectIds stay resolvable through /v1/lookup for as long as ARGUS runs."
+    ],
+    "deprecations": []
+}

@@ -1,0 +1,19 @@
+{
+    "uid": "a0f68206-97f9-49cd-9fb8-f3f0fd322f6c",
+    "workspace_id": "slice-20463f",
+    "code": "DOC-0002",
+    "title": "Ion pump bake-out",
+    "document_type_uid": null,
+    "owner_user_id": null,
+    "responsible_service_asset_uid": null,
+    "authority_level": "informativo",
+    "confidentiality": "interno",
+    "source": "manual",
+    "is_global": false,
+    "current_revision_uid": null,
+    "retention_class": "5y",
+    "retired_at": null,
+    "superseded_by_uid": null,
+    "created_at": "2026-09-28T20:17:14.223282Z",
+    "updated_at": "2026-09-28T20:17:14.223285Z"
+}

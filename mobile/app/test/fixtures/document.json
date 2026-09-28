@@ -1,0 +1,19 @@
+{
+    "uid": "1ee032b4-5a00-4716-a269-8adce879fd8c",
+    "workspace_id": "slice-20463f",
+    "code": "DOC-0001",
+    "title": "Ion pump replacement",
+    "document_type_uid": null,
+    "owner_user_id": null,
+    "responsible_service_asset_uid": null,
+    "authority_level": "informativo",
+    "confidentiality": "interno",
+    "source": "manual",
+    "is_global": false,
+    "current_revision_uid": "1ee032b4-5a00-4716-a269-8adce879fd8c-r1",
+    "retention_class": "5y",
+    "retired_at": null,
+    "superseded_by_uid": null,
+    "created_at": "2026-09-28T20:17:14.151568Z",
+    "updated_at": "2026-09-28T20:17:14.208894Z"
+}

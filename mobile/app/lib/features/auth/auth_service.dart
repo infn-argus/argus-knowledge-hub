@@ -1,0 +1,72 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_appauth/flutter_appauth.dart';
+
+import '../../core/config.dart';
+import '../../core/problem.dart';
+import '../../core/session.dart';
+
+/// Sign-in (flutter-app-design §6.1): OIDC authorization code with PKCE through the system
+/// browser, never an embedded web view and never a password typed into the app. A developer
+/// token is accepted only in non-production builds, for development and the web build.
+abstract class Authenticator {
+  bool get supportsOidc;
+  Future<Session> signInWithOidc();
+  Future<Session?> refresh(Session s);
+  Future<void> endSession(Session s);
+}
+
+class AppAuthAuthenticator implements Authenticator {
+  AppAuthAuthenticator(this.config, [FlutterAppAuth? appAuth]) : _appAuth = appAuth ?? const FlutterAppAuth();
+
+  final AppConfig config;
+  final FlutterAppAuth _appAuth;
+
+  @override
+  bool get supportsOidc => !kIsWeb;
+
+  @override
+  Future<Session> signInWithOidc() async {
+    try {
+      final r = await _appAuth.authorizeAndExchangeCode(AuthorizationTokenRequest(
+        config.oidcClientId,
+        config.oidcRedirect,
+        issuer: config.oidcIssuer,
+        scopes: const ['openid', 'profile', 'email', 'offline_access'],
+      ));
+      if (r.accessToken == null) throw Problem(ProblemCode.unauthenticated, 'Sign-in did not return a token.');
+      return Session(
+        accessToken: r.accessToken!,
+        authType: 'oidc',
+        refreshToken: r.refreshToken,
+        expiresAt: r.accessTokenExpirationDateTime,
+      );
+    } on FlutterAppAuthUserCancelledException {
+      throw Problem(ProblemCode.unauthenticated, 'Sign-in was cancelled.');
+    } on FlutterAppAuthPlatformException catch (e) {
+      throw Problem(ProblemCode.unauthenticated, 'Sign-in failed: ${e.message ?? e.code}');
+    }
+  }
+
+  @override
+  Future<Session?> refresh(Session s) async {
+    if (s.authType != 'oidc' || s.refreshToken == null) return null;
+    try {
+      final r = await _appAuth.token(TokenRequest(
+        config.oidcClientId,
+        config.oidcRedirect,
+        issuer: config.oidcIssuer,
+        refreshToken: s.refreshToken,
+      ));
+      if (r.accessToken == null) return null;
+      return s.copyWith(accessToken: r.accessToken, refreshToken: r.refreshToken, expiresAt: r.accessTokenExpirationDateTime);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<void> endSession(Session s) async {
+    // The identity provider's session ends with the browser's; the tokens here are wiped by the
+    // caller. Nothing to do for a developer token.
+  }
+}

@@ -215,9 +215,13 @@ def asset_context(db: Session, workspace_id: str, asset: Asset, access: Access) 
     docs = documents_for_asset(db, workspace_id, asset) if access.documents else []
     graph = neighbours(db, workspace_id, asset)
     open_tickets = [t for t in tickets if is_open(t)]
+    from app.intake.guide import nature
     from app.ledger.engine import pending_derive
+    schema = db.get(Schema, asset.schema_uid) if asset.schema_uid else None
     return {
         "asset": asset_summary(asset),
+        # equipment | position | control | other, so a client need not interpret the type tree.
+        "nature": nature(db, schema) if schema is not None else "other",
         # Derived edges and counts not yet updated after an edit (I-UX-1).
         "processing": pending_derive(db, asset.workspace_id),
         "restricted": restricted_class(asset),

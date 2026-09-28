@@ -12,6 +12,7 @@ from app.routers import (
     catalogue,
     extensions as extensions_router,
     intake as intake_router,
+    field as field_router,
     ai,
     asset_subresources,
     assets,
@@ -57,7 +58,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-ARGUS-API-Version", "Deprecation", "Sunset", "Link"],
+    expose_headers=["X-ARGUS-API-Version", "Deprecation", "Sunset", "Link", "ETag"],
 )
 
 @app.middleware("http")
@@ -70,6 +71,22 @@ async def api_policy_and_legacy_hosts(request: Request, call_next):
         return RedirectResponse(legacy_hosts.target(host, request.url.path, request.url.query,
                                                     request.headers.get("x-forwarded-proto", "https")),
                                 status_code=301)
+    too_old = api_policy.client_too_old(request.headers.get("x-argus-client"))
+    if too_old is not None:
+        return JSONResponse(status_code=426, content={"detail": too_old},
+                            headers={"X-ARGUS-API-Version": api_policy.API_VERSION})
+    device = request.headers.get("x-argus-device")
+    if device:
+        from app.db import SessionLocal
+        from app.routers.field import device_refusal
+        db = SessionLocal()
+        try:
+            refusal = device_refusal(db, device)
+        finally:
+            db.close()
+        if refusal is not None:
+            return JSONResponse(status_code=401, content={"detail": refusal},
+                                headers={"X-ARGUS-API-Version": api_policy.API_VERSION})
     deprecated = api_policy.find(request.method, request.url.path)
     if deprecated is not None and api_policy.is_past_sunset(deprecated):
         response = JSONResponse(status_code=410, content={"detail": {
@@ -138,6 +155,8 @@ app.include_router(retirement.router)
 app.include_router(catalogue.router)
 app.include_router(extensions_router.router)
 app.include_router(intake_router.router)
+app.include_router(field_router.devices_router)
+app.include_router(field_router.links_router)
 app.include_router(legacy_migration.router)
 app.include_router(attribute_values.router)
 app.include_router(ai.router)

@@ -3028,6 +3028,23 @@ in the history.
 S10 depends on S5 (ledger-only writes) and on AI0–AI2 (§23.14) for capture. It does not gate any
 domain's cutover.
 
+**Progress.**
+
+M0, in part:
+- the committed contract and the field subset;
+- the generated Dart client;
+- 426 `client_too_old`;
+- the device registry, with 401 `revoked`;
+- the universal-link resolver. It gives restricted and missing records the same answer. A shared
+  label value returns 409 `ambiguous` with its candidates and opens none of them.
+
+Still open for M0: idempotency (A57), record versions (A58, A59), the problem shape across all
+errors (A60) and resumable uploads.
+
+M1: the read-only client in `mobile/` is built. The server side of A66 and A67 passes in
+`tests/test_field_client.py`, and the client side passes in `mobile/app/test`. Both still need a
+run on devices.
+
 ### 24.10 Acceptance tests
 
 | # | Given | When | Then | Validates |

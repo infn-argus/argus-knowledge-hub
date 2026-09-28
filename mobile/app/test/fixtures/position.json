@@ -1,0 +1,24 @@
+{
+    "uid": "b3bc26da-32af-4d88-9551-612592db3359",
+    "workspace_id": "slice-20463f",
+    "schema_uid": "slice-20463f:ledger:equipment-position",
+    "key": "S7C415E:POS:GUNSIP01",
+    "name": "GUNSIP01",
+    "type": "Equipment Position",
+    "avatar_icon_uid": null,
+    "attributes": {
+        "position_class": "Ion Pump"
+    },
+    "inbound_relations": [
+        "322e6b6d-5d48-4dbb-9885-5b890aede61b",
+        "a54b9136-c75f-4840-9d0e-1830186774dc"
+    ],
+    "outbound_relations": [
+        "506c63d7-f353-4b5f-9e6d-a0528d4e679f"
+    ],
+    "is_global": false,
+    "record_status": "Active",
+    "created_at": "2026-09-28T20:17:13.574998Z",
+    "updated_at": "2026-09-28T20:17:36.984465Z",
+    "deleted_at": null
+}

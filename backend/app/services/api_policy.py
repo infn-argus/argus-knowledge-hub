@@ -82,3 +82,37 @@ def describe() -> dict:
             "deprecations": [{"method": d.method, "path": d.path, "deprecated_on": d.deprecated_on.isoformat(),
                               "sunset": d.sunset.isoformat(), "successor": d.successor, "note": d.note,
                               "gone": is_past_sunset(d)} for d in DEPRECATIONS]}
+
+
+# --------------------------------------------------------------------------- client versions (§24.3)
+
+# The oldest version of each client the API still serves. A client names itself in
+# `X-ARGUS-Client: <name>/<version>[/<build>]`; below its minimum it gets 426 and the
+# minimum, so it can ask its user to update before anything is sent (flutter-app-design §12).
+import os as _os
+
+MINIMUM_CLIENT_VERSIONS = {
+    "flutter": _os.environ.get("ARGUS_MIN_FLUTTER_VERSION", "0.1.0"),
+}
+
+
+def _parts(version: str) -> tuple:
+    out = []
+    for p in (version or "").split("."):
+        digits = "".join(ch for ch in p if ch.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out + [0] * (3 - len(out)))
+
+
+def client_too_old(header: str | None) -> dict | None:
+    """The 426 body when the named client is below its minimum, else None."""
+    if not header:
+        return None
+    name, _, rest = header.partition("/")
+    version = rest.split("/", 1)[0]
+    minimum = MINIMUM_CLIENT_VERSIONS.get(name.strip().lower())
+    if minimum is None or _parts(version) >= _parts(minimum):
+        return None
+    return {"error": f"This version of the {name} client ({version}) is no longer supported. Update to "
+                     f"{minimum} or later; your drafts are kept.",
+            "code": "client_too_old", "minimum": minimum}

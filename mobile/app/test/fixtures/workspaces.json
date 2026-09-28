@@ -1,0 +1,21 @@
+[
+    {
+        "id": "slice-20463f",
+        "name": "Slice",
+        "is_global": false,
+        "created_at": "2026-09-28T20:17:13.410365Z",
+        "can_read": true,
+        "can_create": true,
+        "can_modify": true,
+        "can_delete": true,
+        "can_read_tickets": true,
+        "can_create_tickets": true,
+        "can_modify_tickets": true,
+        "can_delete_tickets": true,
+        "can_read_documents": true,
+        "can_create_documents": true,
+        "can_modify_documents": true,
+        "can_delete_documents": true,
+        "can_approve_documents": true
+    }
+]
