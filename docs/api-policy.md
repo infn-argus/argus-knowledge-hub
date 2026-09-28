@@ -84,3 +84,76 @@ and nothing is opened.
 
 The web application serves the same paths (`/asset/<uid>` and so on) and redirects them through
 the resolver.
+
+## Errors: one problem shape
+
+Every error keeps its `detail`, as before, and also carries a top-level `problem`:
+
+```json
+{"detail": "...", "problem": {"error": "a person-readable sentence", "code": "stale",
+  "invariant": "I-INS-1", "field": "attr:serial", "current": {"version": 42}, "review_item": "…"}}
+```
+
+Clients decide from `code`, never from the text. The codes are:
+- `invalid`, `unauthenticated`, `forbidden`, `not_found`, `conflict`, `gone`;
+- `stale`, `invariant`, `too_large`, `client_too_old`, `revoked`, `ambiguous`;
+- `idempotency_mismatch`, `in_progress`, `rate_limited`, `server_error`.
+
+The other keys appear only when they apply. A validation error names the `field`.
+
+## Retries: idempotency keys
+
+Any `POST`, `PUT`, `PATCH` or `DELETE` may carry `Idempotency-Key: <uuid>`. The key is kept per
+workspace and per principal. Reuse it for every retry of the same command.
+
+| Situation | Answer |
+|---|---|
+| The same key and the same request | The stored answer, with `Idempotent-Replayed: true`; nothing runs again |
+| The same key and a different request | 422 `idempotency_mismatch` |
+| The first request is still running | 409 `in_progress` with `Retry-After` |
+
+Server errors, 401, 426 and 429 are not stored, so a retry of those runs again. Keys expire after
+the offline retention (`ARGUS_OFFLINE_RETENTION_DAYS`, 7 by default) plus seven days;
+`python -m app.ledger escalate` removes expired ones.
+
+## Edits: record versions
+
+Single-record reads return an `ETag`:
+- for an asset, the latest ledger event that touched it (also returned as `version` in the body);
+- for a ticket, its `version`;
+- for a document, the current revision and its state.
+
+An edit may send the version it read as `If-Match`: `PUT /v1/assets/{uid}`, `PUT /v1/issues/{uid}`
+and `POST /v1/issues/{uid}/transition`. If the record has changed since then:
+
+| What changed since the version sent | Answer |
+|---|---|
+| Nothing the edit touches | The edit is applied |
+| A field the edit touches | 409 `stale`, with the current values |
+| A protected field the edit touches (serial, inventory number, IP, MAC, FQDN, safety class, `acts on`, and the policy's protected predicates) | 409 `stale` with a `review_item`; the edit waits in the review queue as a `stale_command` and is not applied |
+
+A person closes a `stale_command` review item with
+`POST /v1/ledger/review/stale/{id}/close`, `{"outcome": "applied" | "dismissed"}`.
+
+`POST /v1/installations/swap` accepts `seen_installation_uid`, which is `null` for an empty
+Position, and `evidence`. If the Position's current Installation is no longer the one the person
+saw, nothing is ended or started, and the replacement becomes a review item with the evidence.
+
+## Files: resumable uploads
+
+1. `POST /v1/uploads` with `{filename, content_type, size, sha256}`. It is refused before any byte
+   is sent if it is too large (413 `too_large`, with `limit`) or of a type not accepted.
+2. `PUT /v1/uploads/{uid}?offset=N` sends the next piece, at most 8 MB, as the raw body. A piece
+   at another offset gets 409 with `current.offset`. `GET /v1/uploads/{uid}` says where to resume.
+3. `POST /v1/uploads/{uid}/complete` verifies the size and the SHA-256. On a mismatch the bytes are
+   discarded and the client starts again. EXIF GPS is removed from JPEG, PNG and WebP images.
+4. `POST /v1/uploads/{uid}/attach/ticket/{issue_uid}` or `.../attach/asset/{asset_uid}` attaches
+   the file. Attaching the same upload again does nothing.
+
+The limits are set per environment until decision U23:
+- `ARGUS_UPLOAD_MAX_IMAGE`, 25 MB by default;
+- `ARGUS_UPLOAD_MAX_VIDEO`, 200 MB by default;
+- `ARGUS_UPLOAD_MAX_OTHER`, 50 MB by default;
+- `ARGUS_UPLOAD_TYPES`, the accepted types.
+
+Unfinished uploads expire like idempotency keys.

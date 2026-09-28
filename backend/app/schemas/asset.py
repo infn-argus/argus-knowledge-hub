@@ -49,6 +49,9 @@ class AssetOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     deleted_at: Optional[datetime]
+    # The record version (the latest ledger event that touched it), on single-record reads; send it
+    # back as If-Match with an edit (flutter-app-design §3.3).
+    version: Optional[int] = None
 
 
 class BulkDeleteRequest(BaseModel):

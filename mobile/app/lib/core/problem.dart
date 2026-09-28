@@ -8,6 +8,8 @@ enum ProblemCode {
   invariant,
   conflict,
   ambiguous,
+  idempotencyMismatch,
+  inProgress,
   notFound,
   tooLarge,
   clientTooOld,
@@ -18,7 +20,8 @@ enum ProblemCode {
 }
 
 class Problem implements Exception {
-  Problem(this.code, this.message, {this.status, this.minimum, this.candidates = const []});
+  Problem(this.code, this.message,
+      {this.status, this.minimum, this.candidates = const [], this.field, this.current, this.reviewItem});
 
   final ProblemCode code;
   final String message;
@@ -28,6 +31,15 @@ class Problem implements Exception {
   /// For `ambiguous`: the records a label value matches, for the person to choose from.
   final List<Map<String, Object?>> candidates;
 
+  /// The field the problem is about (`attributes.serial`, `If-Match`), when there is one.
+  final String? field;
+
+  /// For `stale` and some conflicts: the current state (version, values, offset).
+  final Map<String, Object?>? current;
+
+  /// When the server turned the command into a review item instead of applying it.
+  final String? reviewItem;
+
   static const _codes = {
     'stale': ProblemCode.stale,
     'forbidden': ProblemCode.forbidden,
@@ -35,6 +47,9 @@ class Problem implements Exception {
     'invariant': ProblemCode.invariant,
     'conflict': ProblemCode.conflict,
     'ambiguous': ProblemCode.ambiguous,
+    'idempotency_mismatch': ProblemCode.idempotencyMismatch,
+    'in_progress': ProblemCode.inProgress,
+    'unauthenticated': ProblemCode.unauthenticated,
     'not_found': ProblemCode.notFound,
     'too_large': ProblemCode.tooLarge,
     'client_too_old': ProblemCode.clientTooOld,
@@ -45,7 +60,9 @@ class Problem implements Exception {
   factory Problem.fromResponse(int status, String? body) {
     Object? detail;
     try {
-      detail = (jsonDecode(body ?? '') as Map<String, dynamic>)['detail'];
+      final decoded = jsonDecode(body ?? '') as Map<String, dynamic>;
+      // The problem shape (revision §24.3 item 4); older servers send only `detail`.
+      detail = decoded['problem'] is Map ? decoded['problem'] : decoded['detail'];
     } catch (_) {
       detail = null;
     }
@@ -53,12 +70,19 @@ class Problem implements Exception {
     String? code;
     String? minimum;
     var candidates = const <Map<String, Object?>>[];
+    String? field;
+    Map<String, Object?>? current;
+    String? reviewItem;
     if (detail is String) {
       message = detail;
     } else if (detail is Map) {
       message = (detail['error'] ?? message).toString();
       code = detail['code']?.toString();
       minimum = detail['minimum']?.toString();
+      field = detail['field']?.toString();
+      reviewItem = detail['review_item']?.toString();
+      final cur = detail['current'];
+      if (cur is Map) current = cur.map((k, v) => MapEntry(k.toString(), v));
       final c = detail['candidates'];
       if (c is List) {
         candidates = [for (final m in c) if (m is Map) m.map((k, v) => MapEntry(k.toString(), v))];
@@ -74,7 +98,8 @@ class Problem implements Exception {
       426 => ProblemCode.clientTooOld,
       _ => ProblemCode.unknown,
     };
-    return Problem(_codes[code] ?? byStatus, message, status: status, minimum: minimum, candidates: candidates);
+    return Problem(_codes[code] ?? byStatus, message,
+        status: status, minimum: minimum, candidates: candidates, field: field, current: current, reviewItem: reviewItem);
   }
 
   @override

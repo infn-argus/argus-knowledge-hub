@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
@@ -256,11 +256,16 @@ async def import_markdown_documents(
 @router.get("/{uid}", response_model=DocumentOut)
 def get_document(
     uid: str,
+    response: Response,
     workspace_id: str = Depends(require_permission("read", resource="documents")),
     identity: Identity = Depends(get_identity),
     db: Session = Depends(get_db),
 ):
-    return _get_visible_document(uid, workspace_id, identity, db)
+    from app.services import versions
+    doc = _get_visible_document(uid, workspace_id, identity, db)
+    revision = db.get(DocumentRevision, doc.current_revision_uid) if doc.current_revision_uid else None
+    response.headers["ETag"] = versions.etag(versions.document_version(doc, revision))
+    return doc
 
 
 @router.put("/{uid}", response_model=DocumentOut)

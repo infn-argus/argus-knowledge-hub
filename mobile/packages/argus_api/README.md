@@ -62,6 +62,7 @@ All URIs are relative to *http://localhost*
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
 *AssetsApi* | [**getAsset**](doc//AssetsApi.md#getasset) | **GET** /v1/assets/{uid} | Get Asset
+*AssetsApi* | [**updateAsset**](doc//AssetsApi.md#updateasset) | **PUT** /v1/assets/{uid} | Update Asset
 *DocumentsApi* | [**getCurrentRevision**](doc//DocumentsApi.md#getcurrentrevision) | **GET** /v1/documents/{uid}/current | Get Current Revision
 *DocumentsApi* | [**getDocument**](doc//DocumentsApi.md#getdocument) | **GET** /v1/documents/{uid} | Get Document
 *FieldClientApi* | [**myDevices**](doc//FieldClientApi.md#mydevices) | **GET** /v1/devices | My Devices
@@ -73,10 +74,23 @@ Class | Method | HTTP request | Description
 *HubApi* | [**search**](doc//HubApi.md#search) | **GET** /v1/hub/search | Search
 *HubApi* | [**ticketContext**](doc//HubApi.md#ticketcontext) | **GET** /v1/hub/tickets/{uid}/context | Ticket Context
 *InstallationsApi* | [**listInstallations**](doc//InstallationsApi.md#listinstallations) | **GET** /v1/installations | List Installations
+*InstallationsApi* | [**swap**](doc//InstallationsApi.md#swap) | **POST** /v1/installations/swap | Swap
+*IssuesApi* | [**createIssue**](doc//IssuesApi.md#createissue) | **POST** /v1/issues | Create Issue
+*IssuesApi* | [**createIssueComment**](doc//IssuesApi.md#createissuecomment) | **POST** /v1/issues/{uid}/comments | Create Issue Comment
 *IssuesApi* | [**getIssue**](doc//IssuesApi.md#getissue) | **GET** /v1/issues/{uid} | Get Issue
+*IssuesApi* | [**listIssueAttachments**](doc//IssuesApi.md#listissueattachments) | **GET** /v1/issues/{uid}/attachments | List Issue Attachments
+*IssuesApi* | [**listIssueComments**](doc//IssuesApi.md#listissuecomments) | **GET** /v1/issues/{uid}/comments | List Issue Comments
+*IssuesApi* | [**transitionIssue**](doc//IssuesApi.md#transitionissue) | **POST** /v1/issues/{uid}/transition | Transition Issue
+*IssuesApi* | [**updateIssue**](doc//IssuesApi.md#updateissue) | **PUT** /v1/issues/{uid} | Update Issue
 *LookupApi* | [**lookup**](doc//LookupApi.md#lookup) | **GET** /v1/lookup/{identifier} | Lookup
 *MetaApi* | [**apiMeta**](doc//MetaApi.md#apimeta) | **GET** /v1/meta/api | Api Meta
 *SchemasApi* | [**getSchema**](doc//SchemasApi.md#getschema) | **GET** /v1/schemas/{uid} | Get Schema
+*UploadsApi* | [**attachToAsset**](doc//UploadsApi.md#attachtoasset) | **POST** /v1/uploads/{uid}/attach/asset/{asset_uid} | Attach To Asset
+*UploadsApi* | [**attachToTicket**](doc//UploadsApi.md#attachtoticket) | **POST** /v1/uploads/{uid}/attach/ticket/{issue_uid} | Attach To Ticket
+*UploadsApi* | [**completeUpload**](doc//UploadsApi.md#completeupload) | **POST** /v1/uploads/{uid}/complete | Complete Upload
+*UploadsApi* | [**createUpload**](doc//UploadsApi.md#createupload) | **POST** /v1/uploads | Create Upload
+*UploadsApi* | [**uploadPiece**](doc//UploadsApi.md#uploadpiece) | **PUT** /v1/uploads/{uid} | Upload Piece
+*UploadsApi* | [**uploadStatus**](doc//UploadsApi.md#uploadstatus) | **GET** /v1/uploads/{uid} | Upload Status
 *WorkspacesApi* | [**getMe**](doc//WorkspacesApi.md#getme) | **GET** /v1/me | Get Me
 *WorkspacesApi* | [**listMyWorkspaces**](doc//WorkspacesApi.md#listmyworkspaces) | **GET** /v1/me/workspaces | List My Workspaces
 
@@ -84,15 +98,24 @@ Class | Method | HTTP request | Description
 ## Documentation For Models
 
  - [AssetOut](doc//AssetOut.md)
+ - [AssetUpdate](doc//AssetUpdate.md)
+ - [AttachmentOut](doc//AttachmentOut.md)
  - [DeviceIn](doc//DeviceIn.md)
  - [DocumentOut](doc//DocumentOut.md)
  - [DocumentRevisionOut](doc//DocumentRevisionOut.md)
  - [HTTPValidationError](doc//HTTPValidationError.md)
+ - [IssueCommentCreate](doc//IssueCommentCreate.md)
+ - [IssueCommentOut](doc//IssueCommentOut.md)
+ - [IssueCreate](doc//IssueCreate.md)
  - [IssueOut](doc//IssueOut.md)
+ - [IssueUpdate](doc//IssueUpdate.md)
  - [MeOut](doc//MeOut.md)
  - [MyWorkspaceOut](doc//MyWorkspaceOut.md)
  - [RevokeIn](doc//RevokeIn.md)
  - [SchemaOut](doc//SchemaOut.md)
+ - [SwapIn](doc//SwapIn.md)
+ - [TransitionIn](doc//TransitionIn.md)
+ - [UploadIn](doc//UploadIn.md)
  - [ValidationError](doc//ValidationError.md)
 
 

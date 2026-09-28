@@ -38,6 +38,9 @@ class Issue(Base, WorkspaceScopedMixin, TimestampMixin):
     closed_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
+    # Per field, the version that last changed it, so an edit made against an older version is
+    # refused only when it touches what changed since (app.services.versions).
+    field_versions: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     deleted_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

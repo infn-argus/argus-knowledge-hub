@@ -184,6 +184,10 @@ class ApiClient {
           return value is DateTime ? value : DateTime.tryParse(value);
         case 'AssetOut':
           return AssetOut.fromJson(value);
+        case 'AssetUpdate':
+          return AssetUpdate.fromJson(value);
+        case 'AttachmentOut':
+          return AttachmentOut.fromJson(value);
         case 'DeviceIn':
           return DeviceIn.fromJson(value);
         case 'DocumentOut':
@@ -192,8 +196,16 @@ class ApiClient {
           return DocumentRevisionOut.fromJson(value);
         case 'HTTPValidationError':
           return HTTPValidationError.fromJson(value);
+        case 'IssueCommentCreate':
+          return IssueCommentCreate.fromJson(value);
+        case 'IssueCommentOut':
+          return IssueCommentOut.fromJson(value);
+        case 'IssueCreate':
+          return IssueCreate.fromJson(value);
         case 'IssueOut':
           return IssueOut.fromJson(value);
+        case 'IssueUpdate':
+          return IssueUpdate.fromJson(value);
         case 'MeOut':
           return MeOut.fromJson(value);
         case 'MyWorkspaceOut':
@@ -202,6 +214,12 @@ class ApiClient {
           return RevokeIn.fromJson(value);
         case 'SchemaOut':
           return SchemaOut.fromJson(value);
+        case 'SwapIn':
+          return SwapIn.fromJson(value);
+        case 'TransitionIn':
+          return TransitionIn.fromJson(value);
+        case 'UploadIn':
+          return UploadIn.fromJson(value);
         case 'ValidationError':
           return ValidationError.fromJson(value);
         default:

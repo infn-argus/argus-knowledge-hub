@@ -1,7 +1,7 @@
 import logging
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
@@ -38,6 +38,7 @@ from app.routers import (
     schemas,
     sync,
     transfers,
+    uploads,
     workflows,
     workspaces,
 )
@@ -46,10 +47,12 @@ logging.basicConfig(level=logging.INFO)
 
 from app.auth import bind_grants  # noqa: E402
 import app.ledger.audit  # noqa: E402,F401  (append-only guards on create_all)
+from app import idempotency, problems  # noqa: E402
 from app.services import api_policy, legacy_hosts  # noqa: E402
 
 # Every request carries the viewer's restricted-class grants (I-ACL-1).
 app = FastAPI(title="ARGUS Asset Knowledge Hub API", version="1.0.0", dependencies=[Depends(bind_grants)])
+problems.install(app)
 
 # Auth is a Bearer token per request (no cookies), so a wildcard origin here
 # carries none of the usual CSRF-adjacent risk of credentialed CORS.
@@ -73,8 +76,7 @@ async def api_policy_and_legacy_hosts(request: Request, call_next):
                                 status_code=301)
     too_old = api_policy.client_too_old(request.headers.get("x-argus-client"))
     if too_old is not None:
-        return JSONResponse(status_code=426, content={"detail": too_old},
-                            headers={"X-ARGUS-API-Version": api_policy.API_VERSION})
+        return problems.response(426, too_old, {"X-ARGUS-API-Version": api_policy.API_VERSION})
     device = request.headers.get("x-argus-device")
     if device:
         from app.db import SessionLocal
@@ -85,15 +87,14 @@ async def api_policy_and_legacy_hosts(request: Request, call_next):
         finally:
             db.close()
         if refusal is not None:
-            return JSONResponse(status_code=401, content={"detail": refusal},
-                                headers={"X-ARGUS-API-Version": api_policy.API_VERSION})
+            return problems.response(401, refusal, {"X-ARGUS-API-Version": api_policy.API_VERSION})
     deprecated = api_policy.find(request.method, request.url.path)
     if deprecated is not None and api_policy.is_past_sunset(deprecated):
-        response = JSONResponse(status_code=410, content={"detail": {
+        response = problems.response(410, {
             "error": f"{request.method} {deprecated.path} was retired on {deprecated.sunset}",
-            "successor": deprecated.successor}})
+            "successor": deprecated.successor})
     else:
-        response = await call_next(request)
+        response = await idempotency.run(request, call_next)
     if deprecated is not None:
         response.headers.update(api_policy.headers(deprecated))
     response.headers["X-ARGUS-API-Version"] = api_policy.API_VERSION
@@ -107,8 +108,8 @@ async def database_refusal(request: Request, exc: DBAPIError):
     code = getattr(exc.orig, "pgcode", None)
     if code == "42501":
         message = str(exc.orig).splitlines()[0]
-        return JSONResponse(status_code=409, content={"detail": {
-            "error": message, "invariant": "ledger-only" if "ledger-only" in message else "append-only"}})
+        return problems.response(409, {
+            "error": message, "invariant": "ledger-only" if "ledger-only" in message else "append-only"})
     raise exc
 
 
@@ -169,6 +170,7 @@ app.include_router(labels.router)
 app.include_router(roles.router)
 app.include_router(sync.router)
 app.include_router(transfers.router)
+app.include_router(uploads.router)
 app.include_router(workspaces.router)
 
 

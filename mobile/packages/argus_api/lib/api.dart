@@ -37,18 +37,28 @@ part 'api/issues_api.dart';
 part 'api/lookup_api.dart';
 part 'api/meta_api.dart';
 part 'api/schemas_api.dart';
+part 'api/uploads_api.dart';
 part 'api/workspaces_api.dart';
 
 part 'model/asset_out.dart';
+part 'model/asset_update.dart';
+part 'model/attachment_out.dart';
 part 'model/device_in.dart';
 part 'model/document_out.dart';
 part 'model/document_revision_out.dart';
 part 'model/http_validation_error.dart';
+part 'model/issue_comment_create.dart';
+part 'model/issue_comment_out.dart';
+part 'model/issue_create.dart';
 part 'model/issue_out.dart';
+part 'model/issue_update.dart';
 part 'model/me_out.dart';
 part 'model/my_workspace_out.dart';
 part 'model/revoke_in.dart';
 part 'model/schema_out.dart';
+part 'model/swap_in.dart';
+part 'model/transition_in.dart';
+part 'model/upload_in.dart';
 part 'model/validation_error.dart';
 
 

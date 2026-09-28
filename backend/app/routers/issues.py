@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -39,7 +39,7 @@ from app.schemas.issue import (
     IssueUpdate,
 )
 from app.services.asset_ticket_links import ensure_asset_link, sync_subject_link
-from app.services import notify, workflows
+from app.services import notify, versions, workflows
 from app.services.visibility import can_see, hidden_fields, redacted_attributes, visible_issues_clause
 from app.services.issue_history import (
     TRACKED_FIELDS,
@@ -141,11 +141,21 @@ def list_issue_labels(
     return [r for r in rows if r]
 
 
+def _bump(issue: Issue, snapshot: dict) -> None:
+    """A new ticket version, naming the fields that changed (app.services.versions)."""
+    after = versions.ticket_snapshot(issue)
+    versions.bump_ticket(issue, {f for f in set(snapshot) | set(after) if snapshot.get(f) != after.get(f)})
+    flag_modified(issue, "field_versions")
+
+
 @router.get("/{uid}", response_model=IssueOut)
 def get_issue(
-    uid: str, workspace_id: str = Depends(require_permission("read", resource="tickets")), db: Session = Depends(get_db)
+    uid: str, response: Response, workspace_id: str = Depends(require_permission("read", resource="tickets")),
+    db: Session = Depends(get_db)
 ):
-    return issue_out(db, _get_owned_issue(uid, workspace_id, db))
+    issue = _get_owned_issue(uid, workspace_id, db)
+    response.headers["ETag"] = versions.etag(issue.version or 1)
+    return issue_out(db, issue)
 
 
 def _move(db: Session, issue: Issue, target: str, actor: Optional[str]) -> None:
@@ -171,9 +181,12 @@ def update_issue(
     workspace_id: str = Depends(require_permission("modify", resource="tickets")),
     current_user_id: Optional[str] = Depends(get_current_user_id),
     db: Session = Depends(get_db),
+    if_match: Optional[str] = Header(None, alias="If-Match",
+                                     description="The ticket version read (flutter-app-design §3.3)"),
 ):
     issue = _get_owned_issue(uid, workspace_id, db)
     patch = body.model_dump(exclude_unset=True)
+    snapshot = versions.ticket_snapshot(issue)
     _guard_ticket_write(db, workspace_id, patch.get("schema_uid", issue.schema_uid),
                         patch["attributes"] if patch.get("attributes") is not None else issue.attributes)
     # Captured before anything is written, so the entry says what actually
@@ -184,6 +197,7 @@ def update_issue(
         hidden = hidden_fields(db, issue)
         patch["attributes"] = {**{k: v for k, v in patch["attributes"].items() if k not in hidden},
                                **{k: v for k, v in (issue.attributes or {}).items() if k in hidden}}
+    versions.check_ticket(issue, if_match, versions.ticket_fields_in(patch, issue))
 
     if "state" in patch and patch["state"] != issue.state:
         _move(db, issue, patch.pop("state"), current_user_id)
@@ -202,6 +216,7 @@ def update_issue(
 
     if "attributes" in patch or "schema_uid" in patch:
         validate_attributes(db, schema, issue.attributes, workspace_id, Issue, exclude_uid=uid)
+    _bump(issue, snapshot)
     derive_for_ticket(db, issue)
     db.commit()
     db.refresh(issue)
@@ -641,9 +656,13 @@ class TransitionIn(BaseModel):
 @router.post("/{uid}/transition", response_model=IssueOut)
 def transition_issue(uid: str, body: TransitionIn,
                      workspace_id: str = Depends(require_permission("modify", resource="tickets")),
-                     current_user_id: Optional[str] = Depends(get_current_user_id), db: Session = Depends(get_db)):
+                     current_user_id: Optional[str] = Depends(get_current_user_id), db: Session = Depends(get_db),
+                     if_match: Optional[str] = Header(None, alias="If-Match",
+                                                      description="The ticket version read")):
     issue = _get_owned_issue(uid, workspace_id, db)
     _guard_ticket_write(db, workspace_id, issue.schema_uid, issue.attributes)
+    versions.check_ticket(issue, if_match, {"state"} | ({"assignee"} if body.assignee is not None else set()))
+    snapshot = versions.ticket_snapshot(issue)
     previous_assignee = issue.assignee
     try:
         moved = workflows.transition(db, issue, body.to, current_user_id, comment=body.comment,
@@ -655,6 +674,7 @@ def transition_issue(uid: str, body: TransitionIn,
     notify.on_transition(db, issue, current_user_id, moved["from"], moved["to"])
     if body.comment:
         notify.on_comment(db, issue, current_user_id, body.comment)
+    _bump(issue, snapshot)
     derive_for_ticket(db, issue)
     db.commit()
     db.refresh(issue)

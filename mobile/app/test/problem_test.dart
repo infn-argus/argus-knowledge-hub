@@ -20,4 +20,17 @@ void main() {
     expect(Problem.fromResponse(401, 'not json').code, ProblemCode.unauthenticated);
     expect(Problem.fromResponse(500, null).code, ProblemCode.unknown);
   });
+
+  test('the problem shape is read first, with its field, current state and review item', () {
+    final p = Problem.fromResponse(409,
+        '{"detail":{"error":"x"},"problem":{"error":"Changed since you read it.","code":"stale",'
+        '"field":"attr:serial","current":{"version":42},"review_item":"c1"}}');
+    expect(p.code, ProblemCode.stale);
+    expect(p.message, 'Changed since you read it.');
+    expect(p.field, 'attr:serial');
+    expect(p.current, {'version': 42});
+    expect(p.reviewItem, 'c1');
+    expect(Problem.fromResponse(422, '{"detail":[],"problem":{"error":"reused","code":"idempotency_mismatch"}}').code,
+        ProblemCode.idempotencyMismatch);
+  });
 }

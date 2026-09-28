@@ -62,6 +62,15 @@ downloaded to `mobile/.tool/` the first time:
 mobile/tool/generate_api.sh
 ```
 
+The server's write foundations are in place for the next phases (`docs/api-policy.md`):
+- the problem shape, which `Problem.fromResponse` reads first;
+- `Idempotency-Key`;
+- `If-Match` record versions;
+- resumable uploads.
+
+The generated client declares upload pieces as `MultipartFile`. Send them as raw bytes through
+`ApiClient.invokeAPI` instead.
+
 Some untyped responses (hub contexts, search, the link resolver, devices, installations) are
 decoded by `ApiService.json`, because the generator cannot deserialize an untyped value.
 

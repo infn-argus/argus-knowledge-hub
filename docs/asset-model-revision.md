@@ -3038,8 +3038,14 @@ M0, in part:
 - the universal-link resolver. It gives restricted and missing records the same answer. A shared
   label value returns 409 `ambiguous` with its candidates and opens none of them.
 
-Still open for M0: idempotency (A57), record versions (A58, A59), the problem shape across all
-errors (A60) and resumable uploads.
+The rest of M0 is built, with its tests in `tests/test_field_foundations.py`:
+- idempotency (A57, and the server side of A63);
+- record versions and preconditions (A58);
+- a stale replacement becoming a review item (A59);
+- the problem shape (A60);
+- resumable uploads.
+
+The push relay (U21) is still open.
 
 M1: the read-only client in `mobile/` is built. The server side of A66 and A67 passes in
 `tests/test_field_client.py`, and the client side passes in `mobile/app/test`. Both still need a

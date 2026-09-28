@@ -386,6 +386,28 @@ def convert_serial_line(uid: str, body: SerialLineConvertIn, identity=Depends(ge
     return built
 
 
+class CloseReviewIn(BaseModel):
+    outcome: str            # applied (the person redid it against the current state) | dismissed
+    reason: Optional[str] = None
+
+
+@router.post("/review/stale/{conflict_id}/close")
+def close_stale_command(conflict_id: str, body: CloseReviewIn, identity=Depends(get_identity),
+                        workspace_id: str = Depends(require_permission("modify")), db: Session = Depends(get_db)):
+    """Close a command that arrived against an older version (app.services.versions): the person
+    either redid it against the current state or dismissed it."""
+    from app.services import versions
+    if body.outcome not in ("applied", "dismissed"):
+        raise HTTPException(status_code=422, detail={"error": "outcome is applied or dismissed", "code": "invalid",
+                                                     "field": "outcome"})
+    c = db.get(Conflict, conflict_id)
+    if c is None or c.workspace_id != workspace_id or _hidden(db, c.subject_uid):
+        raise HTTPException(status_code=404, detail={"error": "No such review item.", "code": "not_found"})
+    versions.close_review(db, conflict_id, actor_of(identity), body.outcome)
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/review/queues")
 def review_queues(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """§18.2: each queue's size, age distribution and escalation, and who owns it."""
@@ -502,12 +524,35 @@ class SwapIn(BaseModel):
     at: datetime
     precision: str = "instant"
     reason: str = "Unknown"
+    # The current Installation the person saw at the Position (null: none). When given and no
+    # longer current, the replacement is not applied: it becomes a review item (§24.4, A59).
+    seen_installation_uid: Optional[str] = None
+    evidence: Optional[dict] = None
+
+
+def _current_installations(db: Session, position_uid: str) -> list[str]:
+    return sorted(v["uid"] for v in engine.installations(db, position_uid=position_uid, status="Confirmed")
+                  if (v["valid_until"] or {"kind": "open"}).get("kind") == "open")
 
 
 @installations_router.post("/swap")
 def swap(body: SwapIn, identity=Depends(get_identity),
          workspace_id: str = Depends(require_permission("modify")), db: Session = Depends(get_db)):
     actor = actor_of(identity)
+    if "seen_installation_uid" in body.model_fields_set:
+        current = _current_installations(db, body.position_uid)
+        seen = [body.seen_installation_uid] if body.seen_installation_uid else []
+        position = db.get(Asset, body.position_uid)
+        if current != seen and position is not None and position.workspace_id == workspace_id:
+            from app.services import versions
+            command = {"kind": "swap", **body.model_dump(mode="json", exclude={"evidence"})}
+            cid = versions.open_review(db, position, command, actor, seen, current,
+                                       {"current_installations": current}, evidence=body.evidence)
+            raise HTTPException(status_code=409, detail={
+                "error": "The Position's installation changed since you saw it. The replacement was not "
+                         "applied; it is waiting in the review queue with what you captured.",
+                "code": "stale", "review_item": cid,
+                "current": {"installations": current}})
     try:
         result = service.swap(db, workspace_id, actor, body.position_uid, body.new_asset_uid,
                               temporal.instant(body.at, body.precision), body.reason)

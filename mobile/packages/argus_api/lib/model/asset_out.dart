@@ -27,6 +27,7 @@ class AssetOut {
     required this.type,
     required this.uid,
     required this.updatedAt,
+    this.version,
     required this.workspaceId,
   });
 
@@ -58,6 +59,8 @@ class AssetOut {
 
   DateTime updatedAt;
 
+  int? version;
+
   String workspaceId;
 
   @override
@@ -76,6 +79,7 @@ class AssetOut {
     other.type == type &&
     other.uid == uid &&
     other.updatedAt == updatedAt &&
+    other.version == version &&
     other.workspaceId == workspaceId;
 
   @override
@@ -95,10 +99,11 @@ class AssetOut {
     (type.hashCode) +
     (uid.hashCode) +
     (updatedAt.hashCode) +
+    (version == null ? 0 : version!.hashCode) +
     (workspaceId.hashCode);
 
   @override
-  String toString() => 'AssetOut[attributes=$attributes, avatarIconUid=$avatarIconUid, createdAt=$createdAt, deletedAt=$deletedAt, inboundRelations=$inboundRelations, isGlobal=$isGlobal, key=$key, name=$name, outboundRelations=$outboundRelations, recordStatus=$recordStatus, schemaUid=$schemaUid, type=$type, uid=$uid, updatedAt=$updatedAt, workspaceId=$workspaceId]';
+  String toString() => 'AssetOut[attributes=$attributes, avatarIconUid=$avatarIconUid, createdAt=$createdAt, deletedAt=$deletedAt, inboundRelations=$inboundRelations, isGlobal=$isGlobal, key=$key, name=$name, outboundRelations=$outboundRelations, recordStatus=$recordStatus, schemaUid=$schemaUid, type=$type, uid=$uid, updatedAt=$updatedAt, version=$version, workspaceId=$workspaceId]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -124,6 +129,11 @@ class AssetOut {
       json[r'type'] = this.type;
       json[r'uid'] = this.uid;
       json[r'updated_at'] = this.updatedAt.toUtc().toIso8601String();
+    if (this.version != null) {
+      json[r'version'] = this.version;
+    } else {
+      json[r'version'] = null;
+    }
       json[r'workspace_id'] = this.workspaceId;
     return json;
   }
@@ -165,6 +175,7 @@ class AssetOut {
         type: mapValueOfType<String>(json, r'type')!,
         uid: mapValueOfType<String>(json, r'uid')!,
         updatedAt: mapDateTime(json, r'updated_at', r'')!,
+        version: mapValueOfType<int>(json, r'version'),
         workspaceId: mapValueOfType<String>(json, r'workspace_id')!,
       );
     }

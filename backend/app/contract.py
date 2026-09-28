@@ -36,6 +36,21 @@ FIELD_OPERATIONS = [
     ("get", "/v1/documents/{uid}"),
     ("get", "/v1/documents/{uid}/current"),
     ("get", "/v1/hub/documents/{uid}/context"),
+    # Writes (M0: every one accepts Idempotency-Key; edits take If-Match with the version read)
+    ("put", "/v1/assets/{uid}"),
+    ("post", "/v1/installations/swap"),
+    ("post", "/v1/issues"),
+    ("put", "/v1/issues/{uid}"),
+    ("post", "/v1/issues/{uid}/transition"),
+    ("get", "/v1/issues/{uid}/comments"),
+    ("post", "/v1/issues/{uid}/comments"),
+    ("get", "/v1/issues/{uid}/attachments"),
+    ("post", "/v1/uploads"),
+    ("get", "/v1/uploads/{uid}"),
+    ("put", "/v1/uploads/{uid}"),
+    ("post", "/v1/uploads/{uid}/complete"),
+    ("post", "/v1/uploads/{uid}/attach/ticket/{issue_uid}"),
+    ("post", "/v1/uploads/{uid}/attach/asset/{asset_uid}"),
 ]
 
 
@@ -104,7 +119,7 @@ def _for_generators(node):
     """Client generators cannot type a value that is one of several primitive types (FastAPI's
     validation-error `loc` is a string or an integer). Such a value becomes "any value". Nor can
     they type a list of "any value" (the Dart generator emits `Object.listFromJson`), so such a
-    list becomes "any value" too."""
+    list becomes "any value" too. Object defaults are dropped (see below)."""
     if isinstance(node, dict):
         options = node.get("anyOf")
         if isinstance(options, list) and len(options) > 1 and all(
@@ -118,6 +133,9 @@ def _for_generators(node):
         if isinstance(props, dict) and isinstance(required, list):
             kept = [r for r in required if not _nullable(props.get(r))]
             node = {**node, "required": kept} if kept else {k: v for k, v in node.items() if k != "required"}
+        # An object default ({}) becomes a non-constant default in Dart; the server applies it anyway.
+        if isinstance(node.get("default"), dict):
+            node = {k: v for k, v in node.items() if k != "default"}
         if node.get("type") == "array" and _untyped(node.get("items")):
             node = {k: v for k, v in node.items() if k not in ("type", "items")}
         return node

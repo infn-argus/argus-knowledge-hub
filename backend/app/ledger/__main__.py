@@ -9,8 +9,9 @@
     python -m app.ledger verify-audit
         recompute the digest chain and report the first break, if any
     python -m app.ledger escalate
-        escalate tickets that have outstayed their state's SLA, and send
-        pending notifications by e-mail when SMTP_HOST is set
+        escalate tickets that have outstayed their state's SLA, send pending
+        notifications by e-mail when SMTP_HOST is set, and remove expired
+        idempotency records and unfinished uploads
     python -m app.ledger export --workspace WS --out DIR
         a complete JSON-lines bundle of a workspace (every grant)
     python -m app.ledger load --dir DIR [--attachments DIR] [--workspace WS]
@@ -191,7 +192,11 @@ def main(argv=None) -> int:
             print(f"review items escalated: {review['backup']} to backup stewards, "
                   f"{review['governance']} to the governance group")
             sent = notify.deliver_pending(db)
+            from app import idempotency
+            from app.routers import uploads
+            purged, stale_uploads = idempotency.purge(db), uploads.purge(db)
             db.commit()
+            print(f"expired idempotency records removed: {purged}; unfinished uploads removed: {stale_uploads}")
         finally:
             db.close()
         print(f"escalated {n} ticket(s); e-mailed {sent} notification(s)")

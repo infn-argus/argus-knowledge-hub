@@ -2,7 +2,7 @@ import os
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -26,7 +26,7 @@ from app.schemas.asset import (
     RelationCreate,
     RelationOut,
 )
-from app.services import asset_keys
+from app.services import asset_keys, versions
 from app.services.attribute_validation import validate_attributes
 from app.services.current_user_attrs import stamp_current_user_attributes
 from app.services.relations import rebuild_asset_relations, rebuild_asset_relations_with_neighbors
@@ -201,8 +201,8 @@ def next_key(
 
 @router.get("/{uid}", response_model=AssetOut)
 def get_asset(
-    uid: str, workspace_id: str = Depends(require_permission("read")), grants=Depends(get_grants),
-    db: Session = Depends(get_db),
+    uid: str, response: Response, workspace_id: str = Depends(require_permission("read")),
+    grants=Depends(get_grants), db: Session = Depends(get_db),
 ):
     asset = _get_visible_asset(uid, workspace_id, db, grants)
     # Keep the denormalized relation cache honest every time an object is
@@ -212,7 +212,10 @@ def get_asset(
     rebuild_asset_relations(db, uid)
     db.commit()
     db.refresh(asset)
-    return asset_out(db, asset)
+    out = asset_out(db, asset)
+    out.version = versions.asset_version(db, uid)
+    response.headers["ETag"] = versions.etag(out.version)
+    return out
 
 
 @router.put("/{uid}", response_model=AssetOut)
@@ -223,6 +226,8 @@ def update_asset(
     workspace_id: str = Depends(require_permission("modify")),
     current_user_id: Optional[str] = Depends(get_current_user_id),
     db: Session = Depends(get_db),
+    if_match: Optional[str] = Header(None, alias="If-Match",
+                                     description="The version read (flutter-app-design §3.3)"),
 ):
     asset = _get_owned_asset(uid, workspace_id, db)
     patch = body.model_dump(exclude_unset=True)
@@ -253,6 +258,8 @@ def update_asset(
     if new_name is not None and new_name != asset.name:
         changes["name"] = new_name
     if changes:
+        versions.check_asset(db, asset, if_match, changes, {"kind": "edit", "uid": uid, "changes": changes},
+                             _actor(identity))
         try:
             ledger_service.edit_values(db, workspace_id, _actor(identity), uid, changes)
         except LedgerError as exc:
@@ -265,7 +272,9 @@ def update_asset(
         rebuild_asset_relations_with_neighbors(db, uid)
         db.commit()
     db.refresh(asset)
-    return asset_out(db, asset)
+    out = asset_out(db, asset)
+    out.version = versions.asset_version(db, uid)
+    return out
 
 
 @router.delete("/{uid}", status_code=204)

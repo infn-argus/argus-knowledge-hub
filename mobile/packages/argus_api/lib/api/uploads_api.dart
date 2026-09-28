@@ -11,28 +11,242 @@
 part of openapi.api;
 
 
-class IssuesApi {
-  IssuesApi([ApiClient? apiClient]) : apiClient = apiClient ?? defaultApiClient;
+class UploadsApi {
+  UploadsApi([ApiClient? apiClient]) : apiClient = apiClient ?? defaultApiClient;
 
   final ApiClient apiClient;
 
-  /// Create Issue
+  /// Attach To Asset
   ///
   /// Note: This method returns the HTTP [Response].
   ///
   /// Parameters:
   ///
-  /// * [IssueCreate] issueCreate (required):
+  /// * [String] uid (required):
+  ///
+  /// * [String] assetUid (required):
   ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<Response> createIssueWithHttpInfo(IssueCreate issueCreate, { String? authorization, String? xWorkspaceId, }) async {
+  Future<Response> attachToAssetWithHttpInfo(String uid, String assetUid, { String? authorization, String? xWorkspaceId, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/v1/issues';
+    final path = r'/v1/uploads/{uid}/attach/asset/{asset_uid}'
+      .replaceAll('{uid}', uid)
+      .replaceAll('{asset_uid}', assetUid);
 
     // ignore: prefer_final_locals
-    Object? postBody = issueCreate;
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// Attach To Asset
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] assetUid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Object?> attachToAsset(String uid, String assetUid, { String? authorization, String? xWorkspaceId, }) async {
+    final response = await attachToAssetWithHttpInfo(uid, assetUid,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+    
+    }
+    return null;
+  }
+
+  /// Attach To Ticket
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] issueUid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Response> attachToTicketWithHttpInfo(String uid, String issueUid, { String? authorization, String? xWorkspaceId, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/uploads/{uid}/attach/ticket/{issue_uid}'
+      .replaceAll('{uid}', uid)
+      .replaceAll('{issue_uid}', issueUid);
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// Attach To Ticket
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] issueUid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Object?> attachToTicket(String uid, String issueUid, { String? authorization, String? xWorkspaceId, }) async {
+    final response = await attachToTicketWithHttpInfo(uid, issueUid,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+    
+    }
+    return null;
+  }
+
+  /// Complete Upload
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Response> completeUploadWithHttpInfo(String uid, { String? authorization, String? xWorkspaceId, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/uploads/{uid}/complete'
+      .replaceAll('{uid}', uid);
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// Complete Upload
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Object?> completeUpload(String uid, { String? authorization, String? xWorkspaceId, }) async {
+    final response = await completeUploadWithHttpInfo(uid,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+    
+    }
+    return null;
+  }
+
+  /// Create Upload
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [UploadIn] uploadIn (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Response> createUploadWithHttpInfo(UploadIn uploadIn, { String? authorization, String? xWorkspaceId, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/uploads';
+
+    // ignore: prefer_final_locals
+    Object? postBody = uploadIn;
 
     final queryParams = <QueryParam>[];
     final headerParams = <String, String>{};
@@ -59,17 +273,17 @@ class IssuesApi {
     );
   }
 
-  /// Create Issue
+  /// Create Upload
   ///
   /// Parameters:
   ///
-  /// * [IssueCreate] issueCreate (required):
+  /// * [UploadIn] uploadIn (required):
   ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<IssueOut?> createIssue(IssueCreate issueCreate, { String? authorization, String? xWorkspaceId, }) async {
-    final response = await createIssueWithHttpInfo(issueCreate,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
+  Future<Object?> createUpload(UploadIn uploadIn, { String? authorization, String? xWorkspaceId, }) async {
+    final response = await createUploadWithHttpInfo(uploadIn,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -77,13 +291,15 @@ class IssuesApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'IssueOut',) as IssueOut;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
     
     }
     return null;
   }
 
-  /// Create Issue Comment
+  /// Upload Piece
+  ///
+  /// The next piece, as the raw body, at `offset`.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
@@ -91,22 +307,26 @@ class IssuesApi {
   ///
   /// * [String] uid (required):
   ///
-  /// * [IssueCommentCreate] issueCommentCreate (required):
+  /// * [int] offset (required):
+  ///
+  /// * [MultipartFile] body (required):
   ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<Response> createIssueCommentWithHttpInfo(String uid, IssueCommentCreate issueCommentCreate, { String? authorization, String? xWorkspaceId, }) async {
+  Future<Response> uploadPieceWithHttpInfo(String uid, int offset, MultipartFile body, { String? authorization, String? xWorkspaceId, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/v1/issues/{uid}/comments'
+    final path = r'/v1/uploads/{uid}'
       .replaceAll('{uid}', uid);
 
     // ignore: prefer_final_locals
-    Object? postBody = issueCommentCreate;
+    Object? postBody = body;
 
     final queryParams = <QueryParam>[];
     final headerParams = <String, String>{};
     final formParams = <String, String>{};
+
+      queryParams.addAll(_queryParams('', 'offset', offset));
 
     if (authorization != null) {
       headerParams[r'authorization'] = parameterToString(authorization);
@@ -115,376 +335,7 @@ class IssuesApi {
       headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
     }
 
-    const contentTypes = <String>['application/json'];
-
-
-    return apiClient.invokeAPI(
-      path,
-      'POST',
-      queryParams,
-      postBody,
-      headerParams,
-      formParams,
-      contentTypes.isEmpty ? null : contentTypes.first,
-    );
-  }
-
-  /// Create Issue Comment
-  ///
-  /// Parameters:
-  ///
-  /// * [String] uid (required):
-  ///
-  /// * [IssueCommentCreate] issueCommentCreate (required):
-  ///
-  /// * [String] authorization:
-  ///
-  /// * [String] xWorkspaceId:
-  Future<IssueCommentOut?> createIssueComment(String uid, IssueCommentCreate issueCommentCreate, { String? authorization, String? xWorkspaceId, }) async {
-    final response = await createIssueCommentWithHttpInfo(uid, issueCommentCreate,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
-    if (response.statusCode >= HttpStatus.badRequest) {
-      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
-    }
-    // When a remote server returns no body with a status of 204, we shall not decode it.
-    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
-    // FormatException when trying to decode an empty string.
-    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'IssueCommentOut',) as IssueCommentOut;
-    
-    }
-    return null;
-  }
-
-  /// Get Issue
-  ///
-  /// Note: This method returns the HTTP [Response].
-  ///
-  /// Parameters:
-  ///
-  /// * [String] uid (required):
-  ///
-  /// * [String] authorization:
-  ///
-  /// * [String] xWorkspaceId:
-  Future<Response> getIssueWithHttpInfo(String uid, { String? authorization, String? xWorkspaceId, }) async {
-    // ignore: prefer_const_declarations
-    final path = r'/v1/issues/{uid}'
-      .replaceAll('{uid}', uid);
-
-    // ignore: prefer_final_locals
-    Object? postBody;
-
-    final queryParams = <QueryParam>[];
-    final headerParams = <String, String>{};
-    final formParams = <String, String>{};
-
-    if (authorization != null) {
-      headerParams[r'authorization'] = parameterToString(authorization);
-    }
-    if (xWorkspaceId != null) {
-      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
-    }
-
-    const contentTypes = <String>[];
-
-
-    return apiClient.invokeAPI(
-      path,
-      'GET',
-      queryParams,
-      postBody,
-      headerParams,
-      formParams,
-      contentTypes.isEmpty ? null : contentTypes.first,
-    );
-  }
-
-  /// Get Issue
-  ///
-  /// Parameters:
-  ///
-  /// * [String] uid (required):
-  ///
-  /// * [String] authorization:
-  ///
-  /// * [String] xWorkspaceId:
-  Future<IssueOut?> getIssue(String uid, { String? authorization, String? xWorkspaceId, }) async {
-    final response = await getIssueWithHttpInfo(uid,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
-    if (response.statusCode >= HttpStatus.badRequest) {
-      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
-    }
-    // When a remote server returns no body with a status of 204, we shall not decode it.
-    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
-    // FormatException when trying to decode an empty string.
-    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'IssueOut',) as IssueOut;
-    
-    }
-    return null;
-  }
-
-  /// List Issue Attachments
-  ///
-  /// Note: This method returns the HTTP [Response].
-  ///
-  /// Parameters:
-  ///
-  /// * [String] uid (required):
-  ///
-  /// * [String] authorization:
-  ///
-  /// * [String] xWorkspaceId:
-  Future<Response> listIssueAttachmentsWithHttpInfo(String uid, { String? authorization, String? xWorkspaceId, }) async {
-    // ignore: prefer_const_declarations
-    final path = r'/v1/issues/{uid}/attachments'
-      .replaceAll('{uid}', uid);
-
-    // ignore: prefer_final_locals
-    Object? postBody;
-
-    final queryParams = <QueryParam>[];
-    final headerParams = <String, String>{};
-    final formParams = <String, String>{};
-
-    if (authorization != null) {
-      headerParams[r'authorization'] = parameterToString(authorization);
-    }
-    if (xWorkspaceId != null) {
-      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
-    }
-
-    const contentTypes = <String>[];
-
-
-    return apiClient.invokeAPI(
-      path,
-      'GET',
-      queryParams,
-      postBody,
-      headerParams,
-      formParams,
-      contentTypes.isEmpty ? null : contentTypes.first,
-    );
-  }
-
-  /// List Issue Attachments
-  ///
-  /// Parameters:
-  ///
-  /// * [String] uid (required):
-  ///
-  /// * [String] authorization:
-  ///
-  /// * [String] xWorkspaceId:
-  Future<List<AttachmentOut>?> listIssueAttachments(String uid, { String? authorization, String? xWorkspaceId, }) async {
-    final response = await listIssueAttachmentsWithHttpInfo(uid,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
-    if (response.statusCode >= HttpStatus.badRequest) {
-      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
-    }
-    // When a remote server returns no body with a status of 204, we shall not decode it.
-    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
-    // FormatException when trying to decode an empty string.
-    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      final responseBody = await _decodeBodyBytes(response);
-      return (await apiClient.deserializeAsync(responseBody, 'List<AttachmentOut>') as List)
-        .cast<AttachmentOut>()
-        .toList(growable: false);
-
-    }
-    return null;
-  }
-
-  /// List Issue Comments
-  ///
-  /// Note: This method returns the HTTP [Response].
-  ///
-  /// Parameters:
-  ///
-  /// * [String] uid (required):
-  ///
-  /// * [String] authorization:
-  ///
-  /// * [String] xWorkspaceId:
-  Future<Response> listIssueCommentsWithHttpInfo(String uid, { String? authorization, String? xWorkspaceId, }) async {
-    // ignore: prefer_const_declarations
-    final path = r'/v1/issues/{uid}/comments'
-      .replaceAll('{uid}', uid);
-
-    // ignore: prefer_final_locals
-    Object? postBody;
-
-    final queryParams = <QueryParam>[];
-    final headerParams = <String, String>{};
-    final formParams = <String, String>{};
-
-    if (authorization != null) {
-      headerParams[r'authorization'] = parameterToString(authorization);
-    }
-    if (xWorkspaceId != null) {
-      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
-    }
-
-    const contentTypes = <String>[];
-
-
-    return apiClient.invokeAPI(
-      path,
-      'GET',
-      queryParams,
-      postBody,
-      headerParams,
-      formParams,
-      contentTypes.isEmpty ? null : contentTypes.first,
-    );
-  }
-
-  /// List Issue Comments
-  ///
-  /// Parameters:
-  ///
-  /// * [String] uid (required):
-  ///
-  /// * [String] authorization:
-  ///
-  /// * [String] xWorkspaceId:
-  Future<List<IssueCommentOut>?> listIssueComments(String uid, { String? authorization, String? xWorkspaceId, }) async {
-    final response = await listIssueCommentsWithHttpInfo(uid,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
-    if (response.statusCode >= HttpStatus.badRequest) {
-      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
-    }
-    // When a remote server returns no body with a status of 204, we shall not decode it.
-    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
-    // FormatException when trying to decode an empty string.
-    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      final responseBody = await _decodeBodyBytes(response);
-      return (await apiClient.deserializeAsync(responseBody, 'List<IssueCommentOut>') as List)
-        .cast<IssueCommentOut>()
-        .toList(growable: false);
-
-    }
-    return null;
-  }
-
-  /// Transition Issue
-  ///
-  /// Note: This method returns the HTTP [Response].
-  ///
-  /// Parameters:
-  ///
-  /// * [String] uid (required):
-  ///
-  /// * [TransitionIn] transitionIn (required):
-  ///
-  /// * [String] ifMatch:
-  ///   The ticket version read
-  ///
-  /// * [String] authorization:
-  ///
-  /// * [String] xWorkspaceId:
-  Future<Response> transitionIssueWithHttpInfo(String uid, TransitionIn transitionIn, { String? ifMatch, String? authorization, String? xWorkspaceId, }) async {
-    // ignore: prefer_const_declarations
-    final path = r'/v1/issues/{uid}/transition'
-      .replaceAll('{uid}', uid);
-
-    // ignore: prefer_final_locals
-    Object? postBody = transitionIn;
-
-    final queryParams = <QueryParam>[];
-    final headerParams = <String, String>{};
-    final formParams = <String, String>{};
-
-    if (ifMatch != null) {
-      headerParams[r'If-Match'] = parameterToString(ifMatch);
-    }
-    if (authorization != null) {
-      headerParams[r'authorization'] = parameterToString(authorization);
-    }
-    if (xWorkspaceId != null) {
-      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
-    }
-
-    const contentTypes = <String>['application/json'];
-
-
-    return apiClient.invokeAPI(
-      path,
-      'POST',
-      queryParams,
-      postBody,
-      headerParams,
-      formParams,
-      contentTypes.isEmpty ? null : contentTypes.first,
-    );
-  }
-
-  /// Transition Issue
-  ///
-  /// Parameters:
-  ///
-  /// * [String] uid (required):
-  ///
-  /// * [TransitionIn] transitionIn (required):
-  ///
-  /// * [String] ifMatch:
-  ///   The ticket version read
-  ///
-  /// * [String] authorization:
-  ///
-  /// * [String] xWorkspaceId:
-  Future<IssueOut?> transitionIssue(String uid, TransitionIn transitionIn, { String? ifMatch, String? authorization, String? xWorkspaceId, }) async {
-    final response = await transitionIssueWithHttpInfo(uid, transitionIn,  ifMatch: ifMatch, authorization: authorization, xWorkspaceId: xWorkspaceId, );
-    if (response.statusCode >= HttpStatus.badRequest) {
-      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
-    }
-    // When a remote server returns no body with a status of 204, we shall not decode it.
-    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
-    // FormatException when trying to decode an empty string.
-    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'IssueOut',) as IssueOut;
-    
-    }
-    return null;
-  }
-
-  /// Update Issue
-  ///
-  /// Note: This method returns the HTTP [Response].
-  ///
-  /// Parameters:
-  ///
-  /// * [String] uid (required):
-  ///
-  /// * [IssueUpdate] issueUpdate (required):
-  ///
-  /// * [String] ifMatch:
-  ///   The ticket version read (flutter-app-design §3.3)
-  ///
-  /// * [String] authorization:
-  ///
-  /// * [String] xWorkspaceId:
-  Future<Response> updateIssueWithHttpInfo(String uid, IssueUpdate issueUpdate, { String? ifMatch, String? authorization, String? xWorkspaceId, }) async {
-    // ignore: prefer_const_declarations
-    final path = r'/v1/issues/{uid}'
-      .replaceAll('{uid}', uid);
-
-    // ignore: prefer_final_locals
-    Object? postBody = issueUpdate;
-
-    final queryParams = <QueryParam>[];
-    final headerParams = <String, String>{};
-    final formParams = <String, String>{};
-
-    if (ifMatch != null) {
-      headerParams[r'If-Match'] = parameterToString(ifMatch);
-    }
-    if (authorization != null) {
-      headerParams[r'authorization'] = parameterToString(authorization);
-    }
-    if (xWorkspaceId != null) {
-      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
-    }
-
-    const contentTypes = <String>['application/json'];
+    const contentTypes = <String>['application/octet-stream'];
 
 
     return apiClient.invokeAPI(
@@ -498,22 +349,23 @@ class IssuesApi {
     );
   }
 
-  /// Update Issue
+  /// Upload Piece
+  ///
+  /// The next piece, as the raw body, at `offset`.
   ///
   /// Parameters:
   ///
   /// * [String] uid (required):
   ///
-  /// * [IssueUpdate] issueUpdate (required):
+  /// * [int] offset (required):
   ///
-  /// * [String] ifMatch:
-  ///   The ticket version read (flutter-app-design §3.3)
+  /// * [MultipartFile] body (required):
   ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<IssueOut?> updateIssue(String uid, IssueUpdate issueUpdate, { String? ifMatch, String? authorization, String? xWorkspaceId, }) async {
-    final response = await updateIssueWithHttpInfo(uid, issueUpdate,  ifMatch: ifMatch, authorization: authorization, xWorkspaceId: xWorkspaceId, );
+  Future<Object?> uploadPiece(String uid, int offset, MultipartFile body, { String? authorization, String? xWorkspaceId, }) async {
+    final response = await uploadPieceWithHttpInfo(uid, offset, body,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -521,7 +373,75 @@ class IssuesApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'IssueOut',) as IssueOut;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+    
+    }
+    return null;
+  }
+
+  /// Upload Status
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Response> uploadStatusWithHttpInfo(String uid, { String? authorization, String? xWorkspaceId, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/uploads/{uid}'
+      .replaceAll('{uid}', uid);
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// Upload Status
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Object?> uploadStatus(String uid, { String? authorization, String? xWorkspaceId, }) async {
+    final response = await uploadStatusWithHttpInfo(uid,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
     
     }
     return null;

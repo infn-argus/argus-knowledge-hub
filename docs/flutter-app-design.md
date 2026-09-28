@@ -3,7 +3,7 @@
 *A mobile client for the work done next to the equipment. It is built on the same API, permissions,
 ledger, policies and registry as the web application, and it does not replace the web application.*
 
-Status: **M1 built** (read-only client, `mobile/`); M0 server foundations **partly built** (§15).
+Status: **M0 server foundations built**, except the push relay; **M1 built** (the read-only client, `mobile/`). See §15.
 [`asset-model-revision.md`](asset-model-revision.md) §24 is normative. It
 states the rules this client must keep: trust boundaries, pending commands, conflict handling,
 invariants I-MOB-1…8 and acceptance tests A57–A72. Where this document and §24 disagree, §24
@@ -140,12 +140,12 @@ are not held to feature parity. Each is designed for where it is used:
 | OpenAPI contract | **built:** `backend/openapi/openapi.json` and the field subset `field-client.json`, committed; a test fails when they drift from the API | publish it per release |
 | Generated clients | **built for Dart** (`mobile/packages/argus_api`, OpenAPI Generator `dart`); the web client is still hand-written | the TypeScript client; the web client migrates to it feature by feature |
 | Identifier lookup | yes: `GET /v1/lookup/{identifier}`, `POST /v1/lookup/batch`, following merges, restriction-aware | **built:** the universal-link resolver `GET /v1/links/resolve` for the paths in §7, with label values (serial, inventory number, MAC) and `ambiguous` candidates |
-| Idempotency | no | an `Idempotency-Key` header on every mutating call (§3.2) |
-| Version preconditions | tickets have `version`; ledger records have no exposed version | each record exposes a **version** (its latest ledger sequence number, or the ticket's `version`) as `ETag`. Commands carry it as `If-Match`, or as `expected_version` in a command body (§3.3) |
-| One error shape | mostly `{"detail": {"error", "invariant"}}` | one documented **problem shape** for all errors (§3.4) |
-| Atomic replacement | yes: `POST /v1/installations/swap` ends and starts in one batch (revision §8.4) | extend with outgoing-unit check, reason, work reference, evidence attachments and port-confirmation handling (§8) |
+| Idempotency | **built:** `Idempotency-Key` on any mutating call (§3.2) | none |
+| Version preconditions | **built:** assets (latest ledger event), tickets (`version` with per-field versions) and documents (revision and state) return an `ETag`; asset edits, ticket edits and transitions take `If-Match` (§3.3) | — |
+| One error shape | **built:** every error keeps `detail` and adds a top-level `problem` (§3.4) | none |
+| Atomic replacement | yes: `POST /v1/installations/swap` ends and starts in one batch (revision §8.4); **built:** `seen_installation_uid` and `evidence`, so a stale replacement becomes a review item | an outgoing-unit check, a work reference and port-confirmation handling (§8) |
 | AI Intake | yes: `/v1/intake/guide`, `/assist`, `/assist/{kind}/file`, `/propose/asset/{uid}`, `/proposals/{claim_id}` | none beyond idempotency. Mobile uploads use the same endpoints |
-| Media upload | yes, per record (attachments, revision attachments) | **resumable** upload with client-supplied SHA-256, size limits and server-side verification (§5.5) |
+| Media upload | **built:** resumable `/v1/uploads`, with a client SHA-256 verified by the server, limits per type, EXIF GPS removal, and attachment to a ticket or asset (§5.5) | the U23 values |
 | Notifications | in-app rows and e-mail (`app.services.notify`) | device registration and a **push relay** that sends content-free notifications (§11) |
 | Minimum client version | **built:** `X-ARGUS-Client: flutter/<version>/<platform>`; **426** `client_too_old` with the minimum (`ARGUS_MIN_FLUTTER_VERSION`) | none |
 | Session revocation | **built:** the device registry (`/v1/devices`: register, list, revoke); a revoked `X-ARGUS-Device` answers 401 `revoked` and the app wipes | invalidating the refresh token at the identity provider |
@@ -670,8 +670,14 @@ M0, in part:
 - the link resolver, with label values and ambiguous candidates;
 - the web redirects for the link paths.
 
-M0 still needs idempotency keys, record versions and preconditions, the one problem shape across
-all errors, and resumable uploads.
+The rest of M0 is also built:
+- the problem shape;
+- idempotency keys;
+- record versions with `If-Match`;
+- stale commands on protected fields and stale replacements as review items;
+- resumable uploads.
+
+What is left of M0 is the push relay (U21), which is planned with M2.
 
 M1, in `mobile/app`:
 - sign-in (OIDC with PKCE, or a token in non-production builds) and device registration;
