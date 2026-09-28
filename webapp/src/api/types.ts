@@ -86,9 +86,11 @@ export interface Asset {
 export interface AssetInput {
   uid?: string;
   schema_uid: string;
-  key: string;
+  /** Blank: the workspace's key pattern makes one. */
+  key?: string;
   name: string;
-  type: string;
+  /** Always the schema's name; the server sets it. */
+  type?: string;
   avatar_icon_uid?: string | null;
   attributes: Record<string, unknown>;
   inbound_relations?: string[];
@@ -1091,4 +1093,10 @@ export interface WorkspaceIdSuggestion {
   /** What the rule produced before a number was added to make it free. */
   base: string;
   taken: boolean;
+}
+
+export interface AssetKeyRule {
+  pattern: string;
+  is_default?: boolean;
+  example?: string;
 }

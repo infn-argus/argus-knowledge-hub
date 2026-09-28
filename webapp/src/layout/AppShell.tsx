@@ -319,6 +319,14 @@ export function AppShell() {
               Access
             </NavLink>
           )}
+          {currentWorkspaceId && (
+            <NavLink
+              to={`/workspaces/${currentWorkspaceId}/keys`}
+              className="rounded px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            >
+              Keys
+            </NavLink>
+          )}
           {scopedMembersLink && (
             <NavLink
               to={scopedMembersLink}

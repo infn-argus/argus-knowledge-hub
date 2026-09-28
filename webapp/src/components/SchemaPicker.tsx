@@ -24,12 +24,19 @@ export function SchemaPicker({
   onChange,
   currentWorkspaceId,
   placeholder = "Search types…",
+  selectable,
+  inputClassName = "w-full rounded border border-slate-300 px-2 py-1 text-sm",
+  disabled,
 }: {
   schemas: AppSchema[];
   value?: string | null;
   onChange: (uid: string, schema: AppSchema | undefined) => void;
   currentWorkspaceId?: string | null;
   placeholder?: string;
+  /** Which schemas may be chosen; the others still show in match paths. */
+  selectable?: (schema: AppSchema) => boolean;
+  inputClassName?: string;
+  disabled?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -38,8 +45,11 @@ export function SchemaPicker({
   const selected = value ? byUid.get(value) : undefined;
 
   const withPath = useMemo(
-    () => schemas.map((s) => ({ schema: s, path: buildPath(s, byUid) })),
-    [schemas, byUid],
+    () =>
+      schemas
+        .filter((s) => !selectable || selectable(s))
+        .map((s) => ({ schema: s, path: buildPath(s, byUid) })),
+    [schemas, byUid, selectable],
   );
 
   const matches = useMemo(() => {
@@ -47,8 +57,9 @@ export function SchemaPicker({
     const filtered = q
       ? withPath.filter((w) => w.path.toLowerCase().includes(q))
       : withPath;
-    return [...filtered].sort((a, b) => a.path.localeCompare(b.path)).slice(0, 30);
+    return [...filtered].sort((a, b) => a.path.localeCompare(b.path));
   }, [withPath, query]);
+  const LIMIT = 30;
 
   return (
     <div className="relative flex-1">
@@ -65,9 +76,10 @@ export function SchemaPicker({
           }}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
           placeholder={placeholder}
-          className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+          disabled={disabled}
+          className={inputClassName}
         />
-        {selected && (
+        {selected && !disabled && (
           <button
             type="button"
             onMouseDown={(e) => {
@@ -83,7 +95,7 @@ export function SchemaPicker({
       </div>
       {open && (
         <div className="absolute z-10 mt-1 max-h-56 w-full min-w-[16rem] overflow-y-auto rounded border border-slate-200 bg-white shadow-lg">
-          {matches.map(({ schema, path }) => (
+          {matches.slice(0, LIMIT).map(({ schema, path }) => (
             <button
               type="button"
               key={schema.uid}
@@ -110,6 +122,11 @@ export function SchemaPicker({
           ))}
           {matches.length === 0 && (
             <p className="px-2 py-1.5 text-sm text-slate-400">No matching types.</p>
+          )}
+          {matches.length > LIMIT && (
+            <p className="border-t border-slate-100 px-2 py-1.5 text-xs text-slate-400">
+              {matches.length - LIMIT} more: type more of the name to narrow it down.
+            </p>
           )}
         </div>
       )}

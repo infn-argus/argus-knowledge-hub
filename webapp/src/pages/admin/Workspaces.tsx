@@ -157,6 +157,12 @@ export function AdminWorkspaces() {
                           Integrity
                         </Link>
                         <Link
+                          to={`/workspaces/${ws.id}/keys`}
+                          className="mr-3 text-slate-500 hover:text-slate-900"
+                        >
+                          Keys
+                        </Link>
+                        <Link
                           to={`/workspaces/${ws.id}/transfer`}
                           className="mr-3 text-slate-500 hover:text-slate-900"
                         >

@@ -2,8 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { assetsApi, intakeApi, schemasApi, type AssistResult } from "../../api/client";
+import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 import { AttributeInput } from "../../components/AttributeInput";
 import { finalFor, GuidedEntry } from "../../components/GuidedEntry";
+import { SchemaBrowser } from "../../components/SchemaBrowser";
+import { SchemaPicker } from "../../components/SchemaPicker";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 
 export function AssetForm() {
@@ -23,11 +26,12 @@ export function AssetForm() {
   const [schemaUid, setSchemaUid] = useState(searchParams.get("schema_uid") ?? "");
   const [name, setName] = useState("");
   const [key, setKey] = useState("");
-  const [type, setType] = useState("");
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
   const [isGlobal, setIsGlobal] = useState(false);
   const [assisted, setAssisted] = useState<AssistResult | null>(null);
-  const draft = { uid: uid ?? null, schema_uid: schemaUid, name, key, type, attributes };
+  const [browsing, setBrowsing] = useState(false);
+  const currentWorkspaceId = useCurrentWorkspaceId();
+  const draft = { uid: uid ?? null, schema_uid: schemaUid, name, key, attributes };
 
   /** Values from the checklist or the assistant, by field name. */
   const apply = (values: Record<string, unknown>) => {
@@ -47,7 +51,6 @@ export function AssetForm() {
       setSchemaUid(existing.data.schema_uid);
       setName(existing.data.name);
       setKey(existing.data.key);
-      setType(existing.data.type);
       setAttributes(existing.data.attributes);
       setIsGlobal(existing.data.is_global);
     }
@@ -56,20 +59,24 @@ export function AssetForm() {
   const objectSchemas = (schemas.data ?? []).filter((s) => (s.applies_to ?? "objects") === "objects");
   const schema = schemas.data?.find((s) => s.uid === schemaUid);
   const attrDefs = effectiveAttributes(schema, schemas.data);
+  // What a blank key becomes, from the workspace's key pattern.
+  const nextKey = useQuery({
+    queryKey: ["asset-next-key", schemaUid],
+    queryFn: () => assetsApi.nextKey(schemaUid || undefined),
+    enabled: !isEditing,
+  });
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (isEditing) {
-        return assetsApi.update(uid!, {
-          name, key, type, attributes, schema_uid: schemaUid, is_global: isGlobal,
-        });
+        return assetsApi.update(uid!, { name, attributes, schema_uid: schemaUid, is_global: isGlobal });
       }
       return assetsApi.create({
         uid: crypto.randomUUID(),
         schema_uid: schemaUid,
-        key,
+        // Blank: the server makes one from the workspace's key pattern.
+        key: key.trim() || undefined,
         name,
-        type: type || schema?.name || "Asset",
         attributes,
         is_global: isGlobal,
       });
@@ -80,6 +87,7 @@ export function AssetForm() {
         await intakeApi.outcome(assisted.run_id, asset!.uid, finalFor(assisted, draft)).catch(() => undefined);
       }
       queryClient.invalidateQueries({ queryKey: ["assets"] });
+      queryClient.invalidateQueries({ queryKey: ["asset-next-key"] });
       navigate(`/assets/${asset!.uid}`);
     },
   });
@@ -105,21 +113,43 @@ export function AssetForm() {
         className="mt-6 space-y-5"
       >
         <div>
-          <label className="block text-sm font-medium text-slate-700">Schema</label>
-          <select
-            value={schemaUid}
-            onChange={(e) => setSchemaUid(e.target.value)}
-            required
-            disabled={isEditing}
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"
-          >
-            <option value="">Select a schema…</option>
-            {objectSchemas.map((s) => (
-              <option key={s.uid} value={s.uid}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-baseline justify-between">
+            <label className="block text-sm font-medium text-slate-700">Type</label>
+            {!isEditing && (
+              <button
+                type="button"
+                onClick={() => setBrowsing(true)}
+                className="text-xs text-indigo-600 hover:underline"
+              >
+                Browse all types
+              </button>
+            )}
+          </div>
+          <div className="mt-1">
+            <SchemaPicker
+              schemas={objectSchemas}
+              value={schemaUid}
+              onChange={(uid) => setSchemaUid(uid)}
+              currentWorkspaceId={currentWorkspaceId}
+              selectable={(s) => s.is_concrete !== false}
+              placeholder="Type to search, e.g. ion pump, power supply…"
+              inputClassName="w-full rounded border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"
+              disabled={isEditing}
+            />
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            What kind of thing it is. The type decides the attributes below.
+          </p>
+          {browsing && (
+            <SchemaBrowser
+              schemas={objectSchemas}
+              onPick={(s) => {
+                setSchemaUid(s.uid);
+                setBrowsing(false);
+              }}
+              onClose={() => setBrowsing(false)}
+            />
+          )}
         </div>
 
         <div>
@@ -133,24 +163,21 @@ export function AssetForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700">Key</label>
+          <label className="block text-sm font-medium text-slate-700">
+            Key {!isEditing && <span className="font-normal text-slate-400">(optional)</span>}
+          </label>
           <input
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            required
-            placeholder="Unique identifier, e.g. AST-001"
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+            disabled={isEditing}
+            placeholder={nextKey.data ? `${nextKey.data.key}, made when you save` : "Made when you save"}
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono text-sm disabled:bg-slate-100"
           />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700">Type</label>
-          <input
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-            placeholder={schema?.name ?? "Asset"}
-            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
-          />
+          <p className="mt-1 text-xs text-slate-500">
+            {isEditing
+              ? "A key does not change once given: labels and links carry it."
+              : "Leave it blank for the next key of this workspace, or type the identifier on its label."}
+          </p>
         </div>
 
         <div className="flex items-center gap-2">

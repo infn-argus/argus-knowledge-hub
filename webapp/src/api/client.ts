@@ -75,6 +75,7 @@ import type {
   GraphSummary,
   AskResult,
   WorkspaceIdRule,
+  AssetKeyRule,
   WorkspaceIdSuggestion,
 } from "./types";
 import type {
@@ -228,6 +229,11 @@ export const assetsApi = {
     request<Asset>("/v1/assets", { method: "POST", body: json(input) }),
   update: (uid: string, input: Partial<AssetInput>) =>
     request<Asset>(`/v1/assets/${uid}`, { method: "PUT", body: json(input) }),
+  /** The key a new record of this type would get; nothing is reserved. */
+  nextKey: (schemaUid?: string) =>
+    request<{ key: string; pattern: string }>(
+      `/v1/assets/next-key${schemaUid ? `?schema_uid=${encodeURIComponent(schemaUid)}` : ""}`,
+    ),
   delete: (uid: string) => request<void>(`/v1/assets/${uid}`, { method: "DELETE" }),
   bulkDelete: (uids: string[]) =>
     request<BulkDeleteResult>("/v1/assets/bulk-delete", { method: "POST", body: json({ uids }) }),
@@ -459,6 +465,12 @@ export const workspacesApi = {
     request<WorkspaceIdRule>("/v1/workspaces/id-rule", {
       method: "PUT",
       body: json(input),
+    }),
+  keyRule: (workspaceId: string) => request<AssetKeyRule>(`/v1/workspaces/${workspaceId}/key-rule`),
+  saveKeyRule: (workspaceId: string, pattern: string) =>
+    request<AssetKeyRule>(`/v1/workspaces/${workspaceId}/key-rule`, {
+      method: "PUT",
+      body: json({ pattern }),
     }),
   get: (workspaceId: string) => request<WorkspaceDetail>(`/v1/workspaces/${workspaceId}`),
   update: (workspaceId: string, input: WorkspaceUpdateInput) =>

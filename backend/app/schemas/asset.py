@@ -7,9 +7,11 @@ from pydantic import BaseModel, ConfigDict
 class AssetCreate(BaseModel):
     uid: str
     schema_uid: str
-    key: str
+    # Blank: the workspace's key pattern makes one (services/asset_keys.py).
+    key: Optional[str] = None
     name: str
-    type: str
+    # Always the type's name; accepted for older clients and ignored.
+    type: Optional[str] = None
     avatar_icon_uid: Optional[str] = None
     attributes: dict = {}
     inbound_relations: list[str] = []
@@ -76,3 +78,8 @@ class RelationOut(BaseModel):
     # None for hand-made and legacy edges; "ledger" or "derived" for edges the
     # fact ledger maintains, which are not edited directly.
     derivation: Optional[str] = None
+
+
+class NextKeyOut(BaseModel):
+    key: str
+    pattern: str

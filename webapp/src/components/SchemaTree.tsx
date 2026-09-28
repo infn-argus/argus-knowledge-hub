@@ -7,12 +7,12 @@ import { useCurrentWorkspaceId } from "../api/useCurrentWorkspaceId";
 import { useWorkspaceNames } from "../api/useWorkspaceNames";
 import { AuthenticatedImage } from "./AuthenticatedImage";
 
-interface TreeNode {
+export interface TreeNode {
   schema: AppSchema;
   children: TreeNode[];
 }
 
-function buildTree(schemas: AppSchema[]): TreeNode[] {
+export function buildTree(schemas: AppSchema[]): TreeNode[] {
   const byUid = new Map(schemas.map((s) => [s.uid, { schema: s, children: [] as TreeNode[] }]));
   const roots: TreeNode[] = [];
   for (const s of schemas) {
@@ -32,7 +32,7 @@ function buildTree(schemas: AppSchema[]): TreeNode[] {
 }
 
 /** Keeps a node if it (or any descendant) matches the query, expanding its full subtree. */
-function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
+export function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
   if (!query) return nodes;
   const q = query.toLowerCase();
   const walk = (node: TreeNode): TreeNode | null => {

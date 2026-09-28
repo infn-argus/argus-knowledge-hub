@@ -21,6 +21,7 @@ from app.services.integrity import cleanup_workspace, generate_integrity_report,
 from app.services.relations import rebuild_relations_for_schemas
 from app.services.document_types import ensure_document_types
 from app.services.ticket_types import DEFAULT_ISSUE_TYPES, ensure_ticket_types
+from app.services import asset_keys
 from app.services.workspace_ids import rule as id_rule, save_rule, slugify, unique_id
 from app.schemas.workspace import (
     CleanupOptions,
@@ -37,6 +38,7 @@ from app.schemas.workspace import (
     WorkspaceOut,
     WorkspaceUpdate,
     WorkspaceIdRule,
+    AssetKeyRule,
     WorkspaceIdSuggestion,
 )
 
@@ -315,6 +317,49 @@ def get_workspace(
     if workspace is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return workspace
+
+
+def _key_rule(workspace: Workspace) -> AssetKeyRule:
+    pattern = asset_keys.pattern_for(workspace)
+    return AssetKeyRule(pattern=pattern, is_default=not workspace.asset_key_pattern,
+                        example=asset_keys.example(pattern, workspace.id))
+
+
+@router.get("/workspaces/{workspace_id}/key-rule", response_model=AssetKeyRule)
+def get_asset_key_rule(
+    workspace_id: str, identity: Identity = Depends(get_identity), db: Session = Depends(get_db)
+):
+    """How keys are made for this workspace's records created without one."""
+    _require_owner_or_admin(workspace_id, identity, db)
+    workspace = db.get(Workspace, workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return _key_rule(workspace)
+
+
+@router.put("/workspaces/{workspace_id}/key-rule", response_model=AssetKeyRule)
+def put_asset_key_rule(
+    workspace_id: str,
+    body: AssetKeyRule,
+    identity: Identity = Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    """Only new keys follow a changed pattern: existing ones stay, since
+    labels, links and other systems already carry them. An empty pattern
+    goes back to the default."""
+    _require_owner_or_admin(workspace_id, identity, db)
+    workspace = db.get(Workspace, workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if (body.pattern or "").strip():
+        try:
+            workspace.asset_key_pattern = asset_keys.validate_pattern(body.pattern)
+        except asset_keys.KeyPatternError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+    else:
+        workspace.asset_key_pattern = None
+    db.commit()
+    return _key_rule(workspace)
 
 
 @router.put("/workspaces/{workspace_id}", response_model=WorkspaceOut)

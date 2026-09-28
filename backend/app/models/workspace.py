@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -19,6 +20,9 @@ class Workspace(Base):
     ledger_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # §13 S7: the relation registry warns (reports) or enforces (refuses new edges that break it).
     registry_mode: Mapped[str] = mapped_column(String, default="warn", server_default="warn")
+    # How keys are made for records created without one; null is the default
+    # pattern. See app/services/asset_keys.py.
+    asset_key_pattern: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Fallback rights for any authenticated user with no explicit Membership
     # row in this workspace. All unchecked by default — a workspace stays

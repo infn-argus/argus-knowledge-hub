@@ -22,9 +22,11 @@ from app.schemas.asset import (
     AssetUpdate,
     BulkDeleteRequest,
     BulkDeleteResult,
+    NextKeyOut,
     RelationCreate,
     RelationOut,
 )
+from app.services import asset_keys
 from app.services.attribute_validation import validate_attributes
 from app.services.current_user_attrs import stamp_current_user_attributes
 from app.services.relations import rebuild_asset_relations, rebuild_asset_relations_with_neighbors
@@ -112,11 +114,23 @@ def create_asset(
     if schema is None or (schema.workspace_id != workspace_id and not schema.is_global):
         raise HTTPException(status_code=422, detail="Unknown object type for this workspace")
     _assert_writable(db, workspace_id)
-    _check_class(db, body.type, body.attributes, None)
+    # A record's type follows its schema, as on update: the ledger and the
+    # graph select records by it, so a free-typed one would hide them.
+    type_name = schema.name
+    _check_class(db, type_name, body.attributes, None)
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
     validate_attributes(db, schema, body.attributes, workspace_id, Asset)
     _assert_unique(db, workspace_id, body.attributes)
     data = body.model_dump()
+    data["key"] = (data.get("key") or "").strip()
+    if not data["key"]:
+        try:
+            data["key"] = asset_keys.allocate(db, workspace_id, schema)
+        except asset_keys.KeyPatternError as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail=str(exc))
+    elif db.scalar(select(Asset.uid).where(Asset.key == data["key"])) is not None:
+        raise HTTPException(status_code=409, detail=f"The key {data['key']} is already taken")
     # Made in a global workspace, an object is global unless it says otherwise —
     # as its types and documents already are.
     workspace = db.get(Workspace, workspace_id)
@@ -126,7 +140,7 @@ def create_asset(
     try:
         asset = ledger_service.create_record(
             db, workspace_id, _actor(identity), uid=data["uid"], schema_uid=data["schema_uid"], key=data["key"],
-            name=data["name"], type_name=data["type"], attributes=data["attributes"],
+            name=data["name"], type_name=type_name, attributes=data["attributes"],
             is_global=data.get("is_global", False), avatar_icon_uid=data.get("avatar_icon_uid"))
     except LedgerError as exc:
         _ledger_failed(db, exc)
@@ -170,6 +184,19 @@ def _get_visible_asset(uid: str, workspace_id: str, db: Session, grants=None) ->
     if asset_visible_in(asset, workspace_id, grants):
         return asset
     raise HTTPException(status_code=404, detail="Asset not found")
+
+
+@router.get("/next-key", response_model=NextKeyOut)
+def next_key(
+    schema_uid: Optional[str] = None,
+    workspace_id: str = Depends(require_permission("create")),
+    db: Session = Depends(get_db),
+):
+    """The key a record of this type would get now, for the form to show.
+    Nothing is reserved; the key is taken only when the record is created."""
+    schema = db.get(Schema, schema_uid) if schema_uid else None
+    return NextKeyOut(key=asset_keys.preview(db, workspace_id, schema),
+                      pattern=asset_keys.pattern_for(db.get(Workspace, workspace_id)))
 
 
 @router.get("/{uid}", response_model=AssetOut)

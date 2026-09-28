@@ -118,7 +118,7 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
     questions = {
         "schema_uid": "What is it? For example an ion pump, a power supply, or a place in the machine.",
         "name": "What do people call it?",
-        "key": "What identifier does it carry? The label on it, or a new unique key.",
+        "key": "Does it carry an identifier, such as a label? Otherwise leave the key blank and one is made.",
         "attributes.serial": "What is its serial number? It is usually on the nameplate.",
         "attributes.manufacturer": "Who made it?",
         "attributes.equipment_class": "What kind of equipment is it, in a word or two?",
@@ -159,7 +159,9 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
     if not name:
         checks.append(_check(ERROR, "Give it a name.", "name"))
     if not key:
-        checks.append(_check(ERROR, "Give it a key: a unique identifier, such as the label on it.", "key"))
+        from app.services import asset_keys
+        checks.append(_check(INFO, f"It will get the key {asset_keys.preview(db, workspace_id, schema)} when saved, "
+                             "unless you type one, such as the label on it.", "key", id="generated-key"))
     else:
         taken = db.scalar(select(Asset).where(Asset.key == key))
         if taken is not None and taken.uid != own:
@@ -169,7 +171,7 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
                                      links=[_link(taken)]))
             else:
                 checks.append(_check(ERROR, f"The key {key} is already taken.", "key"))
-    if name and key and not any(c["field"] in ("name", "key") for c in checks):
+    if name and not any(c["field"] in ("name", "key") and c.get("level") != INFO for c in checks):
         steps["identity"] = True
 
     # A channel or PV typed as a physical unit (§23.5).

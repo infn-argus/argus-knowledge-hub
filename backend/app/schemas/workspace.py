@@ -149,3 +149,11 @@ class WorkspaceIdSuggestion(BaseModel):
     # What the rule produced before a number was added to make it free.
     base: str
     taken: bool
+
+
+class AssetKeyRule(BaseModel):
+    """How keys are made for records created without one."""
+
+    pattern: str
+    is_default: bool = False
+    example: str = ""
