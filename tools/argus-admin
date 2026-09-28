@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Workspaces, people and roles for the Docker Compose hub.
+# Runs backend/scripts/argus_admin.py inside the api container.
+#
+#   tools/argus-admin --help
+#   tools/argus-admin dev-setup
+#   tools/argus-admin grant mario.rossi@lnf.infn.it contributor sparc
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+if ! docker compose ps --status running --services 2>/dev/null | grep -qx api; then
+  echo "The api service is not running. Start the hub first: docker compose up -d --build --wait" >&2
+  exit 1
+fi
+
+# -T only when there is no terminal, so piping and CI work too.
+tty_flag=()
+[ -t 0 ] && [ -t 1 ] || tty_flag=(-T)
+
+exec docker compose exec ${tty_flag[@]+"${tty_flag[@]}"} api python scripts/argus_admin.py "$@"

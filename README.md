@@ -42,7 +42,8 @@ currently valid* revision rather than to an arbitrary PDF.
   operations cockpit opens on what needs attention. Served by `/v1/hub` (`search`, `overview`,
   `assets|tickets|documents/{uid}/context`), which fills each section only for callers who may read it.
 - **Workspaces** with per-user, per-resource permissions (read/create/modify/delete/approve),
-  OIDC sign-in (Firebase today, Keycloak-ready) plus API tokens for automation.
+  OIDC sign-in (*INFN login* through Keycloak, Google through Firebase) plus API tokens for
+  automation.
 - **Types (schemas)** with inheritance: attributes are inherited down the hierarchy, and a type
   can be marked *global* to be referenced across workspaces.
 - **Assets** with typed attributes (string/number/date/enum/reference/user/…), typed relations,
@@ -227,28 +228,105 @@ currently valid* revision rather than to an arbitrary PDF.
 
 ### Everything at once, with Docker Compose
 
-The quickest way to a working hub on your own machine: database, API and web UI, with
-migrations applied on start.
+The quickest way to a working hub on your own machine: database, API, web UI and a local
+Keycloak, with migrations applied on start. **Nothing else to run**: the web UI is built and
+served by the `web` container, so there is no `npm install` or `npm run dev` in this setup.
+
+| Service    | Address                   | What it is                                              |
+|------------|---------------------------|---------------------------------------------------------|
+| `web`      | <http://localhost:5173>   | The web UI, a production build with *INFN login* enabled. |
+| `api`      | <http://localhost:8080>   | The REST API (plain `http`, no TLS).                    |
+| `keycloak` | <http://localhost:8081>   | Dev identity provider, realm `argus-dev` (console: `admin` / `admin`). |
+| `db`       | internal only             | PostgreSQL 16.                                          |
 
 ```bash
 docker compose up -d --build --wait
-docker compose exec api python scripts/create_token.py dev "Local development" local
+tools/argus-admin dev-setup        # test workspaces and the six test users, with their roles
 ```
 
-The second command prints an API token **once**. Open <http://localhost:5173>, give the API
-address `http://localhost:8080` (plain `http`, the API does not speak TLS) and that token.
+Run `dev-setup` before anyone signs in. A test user who signs in first gets a plain account:
+`admin.test` then isn't an admin, and sees *"You don't have access to any workspace yet"*.
+Running `dev-setup` again fixes it, and it's safe to repeat. To throw everything away and begin
+again, see [Starting over with no data](#starting-over-with-no-data).
+
+Open <http://localhost:5173> and sign in one of two ways:
+
+- **INFN login** with a test user from the local Keycloak. The admin is `admin.test`; the others
+  are `owner.test`, `contributor.test`, `viewer.test`, `curator.test` and `outsider.test`. Every
+  password is `argus-dev`. What each one can do is in
+  [docs/oidc-dev-setup.md](docs/oidc-dev-setup.md) §4.
+- **An API token**: `tools/argus-admin workspace token sparc` prints one **once**. Give it with
+  the API address `http://localhost:8080`.
+
+#### Workspaces, people and roles: `tools/argus-admin`
+
+One command for the usual administration, run from the repository root against the running
+stack. Every command is safe to repeat, and a mistake says how to fix it.
+
+```bash
+tools/argus-admin workspace list
+tools/argus-admin workspace create lnf-euaps --name "EuAPS"      # with the defaults the web UI gives one
+tools/argus-admin workspace token lnf-euaps                        # API token for scripts
+tools/argus-admin user add mario.rossi@lnf.infn.it --name "Mario Rossi" --password s3cret
+tools/argus-admin user admin mario.rossi@lnf.infn.it on
+tools/argus-admin role list                                        # viewer, reporter, agent, … owner
+tools/argus-admin grant mario.rossi@lnf.infn.it contributor lnf-euaps
+tools/argus-admin revoke mario.rossi@lnf.infn.it contributor lnf-euaps
+tools/argus-admin access mario.rossi@lnf.infn.it                   # what they hold, and where
+tools/argus-admin user list
+```
+
+A person is known by email, and can be added before they ever sign in: their first sign-in with
+that email lands on the same account, roles included. `--password` also creates their login in
+the local Keycloak, for development only. With INFN's own identity provider, people already have
+a login there, so leave it out. `workspace create` on an existing workspace adds any defaults it
+is missing, such as those skipped by the older `create_token.py`.
+
+#### Starting over with no data
+
+```bash
+docker compose down -v                     # removes the containers and the volumes: database and attachments
+docker compose up -d --build --wait        # a fresh, empty hub, with migrations applied
+tools/argus-admin dev-setup                # the five test workspaces and the six test users
+docker compose exec api python scripts/seed_asset_types.py all sparc   # optional: the object types
+```
+
+Then sign in with *INFN login* as `admin.test` / `argus-dev`.
+
+- **This cannot be undone.** Every record, ticket, document, attachment, API token and account in
+  the hub is deleted. Export anything you want to keep first (see
+  [docs/operations.md](docs/operations.md)).
+- **Keep `--build`.** The containers are recreated from their images, so the images must hold
+  the current code, including the script behind `tools/argus-admin`.
+- **Run `dev-setup` before anyone signs in.** Otherwise the first sign-in makes a plain account
+  with no workspaces. Running `dev-setup` again repairs it.
+- **Keycloak starts fresh as well.** It keeps nothing in a volume: each new container re-imports
+  `keycloak/realm-argus-dev.json`, with the six test users and nothing else. Logins added with
+  `tools/argus-admin user add --password` are gone; add them again.
+- **Workspaces start empty.** `dev-setup` creates `sparc`, `euaps`, `eli`, `btf` and
+  `accelerator-infn` with their defaults, but no object types. The last command above loads them
+  into `sparc`; the notes below cover several beamlines sharing one catalogue.
+
+A few notes:
 
 - `TOKEN_PEPPER=dev-only` is a secret mixed into token hashes, **not** a token. Use the one the
   script prints.
-- Something already on 8080 or 5173, such as a dev server started by hand? Move the published
-  ports: `API_PORT=18080 WEB_PORT=15173 docker compose up -d --build --wait`.
+- After changing web app code, rebuild the image: `docker compose up -d --build web`.
+- Don't also run `npm run dev` from `webapp/`: it binds `localhost:5173` too, and the browser
+  gets the dev server instead of the container. That dev server has no *INFN login* button unless
+  `webapp/.env.development` exists (see [Running the pieces by hand](#running-the-pieces-by-hand)).
+- Something else already on 8080 or 5173? Move the published ports:
+  `API_PORT=18080 WEB_PORT=15173 docker compose up -d --build --wait`. INFN login then stops
+  working, because the Keycloak client only accepts redirects to `http://localhost:5173`. Use a
+  token, or add the new address to `redirectUris` and `webOrigins` in
+  `keycloak/realm-argus-dev.json` and recreate the `keycloak` container.
 - Load the accelerator object types. In a hub with one workspace, `all` puts everything in it:
-  `docker compose exec api python scripts/seed_asset_types.py all dev`.
+  `docker compose exec api python scripts/seed_asset_types.py all sparc`.
   With several beamlines, the shared types go in one catalogue workspace, once, and each
   beamline gets only its own, hanging from them:
   `... seed_asset_types.py global catalogue`, then
   `... seed_asset_types.py beamline sparc --catalogue catalogue`.
-  Each workspace has to exist first (`create_token.py <id> "<name>"` creates it), and
+  Each workspace has to exist first (`tools/argus-admin workspace create <id>` creates it), and
   `--dry-run` shows what would happen without writing.
 - Read a beamline's control configuration into a workspace, as objects of those types:
   `docker compose cp ../epik8-sparc/deploy/values.yaml api:/tmp/sparc.yaml`, then
@@ -262,10 +340,10 @@ address `http://localhost:8080` (plain `http`, the API does not speak TLS) and t
   seeded before.
   Each Access Point also says what kind of endpoint it is, and each device on a port of a serial
   converter is on a Serial Line. Add `--it-workspace it-infrastructure` (a workspace made with
-  `create_token.py`) to make the converters, servers and consoles the hostnames name, once, in that
+  `tools/argus-admin workspace create`) to make the converters, servers and consoles the hostnames name, once, in that
   site-wide workspace, flagged global; each beamline's Access Point is `implemented by` them.
 - State lives in two named volumes and survives `docker compose down`;
-  `docker compose down -v` wipes it.
+  `docker compose down -v` wipes it (see [Starting over with no data](#starting-over-with-no-data)).
 
 The defaults in `docker-compose.yml` are public and meant for one machine. Never reuse them
 anywhere that holds real data.
@@ -292,7 +370,8 @@ the token it prints will not be accepted.
 The tests use the same environment plus `IMPORT_SECRETS_KEY` (any Fernet key) and a database
 they may write to: `pytest tests`. Two drawing tests also need the `dwg2dxf` converter on `PATH`.
 
-Web app:
+Web app, with hot reload. Stop the compose `web` service first
+(`docker compose stop web`), since both use port 5173:
 
 ```bash
 cd webapp
@@ -300,8 +379,15 @@ npm install
 npm run dev
 ```
 
-The web app asks for the API base URL (`http://localhost:8080` when running locally) and either
-a personal access token or a Google sign-in at first launch.
+The sign-in screen offers an API token or a Google sign-in. For the *INFN login* button against
+the compose Keycloak, create an untracked `webapp/.env.development` and restart `npm run dev`:
+
+```
+VITE_OIDC_AUTHORITY=http://localhost:8081/realms/argus-dev
+VITE_OIDC_CLIENT_ID=argus-webapp
+VITE_OIDC_LABEL=INFN login
+VITE_API_BASE_URL=http://localhost:8080
+```
 
 ### Environment variables (backend)
 
@@ -312,6 +398,7 @@ a personal access token or a Google sign-in at first launch.
 | `IMPORT_SECRETS_KEY`  | Key used to encrypt stored import credentials at rest.          |
 | `ATTACHMENTS_DIR`     | Where uploaded files are stored (defaults to `/data/attachments`). |
 | `OIDC_ISSUER` / `OIDC_JWKS_URI` / `OIDC_AUDIENCE` | OIDC token verification.            |
+| `OIDC_EXTRA_PROVIDERS` | More trusted OIDC providers, as a JSON list of `{issuer, jwks_uri, audience}` (e.g. Firebase beside INFN's IdP). |
 | (worker) | `python -m app.ledger derive-worker` runs queued derives when `LEDGER_USER_EDIT_DERIVE=manual`; `python -m app.ledger backfill-checksums` records SHA-256 for older attachments. |
 | `LEDGER_USER_EDIT_DERIVE` | How derived links follow a user's edit: `background` (default), `inline`, or `manual` (left for a worker). |
 
