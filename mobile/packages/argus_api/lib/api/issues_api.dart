@@ -24,10 +24,12 @@ class IssuesApi {
   ///
   /// * [IssueCreate] issueCreate (required):
   ///
+  /// * [String] xARGUSClient:
+  ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<Response> createIssueWithHttpInfo(IssueCreate issueCreate, { String? authorization, String? xWorkspaceId, }) async {
+  Future<Response> createIssueWithHttpInfo(IssueCreate issueCreate, { String? xARGUSClient, String? authorization, String? xWorkspaceId, }) async {
     // ignore: prefer_const_declarations
     final path = r'/v1/issues';
 
@@ -38,6 +40,9 @@ class IssuesApi {
     final headerParams = <String, String>{};
     final formParams = <String, String>{};
 
+    if (xARGUSClient != null) {
+      headerParams[r'X-ARGUS-Client'] = parameterToString(xARGUSClient);
+    }
     if (authorization != null) {
       headerParams[r'authorization'] = parameterToString(authorization);
     }
@@ -65,11 +70,13 @@ class IssuesApi {
   ///
   /// * [IssueCreate] issueCreate (required):
   ///
+  /// * [String] xARGUSClient:
+  ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<IssueOut?> createIssue(IssueCreate issueCreate, { String? authorization, String? xWorkspaceId, }) async {
-    final response = await createIssueWithHttpInfo(issueCreate,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
+  Future<IssueOut?> createIssue(IssueCreate issueCreate, { String? xARGUSClient, String? authorization, String? xWorkspaceId, }) async {
+    final response = await createIssueWithHttpInfo(issueCreate,  xARGUSClient: xARGUSClient, authorization: authorization, xWorkspaceId: xWorkspaceId, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -365,6 +372,78 @@ class IssuesApi {
     return null;
   }
 
+  /// List Transitions
+  ///
+  /// Where this ticket can go next, and what each move needs.
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Response> listTransitionsWithHttpInfo(String uid, { String? authorization, String? xWorkspaceId, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/issues/{uid}/transitions'
+      .replaceAll('{uid}', uid);
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// List Transitions
+  ///
+  /// Where this ticket can go next, and what each move needs.
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Object?> listTransitions(String uid, { String? authorization, String? xWorkspaceId, }) async {
+    final response = await listTransitionsWithHttpInfo(uid,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+    
+    }
+    return null;
+  }
+
   /// Transition Issue
   ///
   /// Note: This method returns the HTTP [Response].
@@ -378,10 +457,12 @@ class IssuesApi {
   /// * [String] ifMatch:
   ///   The ticket version read
   ///
+  /// * [String] xARGUSClient:
+  ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<Response> transitionIssueWithHttpInfo(String uid, TransitionIn transitionIn, { String? ifMatch, String? authorization, String? xWorkspaceId, }) async {
+  Future<Response> transitionIssueWithHttpInfo(String uid, TransitionIn transitionIn, { String? ifMatch, String? xARGUSClient, String? authorization, String? xWorkspaceId, }) async {
     // ignore: prefer_const_declarations
     final path = r'/v1/issues/{uid}/transition'
       .replaceAll('{uid}', uid);
@@ -395,6 +476,9 @@ class IssuesApi {
 
     if (ifMatch != null) {
       headerParams[r'If-Match'] = parameterToString(ifMatch);
+    }
+    if (xARGUSClient != null) {
+      headerParams[r'X-ARGUS-Client'] = parameterToString(xARGUSClient);
     }
     if (authorization != null) {
       headerParams[r'authorization'] = parameterToString(authorization);
@@ -428,11 +512,13 @@ class IssuesApi {
   /// * [String] ifMatch:
   ///   The ticket version read
   ///
+  /// * [String] xARGUSClient:
+  ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<IssueOut?> transitionIssue(String uid, TransitionIn transitionIn, { String? ifMatch, String? authorization, String? xWorkspaceId, }) async {
-    final response = await transitionIssueWithHttpInfo(uid, transitionIn,  ifMatch: ifMatch, authorization: authorization, xWorkspaceId: xWorkspaceId, );
+  Future<IssueOut?> transitionIssue(String uid, TransitionIn transitionIn, { String? ifMatch, String? xARGUSClient, String? authorization, String? xWorkspaceId, }) async {
+    final response = await transitionIssueWithHttpInfo(uid, transitionIn,  ifMatch: ifMatch, xARGUSClient: xARGUSClient, authorization: authorization, xWorkspaceId: xWorkspaceId, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -459,10 +545,12 @@ class IssuesApi {
   /// * [String] ifMatch:
   ///   The ticket version read (flutter-app-design §3.3)
   ///
+  /// * [String] xARGUSClient:
+  ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<Response> updateIssueWithHttpInfo(String uid, IssueUpdate issueUpdate, { String? ifMatch, String? authorization, String? xWorkspaceId, }) async {
+  Future<Response> updateIssueWithHttpInfo(String uid, IssueUpdate issueUpdate, { String? ifMatch, String? xARGUSClient, String? authorization, String? xWorkspaceId, }) async {
     // ignore: prefer_const_declarations
     final path = r'/v1/issues/{uid}'
       .replaceAll('{uid}', uid);
@@ -476,6 +564,9 @@ class IssuesApi {
 
     if (ifMatch != null) {
       headerParams[r'If-Match'] = parameterToString(ifMatch);
+    }
+    if (xARGUSClient != null) {
+      headerParams[r'X-ARGUS-Client'] = parameterToString(xARGUSClient);
     }
     if (authorization != null) {
       headerParams[r'authorization'] = parameterToString(authorization);
@@ -509,11 +600,13 @@ class IssuesApi {
   /// * [String] ifMatch:
   ///   The ticket version read (flutter-app-design §3.3)
   ///
+  /// * [String] xARGUSClient:
+  ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<IssueOut?> updateIssue(String uid, IssueUpdate issueUpdate, { String? ifMatch, String? authorization, String? xWorkspaceId, }) async {
-    final response = await updateIssueWithHttpInfo(uid, issueUpdate,  ifMatch: ifMatch, authorization: authorization, xWorkspaceId: xWorkspaceId, );
+  Future<IssueOut?> updateIssue(String uid, IssueUpdate issueUpdate, { String? ifMatch, String? xARGUSClient, String? authorization, String? xWorkspaceId, }) async {
+    final response = await updateIssueWithHttpInfo(uid, issueUpdate,  ifMatch: ifMatch, xARGUSClient: xARGUSClient, authorization: authorization, xWorkspaceId: xWorkspaceId, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

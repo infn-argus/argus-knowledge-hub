@@ -146,6 +146,6 @@ void main() {
     await tester.tap(find.byKey(const Key('workspace-$workspaceId')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('ticket-title')), findsOneWidget);
-    expect(server.requests.last.url.path, '/v1/issues/$ticketUid');
+    expect(server.requests.any((r) => r.url.path == '/v1/issues/$ticketUid'), isTrue);
   });
 }

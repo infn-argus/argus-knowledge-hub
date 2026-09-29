@@ -280,8 +280,10 @@ def update_asset(
 @router.delete("/{uid}", status_code=204)
 def delete_asset(
     uid: str, identity=Depends(get_identity), workspace_id: str = Depends(require_permission("delete")),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db), x_argus_client: Optional[str] = Header(None, alias="X-ARGUS-Client"),
 ):
+    from app.services import field_policy
+    field_policy.refuse_retirement(x_argus_client)
     asset = _get_owned_asset(uid, workspace_id, db)
     if _ledger_only(db, workspace_id):
         # A ledger-only workspace retires, never erases: the record keeps its history.

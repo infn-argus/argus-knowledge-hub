@@ -4860,8 +4860,15 @@
       "IssueCommentCreate": {
         "properties": {
           "author": {
-            "title": "Author",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
           },
           "body": {
             "title": "Body",
@@ -4874,7 +4881,6 @@
         },
         "required": [
           "uid",
-          "author",
           "body"
         ],
         "title": "IssueCommentCreate",
@@ -12283,6 +12289,22 @@
             "schema": {
               "title": "Uid",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ARGUS-Client",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Argus-Client"
             }
           },
           {
@@ -23406,6 +23428,22 @@
         "parameters": [
           {
             "in": "header",
+            "name": "X-ARGUS-Client",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Argus-Client"
+            }
+          },
+          {
+            "in": "header",
             "name": "authorization",
             "required": false,
             "schema": {
@@ -23811,6 +23849,22 @@
               ],
               "description": "The ticket version read (flutter-app-design §3.3)",
               "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ARGUS-Client",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Argus-Client"
             }
           },
           {
@@ -25089,6 +25143,22 @@
               ],
               "description": "The ticket version read",
               "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ARGUS-Client",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Argus-Client"
             }
           },
           {

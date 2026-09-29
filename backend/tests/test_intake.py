@@ -546,3 +546,38 @@ def test_an_evaluation_that_could_not_run_cannot_be_activated(world, model, monk
     r = client.post(f"/v1/intake/profiles/{p['id']}/activate", headers=w["headers"],
                     json={"reason": "x", "exception": "anyway"})
     assert r.status_code == 409 and "incomplete" in r.json()["detail"]["error"]
+
+
+def test_A69_a_password_read_from_a_nameplate_photo_is_never_proposed(world, model, monkeypatch):
+    """Text in a photo reaches the model (no OCR runs before it), so what the model reads is
+    screened: a credential is dropped, the run counts it, and its value is stored nowhere."""
+    w = world
+    reply = {"type": "Ion Pump", "name": "Ion pump",
+             "attributes": {"manufacturer": "Agilent", "serial": "password: Tr0ub4dor&3"},
+             "evidence": {"attributes.manufacturer": "Agilent", "attributes.serial": "password: Tr0ub4dor&3"},
+             "confidence": {"attributes.manufacturer": 0.9, "attributes.serial": 0.9}}
+
+    def look(endpoint, image, mime_type, system, user, max_tokens=512):
+        return json.dumps(reply)
+    monkeypatch.setattr("app.services.llm.look", look)
+    db = SessionLocal()
+    db.get(LLMConfig, w["ws"]).vision_model = "v-1"
+    db.commit()
+    db.close()
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8)).save(buf, format="JPEG")
+    r = client.post("/v1/intake/assist/asset/file", headers={**w["headers"], "X-ARGUS-Client": "flutter/0.2.0/ios"},
+                    files={"file": ("nameplate.jpg", buf.getvalue(), "image/jpeg")})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert "attributes.serial" not in out["fields"] and out["fields"]["attributes.manufacturer"]["value"] == "Agilent"
+    assert any(d["field"] == "attributes.serial" and "password" in d["reason"] for d in out["dropped"])
+    assert out["redacted"] >= 1
+    from app.models.intake import IntakeRun
+    db = SessionLocal()
+    run = db.get(IntakeRun, out["run_id"])
+    assert "Tr0ub4dor" not in json.dumps(run.output, default=str) and "Tr0ub4dor" not in json.dumps(
+        run.redactions or {}, default=str)
+    db.close()

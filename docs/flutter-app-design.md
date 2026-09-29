@@ -3,7 +3,12 @@
 *A mobile client for the work done next to the equipment. It is built on the same API, permissions,
 ledger, policies and registry as the web application, and it does not replace the web application.*
 
-Status: **M0 server foundations built**, except the push relay; **M1 built** (the read-only client, `mobile/`). See §15.
+Status:
+- **M0** server foundations: built, except the push relay.
+- **M1**, the read-only client: built.
+- **M2**, capture and tickets: built, except push.
+
+See §15. The client is in `mobile/`.
 [`asset-model-revision.md`](asset-model-revision.md) §24 is normative. It
 states the rules this client must keep: trust boundaries, pending commands, conflict handling,
 invariants I-MOB-1…8 and acceptance tests A57–A72. Where this document and §24 disagree, §24
@@ -659,6 +664,11 @@ contains no record data, and the person can review it before sharing it with sup
 |---|---|---|
 | **M0 foundations (server)** | committed OpenAPI contract and generated clients; idempotency keys; record versions and preconditions; the problem shape; the device registry and revocation; the universal-link resolver and web redirects; resumable uploads; 426 minimum version | A57–A61 pass against the API; the web still passes its suite |
 | **M1 read-only field client** | sign-in, workspace, scanning, lookup, details, current Installation, documents to read, diagnostics | A66 and A67 pass; a technician finds a unit by scanning in under 10 s (median) |
+| **M2 capture and tickets** | guided registration with AI nameplate capture; incident tickets with media and occurrence time; comments and transitions; push | A69 and A70 pass; AI proposals are reviewable end to end |
+| **M3 replacement and review** | the guided replacement (online), assigned review items | A68 passes; replacements appear correctly in the web and the graph |
+| **M4 offline** | the pending-command queue, synchronization, conflicts, retention and wipe | A62–A65 and A71 pass; no duplicate writes in a week of pilot use |
+| **M5 pilot** | SPARC vacuum equipment (U20), with its technicians | the pilot exit criteria (§16) are signed by the operational owner |
+
 
 **Built so far.**
 
@@ -677,7 +687,7 @@ The rest of M0 is also built:
 - stale commands on protected fields and stale replacements as review items;
 - resumable uploads.
 
-What is left of M0 is the push relay (U21), which is planned with M2.
+What is left of M0 is the push relay (U21).
 
 M1, in `mobile/app`:
 - sign-in (OIDC with PKCE, or a token in non-production builds) and device registration;
@@ -695,10 +705,50 @@ Tests:
 - the web build was checked in a browser against a local API.
 
 Android and iOS builds, and the 10-second scan measure, still need a device.
-| **M2 capture and tickets** | guided registration with AI nameplate capture; incident tickets with media and occurrence time; comments and transitions; push | A69 and A70 pass; AI proposals are reviewable end to end |
-| **M3 replacement and review** | the guided replacement (online), assigned review items | A68 passes; replacements appear correctly in the web and the graph |
-| **M4 offline** | the pending-command queue, synchronization, conflicts, retention and wipe | A62–A65 and A71 pass; no duplicate writes in a week of pilot use |
-| **M5 pilot** | SPARC vacuum equipment (U20), with its technicians | the pilot exit criteria (§16) are signed by the operational owner |
+
+M2, in `mobile/app` and on the server:
+- **Incident reports**, from the record screen.
+  - The report is Position-first: the scanned Position or unit is the subject.
+  - The occurrence time is given as an exact time, a day or a month, and is required for an
+    operational incident.
+  - Photos go up through resumable uploads.
+  - The open tickets on the record, and the guide's similar tickets, are shown before a new
+    ticket is made.
+  - An AI draft is built from the person's own words. Its proposals show confidence and
+    evidence and are not used until taken. Hypotheses are labelled as unconfirmed.
+  - The outcome is recorded against the intake run.
+- **Ticket updates:**
+  - comments, sent once with their own key; the server stamps the author;
+  - photos;
+  - the transitions the workflow allows, with their requirements and `If-Match`. A stale
+    ticket is reloaded, never overwritten.
+- **Guided registration:**
+  - the nameplate photo is read by the server;
+  - proposals are taken or corrected, and the guide's checks include duplicates;
+  - the unit is created with the person's values and a server key, and the photo is attached as
+    evidence;
+  - an unknown scanned label offers registration, with the label as the serial;
+  - nothing is created from a name (I-MOB-6).
+- **Field limits on the server (A70):**
+  - closing a safety ticket from the field client is recorded as a proposed transition (202),
+    which a person confirms on the web;
+  - root cause and corrective action are not edited from the field;
+  - Equipment is not retired from the field.
+- **Secrets (A69):**
+  - a value that looks like a credential, read by the model from a photo, is dropped and
+    counted, never stored;
+  - text is still redacted before the model;
+  - `test/no_secrets_test.dart` and `tool/check_build.sh` check that the app and a built bundle
+    carry no provider credential, prompt or endpoint.
+  - Redacting text *inside a photo* before the model needs on-device OCR, which is not built.
+- **Notifications:** an in-app inbox with an unread badge. Push waits for U21.
+
+Tests:
+- 35 app tests;
+- the server tests for A69 and A70;
+- the report and registration flows, driven in the web build against a live API with a
+  stand-in model.
+
 
 ---
 

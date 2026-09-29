@@ -19,6 +19,14 @@ class AssetScreen extends ConsumerWidget {
     final r = ref.watch(assetDetailProvider(uid));
     return Scaffold(
       appBar: AppBar(title: Text(r.value?.key ?? 'Record')),
+      floatingActionButton: r.value == null
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('asset-report'),
+              onPressed: () => context.push('/report/$uid'),
+              icon: const Icon(Icons.report_problem_outlined),
+              label: const Text('Report a problem'),
+            ),
       body: r.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => ProblemView(e, onRetry: () => ref.invalidate(assetDetailProvider(uid))),

@@ -1,4 +1,5 @@
 import 'package:argus_field/core/problem.dart';
+import 'package:argus_field/domain/capture.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -19,6 +20,14 @@ void main() {
     expect(Problem.fromResponse(404, '{"detail":"Asset not found"}').message, 'Asset not found');
     expect(Problem.fromResponse(401, 'not json').code, ProblemCode.unauthenticated);
     expect(Problem.fromResponse(500, null).code, ProblemCode.unknown);
+  });
+
+  test('a proposed time is shown in local time, to its precision', () {
+    const month = Proposal(field: 'attributes.occurred_from', value: {'kind': 'date', 'nominal': '2026-09-01T00:00:00Z', 'precision': 'month'});
+    expect(month.display, startsWith('2026-'));
+    expect(month.display.length, 7);
+    const labelled = Proposal(field: 'attributes.argus_impact', value: 'beam_down', label: 'Beam down');
+    expect(labelled.display, 'Beam down');
   });
 
   test('the problem shape is read first, with its field, current state and review item', () {

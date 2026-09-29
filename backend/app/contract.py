@@ -51,6 +51,17 @@ FIELD_OPERATIONS = [
     ("post", "/v1/uploads/{uid}/complete"),
     ("post", "/v1/uploads/{uid}/attach/ticket/{issue_uid}"),
     ("post", "/v1/uploads/{uid}/attach/asset/{asset_uid}"),
+    # Capture and tickets (M2)
+    ("get", "/v1/schemas"),
+    ("post", "/v1/assets"),
+    ("get", "/v1/issues/{uid}/transitions"),
+    ("post", "/v1/intake/guide/asset"),
+    ("post", "/v1/intake/guide/ticket"),
+    ("post", "/v1/intake/assist/ticket"),
+    ("post", "/v1/intake/assist/{kind}/file"),
+    ("post", "/v1/intake/runs/{run_id}/outcome"),
+    ("get", "/v1/notifications"),
+    ("post", "/v1/notifications/{nid}/read"),
 ]
 
 

@@ -12,6 +12,11 @@ const draftUid = 'a0f68206-97f9-49cd-9fb8-f3f0fd322f6c';
 const workspaceId = 'slice-20463f';
 
 String fixture(String name) => File('test/fixtures/$name.json').readAsStringSync();
+Object? fixtureJson(String name) => jsonDecode(fixture(name));
+
+http.Response _json(Object? body, [int status = 200]) => http.Response.bytes(
+    utf8.encode(body is String ? body : jsonEncode(body)), status,
+    headers: {'content-type': 'application/json; charset=utf-8'});
 
 class FakeArgus {
   final List<http.Request> requests = [];
@@ -19,44 +24,125 @@ class FakeArgus {
   /// Replace every response with this one (to simulate revocation, an old client, an outage).
   http.Response? override;
 
+  /// Replace the response of one route: `'POST /v1/issues/<uid>/transition'`.
+  final Map<String, http.Response> routes = {};
+
+  final Map<String, int> _uploads = {};
+
   late final http.Client client = MockClient((req) async {
     requests.add(req);
-    return _serve(req);
+    if (override != null) return override!;
+    return routes['${req.method} ${req.url.path}'] ?? _serve(req);
   });
 
+  /// The JSON bodies sent to a route, in order.
+  List<Map<String, dynamic>> sent(String method, String path) => [
+        for (final r in requests)
+          if (r.method == method && r.url.path == path && r.body.isNotEmpty) jsonDecode(r.body) as Map<String, dynamic>,
+      ];
+
   http.Response _serve(http.Request req) {
-    if (override != null) return override!;
     final p = req.url.path;
     final q = req.url.queryParameters;
+    final m = req.method;
+    Map<String, dynamic> body() => req.body.isEmpty ? {} : jsonDecode(req.body) as Map<String, dynamic>;
+
+    if (m == 'POST') {
+      switch (p) {
+        case '/v1/devices':
+          return _json(fixture('device'));
+        case '/v1/intake/assist/ticket':
+          return _json(fixture('assist_ticket'));
+        case '/v1/intake/assist/asset/file':
+          return _json(fixture('assist_asset_photo'));
+        case '/v1/intake/guide/asset':
+          return _json(fixture('guide_asset'));
+        case '/v1/intake/guide/ticket':
+          // Like the real guide: what the draft already says is not asked again.
+          final draft = (body()['draft'] as Map?) ?? {};
+          final attrs = (draft['attributes'] as Map?) ?? {};
+          final g = fixtureJson('guide_ticket') as Map<String, dynamic>;
+          g['checks'] = [
+            for (final c in g['checks'] as List)
+              if (!(c['field'] == 'attributes.occurred_from' && attrs['occurred_from'] != null) &&
+                  !(c['id'] == 'description' && ((draft['description'] as String?) ?? '').length >= 20))
+                c,
+          ];
+          return _json(g);
+        case '/v1/issues':
+          final b = body();
+          final t = fixtureJson('ticket_created') as Map<String, dynamic>;
+          return _json({...t, 'uid': b['uid'], 'title': b['title'], 'asset_uid': b['asset_uid']}, 201);
+        case '/v1/uploads':
+          final uid = 'up-${_uploads.length + 1}';
+          _uploads[uid] = 0;
+          return _json({'uid': uid, 'offset': 0, 'state': 'open', 'size': body()['size']}, 201);
+        case '/v1/assets':
+          final b = body();
+          final a = fixtureJson('position') as Map<String, dynamic>;
+          return _json({...a, 'uid': b['uid'], 'name': b['name'], 'schema_uid': b['schema_uid'],
+            'attributes': b['attributes']}, 201);
+      }
+      if (RegExp(r'^/v1/intake/runs/[^/]+/outcome$').hasMatch(p)) return _json({'ok': true}, 201);
+      if (RegExp(r'^/v1/issues/[^/]+/comments$').hasMatch(p)) {
+        final c = fixtureJson('comment_created') as Map<String, dynamic>;
+        return _json({...c, 'uid': body()['uid'], 'body': body()['body']}, 201);
+      }
+      if (RegExp(r'^/v1/issues/[^/]+/transition$').hasMatch(p)) return _json(fixture('ticket'));
+      if (RegExp(r'^/v1/notifications/\d+/read$').hasMatch(p)) return _json({'ok': true});
+      final upload = RegExp(r'^/v1/uploads/([^/]+)/(complete|attach/(ticket|asset)/.+)$').firstMatch(p);
+      if (upload != null) {
+        final attach = upload.group(2)!.startsWith('attach');
+        return _json({'uid': upload.group(1), 'state': attach ? 'attached' : 'complete',
+          if (attach) 'attachment_uid': 'att-${upload.group(1)}'});
+      }
+    }
+    if (m == 'PUT' && p.startsWith('/v1/uploads/')) {
+      final uid = p.split('/').last;
+      final offset = int.parse(q['offset']!);
+      if (offset != _uploads[uid]) {
+        return _json({'detail': 'x', 'problem': {'code': 'conflict', 'error': 'wrong offset',
+          'current': {'offset': _uploads[uid]}}}, 409);
+      }
+      _uploads[uid] = offset + req.bodyBytes.length;
+      return _json({'uid': uid, 'offset': _uploads[uid], 'state': 'open'});
+    }
+
     String? name;
     int status = 200;
-    if (req.method == 'POST' && p == '/v1/devices') {
-      name = 'device';
-    } else {
-      name = switch (p) {
-        '/v1/me' => 'me',
-        '/v1/me/workspaces' => 'workspaces',
-        '/v1/meta/api' => 'meta',
-        '/v1/hub/search' => 'search',
-        '/v1/assets/$positionUid' => 'position',
-        '/v1/hub/assets/$positionUid/context' => 'position_context',
-        '/v1/installations' when q['position_uid'] == positionUid => 'position_installations',
-        '/v1/issues/$ticketUid' => 'ticket',
-        '/v1/documents/$documentUid' => 'document',
-        '/v1/documents/$documentUid/current' => 'document_current',
-        '/v1/documents/$draftUid' => 'draft',
-        '/v1/documents/$draftUid/current' => 'draft_current',
-        '/v1/links/resolve' when q['path'] == '/position/$positionUid' => 'resolve_position',
-        _ => null,
-      };
-      if (name == 'draft_current') status = 404;
+    name = switch (p) {
+      '/v1/me' => 'me',
+      '/v1/me/workspaces' => 'workspaces',
+      '/v1/meta/api' => 'meta',
+      '/v1/hub/search' => 'search',
+      '/v1/schemas' => 'schemas',
+      '/v1/notifications' => 'notifications',
+      '/v1/assets/$positionUid' => 'position',
+      '/v1/hub/assets/$positionUid/context' => 'position_context',
+      '/v1/installations' when q['position_uid'] == positionUid => 'position_installations',
+      '/v1/issues/$ticketUid' => 'ticket',
+      '/v1/documents/$documentUid' => 'document',
+      '/v1/documents/$documentUid/current' => 'document_current',
+      '/v1/documents/$draftUid' => 'draft',
+      '/v1/documents/$draftUid/current' => 'draft_current',
+      '/v1/links/resolve' when q['path'] == '/position/$positionUid' => 'resolve_position',
+      _ => null,
+    };
+    if (name == 'draft_current') status = 404;
+    if (name == null && m == 'GET') {
+      if (RegExp(r'^/v1/issues/[^/]+/comments$').hasMatch(p)) return _json(fixture('comments'));
+      if (RegExp(r'^/v1/issues/[^/]+/attachments$').hasMatch(p)) return _json([]);
+      if (RegExp(r'^/v1/issues/[^/]+/transitions$').hasMatch(p)) return _json(fixture('transitions'));
+      final issue = RegExp(r'^/v1/issues/([0-9a-f-]{36})$').firstMatch(p);
+      if (issue != null) {
+        final t = fixtureJson('ticket_created') as Map<String, dynamic>;
+        return _json({...t, 'uid': issue.group(1)});
+      }
     }
     if (name == null) {
-      return http.Response(jsonEncode({'detail': {'error': 'Not found, or not visible to you.', 'code': 'not_found'}}), 404,
-          headers: {'content-type': 'application/json'});
+      return _json({'detail': {'error': 'Not found, or not visible to you.', 'code': 'not_found'}}, 404);
     }
-    return http.Response.bytes(utf8.encode(fixture(name)), status,
-        headers: {'content-type': 'application/json; charset=utf-8'});
+    return _json(fixture(name), status);
   }
 
   static http.Response problem(int status, String code, {String error = 'refused', String? minimum}) => http.Response(

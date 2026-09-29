@@ -1,0 +1,65 @@
+{
+    "workflow": {
+        "uid": null,
+        "name": "ARGUS default"
+    },
+    "state": "new",
+    "state_name": "New",
+    "transitions": [
+        {
+            "to": "in_progress",
+            "name": "Move",
+            "requires": [],
+            "to_name": "In Progress",
+            "category": "active"
+        },
+        {
+            "to": "pending",
+            "name": "Move",
+            "requires": [],
+            "to_name": "Pending",
+            "category": "waiting"
+        },
+        {
+            "to": "resolved",
+            "name": "Move",
+            "requires": [],
+            "to_name": "Resolved",
+            "category": "done"
+        },
+        {
+            "to": "closed",
+            "name": "Move",
+            "requires": [],
+            "to_name": "Closed",
+            "category": "done"
+        }
+    ],
+    "states": [
+        {
+            "key": "new",
+            "name": "New",
+            "category": "open"
+        },
+        {
+            "key": "in_progress",
+            "name": "In Progress",
+            "category": "active"
+        },
+        {
+            "key": "pending",
+            "name": "Pending",
+            "category": "waiting"
+        },
+        {
+            "key": "resolved",
+            "name": "Resolved",
+            "category": "done"
+        },
+        {
+            "key": "closed",
+            "name": "Closed",
+            "category": "done"
+        }
+    ]
+}

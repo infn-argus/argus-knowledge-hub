@@ -122,7 +122,8 @@ class IssueLinksOut(BaseModel):
 
 class IssueCommentCreate(BaseModel):
     uid: str
-    author: str
+    # Ignored for a signed-in person: the comment is theirs. An API token names it.
+    author: Optional[str] = None
     body: str
 
 

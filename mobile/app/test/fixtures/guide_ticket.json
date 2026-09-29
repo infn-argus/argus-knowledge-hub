@@ -1,0 +1,63 @@
+{
+    "kind": "ticket",
+    "ready": false,
+    "checks": [
+        {
+            "id": "description",
+            "level": "warning",
+            "message": "Describe what you saw, when it started, and what you already tried. It is what the person picking this up needs first.",
+            "field": "description"
+        },
+        {
+            "id": "attributes.occurred_from",
+            "level": "error",
+            "message": "An operational incident says when it happened: an operational incident needs occurred_from: when it happened, with the precision known (a day, a month)",
+            "field": "attributes.occurred_from"
+        },
+        {
+            "id": "similar",
+            "level": "warning",
+            "message": "Open tickets look similar. If one is the same problem, add to it instead of opening another.",
+            "field": "title",
+            "links": [
+                {
+                    "uid": "3ad8eae6-5a19-4c15-9e2e-be4ab4b6f983",
+                    "key": "3ad8eae6",
+                    "name": "Pressure spike on gun ion pump",
+                    "path": "/tickets/3ad8eae6-5a19-4c15-9e2e-be4ab4b6f983"
+                }
+            ]
+        }
+    ],
+    "steps": [
+        {
+            "id": "what",
+            "label": "What is wrong",
+            "done": true
+        },
+        {
+            "id": "detail",
+            "label": "What you saw",
+            "done": false
+        },
+        {
+            "id": "subject",
+            "label": "What is affected",
+            "done": true
+        },
+        {
+            "id": "when",
+            "label": "When it happened",
+            "done": false
+        },
+        {
+            "id": "duplicates",
+            "label": "Not already reported",
+            "done": false
+        }
+    ],
+    "next": {
+        "field": "attributes.occurred_from",
+        "question": "When did it happen? The day is enough if you do not know the time."
+    }
+}

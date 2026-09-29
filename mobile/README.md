@@ -4,7 +4,7 @@ The field client of ARGUS, for work next to the equipment. The design is
 [`docs/flutter-app-design.md`](../docs/flutter-app-design.md). Its normative rules are in
 [`docs/asset-model-revision.md`](../docs/asset-model-revision.md) §24.
 
-This is phase **M1, the read-only client**. It does the following:
+Phases **M1** (the read-only client) and **M2** (capture and tickets) are built. It does the following:
 
 - **Sign-in:**
   - OIDC with PKCE through the system browser on Android and iOS;
@@ -25,7 +25,21 @@ This is phase **M1, the read-only client**. It does the following:
   - a revoked device (401 `revoked`) is signed out and its session wiped;
   - a client too old for the server (426 `client_too_old`) stops at an update screen.
 
-Capture, tickets, replacement and offline work are phases M2–M4 (§15 of the design).
+- **Capture and tickets (M2):**
+  - reporting a problem on a Position or unit, with its occurrence time and photos, an AI draft
+    whose proposals the person takes, and the similar tickets shown first;
+  - comments, photos and transitions on a ticket. A closing of a safety ticket from here is only
+    proposed (A70);
+  - registering equipment from a nameplate photo (A69);
+  - a notification inbox.
+
+Every command carries an `Idempotency-Key` derived from its own uid. Edits send the version read
+as `If-Match`.
+
+Replacement and offline work are phases M3 and M4 (§15 of the design).
+
+Before a release, scan the built bundle for credentials, prompts and provider endpoints:
+`mobile/tool/check_build.sh build/web` (or an unzipped APK or IPA).
 
 ## Layout
 

@@ -39,7 +39,7 @@ from app.schemas.issue import (
     IssueUpdate,
 )
 from app.services.asset_ticket_links import ensure_asset_link, sync_subject_link
-from app.services import notify, versions, workflows
+from app.services import field_policy, notify, versions, workflows
 from app.services.visibility import can_see, hidden_fields, redacted_attributes, visible_issues_clause
 from app.services.issue_history import (
     TRACKED_FIELDS,
@@ -97,9 +97,11 @@ def create_issue(
     workspace_id: str = Depends(require_permission("create", resource="tickets")),
     current_user_id: Optional[str] = Depends(get_current_user_id),
     db: Session = Depends(get_db),
+    x_argus_client: Optional[str] = Header(None, alias="X-ARGUS-Client"),
 ):
     if db.get(Issue, body.uid) is not None:
         raise HTTPException(status_code=409, detail="Issue uid already exists")
+    field_policy.check_ticket_fields(x_argus_client, {}, body.attributes)
     _guard_ticket_write(db, workspace_id, body.schema_uid, body.attributes)
     schema = db.get(Schema, body.schema_uid) if body.schema_uid else None
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
@@ -183,6 +185,7 @@ def update_issue(
     db: Session = Depends(get_db),
     if_match: Optional[str] = Header(None, alias="If-Match",
                                      description="The ticket version read (flutter-app-design §3.3)"),
+    x_argus_client: Optional[str] = Header(None, alias="X-ARGUS-Client"),
 ):
     issue = _get_owned_issue(uid, workspace_id, db)
     patch = body.model_dump(exclude_unset=True)
@@ -198,6 +201,8 @@ def update_issue(
         patch["attributes"] = {**{k: v for k, v in patch["attributes"].items() if k not in hidden},
                                **{k: v for k, v in (issue.attributes or {}).items() if k in hidden}}
     versions.check_ticket(issue, if_match, versions.ticket_fields_in(patch, issue))
+    if patch.get("attributes") is not None:
+        field_policy.check_ticket_fields(x_argus_client, issue.attributes, patch["attributes"])
 
     if "state" in patch and patch["state"] != issue.state:
         _move(db, issue, patch.pop("state"), current_user_id)
@@ -621,13 +626,20 @@ def create_issue_comment(
     uid: str,
     body: IssueCommentCreate,
     workspace_id: str = Depends(require_permission("create", resource="tickets")),
+    current_user_id: Optional[str] = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     issue = _get_owned_issue(uid, workspace_id, db)
-    comment = IssueComment(issue_uid=uid, **body.model_dump())
+    existing = db.get(IssueComment, body.uid)
+    if existing is not None:
+        if existing.issue_uid != uid:
+            raise HTTPException(status_code=409, detail={"error": "That comment uid is taken.", "code": "conflict"})
+        return existing                     # a retry of the same comment (flutter-app-design §3.2)
+    author = current_user_id or body.author or "api"
+    comment = IssueComment(issue_uid=uid, uid=body.uid, author=author, body=body.body)
     db.add(comment)
     db.flush()
-    notify.on_comment(db, issue, body.author, body.body)
+    notify.on_comment(db, issue, author, body.body)
     db.commit()
     db.refresh(comment)
     return comment
@@ -658,11 +670,28 @@ def transition_issue(uid: str, body: TransitionIn,
                      workspace_id: str = Depends(require_permission("modify", resource="tickets")),
                      current_user_id: Optional[str] = Depends(get_current_user_id), db: Session = Depends(get_db),
                      if_match: Optional[str] = Header(None, alias="If-Match",
-                                                      description="The ticket version read")):
+                                                      description="The ticket version read"),
+                     x_argus_client: Optional[str] = Header(None, alias="X-ARGUS-Client")):
     issue = _get_owned_issue(uid, workspace_id, db)
     _guard_ticket_write(db, workspace_id, issue.schema_uid, issue.attributes)
     versions.check_ticket(issue, if_match, {"state"} | ({"assignee"} if body.assignee is not None else set()))
     snapshot = versions.ticket_snapshot(issue)
+    wf = workflows.workflow_for(db, workspace_id, issue.schema_uid)
+    if field_policy.is_field_client(x_argus_client) and field_policy.closes(wf, body.to) \
+            and field_policy.is_safety_ticket(db, issue):
+        # A70: closing a safety ticket from the field is a proposal a person confirms online.
+        try:
+            workflows.check_move(wf, issue.state, body.to)
+        except workflows.WorkflowError as exc:
+            raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": "workflow"})
+        field_policy.propose_transition(db, issue, current_user_id, body.to, body.comment, body.resolution)
+        _bump(issue, snapshot)
+        db.commit()
+        db.refresh(issue)
+        from fastapi.encoders import jsonable_encoder
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=202, content=jsonable_encoder(issue_out(db, issue)))
+    field_policy.clear_proposal(issue)
     previous_assignee = issue.assignee
     try:
         moved = workflows.transition(db, issue, body.to, current_user_id, comment=body.comment,

@@ -150,7 +150,17 @@ class AssetDetail {
 }
 
 class TicketDetail {
-  const TicketDetail({required this.uid, required this.title, required this.state, this.description, this.priority, this.assetUid, this.occurredFrom});
+  const TicketDetail({
+    required this.uid,
+    required this.title,
+    required this.state,
+    this.description,
+    this.priority,
+    this.assetUid,
+    this.occurredFrom,
+    this.version = 1,
+    this.attributes = const {},
+  });
 
   final String uid;
   final String title;
@@ -159,6 +169,16 @@ class TicketDetail {
   final String? priority;
   final String? assetUid;
   final When? occurredFrom;
+  final int version; // sent back as If-Match with a change (flutter-app-design §3.3)
+  final Map<String, Object?> attributes;
+
+  /// A closure proposed from the field, waiting for a person online (A70).
+  Map<String, Object?>? get proposedTransition {
+    final p = attributes['argus_proposed_transition'];
+    return p is Map ? p.map((k, v) => MapEntry(k.toString(), v)) : null;
+  }
+
+  String? get impact => attributes['argus_impact']?.toString();
 }
 
 class DocumentDetail {

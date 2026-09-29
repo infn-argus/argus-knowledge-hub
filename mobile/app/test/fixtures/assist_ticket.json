@@ -1,0 +1,125 @@
+{
+    "run_id": "83dff839-7bde-4349-b1eb-89723679b35d",
+    "profile_id": null,
+    "fields": {
+        "title": {
+            "value": "Gun ion pump tripped, beam lost",
+            "label": null,
+            "confidence": null,
+            "evidence": null,
+            "grounded": true,
+            "method": "draft"
+        },
+        "schema_uid": {
+            "value": "slice-20463f:operational-incident",
+            "label": "Operational Incident",
+            "confidence": 0.8,
+            "evidence": "tripped",
+            "grounded": true,
+            "method": "ai_classified"
+        },
+        "attributes.occurred_from": {
+            "value": {
+                "kind": "date",
+                "nominal": "2026-09-25T01:10:00+00:00",
+                "precision": "instant"
+            },
+            "label": null,
+            "confidence": 0.85,
+            "evidence": "at 03:10",
+            "grounded": true,
+            "method": "ai_extracted"
+        },
+        "attributes.argus_impact": {
+            "value": "beam_down",
+            "label": "Beam down",
+            "confidence": 0.9,
+            "evidence": "beam lost",
+            "grounded": true,
+            "method": "ai_classified"
+        },
+        "attributes.argus_category": {
+            "value": "fault",
+            "label": "Fault",
+            "confidence": 0.5,
+            "evidence": null,
+            "grounded": false,
+            "method": "ai_classified"
+        },
+        "attributes.argus_detected_by": {
+            "value": "alarm",
+            "label": "Alarm",
+            "confidence": 0.75,
+            "evidence": "alarm",
+            "grounded": true,
+            "method": "ai_classified"
+        },
+        "description": {
+            "value": "The gun ion pump tripped at 03:10 tonight after an alarm, beam lost.",
+            "label": null,
+            "confidence": null,
+            "evidence": null,
+            "grounded": true,
+            "method": "person"
+        }
+    },
+    "dropped": [],
+    "hypotheses": [
+        {
+            "text": "The HV cable of the pump controller may be damaged",
+            "class": "unresolved hypothesis"
+        }
+    ],
+    "redacted": 0,
+    "guide": {
+        "kind": "ticket",
+        "ready": true,
+        "checks": [
+            {
+                "id": "similar",
+                "level": "warning",
+                "message": "Open tickets look similar. If one is the same problem, add to it instead of opening another.",
+                "field": "title",
+                "links": [
+                    {
+                        "uid": "cfb38633-f3de-428f-acbe-6f7940baf031",
+                        "key": "cfb38633",
+                        "name": "Gun ion pump tripped, beam lost",
+                        "path": "/tickets/cfb38633-f3de-428f-acbe-6f7940baf031"
+                    }
+                ]
+            }
+        ],
+        "steps": [
+            {
+                "id": "what",
+                "label": "What is wrong",
+                "done": true
+            },
+            {
+                "id": "detail",
+                "label": "What you saw",
+                "done": true
+            },
+            {
+                "id": "subject",
+                "label": "What is affected",
+                "done": true
+            },
+            {
+                "id": "when",
+                "label": "When it happened",
+                "done": true
+            },
+            {
+                "id": "duplicates",
+                "label": "Not already reported",
+                "done": false
+            }
+        ],
+        "next": {
+            "field": "title",
+            "question": "In one line, what is wrong?"
+        }
+    }
+}

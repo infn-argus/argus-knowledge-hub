@@ -1,0 +1,156 @@
+[
+    {
+        "uid": "slice-20463f:ledger:equipment-position",
+        "workspace_id": "slice-20463f",
+        "name": "Equipment Position",
+        "description": null,
+        "is_concrete": true,
+        "parent_schema_uid": null,
+        "attributes": [],
+        "metadata": {},
+        "version": 1,
+        "icon_uid": null,
+        "is_global": false,
+        "applies_to": "objects",
+        "created_at": "2026-09-28T20:17:13.564670Z",
+        "updated_at": "2026-09-28T20:17:13.564673Z"
+    },
+    {
+        "uid": "slice-20463f:argus-object:ion-pump",
+        "workspace_id": "slice-20463f",
+        "name": "Ion Pump",
+        "description": "A sputter-ion pump: the thing that trips when the pressure rises.",
+        "is_concrete": true,
+        "parent_schema_uid": "slice-20463f:argus-object:vacuum-pump",
+        "attributes": [
+            {
+                "id": "pumping_speed",
+                "key": "pumping_speed",
+                "name": "Pumping speed (l/s)",
+                "type": "float",
+                "unique": false,
+                "indexed": false,
+                "readOnly": false,
+                "required": false,
+                "multiValue": false
+            },
+            {
+                "id": "nominal_voltage",
+                "key": "nominal_voltage",
+                "name": "Nominal voltage (V)",
+                "type": "integer",
+                "unique": false,
+                "indexed": false,
+                "readOnly": false,
+                "required": false,
+                "multiValue": false
+            },
+            {
+                "id": "element_count",
+                "key": "element_count",
+                "name": "Number of elements",
+                "type": "integer",
+                "unique": false,
+                "indexed": false,
+                "readOnly": false,
+                "required": false,
+                "multiValue": false
+            }
+        ],
+        "metadata": {
+            "source": "argus"
+        },
+        "version": 1,
+        "icon_uid": null,
+        "is_global": false,
+        "applies_to": "objects",
+        "created_at": "2026-09-29T08:04:10.539082Z",
+        "updated_at": "2026-09-29T08:04:10.539087Z"
+    },
+    {
+        "uid": "slice-20463f:argus-object:vacuum-gauge",
+        "workspace_id": "slice-20463f",
+        "name": "Vacuum Gauge",
+        "description": "Measures pressure.",
+        "is_concrete": true,
+        "parent_schema_uid": "slice-20463f:argus-object:asset",
+        "attributes": [
+            {
+                "id": "gauge_kind",
+                "key": "gauge_kind",
+                "name": "Gauge kind",
+                "type": "enumeration",
+                "unique": false,
+                "indexed": false,
+                "options": [
+                    {
+                        "id": "pirani",
+                        "value": "Pirani"
+                    },
+                    {
+                        "id": "penning",
+                        "value": "Penning"
+                    },
+                    {
+                        "id": "cold_cathode",
+                        "value": "Cold cathode"
+                    },
+                    {
+                        "id": "capacitive",
+                        "value": "Capacitive"
+                    }
+                ],
+                "readOnly": false,
+                "required": false,
+                "multiValue": false
+            },
+            {
+                "id": "range_min",
+                "key": "range_min",
+                "name": "Range minimum (mbar)",
+                "type": "float",
+                "unique": false,
+                "indexed": false,
+                "readOnly": false,
+                "required": false,
+                "multiValue": false
+            },
+            {
+                "id": "range_max",
+                "key": "range_max",
+                "name": "Range maximum (mbar)",
+                "type": "float",
+                "unique": false,
+                "indexed": false,
+                "readOnly": false,
+                "required": false,
+                "multiValue": false
+            }
+        ],
+        "metadata": {
+            "source": "argus"
+        },
+        "version": 1,
+        "icon_uid": null,
+        "is_global": false,
+        "applies_to": "objects",
+        "created_at": "2026-09-29T08:04:10.545433Z",
+        "updated_at": "2026-09-29T08:04:10.545437Z"
+    },
+    {
+        "uid": "slice-20463f:operational-incident",
+        "workspace_id": "slice-20463f",
+        "name": "Operational Incident",
+        "description": null,
+        "is_concrete": true,
+        "parent_schema_uid": null,
+        "attributes": [],
+        "metadata": {},
+        "version": 1,
+        "icon_uid": null,
+        "is_global": false,
+        "applies_to": "tickets",
+        "created_at": "2026-09-29T08:04:18.657604Z",
+        "updated_at": "2026-09-29T08:04:18.657610Z"
+    }
+]

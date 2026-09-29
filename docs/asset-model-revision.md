@@ -3051,6 +3051,17 @@ M1: the read-only client in `mobile/` is built. The server side of A66 and A67 p
 `tests/test_field_client.py`, and the client side passes in `mobile/app/test`. Both still need a
 run on devices.
 
+M2 is built, except push (U21):
+- incident reports: Position-first, with the occurrence time, photos, the AI draft and similar
+  tickets;
+- comments, photos and transitions on tickets;
+- guided registration from a nameplate photo.
+
+A69 and A70 pass on the server (`tests/test_intake.py`, `tests/test_field_foundations.py`) and in
+the app (`mobile/app/test`). A limit of A69: a password written in a photo reaches the model,
+because no OCR runs before it. What the model reads back is screened, and a credential is never
+proposed or stored. On-device OCR would redact it before the model.
+
 ### 24.10 Acceptance tests
 
 | # | Given | When | Then | Validates |

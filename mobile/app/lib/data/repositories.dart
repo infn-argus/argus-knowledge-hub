@@ -175,6 +175,8 @@ class TicketRepository {
       priority: t.priority,
       assetUid: t.assetUid,
       occurredFrom: When.fromJson(_map(t.attributes)['occurred_from']),
+      version: t.version,
+      attributes: _map(t.attributes),
     );
   }
 }

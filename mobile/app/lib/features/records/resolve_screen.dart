@@ -28,7 +28,22 @@ class ResolveScreen extends ConsumerWidget {
         data: (_) => const Center(child: CircularProgressIndicator()),
         error: (e, _) => e is Problem && e.code == ProblemCode.ambiguous
             ? _Candidates(e)
-            : ProblemView(e, onRetry: () => ref.invalidate(resolveProvider(path))),
+            : Column(children: [
+                Expanded(child: ProblemView(e, onRetry: () => ref.invalidate(resolveProvider(path)))),
+                // An unknown label on a unit in hand: register it, never invent it from a name (I-MOB-6).
+                if (e is Problem && e.code == ProblemCode.notFound && path.startsWith('/lookup/'))
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: FilledButton.tonalIcon(
+                        key: const Key('resolve-register'),
+                        onPressed: () => context.pushReplacement('/register?label=${Uri.encodeComponent(label)}'),
+                        icon: const Icon(Icons.add_box_outlined),
+                        label: const Text('Register this unit'),
+                      ),
+                    ),
+                  ),
+              ]),
       ),
     );
   }

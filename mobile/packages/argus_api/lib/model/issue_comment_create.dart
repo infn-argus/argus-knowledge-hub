@@ -13,12 +13,12 @@ part of openapi.api;
 class IssueCommentCreate {
   /// Returns a new [IssueCommentCreate] instance.
   IssueCommentCreate({
-    required this.author,
+    this.author,
     required this.body,
     required this.uid,
   });
 
-  String author;
+  String? author;
 
   String body;
 
@@ -33,7 +33,7 @@ class IssueCommentCreate {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
-    (author.hashCode) +
+    (author == null ? 0 : author!.hashCode) +
     (body.hashCode) +
     (uid.hashCode);
 
@@ -42,7 +42,11 @@ class IssueCommentCreate {
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+    if (this.author != null) {
       json[r'author'] = this.author;
+    } else {
+      json[r'author'] = null;
+    }
       json[r'body'] = this.body;
       json[r'uid'] = this.uid;
     return json;
@@ -67,7 +71,7 @@ class IssueCommentCreate {
       }());
 
       return IssueCommentCreate(
-        author: mapValueOfType<String>(json, r'author')!,
+        author: mapValueOfType<String>(json, r'author'),
         body: mapValueOfType<String>(json, r'body')!,
         uid: mapValueOfType<String>(json, r'uid')!,
       );
@@ -117,7 +121,6 @@ class IssueCommentCreate {
 
   /// The list of required keys that must be present in a JSON.
   static const requiredKeys = <String>{
-    'author',
     'body',
     'uid',
   };

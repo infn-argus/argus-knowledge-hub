@@ -21,6 +21,9 @@ dependencies:
   intl: ^0.20.3
   mobile_scanner: ^7.4.2
   uuid: ^4.6.0
+  image_picker: ^1.2.3
+  crypto: ^3.0.7
+  http_parser: ^4.1.2
 
 dev_dependencies:
   flutter_test:

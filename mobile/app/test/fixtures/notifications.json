@@ -1,0 +1,22 @@
+[
+    {
+        "id": 12,
+        "kind": "assigned",
+        "title": "Assigned to you: Gun ion pump tripped, beam lost",
+        "issue_uid": "cfb38633-f3de-428f-acbe-6f7940baf031",
+        "detail": null,
+        "actor": "operator",
+        "created_at": "2026-09-29T08:10:00Z",
+        "read": false
+    },
+    {
+        "id": 11,
+        "kind": "comment",
+        "title": "New comment on Pressure spike on gun ion pump",
+        "issue_uid": "3ad8eae6-5a19-4c15-9e2e-be4ab4b6f983",
+        "detail": "Controller reset",
+        "actor": "operator",
+        "created_at": "2026-09-29T07:55:00Z",
+        "read": true
+    }
+]

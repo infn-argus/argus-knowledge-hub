@@ -1,0 +1,95 @@
+{
+    "run_id": "d1ee4770-81b2-4f84-9cf6-e02669ec0a4e",
+    "profile_id": null,
+    "fields": {
+        "schema_uid": {
+            "value": "slice-20463f:argus-object:ion-pump",
+            "label": "Ion Pump",
+            "confidence": 0.93,
+            "evidence": "ion pump",
+            "grounded": true,
+            "method": "ai_classified"
+        },
+        "name": {
+            "value": "Ion pump gun area 2",
+            "label": null,
+            "confidence": 0.7,
+            "evidence": "gun area",
+            "grounded": true,
+            "method": "ai_extracted"
+        },
+        "attributes.manufacturer": {
+            "value": "Agilent",
+            "label": null,
+            "confidence": 0.95,
+            "evidence": "Agilent",
+            "grounded": true,
+            "method": "ai_extracted"
+        },
+        "attributes.model": {
+            "value": "VacIon Plus 75",
+            "label": null,
+            "confidence": 0.88,
+            "evidence": "VacIon Plus 75",
+            "grounded": true,
+            "method": "ai_extracted"
+        },
+        "attributes.serial": {
+            "value": "77120",
+            "label": null,
+            "confidence": 0.9,
+            "evidence": "serial 77120",
+            "grounded": true,
+            "method": "ai_extracted"
+        }
+    },
+    "dropped": [],
+    "hypotheses": [],
+    "redacted": 0,
+    "guide": {
+        "kind": "asset",
+        "ready": true,
+        "checks": [
+            {
+                "id": "nature",
+                "level": "info",
+                "message": "Ion Pump: a physical unit, the box with a serial number. Where it is installed is recorded separately, as an Installation at a Position, so the unit keeps its history when it moves.",
+                "field": "schema_uid"
+            },
+            {
+                "id": "generated-key",
+                "level": "info",
+                "message": "It will get the key SLICE-20463F-IP-0001 when saved, unless you type one, such as the label on it.",
+                "field": "key"
+            }
+        ],
+        "steps": [
+            {
+                "id": "type",
+                "label": "What it is",
+                "done": true
+            },
+            {
+                "id": "identity",
+                "label": "Name and key",
+                "done": true
+            },
+            {
+                "id": "identifiers",
+                "label": "Serial or inventory number",
+                "done": true
+            },
+            {
+                "id": "details",
+                "label": "Required details",
+                "done": true
+            },
+            {
+                "id": "duplicates",
+                "label": "Not already recorded",
+                "done": true
+            }
+        ],
+        "next": null
+    }
+}

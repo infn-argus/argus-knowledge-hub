@@ -1,44 +1,301 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../app/providers.dart';
+import '../../core/problem.dart';
+import '../../domain/capture.dart';
+import '../../domain/models.dart';
 import '../../widgets/common.dart';
+import 'report_screen.dart' show impactOptions;
 
-class TicketScreen extends ConsumerWidget {
+/// A ticket in the field (flutter-app-design §9): read it, comment, add a photo, and move it
+/// through the transitions the server's workflow allows. A closure of a safety ticket from here
+/// is only proposed; a person confirms it online (A70).
+class TicketScreen extends ConsumerStatefulWidget {
   const TicketScreen({super.key, required this.uid});
 
   final String uid;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final r = ref.watch(ticketDetailProvider(uid));
+  ConsumerState<TicketScreen> createState() => _TicketScreenState();
+}
+
+class _TicketScreenState extends ConsumerState<TicketScreen> {
+  final _comment = TextEditingController();
+  String _commentUid = const Uuid().v4();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _comment.dispose();
+    super.dispose();
+  }
+
+  void _say(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  void _reload() {
+    ref.invalidate(ticketDetailProvider(widget.uid));
+    ref.invalidate(commentsProvider(widget.uid));
+    ref.invalidate(transitionsProvider(widget.uid));
+    ref.invalidate(attachmentsProvider(widget.uid));
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    setState(() => _busy = true);
+    try {
+      await action();
+    } on Problem catch (p) {
+      if (p.code == ProblemCode.stale) {
+        _reload();
+        _say('Someone changed this ticket meanwhile. It was reloaded; check it and try again.');
+      } else {
+        _say(p.message);
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _send() => _run(() async {
+        final text = _comment.text.trim();
+        if (text.isEmpty) return;
+        await ref.read(ticketCommandsProvider).comment(widget.uid, _commentUid, text);
+        _comment.clear();
+        _commentUid = const Uuid().v4(); // the next comment is another command
+        ref.invalidate(commentsProvider(widget.uid));
+      });
+
+  Future<void> _photo() => _run(() async {
+        final photo = await ref.read(photoSourceProvider).take();
+        if (photo == null) return;
+        await ref
+            .read(uploadRepositoryProvider)
+            .uploadAndAttach(photo, ticketUid: widget.uid, key: 'photo:${widget.uid}:${const Uuid().v4()}');
+        ref.invalidate(attachmentsProvider(widget.uid));
+        _say('Photo added.');
+      });
+
+  Future<void> _move(TicketDetail t, TransitionOption o) async {
+    String? comment;
+    String? resolution;
+    if (o.requires.contains('comment') || o.requires.contains('resolution') || o.closes) {
+      final r = await showDialog<(String, String)>(context: context, builder: (_) => _MoveDialog(o));
+      if (r == null) return;
+      (comment, resolution) = (r.$1.isEmpty ? null : r.$1, r.$2.isEmpty ? null : r.$2);
+    }
+    await _run(() async {
+      final result = await ref.read(ticketCommandsProvider).transition(widget.uid, o.to,
+          version: t.version, key: 'move:${widget.uid}:${t.version}:${o.to}', comment: comment, resolution: resolution);
+      _reload();
+      _say(result.proposed
+          ? 'Proposed. A person confirms closing a safety ticket on the web.'
+          : 'Moved to ${o.toName}.');
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = ref.watch(ticketDetailProvider(widget.uid));
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Ticket')),
       body: r.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ProblemView(e, onRetry: () => ref.invalidate(ticketDetailProvider(uid))),
-        data: (t) => ListView(padding: const EdgeInsets.all(16), children: [
-          Text(t.title, key: const Key('ticket-title'), style: theme.textTheme.headlineSmall),
-          const SizedBox(height: 8),
-          Wrap(spacing: 8, children: [
-            StatusChip(t.state, tone: theme.colorScheme.primary),
-            if (t.priority != null) StatusChip(t.priority!),
-            if (t.occurredFrom?.nominal != null) StatusChip('occurred ${formatWhenDate(t.occurredFrom!.nominal)}'),
-          ]),
-          if (t.assetUid != null) ...[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => context.push('/asset/${t.assetUid}'),
-              icon: const Icon(Icons.memory),
-              label: const Text('Open the asset'),
+        error: (e, _) => ProblemView(e, onRetry: () => ref.invalidate(ticketDetailProvider(widget.uid))),
+        data: (t) => RefreshIndicator(
+          onRefresh: () async => _reload(),
+          child: ListView(padding: const EdgeInsets.only(bottom: 32), children: [
+            if (t.proposedTransition != null)
+              NoticeBar(
+                key: const Key('ticket-proposed'),
+                icon: Icons.hourglass_top,
+                text: 'Closing was proposed from the field (to ${t.proposedTransition!['to']}). '
+                    'It takes effect when a person confirms it on the web.',
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(t.title, key: const Key('ticket-title'), style: theme.textTheme.headlineSmall),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 6, children: [
+                  StatusChip(t.state, tone: theme.colorScheme.primary),
+                  if (t.priority != null) StatusChip(t.priority!),
+                  if (t.impact != null) StatusChip(impactOptions[t.impact] ?? t.impact!),
+                  if (t.occurredFrom?.nominal != null)
+                    StatusChip('occurred ${formatWhenDate(t.occurredFrom!.nominal)}'),
+                ]),
+                if (t.assetUid != null) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => context.push('/asset/${t.assetUid}'),
+                    icon: const Icon(Icons.memory),
+                    label: const Text('Open the affected record'),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                SelectableText((t.description ?? '').isEmpty ? 'No description.' : t.description!),
+              ]),
             ),
-          ],
-          const SizedBox(height: 16),
-          SelectableText((t.description ?? '').isEmpty ? 'No description.' : t.description!),
-        ]),
+            _Transitions(uid: widget.uid, onMove: (o) => _move(t, o), busy: _busy),
+            _Attachments(uid: widget.uid, onAdd: _busy ? null : _photo),
+            _Comments(uid: widget.uid),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(children: [
+                Expanded(
+                  child: TextField(
+                    key: const Key('ticket-comment'),
+                    controller: _comment,
+                    minLines: 1,
+                    maxLines: 4,
+                    decoration: const InputDecoration(hintText: 'Add a comment', border: OutlineInputBorder()),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                    key: const Key('ticket-comment-send'),
+                    onPressed: _busy ? null : _send,
+                    icon: const Icon(Icons.send)),
+              ]),
+            ),
+          ]),
+        ),
       ),
     );
   }
+}
+
+class _Transitions extends ConsumerWidget {
+  const _Transitions({required this.uid, required this.onMove, required this.busy});
+
+  final String uid;
+  final void Function(TransitionOption) onMove;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final moves = ref.watch(transitionsProvider(uid)).value ?? const [];
+    if (moves.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SectionHeader('Move to'),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final o in moves)
+            OutlinedButton(
+              key: Key('move-${o.to}'),
+              onPressed: busy ? null : () => onMove(o),
+              child: Text(o.name == 'Move' ? o.toName : '${o.name} → ${o.toName}'),
+            ),
+        ]),
+      ),
+    ]);
+  }
+}
+
+class _Attachments extends ConsumerWidget {
+  const _Attachments({required this.uid, required this.onAdd});
+
+  final String uid;
+  final VoidCallback? onAdd;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final files = ref.watch(attachmentsProvider(uid)).value ?? const <AttachmentInfo>[];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SectionHeader('Photos and files', trailing: '${files.length}'),
+      for (final f in files)
+        ListTile(
+          dense: true,
+          leading: Icon((f.mimeType ?? '').startsWith('image/') ? Icons.image_outlined : Icons.attach_file),
+          title: Text(f.filename),
+          subtitle: f.size == null ? null : Text('${(f.size! / 1024).ceil()} KB'),
+        ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: TextButton.icon(
+            key: const Key('ticket-add-photo'),
+            onPressed: onAdd,
+            icon: const Icon(Icons.add_a_photo_outlined),
+            label: const Text('Add photo')),
+      ),
+    ]);
+  }
+}
+
+class _Comments extends ConsumerWidget {
+  const _Comments({required this.uid});
+
+  final String uid;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final comments = ref.watch(commentsProvider(uid)).value ?? const <Comment>[];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SectionHeader('Comments', trailing: '${comments.length}'),
+      for (final c in comments)
+        ListTile(
+          dense: true,
+          title: Text(c.body),
+          subtitle: Text([c.author, if (c.at != null) formatWhenDate(c.at)].join(' · ')),
+        ),
+    ]);
+  }
+}
+
+class _MoveDialog extends StatefulWidget {
+  const _MoveDialog(this.option);
+
+  final TransitionOption option;
+
+  @override
+  State<_MoveDialog> createState() => _MoveDialogState();
+}
+
+class _MoveDialogState extends State<_MoveDialog> {
+  final _comment = TextEditingController();
+  final _resolution = TextEditingController();
+
+  @override
+  void dispose() {
+    _comment.dispose();
+    _resolution.dispose();
+    super.dispose();
+  }
+
+  bool get _complete =>
+      (!widget.option.requires.contains('comment') || _comment.text.trim().isNotEmpty) &&
+      (!widget.option.requires.contains('resolution') || _resolution.text.trim().isNotEmpty);
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text('Move to ${widget.option.toName}'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            key: const Key('move-comment'),
+            controller: _comment,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+                labelText: widget.option.requires.contains('comment') ? 'Comment (required)' : 'Comment'),
+          ),
+          if (widget.option.requires.contains('resolution') || widget.option.closes)
+            TextField(
+              key: const Key('move-resolution'),
+              controller: _resolution,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                  labelText: widget.option.requires.contains('resolution') ? 'Resolution (required)' : 'Resolution'),
+            ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            key: const Key('move-confirm'),
+            onPressed: _complete ? () => Navigator.pop(context, (_comment.text.trim(), _resolution.text.trim())) : null,
+            child: const Text('Move'),
+          ),
+        ],
+      );
 }

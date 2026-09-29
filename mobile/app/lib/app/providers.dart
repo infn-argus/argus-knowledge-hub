@@ -5,9 +5,12 @@ import '../core/config.dart';
 import '../core/problem.dart';
 import '../core/session.dart';
 import '../data/api_service.dart';
+import '../data/capture_repositories.dart';
 import '../data/repositories.dart';
+import '../domain/capture.dart';
 import '../domain/models.dart';
 import '../features/auth/auth_service.dart';
+import '../features/capture/photo_source.dart';
 
 /// Riverpod retries a failed provider by default. A refusal (not found, forbidden, invalid,
 /// revoked) will not change by asking again, so only an unreachable server is retried, briefly.
@@ -188,4 +191,45 @@ final serverMetaProvider = FutureProvider.autoDispose<Map<String, Object?>>((ref
   final api = ref.watch(apiServiceProvider);
   final meta = await api.json((c) => api.meta(c).apiMetaWithHttpInfo());
   return meta is Map ? meta.map((k, v) => MapEntry(k.toString(), v)) : {'value': meta};
+});
+
+// --------------------------------------------------------------------------- capture and tickets (M2)
+
+final photoSourceProvider = Provider<PhotoSource>((_) => DevicePhotoSource());
+final intakeRepositoryProvider = Provider((ref) => IntakeRepository(ref.watch(apiServiceProvider)));
+final schemaRepositoryProvider = Provider((ref) => SchemaRepository(ref.watch(apiServiceProvider)));
+final uploadRepositoryProvider = Provider((ref) => UploadRepository(ref.watch(apiServiceProvider)));
+final ticketCommandsProvider = Provider((ref) => TicketCommands(ref.watch(apiServiceProvider)));
+final equipmentCommandsProvider = Provider((ref) => EquipmentCommands(ref.watch(apiServiceProvider)));
+final notificationRepositoryProvider = Provider((ref) => NotificationRepository(ref.watch(apiServiceProvider)));
+
+final ticketKindsProvider = FutureProvider.autoDispose<List<TicketKind>>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(schemaRepositoryProvider).ticketKinds();
+});
+
+final objectTypesProvider = FutureProvider.autoDispose<List<EquipmentType>>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(schemaRepositoryProvider).objectTypes();
+});
+
+final commentsProvider = FutureProvider.autoDispose.family<List<Comment>, String>((ref, uid) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(ticketCommandsProvider).comments(uid);
+});
+
+final attachmentsProvider = FutureProvider.autoDispose.family<List<AttachmentInfo>, String>((ref, uid) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(ticketCommandsProvider).attachments(uid);
+});
+
+final transitionsProvider = FutureProvider.autoDispose.family<List<TransitionOption>, String>((ref, uid) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(ticketCommandsProvider).transitions(uid);
+});
+
+/// The inbox. Push is decision U21; until then the app asks when it opens and when the person looks.
+final notificationsProvider = FutureProvider.autoDispose<List<NotificationItem>>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(notificationRepositoryProvider).mine();
 });

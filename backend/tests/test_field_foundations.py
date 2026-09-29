@@ -284,3 +284,59 @@ def test_uploads_refuse_oversize_wrong_type_bad_hash_and_other_peoples_uploads(t
     assert over.status_code == 413
     _ws2, h2 = workspace()
     assert client.get(f"/v1/uploads/{uid}", headers=h2).status_code == 404
+
+
+# --------------------------------------------------------------------------- A70
+
+FIELD = {"X-ARGUS-Client": "flutter/0.2.0/android"}
+
+
+def _incident_type(ws):
+    from app.models.schema import Schema
+    db = SessionLocal()
+    s = Schema(uid=f"{ws}:operational-incident", workspace_id=ws, name="Operational Incident",
+               applies_to="tickets", attributes=[])
+    db.add(s)
+    db.commit()
+    uid = s.uid
+    db.close()
+    return uid
+
+
+def test_A70_an_incident_needs_its_time_and_a_safety_closure_from_the_field_is_only_proposed():
+    ws, h = workspace()
+    kind = _incident_type(ws)
+    no_time = client.post("/v1/issues", headers={**h, **FIELD},
+                          json={"uid": str(uuid.uuid4()), "title": "Interlock tripped", "schema_uid": kind})
+    assert no_time.status_code == 422 and no_time.json()["problem"]["code"] in ("invalid", "invariant")
+    uid = str(uuid.uuid4())
+    made = client.post("/v1/issues", headers={**h, **FIELD}, json={
+        "uid": uid, "title": "Interlock tripped", "schema_uid": kind,
+        "attributes": {"occurred_from": {"kind": "date", "nominal": "2026-09-20T00:00:00+00:00", "precision": "day"},
+                       "argus_impact": "safety"}})
+    assert made.status_code == 201, made.text
+    moves = client.get(f"/v1/issues/{uid}/transitions", headers=h).json()["transitions"]
+    done = next(t["to"] for t in moves if t["to"] in ("resolved", "closed"))
+    proposed = client.post(f"/v1/issues/{uid}/transition", headers={**h, **FIELD},
+                           json={"to": done, "comment": "Reset and tested"})
+    assert proposed.status_code == 202
+    body = proposed.json()
+    assert body["state"] == made.json()["state"]                                   # not closed
+    assert body["attributes"]["argus_proposed_transition"]["to"] == done
+    # On the web, a person confirms it: the transition applies and the proposal is gone.
+    web = client.post(f"/v1/issues/{uid}/transition", headers=h, json={"to": done, "comment": "Confirmed"})
+    assert web.status_code == 200, web.text
+    assert web.json()["state"] == done and "argus_proposed_transition" not in web.json()["attributes"]
+
+
+def test_the_field_client_does_not_confirm_root_causes_or_retire_equipment():
+    ws, h = workspace()
+    uid = str(uuid.uuid4())
+    client.post("/v1/issues", headers=h, json={"uid": uid, "title": "Pump noisy"})
+    rc = client.put(f"/v1/issues/{uid}", headers={**h, **FIELD},
+                    json={"attributes": {"argus_root_cause": "bearing"}})
+    assert rc.status_code == 403 and rc.json()["problem"]["field"] == "attributes.argus_root_cause"
+    assert client.put(f"/v1/issues/{uid}", headers=h,
+                      json={"attributes": {"argus_root_cause": "bearing"}}).status_code == 200
+    pump = _pump(ws, h, {})
+    assert client.delete(f"/v1/assets/{pump}", headers={**h, **FIELD}).status_code == 403

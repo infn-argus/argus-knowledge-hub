@@ -51,10 +51,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             Text(session!.workspaceName!, style: Theme.of(context).textTheme.labelMedium),
         ]),
         actions: [
+          const _InboxBell(),
           PopupMenuButton<String>(
             key: const Key('home-menu'),
             onSelected: (v) {
               switch (v) {
+                case 'register':
+                  context.push('/register');
                 case 'workspace':
                   context.push('/workspace');
                 case 'diagnostics':
@@ -64,6 +67,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               }
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'register', child: Text('Register equipment')),
               PopupMenuItem(value: 'workspace', child: Text('Switch workspace')),
               PopupMenuItem(value: 'diagnostics', child: Text('About and diagnostics')),
               PopupMenuItem(value: 'signout', child: Text('Sign out')),
@@ -103,6 +107,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         Expanded(child: _q.length < 2 ? const _Hint() : _Results(q: _q)),
       ]),
+    );
+  }
+}
+
+class _InboxBell extends ConsumerWidget {
+  const _InboxBell();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unread = (ref.watch(notificationsProvider).value ?? const []).where((n) => !n.read).length;
+    return IconButton(
+      key: const Key('home-inbox'),
+      tooltip: 'Notifications',
+      onPressed: () => context.push('/inbox'),
+      icon: Badge(isLabelVisible: unread > 0, label: Text('$unread'), child: const Icon(Icons.notifications_none)),
     );
   }
 }

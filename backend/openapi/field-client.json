@@ -1,6 +1,87 @@
 {
   "components": {
     "schemas": {
+      "AssetCreate": {
+        "properties": {
+          "attributes": {
+            "title": "Attributes",
+            "type": "object"
+          },
+          "avatar_icon_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Icon Uid"
+          },
+          "inbound_relations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Inbound Relations",
+            "type": "array"
+          },
+          "is_global": {
+            "default": false,
+            "title": "Is Global",
+            "type": "boolean"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "outbound_relations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Outbound Relations",
+            "type": "array"
+          },
+          "schema_uid": {
+            "title": "Schema Uid",
+            "type": "string"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "uid": {
+            "title": "Uid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uid",
+          "schema_uid",
+          "name"
+        ],
+        "title": "AssetCreate",
+        "type": "object"
+      },
       "AssetOut": {
         "properties": {
           "attributes": {
@@ -217,6 +298,21 @@
         "title": "AssetUpdate",
         "type": "object"
       },
+      "AssistIn": {
+        "properties": {
+          "draft": {
+            "title": "Draft",
+            "type": "object"
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "title": "AssistIn",
+        "type": "object"
+      },
       "AttachmentOut": {
         "properties": {
           "asset_uid": {
@@ -321,6 +417,30 @@
           "created_at"
         ],
         "title": "AttachmentOut",
+        "type": "object"
+      },
+      "Body_assist_from_file_v1_intake_assist__kind__file_post": {
+        "properties": {
+          "draft": {
+            "default": "{}",
+            "title": "Draft",
+            "type": "string"
+          },
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_assist_from_file_v1_intake_assist__kind__file_post",
         "type": "object"
       },
       "DeviceIn": {
@@ -665,6 +785,16 @@
         "title": "DocumentRevisionOut",
         "type": "object"
       },
+      "GuideIn": {
+        "properties": {
+          "draft": {
+            "title": "Draft",
+            "type": "object"
+          }
+        },
+        "title": "GuideIn",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -681,8 +811,15 @@
       "IssueCommentCreate": {
         "properties": {
           "author": {
-            "title": "Author",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
           },
           "body": {
             "title": "Body",
@@ -695,7 +832,6 @@
         },
         "required": [
           "uid",
-          "author",
           "body"
         ],
         "title": "IssueCommentCreate",
@@ -1294,6 +1430,23 @@
         "title": "MyWorkspaceOut",
         "type": "object"
       },
+      "OutcomeIn": {
+        "properties": {
+          "final": {
+            "title": "Final",
+            "type": "object"
+          },
+          "record_uid": {
+            "title": "Record Uid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_uid"
+        ],
+        "title": "OutcomeIn",
+        "type": "object"
+      },
       "RevokeIn": {
         "properties": {
           "reason": {
@@ -1568,6 +1721,86 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/assets": {
+      "post": {
+        "operationId": "create_asset",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Asset",
+        "tags": [
+          "assets"
+        ]
+      }
+    },
     "/v1/assets/{uid}": {
       "get": {
         "operationId": "get_asset",
@@ -2662,10 +2895,438 @@
         ]
       }
     },
+    "/v1/intake/assist/ticket": {
+      "post": {
+        "description": "Turn a report, in the person's own words, into a ticket draft.",
+        "operationId": "assist_ticket",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssistIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Assist Ticket",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/v1/intake/assist/{kind}/file": {
+      "post": {
+        "description": "Fill a draft from a file: a nameplate photo, a datasheet, a Word or Excel file, an email.",
+        "operationId": "assist_from_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_assist_from_file_v1_intake_assist__kind__file_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Assist From File",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/v1/intake/guide/asset": {
+      "post": {
+        "description": "What is missing or wrong in this asset draft, and the next question.",
+        "operationId": "guide_asset",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuideIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Guide Asset",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/v1/intake/guide/ticket": {
+      "post": {
+        "operationId": "guide_ticket",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuideIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Guide Ticket",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
+    "/v1/intake/runs/{run_id}/outcome": {
+      "post": {
+        "description": "After the save: which suggestions the person kept, corrected or left out.",
+        "operationId": "record_outcome",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Outcome",
+        "tags": [
+          "intake"
+        ]
+      }
+    },
     "/v1/issues": {
       "post": {
         "operationId": "create_issue",
         "parameters": [
+          {
+            "in": "header",
+            "name": "X-ARGUS-Client",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Argus-Client"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
@@ -2848,6 +3509,22 @@
               ],
               "description": "The ticket version read (flutter-app-design §3.3)",
               "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ARGUS-Client",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Argus-Client"
             }
           },
           {
@@ -3212,6 +3889,22 @@
           },
           {
             "in": "header",
+            "name": "X-ARGUS-Client",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Argus-Client"
+            }
+          },
+          {
+            "in": "header",
             "name": "authorization",
             "required": false,
             "schema": {
@@ -3281,6 +3974,84 @@
           }
         ],
         "summary": "Transition Issue",
+        "tags": [
+          "issues"
+        ]
+      }
+    },
+    "/v1/issues/{uid}/transitions": {
+      "get": {
+        "description": "Where this ticket can go next, and what each move needs.",
+        "operationId": "list_transitions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "title": "Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Transitions",
         "tags": [
           "issues"
         ]
@@ -3665,6 +4436,267 @@
         "summary": "Api Meta",
         "tags": [
           "meta"
+        ]
+      }
+    },
+    "/v1/notifications": {
+      "get": {
+        "operationId": "my_notifications",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "unread",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Unread",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recipient",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Recipient"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Notifications",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/v1/notifications/{nid}/read": {
+      "post": {
+        "operationId": "mark_read",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "nid",
+            "required": true,
+            "schema": {
+              "title": "Nid",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recipient",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Recipient"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark Read",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/v1/schemas": {
+      "get": {
+        "operationId": "list_schemas",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SchemaOut"
+                  },
+                  "title": "Response List Schemas V1 Schemas Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Schemas",
+        "tags": [
+          "schemas"
         ]
       }
     },

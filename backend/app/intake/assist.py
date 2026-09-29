@@ -131,6 +131,32 @@ def _evidence(data: dict, field: str, text: str, from_image: bool) -> tuple[Opti
     return quote.strip()[:200], found or from_image
 
 
+def _screen(fields: dict, dropped: list, redactions: dict) -> None:
+    """Nothing that looks like a credential leaves as a proposal (§23.10). Text is redacted before the
+    model, but text written in a photograph reaches it: a value or an evidence quote the model read
+    that the scanner flags is dropped here, and the run records that it happened, never the value."""
+    for name in list(fields):
+        f = fields[name]
+        value = f.get("value")
+        if isinstance(value, str) and secrets.scan(value):
+            fields.pop(name)
+            dropped.append({"field": name, "reason": "it looked like a password or key; secrets are never stored"})
+            redactions["output"] = redactions.get("output", 0) + 1
+        elif isinstance(f.get("evidence"), str) and secrets.scan(f["evidence"]):
+            f["evidence"] = secrets.redact(f["evidence"])[0]
+            redactions["output"] = redactions.get("output", 0) + 1
+
+
+def _named(by_name: dict, name: str):
+    """The type a model named, ignoring case and spacing: it writes "Operational incident" for
+    "Operational Incident"."""
+    exact = by_name.get(name)
+    if exact is not None:
+        return exact
+    key = " ".join(name.split()).lower()
+    return next((v for k, v in by_name.items() if " ".join(k.split()).lower() == key), None)
+
+
 def _field(value, label, data, field, text, from_image, method) -> dict:
     quote, grounded = _evidence(data, field, text, from_image)
     confidence = _conf(data, field) if grounded else min(_conf(data, field), LOW)
@@ -289,8 +315,8 @@ def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint,
     from_image = bool(image)
 
     t = data.get("type")
-    if isinstance(t, str) and t in by_name:
-        schema = by_name[t]
+    if isinstance(t, str) and _named(by_name, t) is not None:
+        schema = _named(by_name, t)
         fields["schema_uid"] = _field(schema.uid, schema.name, data, "type", clean, from_image, "ai_classified")
         if chosen is None:
             menu = _attribute_menu(db, schema, GENERIC_ASSET)
@@ -327,6 +353,7 @@ def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint,
     validations += [{"step": "vocabulary", "result": "pass", "dropped": len(dropped)},
                     {"step": "evidence", "result": "pass",
                      "ungrounded": [f for f, v in fields.items() if not v["grounded"]]}]
+    _screen(fields, dropped, redactions)
     output = {"fields": fields, "dropped": dropped}
     run = _record(db, workspace_id, actor, "asset", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes, redactions=redactions,
                   output=output, validations=validations, outcome="proposed" if fields else "draft_only",
@@ -379,8 +406,9 @@ def assist_ticket(db: Session, workspace_id: str, actor: str, endpoint: Endpoint
         fields["title"] = {"value": title.strip()[:200], "label": None, "confidence": None, "evidence": None,
                            "grounded": True, "method": "draft"}
     t = data.get("type")
-    if isinstance(t, str) and t in by_name:
-        fields["schema_uid"] = _field(by_name[t].uid, t, data, "type", clean, False, "ai_classified")
+    if isinstance(t, str) and _named(by_name, t) is not None:
+        schema = _named(by_name, t)
+        fields["schema_uid"] = _field(schema.uid, schema.name, data, "type", clean, False, "ai_classified")
     elif t:
         dropped.append({"field": "type", "reason": f"“{t}” is not a ticket type here"})
     when = data.get("occurred_at")
@@ -423,6 +451,7 @@ def assist_ticket(db: Session, workspace_id: str, actor: str, endpoint: Endpoint
         # The report is the person's own words: it is the description, with secrets removed.
         fields["description"] = {"value": clean, "label": None, "confidence": None, "evidence": None,
                                  "grounded": True, "method": "person"}
+    _screen(fields, dropped, redactions)
     output = {"fields": fields, "dropped": dropped, "hypotheses": hypotheses}
     run = _record(db, workspace_id, actor, "ticket", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes,
                   redactions=redactions, output=output,
@@ -463,8 +492,10 @@ def assist_document(db: Session, workspace_id: str, actor: str, endpoint: Endpoi
         if isinstance(title, str) and title.strip():
             fields["title"] = _field(title.strip()[:200], None, data, "title", clean, False, "ai_extracted")
         t = data.get("type")
-        if isinstance(t, str) and t in by_name:
-            fields["document_type_uid"] = _field(by_name[t].uid, t, data, "type", clean, False, "ai_classified")
+        if isinstance(t, str) and _named(by_name, t) is not None:
+            doc_type = _named(by_name, t)
+            fields["document_type_uid"] = _field(doc_type.uid, doc_type.name, data, "type", clean, False,
+                                                 "ai_classified")
         elif t:
             dropped.append({"field": "type", "reason": f"“{t}” is not a document type here"})
         summary = data.get("summary")
@@ -475,6 +506,7 @@ def assist_document(db: Session, workspace_id: str, actor: str, endpoint: Endpoi
         if words:
             fields["attributes.argus_keywords"] = {"value": words, "label": "Keywords", "confidence": None,
                                                    "evidence": None, "grounded": True, "method": "draft"}
+    _screen(fields, dropped, redactions)
     output = {"fields": fields, "dropped": dropped} if data is not None else None
     run = _record(db, workspace_id, actor, "document", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes,
                   redactions=redactions, output=output,
