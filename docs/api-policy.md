@@ -135,6 +135,15 @@ and `POST /v1/issues/{uid}/transition`. If the record has changed since then:
 A person closes a `stale_command` review item with
 `POST /v1/ledger/review/stale/{id}/close`, `{"outcome": "applied" | "dismissed"}`.
 
+`POST /v1/installations/replace` is the guided replacement (flutter-app-design §8).
+- `dry_run: true` returns the checks and the consequences, and writes nothing.
+- A submission answers 200 `applied`, or 202 `proposed` with a `review_item`. A
+  `discrepancy_item` is added when the scanned outgoing unit is not the recorded one.
+- An approver decides a proposal with `POST /v1/ledger/review/replacements/{id}/confirm` or
+  `/reject`.
+- `GET /v1/ledger/review/mine` lists the review items routed to the caller, with the decisions
+  the field client may take on each.
+
 `POST /v1/installations/swap` accepts `seen_installation_uid`, which is `null` for an empty
 Position, and `evidence`. If the Position's current Installation is no longer the one the person
 saw, nothing is ended or started, and the replacement becomes a review item with the evidence.

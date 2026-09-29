@@ -192,6 +192,12 @@ class ApiClient {
           return AssistIn.fromJson(value);
         case 'AttachmentOut':
           return AttachmentOut.fromJson(value);
+        case 'CloseReviewIn':
+          return CloseReviewIn.fromJson(value);
+        case 'DecideIn':
+          return DecideIn.fromJson(value);
+        case 'DecideReplacementIn':
+          return DecideReplacementIn.fromJson(value);
         case 'DeviceIn':
           return DeviceIn.fromJson(value);
         case 'DocumentOut':
@@ -218,6 +224,8 @@ class ApiClient {
           return MyWorkspaceOut.fromJson(value);
         case 'OutcomeIn':
           return OutcomeIn.fromJson(value);
+        case 'ReplaceIn':
+          return ReplaceIn.fromJson(value);
         case 'RevokeIn':
           return RevokeIn.fromJson(value);
         case 'SchemaOut':

@@ -3062,6 +3062,18 @@ the app (`mobile/app/test`). A limit of A69: a password written in a photo reach
 because no OCR runs before it. What the model reads back is screened, and a credential is never
 proposed or stored. On-device OCR would redact it before the model.
 
+M3 is built:
+- the guided replacement: a dry run, then one atomic command, applied or proposed;
+- the review items routed to the person, with only the field decisions offered.
+
+A68 passes in `tests/test_replacement.py`. With a wrong outgoing unit and an interlock segment
+behind the Position:
+- the submission is a proposal with a discrepancy item;
+- nothing ends or starts;
+- no unit is created from the Position;
+- an approver's confirmation applies the swap, and the interlock segment then waits for its port
+  (A22).
+
 ### 24.10 Acceptance tests
 
 | # | Given | When | Then | Validates |

@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import OidcIdentity, get_identity, require_permission
+from app.auth import OidcIdentity, get_grants, get_identity, require_permission
 from app.db import get_db
 from app.ledger import connectivity, engine, rules, service, temporal, tickets
 from app.ledger.engine import LedgerError
@@ -408,6 +408,64 @@ def close_stale_command(conflict_id: str, body: CloseReviewIn, identity=Depends(
     return {"ok": True}
 
 
+# What the field client may decide on a review item, per kind (flutter-app-design §4.2 `review`).
+# Everything else is decided on the web, with the full record and the graph in front of the person.
+FIELD_DECISIONS = {
+    "replacement_proposal": ["confirm", "reject"],
+    "outgoing_discrepancy": ["resolve"],
+    "stale_command": ["applied", "dismissed"],
+    "ai_proposal": ["confirm", "edit", "reject"],
+}
+
+
+@router.get("/review/mine")
+def my_review_items(all: bool = False, identity=Depends(get_identity), grants=Depends(get_grants),
+                    workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """The review items routed to this person (the owner domain's steward or backup, or the
+    governance group), oldest first, with what the field client may decide. `all` lists every
+    item of the workspace; an API token acts for the workspace and sees them all."""
+    from app.auth import PatIdentity
+    from app.intake.proposals import AI_METHODS
+    from app.ledger import queues
+    from app.models.ledger import Claim
+    d = queues.owner_domain(db, workspace_id)
+    targets = {t.lower() for t in [(d.steward if d else None), (d.backup_steward if d else None),
+                                   *queues.governance_group()] if t}
+    if isinstance(identity, PatIdentity):
+        me, mine = set(), True
+    else:
+        me = {x.lower() for x in (identity.user.id, identity.user.email) if x}
+        mine = bool(me & targets)
+    can_approve = _can(db, identity, workspace_id, "approve")
+    out = []
+    for item in sorted(queues.items(db, workspace_id), key=lambda i: i["opened_at"]):
+        if not (all or mine):
+            break
+        kind, detail, decisions = item["kind"], None, []
+        if item["key"].startswith("conflict:"):
+            c = db.get(Conflict, item["key"][9:])
+            detail = c.detail if c else None
+            decisions = FIELD_DECISIONS.get(kind, [])
+            if kind == "replacement_proposal" and not can_approve:
+                decisions = []
+        elif item["key"].startswith("proposal:"):
+            claim = db.get(Claim, item["key"].split(":")[1])
+            if claim is not None:
+                detail = {"claim_id": claim.claim_id, "predicate": claim.predicate, "value": claim.value,
+                          "method": claim.method, "rule_id": claim.rule_id}
+                if claim.method in AI_METHODS:
+                    kind = "ai_proposal"
+                    from app.intake.proposals import evidence_of
+                    ev = evidence_of(db, claim.claim_id)
+                    detail.update({"confidence": ev["confidence"], "quote": (ev["evidence"] or {}).get("quote")})
+                    decisions = FIELD_DECISIONS["ai_proposal"]
+        out.append({"key": item["key"], "kind": kind, "queue": item["queue"], "age": item["age"],
+                    "overdue": item["overdue"], "opened_at": item["opened_at"],
+                    "record": _record_brief(db, item["subject_uid"]) if item["subject_uid"] else None,
+                    "detail": detail, "decisions": decisions})
+    return {"assigned_to_me": mine, "targets": sorted(targets) if mine else [], "items": out}
+
+
 @router.get("/review/queues")
 def review_queues(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """§18.2: each queue's size, age distribution and escalation, and who owns it."""
@@ -560,6 +618,119 @@ def swap(body: SwapIn, identity=Depends(get_identity),
         _fail(db, exc, workspace_id, actor, [{"kind": "swap", **body.model_dump(mode="json")}])
     db.commit()
     return result
+
+
+class ReplaceIn(BaseModel):
+    """A guided replacement (flutter-app-design §8). `seen_installation_uid` is the Installation the
+    person saw (null for an empty Position); `outgoing_uid` is the unit they scanned as removed."""
+    position_uid: str
+    incoming_uid: str
+    at: datetime
+    precision: str = "instant"
+    reason: str = "Replacement"
+    condition: Optional[str] = None
+    work_reference: Optional[str] = None
+    outgoing_uid: Optional[str] = None
+    seen_installation_uid: Optional[str] = None
+    evidence: Optional[dict] = None
+    dry_run: bool = False
+
+
+def _can(db: Session, identity, workspace_id: str, action: str, resource: str = "objects") -> bool:
+    from app.auth import PatIdentity, resolve_permission
+    return isinstance(identity, PatIdentity) or bool(resolve_permission(db, identity.user, workspace_id, action,
+                                                                         resource))
+
+
+@installations_router.post("/replace")
+def replace(body: ReplaceIn, identity=Depends(get_identity), grants=Depends(get_grants),
+            workspace_id: str = Depends(require_permission("modify")), db: Session = Depends(get_db)):
+    """Replace the unit at a Position: a dry run shows the checks and consequences; a submission
+    applies the swap in one batch, or records it as a proposal for an approver (§8, A68)."""
+    from app.ledger import replacement
+    from app.services import knowledge_hub as hub
+    from app.services.visibility import asset_visible_in
+    actor = actor_of(identity)
+    access = hub.Access(assets=True, tickets=_can(db, identity, workspace_id, "read", "tickets"),
+                        documents=_can(db, identity, workspace_id, "read", "documents"))
+    result = replacement.preview(
+        db, workspace_id, position_uid=body.position_uid, incoming_uid=body.incoming_uid,
+        outgoing_uid=body.outgoing_uid, seen_installation_uid=body.seen_installation_uid,
+        seen_given="seen_installation_uid" in body.model_fields_set,
+        visible=lambda a: asset_visible_in(a, workspace_id, grants),
+        can_approve=_can(db, identity, workspace_id, "approve"), access=access)
+    if body.dry_run:
+        db.rollback()
+        return result
+    errors = [c for c in result["checks"] if c["level"] == "error"]
+    if any(c["id"] == "stale" for c in errors):
+        from app.services import versions
+        position = db.get(Asset, body.position_uid)
+        command = body.model_dump(mode="json", exclude={"evidence", "dry_run"})
+        cid = versions.open_review(db, position, command, actor, body.seen_installation_uid,
+                                   result["current"]["installation_uid"], {"current": result["current"]},
+                                   evidence=body.evidence)
+        raise HTTPException(status_code=409, detail={
+            "error": "The Position's installation changed since you saw it. The replacement was not applied; "
+                     "it is waiting in the review queue with what you captured.",
+            "code": "stale", "review_item": cid, "current": result["current"]})
+    if errors:
+        first = errors[0]
+        raise HTTPException(status_code=409 if first.get("invariant") else 422, detail={
+            "error": first["message"], "code": "invariant" if first.get("invariant") else "invalid",
+            "invariant": first.get("invariant"), "field": "incoming_uid" if first["id"] != "position" else "position_uid",
+            "checks": errors})
+    command = body.model_dump(mode="json", exclude={"evidence", "dry_run"})
+    try:
+        out = replacement.submit(db, workspace_id, actor, command, result, body.evidence)
+    except (LedgerError, temporal.TemporalError) as exc:
+        _fail(db, exc, workspace_id, actor, [{"kind": "replace", **command}])
+    db.commit()
+    if out["outcome"] == "propose":
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=202, content={**out, "outcome": "proposed"})
+    return {**out, "outcome": "applied"}
+
+
+class DecideReplacementIn(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/review/replacements/{conflict_id}/confirm")
+def confirm_replacement(conflict_id: str, identity=Depends(get_identity), grants=Depends(get_grants),
+                        workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    """An approver applies a proposed replacement, after the same checks against the Position now."""
+    from app.ledger import replacement
+    from app.services.visibility import asset_visible_in
+    actor = actor_of(identity)
+    try:
+        out = replacement.confirm(db, workspace_id, actor, conflict_id,
+                                  visible=lambda a: asset_visible_in(a, workspace_id, grants))
+    except LookupError:
+        raise HTTPException(status_code=404, detail={"error": "No such proposal.", "code": "not_found"})
+    except (LedgerError, temporal.TemporalError) as exc:
+        _fail(db, exc, workspace_id, actor, [{"kind": "confirm_replacement", "item": conflict_id}])
+    if out["outcome"] == "refused":
+        db.rollback()
+        raise HTTPException(status_code=409, detail={"error": out["checks"][0]["message"], "code": "stale"
+                                                     if out["checks"][0]["id"] == "stale" else "invalid",
+                                                     "checks": out["checks"]})
+    db.commit()
+    return out
+
+
+@router.post("/review/replacements/{conflict_id}/reject")
+def reject_replacement(conflict_id: str, body: DecideReplacementIn, identity=Depends(get_identity),
+                       workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    from app.ledger import replacement
+    c = db.get(Conflict, conflict_id)
+    if c is None or c.workspace_id != workspace_id or c.conflict_type not in (replacement.PROPOSAL,
+                                                                               replacement.DISCREPANCY):
+        raise HTTPException(status_code=404, detail={"error": "No such review item.", "code": "not_found"})
+    replacement.close(db, conflict_id, actor_of(identity), "rejected" if c.conflict_type == replacement.PROPOSAL
+                      else "resolved", body.reason)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/policy/activate")

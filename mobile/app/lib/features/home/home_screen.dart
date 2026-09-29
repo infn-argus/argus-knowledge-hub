@@ -58,6 +58,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               switch (v) {
                 case 'register':
                   context.push('/register');
+                case 'reviews':
+                  context.push('/reviews');
                 case 'workspace':
                   context.push('/workspace');
                 case 'diagnostics':
@@ -68,6 +70,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'register', child: Text('Register equipment')),
+              PopupMenuItem(value: 'reviews', child: Text('Review items')),
               PopupMenuItem(value: 'workspace', child: Text('Switch workspace')),
               PopupMenuItem(value: 'diagnostics', child: Text('About and diagnostics')),
               PopupMenuItem(value: 'signout', child: Text('Sign out')),

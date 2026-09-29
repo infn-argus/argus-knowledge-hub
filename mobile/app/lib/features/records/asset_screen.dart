@@ -82,6 +82,19 @@ class _AssetBody extends StatelessWidget {
         )
       else
         for (final i in current) _installation(context, i),
+      if (a.isPosition)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              key: const Key('asset-replace'),
+              onPressed: () => context.push('/replace/${a.uid}'),
+              icon: const Icon(Icons.swap_horiz),
+              label: Text(current.isEmpty ? 'Install a unit' : 'Replace the unit'),
+            ),
+          ),
+        ),
       if (a.installations.length > current.length)
         ExpansionTile(
           title: Text('History (${a.installations.length - current.length})'),

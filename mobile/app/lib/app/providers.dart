@@ -6,6 +6,7 @@ import '../core/problem.dart';
 import '../core/session.dart';
 import '../data/api_service.dart';
 import '../data/capture_repositories.dart';
+import '../data/replacement_repositories.dart';
 import '../data/repositories.dart';
 import '../domain/capture.dart';
 import '../domain/models.dart';
@@ -232,4 +233,14 @@ final transitionsProvider = FutureProvider.autoDispose.family<List<TransitionOpt
 final notificationsProvider = FutureProvider.autoDispose<List<NotificationItem>>((ref) {
   ref.watch(workspaceIdProvider);
   return ref.watch(notificationRepositoryProvider).mine();
+});
+
+// --------------------------------------------------------------------------- replacement and review (M3)
+
+final replacementRepositoryProvider = Provider((ref) => ReplacementRepository(ref.watch(apiServiceProvider)));
+final reviewRepositoryProvider = Provider((ref) => ReviewRepository(ref.watch(apiServiceProvider)));
+
+final myReviewItemsProvider = FutureProvider.autoDispose<List<ReviewItem>>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(reviewRepositoryProvider).mine();
 });

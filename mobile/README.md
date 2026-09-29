@@ -36,7 +36,12 @@ Phases **M1** (the read-only client) and **M2** (capture and tickets) are built.
 Every command carries an `Idempotency-Key` derived from its own uid. Edits send the version read
 as `If-Match`.
 
-Replacement and offline work are phases M3 and M4 (§15 of the design).
+- **Replacement and review (M3):**
+  - the guided replacement of the unit at a Position, with the server's dry run, consequences
+    and evidence. It is applied at once or submitted as a proposal;
+  - the review items routed to the person, one at a time, with the decisions allowed here.
+
+Offline work is phase M4 (§15 of the design).
 
 Before a release, scan the built bundle for credentials, prompts and provider endpoints:
 `mobile/tool/check_build.sh build/web` (or an unzipped APK or IPA).

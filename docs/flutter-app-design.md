@@ -7,6 +7,7 @@ Status:
 - **M0** server foundations: built, except the push relay.
 - **M1**, the read-only client: built.
 - **M2**, capture and tickets: built, except push.
+- **M3**, replacement and review: built.
 
 See §15. The client is in `mobile/`.
 [`asset-model-revision.md`](asset-model-revision.md) §24 is normative. It
@@ -148,7 +149,7 @@ are not held to feature parity. Each is designed for where it is used:
 | Idempotency | **built:** `Idempotency-Key` on any mutating call (§3.2) | none |
 | Version preconditions | **built:** assets (latest ledger event), tickets (`version` with per-field versions) and documents (revision and state) return an `ETag`; asset edits, ticket edits and transitions take `If-Match` (§3.3) | — |
 | One error shape | **built:** every error keeps `detail` and adds a top-level `problem` (§3.4) | none |
-| Atomic replacement | yes: `POST /v1/installations/swap` ends and starts in one batch (revision §8.4); **built:** `seen_installation_uid` and `evidence`, so a stale replacement becomes a review item | an outgoing-unit check, a work reference and port-confirmation handling (§8) |
+| Atomic replacement | **built:** `POST /v1/installations/replace` with a dry run, and the lower-level `swap`. It checks the outgoing unit, the incoming identity, I-INS-1, compatibility and duplicates, and reports the consequences (§8). It applies in one batch, or becomes a `replacement_proposal` for an approver | the push relay for the approver (U21) |
 | AI Intake | yes: `/v1/intake/guide`, `/assist`, `/assist/{kind}/file`, `/propose/asset/{uid}`, `/proposals/{claim_id}` | none beyond idempotency. Mobile uploads use the same endpoints |
 | Media upload | **built:** resumable `/v1/uploads`, with a client SHA-256 verified by the server, limits per type, EXIF GPS removal, and attachment to a ticket or asset (§5.5) | the U23 values |
 | Notifications | in-app rows and e-mail (`app.services.notify`) | device registration and a **push relay** that sends content-free notifications (§11) |
@@ -743,7 +744,37 @@ M2, in `mobile/app` and on the server:
   - Redacting text *inside a photo* before the model needs on-device OCR, which is not built.
 - **Notifications:** an in-app inbox with an unread badge. Push waits for U21.
 
+M3, in `mobile/app` and on the server:
+- **Guided replacement** (§8), from a Position:
+  1. What is installed now.
+  2. The outgoing unit: the recorded one, or a different unit scanned in place, which opens an
+     `outgoing_discrepancy` review item.
+  3. The time, reason, condition and work reference. The ticket gets a line saying what was
+     replaced.
+  4. The incoming unit: scanned, or registered from its nameplate when it is unknown.
+  5. The server's dry run: identity, I-INS-1, compatibility and duplicates. The consequences
+     come from the confirmed graph: Access Points, segments with their safety class, the segments
+     the person cannot see (counted and still checked), documents and open tickets.
+  6. Evidence photos, attached to the incoming unit.
+- **The result:** the replacement is applied in one batch, or submitted as a proposal with its
+  reasons. The reasons are a different outgoing unit, a port that needs a steward, or missing
+  owner's rights. An approver confirms the proposal against the Position as it is then, or rejects
+  it (A68).
+- **Assigned review items**, one at a time: `GET /v1/ledger/review/mine` lists the items routed
+  to the person, with the decisions the field client may take:
+  - confirm or reject a proposed replacement;
+  - resolve a discrepancy;
+  - close a stale command;
+  - confirm, correct or reject an AI proposal.
+
+  Everything else says to decide it on the web.
+
 Tests:
+- 39 app tests;
+- `tests/test_replacement.py`;
+- a replacement driven in the web build against the live API.
+
+M2 tests:
 - 35 app tests;
 - the server tests for A69 and A70;
 - the report and registration flows, driven in the web build against a live API with a

@@ -1172,7 +1172,8 @@ def _write_record_status(db: Session, record: Asset, outcome: Optional[_Outcome]
 # Review items the validate and derive stages own; projection leaves them alone.
 DERIVED_CONFLICTS = ("possible_overlap", "port_mapping_unresolved", "port_confirmation_required", "port_map_invalid",
                      "identity_candidate", "merge_installation_overlap",
-                     "stale_command")      # opened by app.services.versions, closed by a person
+                     "stale_command",      # opened by app.services.versions, closed by a person
+                     "replacement_proposal", "outgoing_discrepancy")   # app.ledger.replacement
 
 
 def _write_conflicts(db: Session, record: Asset, new: dict, cause: str, emit: bool) -> None:

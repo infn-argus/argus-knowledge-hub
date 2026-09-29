@@ -10,6 +10,9 @@ const ticketUid = '3ad8eae6-5a19-4c15-9e2e-be4ab4b6f983';
 const documentUid = '1ee032b4-5a00-4716-a269-8adce879fd8c';
 const draftUid = 'a0f68206-97f9-49cd-9fb8-f3f0fd322f6c';
 const workspaceId = 'slice-20463f';
+const recordedUnit = '506c63d7-f353-4b5f-9e6d-a0528d4e679f';
+const recordedInstallation = 'a54b9136-c75f-4840-9d0e-1830186774dc';
+const incomingUnit = '812ddce6-b3a6-4d69-8e23-4e3600136faa';
 
 String fixture(String name) => File('test/fixtures/$name.json').readAsStringSync();
 Object? fixtureJson(String name) => jsonDecode(fixture(name));
@@ -83,6 +86,17 @@ class FakeArgus {
           return _json({...a, 'uid': b['uid'], 'name': b['name'], 'schema_uid': b['schema_uid'],
             'attributes': b['attributes']}, 201);
       }
+      if (p == '/v1/installations/replace') {
+        final b = body();
+        final mismatch = b['outgoing_uid'] != recordedUnit;
+        if (b['dry_run'] == true) return _json(fixture(mismatch ? 'replace_preview_mismatch' : 'replace_preview'));
+        if (mismatch) return _json(fixture('replace_proposed'), 202);
+        return _json({'outcome': 'applied', 'reasons': [], 'ended': [recordedInstallation], 'installation_uid': 'inst-new'});
+      }
+      if (RegExp(r'^/v1/ledger/review/(replacements|stale)/[^/]+/(confirm|reject|close)$').hasMatch(p) ||
+          RegExp(r'^/v1/intake/proposals/[^/]+$').hasMatch(p)) {
+        return _json({'ok': true, 'outcome': 'applied'});
+      }
       if (RegExp(r'^/v1/intake/runs/[^/]+/outcome$').hasMatch(p)) return _json({'ok': true}, 201);
       if (RegExp(r'^/v1/issues/[^/]+/comments$').hasMatch(p)) {
         final c = fixtureJson('comment_created') as Map<String, dynamic>;
@@ -126,9 +140,14 @@ class FakeArgus {
       '/v1/documents/$draftUid' => 'draft',
       '/v1/documents/$draftUid/current' => 'draft_current',
       '/v1/links/resolve' when q['path'] == '/position/$positionUid' => 'resolve_position',
+      '/v1/ledger/review/mine' => 'review_mine',
       _ => null,
     };
     if (name == 'draft_current') status = 404;
+    if (m == 'GET' && p == '/v1/links/resolve' && q['path'] == '/lookup/IP-NEW-1') {
+      return _json({'kind': 'asset', 'uid': incomingUnit, 'key': 'SLICE-20463F-IP-0001', 'name': 'Ion pump gun area 2',
+        'type': 'Ion Pump', 'web_path': '/assets/$incomingUnit'});
+    }
     if (name == null && m == 'GET') {
       if (RegExp(r'^/v1/issues/[^/]+/comments$').hasMatch(p)) return _json(fixture('comments'));
       if (RegExp(r'^/v1/issues/[^/]+/attachments$').hasMatch(p)) return _json([]);

@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../features/auth/signin_screen.dart';
 import '../features/capture/register_screen.dart';
+import '../features/installations/replace_screen.dart';
+import '../features/review/review_screen.dart';
 import '../features/notifications/inbox_screen.dart';
 import '../features/tickets/report_screen.dart';
 import '../features/auth/update_screen.dart';
@@ -72,11 +74,16 @@ final routerProvider = Provider<GoRouter>((ref) {
           path: '/workspace',
           builder: (_, st) => WorkspaceScreen(returnTo: safeReturn(st.uri.queryParameters['from']))),
       GoRoute(path: '/', builder: (_, _) => const HomeScreen()),
-      GoRoute(path: '/scan', builder: (_, _) => const ScanScreen()),
+      GoRoute(path: '/scan', builder: (_, st) => ScanScreen(pick: st.uri.queryParameters['pick'] == '1')),
       GoRoute(path: '/diagnostics', builder: (_, _) => const DiagnosticsScreen()),
       GoRoute(path: '/inbox', builder: (_, _) => const InboxScreen()),
       GoRoute(path: '/report/:uid', builder: (_, st) => ReportScreen(subjectUid: st.pathParameters['uid']!)),
-      GoRoute(path: '/register', builder: (_, st) => RegisterScreen(label: st.uri.queryParameters['label'])),
+      GoRoute(
+          path: '/register',
+          builder: (_, st) =>
+              RegisterScreen(label: st.uri.queryParameters['label'], pick: st.uri.queryParameters['pick'] == '1')),
+      GoRoute(path: '/replace/:uid', builder: (_, st) => ReplaceScreen(positionUid: st.pathParameters['uid']!)),
+      GoRoute(path: '/reviews', builder: (_, _) => const ReviewScreen()),
       GoRoute(path: '/asset/:uid', builder: (_, st) => AssetScreen(uid: st.pathParameters['uid']!)),
       // A document code or a Jira key in the link is resolved first; a uid opens directly.
       GoRoute(

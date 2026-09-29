@@ -175,3 +175,112 @@ class NotificationItem {
   final bool read;
   final DateTime? at;
 }
+
+// --------------------------------------------------------------------------- replacement and review (M3)
+
+class BriefRecord {
+  const BriefRecord({this.uid, this.key, this.name, this.type, this.restricted = false});
+
+  final String? uid;
+  final String? key;
+  final String? name;
+  final String? type;
+  final bool restricted;
+
+  String get label => restricted ? 'Restricted record' : [key, name].whereType<String>().join(' · ');
+
+  static BriefRecord? fromJson(Object? o) => o is Map
+      ? BriefRecord(
+          uid: o['uid']?.toString(),
+          key: o['key']?.toString(),
+          name: o['name']?.toString(),
+          type: o['type']?.toString(),
+          restricted: o['restricted'] == true)
+      : null;
+}
+
+class SegmentConsequence {
+  const SegmentConsequence({required this.name, required this.status, required this.safetyClass, this.reason});
+
+  final String name;
+  final String status; // attaches | confirmation_required | unresolved | not_applicable
+  final String safetyClass;
+  final String? reason;
+
+  bool get needsConfirmation => status == 'confirmation_required' || status == 'unresolved';
+}
+
+/// What the server says a replacement would do (flutter-app-design §8 steps 6 and 8).
+class ReplacementPreview {
+  const ReplacementPreview({
+    required this.outcome,
+    this.reasons = const [],
+    this.checks = const [],
+    this.currentInstallationUid,
+    this.currentUnit,
+    this.incoming,
+    this.accessPoints = const [],
+    this.segments = const [],
+    this.hiddenSegments = 0,
+    this.documents = const [],
+    this.openTickets = const [],
+  });
+
+  final String outcome; // apply | propose | refused
+  final List<String> reasons;
+  final List<GuideCheck> checks;
+  final String? currentInstallationUid;
+  final BriefRecord? currentUnit;
+  final BriefRecord? incoming;
+  final List<BriefRecord> accessPoints;
+  final List<SegmentConsequence> segments;
+  final int hiddenSegments;
+  final List<({String uid, String title})> documents;
+  final List<({String uid, String title})> openTickets;
+
+  bool get refused => outcome == 'refused';
+}
+
+class ReplacementResult {
+  const ReplacementResult({required this.applied, this.reasons = const [], this.reviewItem, this.discrepancyItem});
+
+  final bool applied;
+  final List<String> reasons;
+  final String? reviewItem;
+  final String? discrepancyItem;
+}
+
+/// One review item routed to the person, with the decisions the field client may take.
+class ReviewItem {
+  const ReviewItem({
+    required this.key,
+    required this.kind,
+    required this.queue,
+    this.age = 0,
+    this.overdue = false,
+    this.record,
+    this.detail = const {},
+    this.decisions = const [],
+  });
+
+  final String key; // conflict:<id> | proposal:<claim>:<uid>:<predicate> | revision:<id>
+  final String kind;
+  final String queue;
+  final int age;
+  final bool overdue;
+  final BriefRecord? record;
+  final Map<String, Object?> detail;
+  final List<String> decisions;
+
+  String get id => key.split(':')[1];
+
+  String get title => switch (kind) {
+        'replacement_proposal' => 'Proposed replacement',
+        'outgoing_discrepancy' => 'Outgoing unit differs from the record',
+        'stale_command' => 'A change made against an older version',
+        'ai_proposal' => 'Value proposed by the assistant',
+        'port_confirmation_required' => 'Port to confirm',
+        'identity_candidate' => 'Possible duplicate',
+        _ => kind.replaceAll('_', ' '),
+      };
+}

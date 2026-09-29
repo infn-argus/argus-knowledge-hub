@@ -75,9 +75,11 @@ Class | Method | HTTP request | Description
 *HubApi* | [**search**](doc//HubApi.md#search) | **GET** /v1/hub/search | Search
 *HubApi* | [**ticketContext**](doc//HubApi.md#ticketcontext) | **GET** /v1/hub/tickets/{uid}/context | Ticket Context
 *InstallationsApi* | [**listInstallations**](doc//InstallationsApi.md#listinstallations) | **GET** /v1/installations | List Installations
+*InstallationsApi* | [**replace**](doc//InstallationsApi.md#replace) | **POST** /v1/installations/replace | Replace
 *InstallationsApi* | [**swap**](doc//InstallationsApi.md#swap) | **POST** /v1/installations/swap | Swap
 *IntakeApi* | [**assistFromFile**](doc//IntakeApi.md#assistfromfile) | **POST** /v1/intake/assist/{kind}/file | Assist From File
 *IntakeApi* | [**assistTicket**](doc//IntakeApi.md#assistticket) | **POST** /v1/intake/assist/ticket | Assist Ticket
+*IntakeApi* | [**decideProposal**](doc//IntakeApi.md#decideproposal) | **POST** /v1/intake/proposals/{claim_id} | Decide Proposal
 *IntakeApi* | [**guideAsset**](doc//IntakeApi.md#guideasset) | **POST** /v1/intake/guide/asset | Guide Asset
 *IntakeApi* | [**guideTicket**](doc//IntakeApi.md#guideticket) | **POST** /v1/intake/guide/ticket | Guide Ticket
 *IntakeApi* | [**recordOutcome**](doc//IntakeApi.md#recordoutcome) | **POST** /v1/intake/runs/{run_id}/outcome | Record Outcome
@@ -89,6 +91,10 @@ Class | Method | HTTP request | Description
 *IssuesApi* | [**listTransitions**](doc//IssuesApi.md#listtransitions) | **GET** /v1/issues/{uid}/transitions | List Transitions
 *IssuesApi* | [**transitionIssue**](doc//IssuesApi.md#transitionissue) | **POST** /v1/issues/{uid}/transition | Transition Issue
 *IssuesApi* | [**updateIssue**](doc//IssuesApi.md#updateissue) | **PUT** /v1/issues/{uid} | Update Issue
+*LedgerApi* | [**closeStaleCommand**](doc//LedgerApi.md#closestalecommand) | **POST** /v1/ledger/review/stale/{conflict_id}/close | Close Stale Command
+*LedgerApi* | [**confirmReplacement**](doc//LedgerApi.md#confirmreplacement) | **POST** /v1/ledger/review/replacements/{conflict_id}/confirm | Confirm Replacement
+*LedgerApi* | [**myReviewItems**](doc//LedgerApi.md#myreviewitems) | **GET** /v1/ledger/review/mine | My Review Items
+*LedgerApi* | [**rejectReplacement**](doc//LedgerApi.md#rejectreplacement) | **POST** /v1/ledger/review/replacements/{conflict_id}/reject | Reject Replacement
 *LookupApi* | [**lookup**](doc//LookupApi.md#lookup) | **GET** /v1/lookup/{identifier} | Lookup
 *MetaApi* | [**apiMeta**](doc//MetaApi.md#apimeta) | **GET** /v1/meta/api | Api Meta
 *NotificationsApi* | [**markRead**](doc//NotificationsApi.md#markread) | **POST** /v1/notifications/{nid}/read | Mark Read
@@ -112,6 +118,9 @@ Class | Method | HTTP request | Description
  - [AssetUpdate](doc//AssetUpdate.md)
  - [AssistIn](doc//AssistIn.md)
  - [AttachmentOut](doc//AttachmentOut.md)
+ - [CloseReviewIn](doc//CloseReviewIn.md)
+ - [DecideIn](doc//DecideIn.md)
+ - [DecideReplacementIn](doc//DecideReplacementIn.md)
  - [DeviceIn](doc//DeviceIn.md)
  - [DocumentOut](doc//DocumentOut.md)
  - [DocumentRevisionOut](doc//DocumentRevisionOut.md)
@@ -125,6 +134,7 @@ Class | Method | HTTP request | Description
  - [MeOut](doc//MeOut.md)
  - [MyWorkspaceOut](doc//MyWorkspaceOut.md)
  - [OutcomeIn](doc//OutcomeIn.md)
+ - [ReplaceIn](doc//ReplaceIn.md)
  - [RevokeIn](doc//RevokeIn.md)
  - [SchemaOut](doc//SchemaOut.md)
  - [SwapIn](doc//SwapIn.md)

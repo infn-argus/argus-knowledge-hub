@@ -10,7 +10,10 @@ import '../../core/link_parser.dart';
 /// is parsed before anything happens: only ARGUS links are followed, other links are refused and
 /// plain values are looked up. Typing the label is always possible (a damaged label, no camera).
 class ScanScreen extends ConsumerStatefulWidget {
-  const ScanScreen({super.key});
+  const ScanScreen({super.key, this.pick = false});
+
+  /// Return what was read to the screen that asked, instead of opening it.
+  final bool pick;
 
   @override
   ConsumerState<ScanScreen> createState() => _ScanScreenState();
@@ -37,10 +40,11 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     switch (result) {
       case ArgusPath(:final path):
         _handling = true;
-        context.pushReplacement(path);
+        widget.pick ? context.pop(path) : context.pushReplacement(path);
       case LabelValue(:final value):
         _handling = true;
-        context.pushReplacement('/lookup/${Uri.encodeComponent(value)}');
+        widget.pick ? context.pop('/lookup/${Uri.encodeComponent(value)}')
+            : context.pushReplacement('/lookup/${Uri.encodeComponent(value)}');
       case Refused(:final reason):
         setState(() => _refusal = reason);
     }

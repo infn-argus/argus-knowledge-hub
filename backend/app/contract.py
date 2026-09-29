@@ -62,6 +62,13 @@ FIELD_OPERATIONS = [
     ("post", "/v1/intake/runs/{run_id}/outcome"),
     ("get", "/v1/notifications"),
     ("post", "/v1/notifications/{nid}/read"),
+    # Replacement and review (M3)
+    ("post", "/v1/installations/replace"),
+    ("get", "/v1/ledger/review/mine"),
+    ("post", "/v1/ledger/review/replacements/{conflict_id}/confirm"),
+    ("post", "/v1/ledger/review/replacements/{conflict_id}/reject"),
+    ("post", "/v1/ledger/review/stale/{conflict_id}/close"),
+    ("post", "/v1/intake/proposals/{claim_id}"),
 ]
 
 

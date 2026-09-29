@@ -1,0 +1,163 @@
+{
+    "assigned_to_me": true,
+    "targets": [],
+    "items": [
+        {
+            "key": "conflict:217df1a80e24d9898604c9c0",
+            "kind": "source_vs_confirmed",
+            "queue": "non_blocking",
+            "age": 1,
+            "overdue": false,
+            "opened_at": "2026-09-28T20:17:14.048800+00:00",
+            "record": {
+                "uid": "a54b9136-c75f-4840-9d0e-1830186774dc",
+                "key": "INS-01M3MTM6768A8HE1ZQFE397AR0",
+                "name": "INS-01M3MTM6768A8HE1ZQFE397AR0",
+                "type": "Installation",
+                "record_status": "Active"
+            },
+            "detail": {
+                "sources": [
+                    {
+                        "kind": "before_records",
+                        "bound": "2026-09-01T08:00:00+00:00"
+                    }
+                ],
+                "confirmed": {
+                    "kind": "date",
+                    "nominal": "2026-01-12T00:00:00+00:00",
+                    "precision": "day"
+                }
+            },
+            "decisions": []
+        },
+        {
+            "key": "conflict:ccbf4ad4f5ec8591c1450fcf",
+            "kind": "outgoing_discrepancy",
+            "queue": "non_blocking",
+            "age": 0,
+            "overdue": false,
+            "opened_at": "2026-09-29T11:31:08.156606+00:00",
+            "record": {
+                "uid": "b3bc26da-32af-4d88-9551-612592db3359",
+                "key": "S7C415E:POS:GUNSIP01",
+                "name": "GUNSIP01",
+                "type": "Equipment Position",
+                "record_status": "Active"
+            },
+            "detail": {
+                "command": {
+                    "at": "2026-09-29T10:00:00Z",
+                    "reason": "Failure",
+                    "condition": null,
+                    "precision": "instant",
+                    "incoming_uid": "812ddce6-b3a6-4d69-8e23-4e3600136faa",
+                    "outgoing_uid": "812ddce6-b3a6-4d69-8e23-4e3600136faa",
+                    "position_uid": "b3bc26da-32af-4d88-9551-612592db3359",
+                    "work_reference": null,
+                    "seen_installation_uid": "a54b9136-c75f-4840-9d0e-1830186774dc"
+                },
+                "scanned": {
+                    "key": "SLICE-20463F-IP-0001",
+                    "uid": "812ddce6-b3a6-4d69-8e23-4e3600136faa",
+                    "name": "Ion pump gun area 2",
+                    "type": "Ion Pump",
+                    "record_status": "Active"
+                },
+                "evidence": {
+                    "note": "label unreadable"
+                },
+                "recorded": {
+                    "key": null,
+                    "uid": null,
+                    "name": "Restricted record",
+                    "type": null,
+                    "restricted": true
+                },
+                "submitted_at": "2026-09-29T11:31:08.155195+00:00",
+                "submitted_by": "api-token"
+            },
+            "decisions": [
+                "resolve"
+            ]
+        },
+        {
+            "key": "conflict:d1680a2c5d0eb341f389ddd5",
+            "kind": "replacement_proposal",
+            "queue": "non_blocking",
+            "age": 0,
+            "overdue": false,
+            "opened_at": "2026-09-29T11:31:08.161800+00:00",
+            "record": {
+                "uid": "b3bc26da-32af-4d88-9551-612592db3359",
+                "key": "S7C415E:POS:GUNSIP01",
+                "name": "GUNSIP01",
+                "type": "Equipment Position",
+                "record_status": "Active"
+            },
+            "detail": {
+                "checks": [
+                    {
+                        "id": "outgoing",
+                        "level": "warning",
+                        "message": "The unit you scanned is not the one recorded at this Position. The difference goes to review; nothing is corrected silently.",
+                        "scanned": {
+                            "key": "SLICE-20463F-IP-0001",
+                            "uid": "812ddce6-b3a6-4d69-8e23-4e3600136faa",
+                            "name": "Ion pump gun area 2",
+                            "type": "Ion Pump",
+                            "record_status": "Active"
+                        },
+                        "recorded": {
+                            "key": null,
+                            "uid": null,
+                            "name": "Restricted record",
+                            "type": null,
+                            "restricted": true
+                        }
+                    }
+                ],
+                "command": {
+                    "at": "2026-09-29T10:00:00Z",
+                    "reason": "Failure",
+                    "condition": null,
+                    "precision": "instant",
+                    "incoming_uid": "812ddce6-b3a6-4d69-8e23-4e3600136faa",
+                    "outgoing_uid": "812ddce6-b3a6-4d69-8e23-4e3600136faa",
+                    "position_uid": "b3bc26da-32af-4d88-9551-612592db3359",
+                    "work_reference": null,
+                    "seen_installation_uid": "a54b9136-c75f-4840-9d0e-1830186774dc"
+                },
+                "current": {
+                    "unit": {
+                        "key": null,
+                        "uid": null,
+                        "name": "Restricted record",
+                        "type": null,
+                        "restricted": true
+                    },
+                    "installation_uid": "a54b9136-c75f-4840-9d0e-1830186774dc"
+                },
+                "reasons": [
+                    "the outgoing unit differs from the recorded one"
+                ],
+                "evidence": {
+                    "note": "label unreadable"
+                },
+                "incoming": {
+                    "key": "SLICE-20463F-IP-0001",
+                    "uid": "812ddce6-b3a6-4d69-8e23-4e3600136faa",
+                    "name": "Ion pump gun area 2",
+                    "type": "Ion Pump",
+                    "record_status": "Active"
+                },
+                "submitted_at": "2026-09-29T11:31:08.155195+00:00",
+                "submitted_by": "api-token"
+            },
+            "decisions": [
+                "confirm",
+                "reject"
+            ]
+        }
+    ]
+}

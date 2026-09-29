@@ -24,7 +24,10 @@ const baseFields = ['manufacturer', 'model', 'serial', 'inventory_number'];
 /// No Equipment is made from a Position, channel or scanned name (I-MOB-6): only from a photo or
 /// from values the person types.
 class RegisterScreen extends ConsumerStatefulWidget {
-  const RegisterScreen({super.key, this.label});
+  const RegisterScreen({super.key, this.label, this.pick = false});
+
+  /// Return the new unit's uid to the screen that asked (the replacement), instead of opening it.
+  final bool pick;
 
   /// A label value that found nothing (a serial, an inventory number), offered as the serial.
   final String? label;
@@ -154,7 +157,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Registered, but the nameplate photo was not sent.')));
       }
-      context.pushReplacement('/asset/$uid');
+      widget.pick ? context.pop(uid) : context.pushReplacement('/asset/$uid');
     } on Problem catch (p) {
       setState(() => _error = p.field != null ? '${p.message} (${p.field})' : p.message);
     } finally {
