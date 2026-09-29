@@ -144,6 +144,15 @@ A person closes a `stale_command` review item with
 - `GET /v1/ledger/review/mine` lists the review items routed to the caller, with the decisions
   the field client may take on each.
 
+**Offline commands.** A mutating request may carry `X-ARGUS-Captured-At`: when the person captured
+it, in server time.
+- If that is longer ago than the offline retention (`ARGUS_OFFLINE_RETENTION_DAYS`), the request
+  answers 422 `expired`, and nothing is applied.
+- A request already accepted under its idempotency key is still answered again.
+
+`GET /v1/issues?mine=true` lists the open tickets assigned to the caller, for the field client's
+prefetch.
+
 `POST /v1/installations/swap` accepts `seen_installation_uid`, which is `null` for an empty
 Position, and `evidence`. If the Position's current Installation is no longer the one the person
 saw, nothing is ended or started, and the replacement becomes a review item with the evidence.

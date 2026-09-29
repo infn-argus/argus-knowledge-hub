@@ -372,6 +372,89 @@ class IssuesApi {
     return null;
   }
 
+  /// List Issues
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] schemaUid:
+  ///
+  /// * [bool] mine:
+  ///   Only the open tickets assigned to the caller (the field client's prefetch)
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Response> listIssuesWithHttpInfo({ String? schemaUid, bool? mine, String? authorization, String? xWorkspaceId, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/issues';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (schemaUid != null) {
+      queryParams.addAll(_queryParams('', 'schema_uid', schemaUid));
+    }
+    if (mine != null) {
+      queryParams.addAll(_queryParams('', 'mine', mine));
+    }
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// List Issues
+  ///
+  /// Parameters:
+  ///
+  /// * [String] schemaUid:
+  ///
+  /// * [bool] mine:
+  ///   Only the open tickets assigned to the caller (the field client's prefetch)
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<List<IssueOut>?> listIssues({ String? schemaUid, bool? mine, String? authorization, String? xWorkspaceId, }) async {
+    final response = await listIssuesWithHttpInfo( schemaUid: schemaUid, mine: mine, authorization: authorization, xWorkspaceId: xWorkspaceId, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<IssueOut>') as List)
+        .cast<IssueOut>()
+        .toList(growable: false);
+
+    }
+    return null;
+  }
+
   /// List Transitions
   ///
   /// Where this ticket can go next, and what each move needs.

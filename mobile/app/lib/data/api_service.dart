@@ -13,7 +13,14 @@ import '../core/session.dart';
 /// carries (authentication, workspace, client version, device) and every failure turned into a
 /// [Problem]. Nothing else in the app talks HTTP (flutter-app-design §2.2).
 class ApiService {
-  ApiService(this.config, this.sessionOf, {this.onProblem, this.ensureFresh, this.httpClient});
+  ApiService(this.config, this.sessionOf, {this.onProblem, this.ensureFresh, this.httpClient, this.capturedAt});
+
+  /// The same service, stamping every request with when a queued command was captured.
+  ApiService capturing(DateTime at) =>
+      ApiService(config, sessionOf, onProblem: onProblem, ensureFresh: ensureFresh, httpClient: httpClient, capturedAt: at);
+
+  /// Set on a service made by [capturing].
+  final DateTime? capturedAt;
 
   final AppConfig config;
   final Session? Function() sessionOf;
@@ -32,7 +39,7 @@ class ApiService {
 
   String get base => config.apiBase.replaceAll(RegExp(r'/+$'), '');
 
-  Map<String, String> headers({String? idempotencyKey, String? ifMatch}) {
+  Map<String, String> headers({String? idempotencyKey, String? ifMatch, DateTime? capturedAt}) {
     final s = sessionOf();
     return {
       'X-ARGUS-Client': 'flutter/${config.appVersion}/$platform',
@@ -42,13 +49,17 @@ class ApiService {
       // A command keeps its key for every retry, so a lost answer never writes twice (§3.2).
       'Idempotency-Key': ?idempotencyKey,
       'If-Match': ?ifMatch,
+      // When the person captured a queued command, in server time: the server refuses one older than
+      // the offline retention (A65).
+      if ((capturedAt ?? this.capturedAt) != null)
+        'X-ARGUS-Captured-At': (capturedAt ?? this.capturedAt)!.toUtc().toIso8601String(),
     };
   }
 
-  api.ApiClient _client({String? idempotencyKey, String? ifMatch}) {
+  api.ApiClient _client({String? idempotencyKey, String? ifMatch, DateTime? capturedAt}) {
     final c = api.ApiClient(basePath: base);
     if (httpClient != null) c.client = httpClient!;
-    headers(idempotencyKey: idempotencyKey, ifMatch: ifMatch).forEach(c.addDefaultHeader);
+    headers(idempotencyKey: idempotencyKey, ifMatch: ifMatch, capturedAt: capturedAt).forEach(c.addDefaultHeader);
     return c;
   }
 
@@ -71,19 +82,19 @@ class ApiService {
   /// request (path, parameters, headers) and the JSON body is decoded here, since the generated
   /// deserializer has no case for an untyped value.
   Future<Object?> json(Future<http.Response> Function(api.ApiClient c) body,
-      {String? idempotencyKey, String? ifMatch}) async {
-    final r = await raw((c) => body(c), idempotencyKey: idempotencyKey, ifMatch: ifMatch);
+      {String? idempotencyKey, String? ifMatch, DateTime? capturedAt}) async {
+    final r = await raw((c) => body(c), idempotencyKey: idempotencyKey, ifMatch: ifMatch, capturedAt: capturedAt);
     return r.body;
   }
 
   /// Like [json], with the status and headers (`202` for a proposed transition, the `ETag`).
   Future<({int status, Object? body, Map<String, String> headers})> raw(
       Future<http.Response> Function(api.ApiClient c) body,
-      {String? idempotencyKey, String? ifMatch}) async {
+      {String? idempotencyKey, String? ifMatch, DateTime? capturedAt}) async {
     if (ensureFresh != null) await ensureFresh!();
     Problem problem;
     try {
-      final r = await body(_client(idempotencyKey: idempotencyKey, ifMatch: ifMatch));
+      final r = await body(_client(idempotencyKey: idempotencyKey, ifMatch: ifMatch, capturedAt: capturedAt));
       final text = utf8.decode(r.bodyBytes, allowMalformed: true);
       if (r.statusCode < 400) {
         return (status: r.statusCode, body: text.isEmpty ? null : jsonDecode(text), headers: r.headers);

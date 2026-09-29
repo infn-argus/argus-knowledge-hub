@@ -85,3 +85,4 @@ Future<Running> start(WidgetTester tester, {Map<String, String> stored = signedI
   await tester.pumpAndSettle();
   return Running(server, photos, tester);
 }
+

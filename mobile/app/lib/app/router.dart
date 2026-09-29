@@ -6,6 +6,7 @@ import '../features/auth/signin_screen.dart';
 import '../features/capture/register_screen.dart';
 import '../features/installations/replace_screen.dart';
 import '../features/review/review_screen.dart';
+import '../features/sync/outbox_screen.dart';
 import '../features/notifications/inbox_screen.dart';
 import '../features/tickets/report_screen.dart';
 import '../features/auth/update_screen.dart';
@@ -84,6 +85,7 @@ final routerProvider = Provider<GoRouter>((ref) {
               RegisterScreen(label: st.uri.queryParameters['label'], pick: st.uri.queryParameters['pick'] == '1')),
       GoRoute(path: '/replace/:uid', builder: (_, st) => ReplaceScreen(positionUid: st.pathParameters['uid']!)),
       GoRoute(path: '/reviews', builder: (_, _) => const ReviewScreen()),
+      GoRoute(path: '/outbox', builder: (_, _) => const OutboxScreen()),
       GoRoute(path: '/asset/:uid', builder: (_, st) => AssetScreen(uid: st.pathParameters['uid']!)),
       // A document code or a Jira key in the link is resolved first; a uid opens directly.
       GoRoute(

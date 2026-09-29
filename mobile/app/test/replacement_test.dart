@@ -64,7 +64,7 @@ void main() {
     expect(find.textContaining('This goes to review: the outgoing unit differs'), findsOneWidget);
     await app.tap('replace-submit');
     expect(find.text('Submitted for review'), findsOneWidget);
-    expect(find.textContaining('sent to review'), findsOneWidget);
+    expect(find.textContaining('An approver confirms it'), findsOneWidget);
   });
 
   testWidgets('review items come one at a time with only the decisions allowed here', (tester) async {

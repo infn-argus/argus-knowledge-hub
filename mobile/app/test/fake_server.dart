@@ -32,8 +32,18 @@ class FakeArgus {
 
   final Map<String, int> _uploads = {};
 
+  /// No network: every request fails as if the device were out of reach.
+  bool offline = false;
+
+  /// Serve these once, then lose the answer (the request reached the server; the reply did not).
+  final Set<String> loseAnswer = {};
+
   late final http.Client client = MockClient((req) async {
+    if (offline) throw http.ClientException('Network is unreachable', req.url);
     requests.add(req);
+    if (loseAnswer.remove('${req.method} ${req.url.path}')) {
+      throw http.ClientException('Connection reset after the request was sent', req.url);
+    }
     if (override != null) return override!;
     return routes['${req.method} ${req.url.path}'] ?? _serve(req);
   });

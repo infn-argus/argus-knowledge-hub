@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/providers.dart';
+import '../../app/queue.dart';
+import '../../data/command_queue.dart';
 import '../../core/problem.dart';
 import '../../domain/capture.dart';
 import '../../domain/models.dart';
@@ -58,23 +60,58 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
     }
   }
 
+  /// Keep the command, send it now if ARGUS can be reached, and say what happened.
+  Future<PendingCommand> _command(Future<PendingCommand> Function(QueueController q) make) async {
+    final queue = ref.read(queueProvider.notifier);
+    final sent = await queue.sendNow(await make(queue));
+    if (sent.lastCode == 'stale' && sent.status == CommandStatus.rejected) {
+      // Refused while the person looks at it: reload and let them decide again, rather than keep it.
+      await queue.discard(sent.id);
+      _reload();
+      _say('Someone changed this ticket meanwhile. It was reloaded; check it and try again.');
+      return sent;
+    }
+    if (sent.status != CommandStatus.accepted || sent.note != null) _say(describe(sent));
+    return sent;
+  }
+
   Future<void> _send() => _run(() async {
         final text = _comment.text.trim();
         if (text.isEmpty) return;
-        await ref.read(ticketCommandsProvider).comment(widget.uid, _commentUid, text);
-        _comment.clear();
+        final uid = _commentUid;
         _commentUid = const Uuid().v4(); // the next comment is another command
-        ref.invalidate(commentsProvider(widget.uid));
+        _comment.clear();
+        final sent = await _command((q) => q.enqueue(
+            kind: 'ticket.comment',
+            key: 'comment:$uid',
+            target: widget.uid,
+            label: 'Comment: $text',
+            payload: {'ticket_uid': widget.uid, 'comment_uid': uid, 'body': text},
+            dependsOn: _createOf(q)));
+        if (sent.status == CommandStatus.accepted) ref.invalidate(commentsProvider(widget.uid));
       });
+
+  /// A command about a ticket reported offline waits for the ticket itself (A64).
+  List<String> _createOf(QueueController q) => [
+        for (final c in q.commands)
+          if (c.kind == 'ticket.create' && c.target == widget.uid && c.status != CommandStatus.accepted) c.id,
+      ];
 
   Future<void> _photo() => _run(() async {
         final photo = await ref.read(photoSourceProvider).take();
         if (photo == null) return;
-        await ref
-            .read(uploadRepositoryProvider)
-            .uploadAndAttach(photo, ticketUid: widget.uid, key: 'photo:${widget.uid}:${const Uuid().v4()}');
-        ref.invalidate(attachmentsProvider(widget.uid));
-        _say('Photo added.');
+        final sent = await _command((q) => q.enqueue(
+            kind: 'attachment.upload',
+            key: 'photo:${widget.uid}:${const Uuid().v4()}',
+            target: widget.uid,
+            label: 'Photo for the ticket',
+            payload: {'ticket_uid': widget.uid},
+            attachments: [QueueController.photo(photo)],
+            dependsOn: _createOf(q)));
+        if (sent.status == CommandStatus.accepted) {
+          ref.invalidate(attachmentsProvider(widget.uid));
+          _say('Photo added.');
+        }
       });
 
   Future<void> _move(TicketDetail t, TransitionOption o) async {
@@ -86,12 +123,18 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
       (comment, resolution) = (r.$1.isEmpty ? null : r.$1, r.$2.isEmpty ? null : r.$2);
     }
     await _run(() async {
-      final result = await ref.read(ticketCommandsProvider).transition(widget.uid, o.to,
-          version: t.version, key: 'move:${widget.uid}:${t.version}:${o.to}', comment: comment, resolution: resolution);
-      _reload();
-      _say(result.proposed
-          ? 'Proposed. A person confirms closing a safety ticket on the web.'
-          : 'Moved to ${o.toName}.');
+      final sent = await _command((q) => q.enqueue(
+          kind: 'ticket.transition',
+          key: 'move:${widget.uid}:${t.version}:${o.to}',
+          target: widget.uid,
+          seenVersion: '${t.version}',
+          label: 'Move “${t.title}” to ${o.toName}',
+          payload: {'ticket_uid': widget.uid, 'to': o.to, 'version': t.version, 'comment': comment,
+            'resolution': resolution}));
+      if (sent.status == CommandStatus.accepted) {
+        _reload();
+        if (sent.note == null) _say('Moved to ${o.toName}.');
+      }
     });
   }
 
@@ -103,7 +146,12 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
       appBar: AppBar(title: const Text('Ticket')),
       body: r.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ProblemView(e, onRetry: () => ref.invalidate(ticketDetailProvider(widget.uid))),
+        error: (e, _) {
+          final pending = ref.watch(pendingForProvider(widget.uid)).where((c) => c.kind == 'ticket.create').firstOrNull;
+          return pending != null
+              ? _PendingTicket(pending)
+              : ProblemView(e, onRetry: () => ref.invalidate(ticketDetailProvider(widget.uid)));
+        },
         data: (t) => RefreshIndicator(
           onRefresh: () async => _reload(),
           child: ListView(padding: const EdgeInsets.only(bottom: 32), children: [
@@ -138,6 +186,7 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
                 SelectableText((t.description ?? '').isEmpty ? 'No description.' : t.description!),
               ]),
             ),
+            _Unsent(uid: widget.uid),
             _Transitions(uid: widget.uid, onMove: (o) => _move(t, o), busy: _busy),
             _Attachments(uid: widget.uid, onAdd: _busy ? null : _photo),
             _Comments(uid: widget.uid),
@@ -298,4 +347,56 @@ class _MoveDialogState extends State<_MoveDialog> {
           ),
         ],
       );
+}
+
+
+/// A ticket reported on this device and not yet accepted: shown only to its author (I-MOB-3).
+class _PendingTicket extends StatelessWidget {
+  const _PendingTicket(this.command);
+
+  final PendingCommand command;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = command.payload;
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      NoticeBar(
+        key: const Key('ticket-pending'),
+        icon: Icons.cloud_upload_outlined,
+        severe: command.needsPerson,
+        text: command.needsPerson
+            ? 'Not yet in ARGUS: ${describe(command)}'
+            : 'Not yet in ARGUS. It is on this device only, and is sent when ARGUS can be reached.',
+      ),
+      const SizedBox(height: 16),
+      Text('${p['title']}', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 12),
+      Text('${p['description'] ?? ''}'),
+    ]);
+  }
+}
+
+/// Changes to this ticket kept on the device and not yet accepted.
+class _Unsent extends ConsumerWidget {
+  const _Unsent({required this.uid});
+
+  final String uid;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pending = ref.watch(pendingForProvider(uid)).where((c) => c.kind != 'ticket.create').toList();
+    if (pending.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SectionHeader('Not yet sent', trailing: '${pending.length}'),
+      for (final c in pending)
+        ListTile(
+          key: Key('unsent-${c.id}'),
+          dense: true,
+          leading: Icon(c.needsPerson ? Icons.error_outline : Icons.cloud_upload_outlined),
+          title: Text(c.label),
+          subtitle: Text(c.needsPerson ? describe(c) : 'pending'),
+          onTap: () => context.push('/outbox'),
+        ),
+    ]);
+  }
 }

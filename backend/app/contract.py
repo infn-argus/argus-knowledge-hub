@@ -69,6 +69,8 @@ FIELD_OPERATIONS = [
     ("post", "/v1/ledger/review/replacements/{conflict_id}/reject"),
     ("post", "/v1/ledger/review/stale/{conflict_id}/close"),
     ("post", "/v1/intake/proposals/{claim_id}"),
+    # Offline (M4): the assigned tickets prefetched for offline use
+    ("get", "/v1/issues"),
 ]
 
 

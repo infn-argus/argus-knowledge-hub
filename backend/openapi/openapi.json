@@ -23546,6 +23546,18 @@
             }
           },
           {
+            "description": "Only the open tickets assigned to the caller (the field client's prefetch)",
+            "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only the open tickets assigned to the caller (the field client's prefetch)",
+              "title": "Mine",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,

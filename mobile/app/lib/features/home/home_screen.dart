@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
+import '../../app/queue.dart';
 import '../../domain/models.dart';
 import '../../widgets/common.dart';
 
@@ -51,6 +52,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             Text(session!.workspaceName!, style: Theme.of(context).textTheme.labelMedium),
         ]),
         actions: [
+          const _Unsent(),
           const _InboxBell(),
           PopupMenuButton<String>(
             key: const Key('home-menu'),
@@ -65,7 +67,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 case 'diagnostics':
                   context.push('/diagnostics');
                 case 'signout':
-                  ref.read(sessionProvider.notifier).signOut();
+                  _signOut(context, ref);
               }
             },
             itemBuilder: (_) => const [
@@ -110,6 +112,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         Expanded(child: _q.length < 2 ? const _Hint() : _Results(q: _q)),
       ]),
+    );
+  }
+}
+
+/// Signing out wipes the device (§5.6). Unsent changes would be lost: the person sees them first.
+Future<void> _signOut(BuildContext context, WidgetRef ref) async {
+  final unsent = ref.read(queueProvider.notifier).unsent;
+  if (unsent.isNotEmpty) {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Sign out and lose unsent changes?'),
+        content: Text('These are on this device only and would be removed:\n'
+            '${unsent.map((c) => '• ${c.label}').join('\n')}'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Stay signed in')),
+          FilledButton(
+              key: const Key('signout-anyway'),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Sign out anyway')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+  }
+  await ref.read(sessionProvider.notifier).signOut();
+}
+
+class _Unsent extends ConsumerWidget {
+  const _Unsent();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final all = ref.watch(queueProvider).value ?? const [];
+    final n = all.where((c) => c.open || c.needsPerson).length;
+    if (n == 0) return const SizedBox.shrink();
+    return IconButton(
+      key: const Key('home-outbox'),
+      tooltip: 'Unsent changes',
+      onPressed: () => context.push('/outbox'),
+      icon: Badge(label: Text('$n'), child: const Icon(Icons.cloud_upload_outlined)),
     );
   }
 }

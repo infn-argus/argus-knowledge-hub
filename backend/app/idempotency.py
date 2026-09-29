@@ -85,10 +85,41 @@ def _replay(row) -> Response:
     return Response(content=row.response_body or b"", status_code=row.status_code, headers=headers)
 
 
+CAPTURED = "x-argus-captured-at"
+
+
+def offline_retention() -> timedelta:
+    """How long a command captured offline may wait before it is sent (U22, proposed 7 days)."""
+    return timedelta(days=int(os.environ.get("ARGUS_OFFLINE_RETENTION_DAYS", "7")))
+
+
+def expired(request: Request) -> Optional[Response]:
+    """A command captured offline longer ago than the retention is not applied (revision §24.4, A65).
+    The client says when the person captured it (`X-ARGUS-Captured-At`, with the device's offset
+    from server time already applied); a request without the header is live."""
+    raw = request.headers.get(CAPTURED)
+    if request.method not in MUTATING or not raw:
+        return None
+    try:
+        at = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return problems.response(422, {"error": "X-ARGUS-Captured-At must be an ISO 8601 time.", "code": "invalid",
+                                       "field": "X-ARGUS-Captured-At"})
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    if _now() - at > offline_retention():
+        return problems.response(422, {
+            "error": f"This was captured on {at.date().isoformat()}, longer ago than the "
+                     f"{offline_retention().days}-day offline retention. It was not applied; do it again if it still "
+                     "holds.", "code": "expired"})
+    return None
+
+
 async def run(request: Request, call_next):
     key = request.headers.get(HEADER)
     if request.method not in MUTATING or key is None:
-        return await call_next(request)
+        refused = expired(request)
+        return refused if refused is not None else await call_next(request)
     key = key.strip()
     if not key or len(key) > 200 or not key.isprintable():
         return problems.response(422, {"error": "The Idempotency-Key must be 1 to 200 printable characters.",
@@ -113,6 +144,11 @@ async def run(request: Request, call_next):
             db.commit()
             row = None
         if row is None:
+            # A stored answer is replayed whatever its age; only a new application of an old command
+            # is refused.
+            refused = expired(request)
+            if refused is not None:
+                return refused
             row = IdempotencyRecord(workspace_id=workspace, principal=principal, key=key, request_hash=digest,
                                     method=request.method, path=request.url.path, state="in_progress",
                                     expires_at=_now() + retention())

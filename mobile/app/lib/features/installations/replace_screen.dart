@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/providers.dart';
+import '../../app/queue.dart';
+import '../../data/command_queue.dart';
 import '../../core/problem.dart';
 import '../../data/replacement_repositories.dart';
 import '../../domain/capture.dart';
@@ -39,7 +41,8 @@ class _ReplaceScreenState extends ConsumerState<ReplaceScreen> {
   final _condition = TextEditingController();
   final _photos = <PickedPhoto>[];
   ReplacementPreview? _preview;
-  ReplacementResult? _result;
+  PendingCommand? _result;
+  bool _unchecked = false; // ARGUS could not be reached for the dry run
   bool _busy = false;
   String? _error;
 
@@ -137,9 +140,18 @@ class _ReplaceScreenState extends ConsumerState<ReplaceScreen> {
     try {
       d.condition = _condition.text.trim().isEmpty ? null : _condition.text.trim();
       final p = await ref.read(replacementRepositoryProvider).preview(d);
-      setState(() => _preview = p);
+      setState(() {
+        _preview = p;
+        _unchecked = false;
+      });
     } on Problem catch (p) {
-      setState(() => _error = p.message);
+      setState(() {
+        _error = p.code == ProblemCode.offline
+            ? 'ARGUS cannot be reached to check it. You can save the replacement on this device; ARGUS checks it '
+                'when it arrives, and anything that changed meanwhile goes to review.'
+            : p.message;
+        _unchecked = p.code == ProblemCode.offline;
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -155,18 +167,44 @@ class _ReplaceScreenState extends ConsumerState<ReplaceScreen> {
         'photos': _photos.length,
         if (!_outgoingIsRecorded && _outgoingScanned != null) 'outgoing_scanned': _outgoingScanned!.uid,
       };
-      final r = await ref.read(replacementRepositoryProvider).submit(d);
+      final queue = ref.read(queueProvider.notifier);
+      final command = await queue.enqueue(
+        kind: 'replacement.submit',
+        key: 'replace:${d.commandUid}',
+        target: widget.positionUid,
+        seenVersion: d.seenInstallationUid,
+        label: 'Replace the unit at the Position',
+        payload: {
+          'command_uid': d.commandUid,
+          'position_uid': d.positionUid,
+          'seen_installation_uid': d.seenInstallationUid,
+          'outgoing_uid': d.outgoingUid,
+          'incoming_uid': d.incomingUid,
+          'at': d.at.toUtc().toIso8601String(),
+          'precision': d.precision,
+          'reason': d.reason,
+          'condition': d.condition,
+          'work_reference': d.workReference,
+          'evidence': d.evidence,
+        },
+      );
       // Evidence photos go with the incoming unit, whatever the outcome.
       for (final (i, photo) in _photos.indexed) {
-        try {
-          await ref.read(uploadRepositoryProvider)
-              .uploadAndAttach(photo, assetUid: d.incomingUid!, key: 'replace:${d.commandUid}:photo:$i');
-        } on Problem {
-          // the replacement stands; the photo can be added from the unit's record
-        }
+        await queue.enqueue(
+          kind: 'attachment.upload',
+          key: 'replace:${d.commandUid}:photo:$i',
+          target: d.incomingUid,
+          label: 'Photo of the installed unit',
+          payload: {'asset_uid': d.incomingUid},
+          attachments: [QueueController.photo(photo)],
+        );
+      }
+      final sent = await queue.sendNow(command);
+      if (sent.status == CommandStatus.rejected || sent.status == CommandStatus.expired) {
+        throw Problem(ProblemCode.invalid, describe(sent));
       }
       ref.invalidate(assetDetailProvider(widget.positionUid));
-      setState(() => _result = r);
+      setState(() => _result = sent);
     } on Problem catch (p) {
       setState(() => _error = p.reviewItem != null ? '${p.message} (review item ${p.reviewItem})' : p.message);
     } finally {
@@ -348,8 +386,10 @@ class _ReplaceScreenState extends ConsumerState<ReplaceScreen> {
             flex: 2,
             child: FilledButton(
               key: const Key('replace-submit'),
-              onPressed: _busy || _preview == null || _preview!.refused ? null : () => _submit(d),
-              child: Text(_preview?.outcome == 'propose' ? 'Submit for review' : 'Replace'),
+              onPressed: _busy || ((_preview == null || _preview!.refused) && !_unchecked) ? null : () => _submit(d),
+              child: Text(_unchecked && _preview == null
+                  ? 'Save for later'
+                  : (_preview?.outcome == 'propose' ? 'Submit for review' : 'Replace')),
             ),
           ),
         ]),
@@ -410,26 +450,32 @@ class _ReplaceScreenState extends ConsumerState<ReplaceScreen> {
     ];
   }
 
-  Widget _done(AssetDetail a, ReplacementResult r) => ListView(padding: const EdgeInsets.all(16), children: [
-        Icon(r.applied ? Icons.check_circle : Icons.rate_review, size: 56, color: Theme.of(context).colorScheme.primary),
-        const SizedBox(height: 12),
-        Text(r.applied ? 'Replaced' : 'Submitted for review',
-            key: const Key('replace-done'), textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          r.applied
-              ? 'The new Installation is recorded. ARGUS is updating the relations behind the Position; ports that '
-                  'need a steward will show in the review queue.'
-              : 'An approver confirms it. Nothing is changed until then. Why: ${r.reasons.join('; ')}.',
-          textAlign: TextAlign.center,
-        ),
-        if (r.discrepancyItem != null)
-          const Padding(
-            padding: EdgeInsets.only(top: 12),
-            child: Text('The difference between the recorded and the removed unit was sent to review.',
-                textAlign: TextAlign.center),
-          ),
-        const SizedBox(height: 24),
-        FilledButton(onPressed: () => context.pushReplacement('/asset/${a.uid}'), child: const Text('Back to the Position')),
-      ]);
+  Widget _done(AssetDetail a, PendingCommand c) {
+    final applied = c.status == CommandStatus.accepted && c.note == 'Replaced.';
+    final title = switch (c.status) {
+      CommandStatus.accepted => applied ? 'Replaced' : 'Submitted for review',
+      CommandStatus.conflict => 'Sent to review',
+      _ => 'Saved on this device',
+    };
+    final text = switch (c.status) {
+      CommandStatus.accepted => applied
+          ? 'The new Installation is recorded. ARGUS is updating the relations behind the Position; ports that '
+              'need a steward will show in the review queue.'
+          : 'An approver confirms it. Nothing is changed until then. ${c.note ?? ''}',
+      CommandStatus.conflict => 'The Position changed since you looked. Nothing was applied; your replacement and '
+          'its evidence are waiting in the review queue.',
+      _ => 'ARGUS cannot be reached. The replacement is sent when it can, and checked against the Position then.',
+    };
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      Icon(applied ? Icons.check_circle : (c.open ? Icons.cloud_upload_outlined : Icons.rate_review),
+          size: 56, color: Theme.of(context).colorScheme.primary),
+      const SizedBox(height: 12),
+      Text(title, key: const Key('replace-done'), textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 8),
+      Text(text, textAlign: TextAlign.center),
+      const SizedBox(height: 24),
+      FilledButton(onPressed: () => context.pushReplacement('/asset/${a.uid}'), child: const Text('Back to the Position')),
+    ]);
+  }
 }

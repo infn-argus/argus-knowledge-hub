@@ -3074,6 +3074,19 @@ behind the Position:
 - an approver's confirmation applies the swap, and the interlock segment then waits for its port
   (A22).
 
+M4 is built:
+- the pending-command queue: encrypted, in dependency order, idempotent, versioned and time-stamped;
+- saved copies of what the person opened, never of searches;
+- the wipe on sign-out and revocation, with the unsent work named.
+
+Where A62–A65 and A71 pass:
+- in `mobile/app/test`;
+- on the server: A63 in `tests/test_replacement.py`, and A65's refusal of a command captured
+  longer ago than the retention (`X-ARGUS-Captured-At`).
+
+A72 holds by construction: the device keeps only what the API returned to the person, and a
+notification about a record they may not read is never sent.
+
 ### 24.10 Acceptance tests
 
 | # | Given | When | Then | Validates |

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/providers.dart';
+import '../../app/queue.dart';
 import '../../core/problem.dart';
 import '../../domain/capture.dart';
 import '../../domain/models.dart';
@@ -148,45 +149,70 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
       if ((_kind?.isIncident ?? false) && _when == null) {
         throw Problem(ProblemCode.invalid, 'Say when it happened. The day is enough if you do not know the time.');
       }
-      final checks = await ref.read(intakeRepositoryProvider).guideTicket(_draft);
-      setState(() => _checks = checks);
-      if (checks.any((c) => c.blocking)) return;
-      if (!_similarSeen && checks.any((c) => c.id == 'similar')) {
-        setState(() => _similarSeen = true);
-        return; // shown above the button; a second press reports anyway
-      }
-      final commands = ref.read(ticketCommandsProvider);
-      final uid = await commands.create(
-        uid: _uid,
-        title: _title.text.trim(),
-        description: _description.text.trim(),
-        subjectUid: widget.subjectUid,
-        kindUid: _kind?.uid,
-        attributes: _attributes,
-      );
-      var failed = 0;
-      for (final (i, photo) in _photos.indexed) {
-        try {
-          await ref.read(uploadRepositoryProvider).uploadAndAttach(photo, ticketUid: uid, key: 'photo:$uid:$i');
-        } on Problem {
-          failed++;
+      // The guide needs ARGUS; offline, the report is kept and checked by the server when it arrives.
+      try {
+        final checks = await ref.read(intakeRepositoryProvider).guideTicket(_draft);
+        setState(() => _checks = checks);
+        if (checks.any((c) => c.blocking)) return;
+        if (!_similarSeen && checks.any((c) => c.id == 'similar')) {
+          setState(() => _similarSeen = true);
+          return; // shown above the button; a second press reports anyway
         }
+      } on Problem catch (p) {
+        if (p.code != ProblemCode.offline) rethrow;
       }
-      if (_assist != null) {
-        await ref.read(intakeRepositoryProvider).recordOutcome(_assist!.runId, uid, {
+      final queue = ref.read(queueProvider.notifier);
+      final create = await queue.enqueue(
+        kind: 'ticket.create',
+        key: 'ticket:$_uid',
+        target: _uid,
+        label: 'Report: ${_title.text.trim()}',
+        payload: {
+          'uid': _uid,
           'title': _title.text.trim(),
           'description': _description.text.trim(),
-          'schema_uid': ?_kind?.uid,
-          for (final e in _attributes.entries) 'attributes.${e.key}': e.value,
-        });
+          'asset_uid': widget.subjectUid,
+          'schema_uid': _kind?.uid,
+          'attributes': _attributes,
+        },
+      );
+      for (final (i, photo) in _photos.indexed) {
+        await queue.enqueue(
+          kind: 'attachment.upload',
+          key: 'photo:$_uid:$i',
+          target: _uid,
+          label: 'Photo for “${_title.text.trim()}”',
+          payload: {'ticket_uid': _uid},
+          attachments: [QueueController.photo(photo)],
+          dependsOn: [create.id], // the ticket first, then its photos (A64)
+        );
       }
+      if (_assist != null) {
+        await queue.enqueue(
+          kind: 'intake.outcome',
+          key: 'outcome:$_uid',
+          label: 'What was kept of the assistant’s draft',
+          payload: {
+            'run_id': _assist!.runId,
+            'record_uid': _uid,
+            'final': {
+              'title': _title.text.trim(),
+              'description': _description.text.trim(),
+              'schema_uid': ?_kind?.uid,
+              for (final e in _attributes.entries) 'attributes.${e.key}': e.value,
+            },
+          },
+          dependsOn: [create.id],
+        );
+      }
+      final sent = await queue.sendNow(create);
+      if (sent.needsPerson) throw Problem(ProblemCode.invalid, describe(sent));
       ref.invalidate(assetDetailProvider(widget.subjectUid));
       if (!mounted) return;
-      if (failed > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('$failed photo(s) were not sent. Add them again from the ticket.')));
+      if (sent.open) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(describe(sent))));
       }
-      context.pushReplacement('/ticket/$uid');
+      context.pushReplacement('/ticket/$_uid');
     } on Problem catch (p) {
       setState(() => _error = p.field != null ? '${p.message} (${p.field})' : p.message);
     } finally {

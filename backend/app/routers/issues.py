@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -77,12 +77,21 @@ def _guard_ticket_write(db: Session, workspace_id: str, schema_uid: Optional[str
 @router.get("", response_model=list[IssueOut])
 def list_issues(
     schema_uid: Optional[str] = None,
+    mine: bool = Query(False, description="Only the open tickets assigned to the caller (the field client's prefetch)"),
     workspace_id: str = Depends(require_permission("read", resource="tickets")),
+    current_user_id: Optional[str] = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     stmt = select(Issue).where(Issue.workspace_id == workspace_id, visible_issues_clause())
     if schema_uid:
         stmt = stmt.where(Issue.schema_uid == schema_uid)
+    if mine:
+        from app.models.user import User
+        user = db.get(User, current_user_id) if current_user_id else None
+        names = [x for x in (current_user_id, user.email if user else None) if x]
+        if not names:
+            return []                       # an API token has no assignments
+        stmt = stmt.where(Issue.assignee.in_(names), Issue.closed_at.is_(None), Issue.deleted_at.is_(None))
     return [issue_out(db, i) for i in db.scalars(stmt).all()]
 
 

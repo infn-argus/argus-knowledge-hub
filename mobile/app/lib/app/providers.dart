@@ -1,6 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
+import '../core/local_store.dart';
+import '../data/caching_client.dart';
+
 import '../core/config.dart';
 import '../core/problem.dart';
 import '../core/session.dart';
@@ -12,6 +15,7 @@ import '../domain/capture.dart';
 import '../domain/models.dart';
 import '../features/auth/auth_service.dart';
 import '../features/capture/photo_source.dart';
+import 'queue.dart';
 
 /// Riverpod retries a failed provider by default. A refusal (not found, forbidden, invalid,
 /// revoked) will not change by asking again, so only an unreachable server is retried, briefly.
@@ -23,6 +27,41 @@ Duration? retryPolicy(int retryCount, Object error) {
 final configProvider = Provider<AppConfig>((_) => AppConfig.fromEnvironment());
 /// The HTTP transport. `null` is the platform default; tests put a fake server here.
 final httpClientProvider = Provider<http.Client?>((_) => null);
+
+/// Saved copies, pending commands and their attachments, encrypted on the device.
+final localStoreProvider = Provider<LocalStore>((_) => SecureLocalStore());
+
+/// Whether ARGUS answered the last request, and the device's offset from the server's clock.
+class Reachability {
+  const Reachability({this.reachable = true, this.serverOffset = Duration.zero, this.since});
+
+  final bool reachable;
+  final Duration serverOffset; // server time minus device time
+  final DateTime? since;
+
+  DateTime serverNow() => DateTime.now().add(serverOffset);
+}
+
+class ReachabilityController extends Notifier<Reachability> {
+  @override
+  Reachability build() => const Reachability();
+
+  void reached(bool ok) {
+    if (ok != state.reachable) {
+      state = Reachability(reachable: ok, serverOffset: state.serverOffset, since: DateTime.now());
+    }
+  }
+
+  void serverTime(DateTime serverNow) {
+    final offset = serverNow.difference(DateTime.now());
+    // The Date header has a one-second resolution: only a real change is worth a rebuild.
+    if ((offset - state.serverOffset).abs() > const Duration(seconds: 5)) {
+      state = Reachability(reachable: state.reachable, serverOffset: offset, since: state.since);
+    }
+  }
+}
+
+final reachabilityProvider = NotifierProvider<ReachabilityController, Reachability>(ReachabilityController.new);
 
 final sessionStoreProvider = Provider<SessionStore>((_) => SessionStore());
 final authenticatorProvider = Provider<Authenticator>((ref) => AppAuthAuthenticator(ref.watch(configProvider)));
@@ -103,9 +142,20 @@ class SessionController extends AsyncNotifier<Session?> {
 
   Future<void> signOut({String? reason}) async {
     final s = current;
-    if (s != null) await ref.read(authenticatorProvider).endSession(s);
-    ref.read(signOutReasonProvider.notifier).set(reason);
+    // Already signed out: a later refusal (several requests in flight) must not replace what the
+    // person was told first.
+    if (s == null) return;
+    await ref.read(authenticatorProvider).endSession(s);
+    // Everything the app keeps goes with the session (§5.6, A71). Pending work is not lost silently:
+    // the person is told what was not sent.
+    final lost = ref.exists(queueProvider) ? ref.read(queueProvider.notifier).unsent : const [];
+    final told = lost.isEmpty
+        ? reason
+        : '${reason ?? 'Signed out.'} ${lost.length} change(s) not yet sent were removed from this device: '
+            '${lost.take(5).map((c) => c.label).join('; ')}${lost.length > 5 ? '; …' : ''}.';
+    ref.read(signOutReasonProvider.notifier).set(told);
     await _set(null);
+    ref.invalidate(queueProvider);
   }
 
   /// Refresh an OIDC access token shortly before it expires; on failure the person signs in again.
@@ -141,12 +191,25 @@ final sessionProvider = AsyncNotifierProvider<SessionController, Session?>(Sessi
 
 final apiServiceProvider = Provider<ApiService>((ref) {
   final controller = ref.read(sessionProvider.notifier);
+  final config = ref.watch(configProvider);
+  final reach = ref.read(reachabilityProvider.notifier);
+  final caching = CachingClient(
+    ref.watch(httpClientProvider) ?? http.Client(),
+    ref.watch(localStoreProvider),
+    retention: config.offlineRetention,
+    scope: () {
+      final s = ref.read(sessionProvider).value;
+      return '${s?.workspaceId}|${s?.userLabel ?? s?.deviceId}';
+    },
+    onReachable: (ok) => Future.microtask(() => reach.reached(ok)),
+    onServerTime: (t) => Future.microtask(() => reach.serverTime(t)),
+  );
   return ApiService(
-    ref.watch(configProvider),
+    config,
     () => ref.read(sessionProvider).value,
     onProblem: controller.onProblem,
     ensureFresh: controller.ensureFresh,
-    httpClient: ref.watch(httpClientProvider),
+    httpClient: caching,
   );
 });
 

@@ -8,6 +8,7 @@ Status:
 - **M1**, the read-only client: built.
 - **M2**, capture and tickets: built, except push.
 - **M3**, replacement and review: built.
+- **M4**, offline: built.
 
 See §15. The client is in `mobile/`.
 [`asset-model-revision.md`](asset-model-revision.md) §24 is normative. It
@@ -773,6 +774,45 @@ Tests:
 - 39 app tests;
 - `tests/test_replacement.py`;
 - a replacement driven in the web build against the live API.
+
+M4, in `mobile/app` and on the server:
+- **Pending commands** (§5.2, §5.3):
+  - Every change goes through one queue: a report and its photos, a comment, a move, a
+    replacement and its evidence, the intake outcome. The queue is kept encrypted in the platform
+    keystore.
+  - A command is sent at once when ARGUS answers. Otherwise it waits: in dependency order (the
+    ticket before its comments and photos, A64), then in the order made.
+  - Each command keeps its idempotency key (a lost answer is retried with the same key, A63), the
+    version seen, and its capture time in server time (`X-ARGUS-Captured-At`).
+  - A command ends `accepted`, `rejected` (a permission lost while offline is `forbidden` and is
+    kept for the person, A62), `conflict` (with the review item) or `expired`. It expires on the
+    device after the retention, and the server refuses a late one too (A65).
+  - Retries back off with jitter and stop after 8 attempts.
+- **Pending shown as pending:**
+  - a ticket reported offline reads "Not yet in ARGUS", and only its author sees it;
+  - unsent changes are listed on the ticket and in **Unsent changes**, where a refused change can
+    be retried or discarded.
+- **Saved copies** (§5.1):
+  - A caching layer under the generated client keeps the reads of records and of the person's
+    own work (assets, contexts, installations, tickets, documents, review items, notifications,
+    and the assigned tickets, prefetched hourly), scoped to the person and workspace.
+  - Searches, lookups by label, the assistant and uploads are never kept.
+  - A record that becomes 404 or 403 leaves the device. A copy past the retention is not served.
+  - Offline, the app says so in a banner across every screen.
+- **Wipe** (§5.6, A71):
+  - signing out or a revocation removes the session, the saved copies, the queue and its
+    attachments;
+  - the person is told which unsent changes were lost;
+  - a voluntary sign-out with unsent work asks first.
+
+Tests:
+- 52 app tests, including A62–A65, A71 and the caching rules;
+- server tests for A63 and A65;
+- the offline round trip in the web build: a record read from its saved copy, a report kept
+  offline, then sent when the browser came back online.
+
+Not yet: attachments are kept base64 in the keystore, which suits photos but not long videos. A
+Drift/SQLCipher store (§4.3) remains the option for larger volumes.
 
 M2 tests:
 - 35 app tests;

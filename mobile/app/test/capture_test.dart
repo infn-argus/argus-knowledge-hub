@@ -90,7 +90,7 @@ void main() {
     final move = app.server.requests.lastWhere((r) => r.url.path == '/v1/issues/$ticketUid/transition');
     expect(move.headers['If-Match'], '"1"');
     expect(jsonDecode(move.body)['to'], 'resolved');
-    expect(find.textContaining('Proposed.'), findsOneWidget);
+    expect(find.textContaining('Proposed: a person confirms it on the web'), findsOneWidget);
   });
 
   testWidgets('a move against a changed ticket reloads it and says so', (tester) async {

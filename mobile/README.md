@@ -41,7 +41,12 @@ as `If-Match`.
     and evidence. It is applied at once or submitted as a proposal;
   - the review items routed to the person, one at a time, with the decisions allowed here.
 
-Offline work is phase M4 (§15 of the design).
+- **Offline (M4):**
+  - every change goes through an encrypted pending-command queue: sent at once when ARGUS
+    answers, otherwise in dependency order when it does, and listed in **Unsent changes**;
+  - records the person opened are readable offline, from saved copies;
+  - sign-out and revocation wipe the device and name the unsent work that was lost.
+  - `ARGUS_OFFLINE_RETENTION_DAYS` (default 7) is the retention for saved copies and commands.
 
 Before a release, scan the built bundle for credentials, prompts and provider endpoints:
 `mobile/tool/check_build.sh build/web` (or an unzipped APK or IPA).

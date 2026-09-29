@@ -88,6 +88,7 @@ Class | Method | HTTP request | Description
 *IssuesApi* | [**getIssue**](doc//IssuesApi.md#getissue) | **GET** /v1/issues/{uid} | Get Issue
 *IssuesApi* | [**listIssueAttachments**](doc//IssuesApi.md#listissueattachments) | **GET** /v1/issues/{uid}/attachments | List Issue Attachments
 *IssuesApi* | [**listIssueComments**](doc//IssuesApi.md#listissuecomments) | **GET** /v1/issues/{uid}/comments | List Issue Comments
+*IssuesApi* | [**listIssues**](doc//IssuesApi.md#listissues) | **GET** /v1/issues | List Issues
 *IssuesApi* | [**listTransitions**](doc//IssuesApi.md#listtransitions) | **GET** /v1/issues/{uid}/transitions | List Transitions
 *IssuesApi* | [**transitionIssue**](doc//IssuesApi.md#transitionissue) | **POST** /v1/issues/{uid}/transition | Transition Issue
 *IssuesApi* | [**updateIssue**](doc//IssuesApi.md#updateissue) | **PUT** /v1/issues/{uid} | Update Issue

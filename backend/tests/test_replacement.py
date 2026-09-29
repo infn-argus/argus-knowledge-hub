@@ -110,3 +110,47 @@ def test_the_field_client_lists_its_review_items_with_the_decisions_it_may_take(
     assert proposal["record"]["uid"] == ids["pos"]
     assert proposal["detail"]["evidence"] == {} and "port confirmation is needed" in proposal["detail"]["reasons"]
     assert by_key[f"conflict:{r['discrepancy_item']}"]["decisions"] == ["resolve"]
+
+
+def test_A63_a_replacement_whose_answer_was_lost_is_answered_again_and_applied_once():
+    from app.models.ledger import Decision
+    it, h, ids = setup()
+    body = {"position_uid": ids["pos"], "incoming_uid": ids["new"], "outgoing_uid": ids["old"], "at": AT,
+            "seen_installation_uid": ids["inst"]}
+    k = {**h, "Idempotency-Key": f"replace:{uuid.uuid4()}"}
+    first = client.post("/v1/installations/replace", headers=k, json=body)
+    db = SessionLocal()
+    batches = db.scalar(select(func.count(func.distinct(Decision.batch_id))).where(Decision.workspace_id == it.it))
+    db.close()
+    retry = client.post("/v1/installations/replace", headers=k, json=body)
+    assert first.status_code == retry.status_code == 200
+    assert retry.json() == first.json() and retry.headers["Idempotent-Replayed"] == "true"
+    db = SessionLocal()
+    assert db.scalar(select(func.count(func.distinct(Decision.batch_id))).where(Decision.workspace_id == it.it)) == batches
+    db.close()
+
+
+def test_A65_a_command_captured_longer_ago_than_the_retention_is_not_applied():
+    from datetime import datetime, timedelta, timezone
+    from app.models.issue import Issue
+    it, h, ids = setup()
+    old = (datetime.now(timezone.utc) - timedelta(days=9)).isoformat()
+    uid = str(uuid.uuid4())
+    r = client.post("/v1/issues", headers={**h, "X-ARGUS-Captured-At": old, "Idempotency-Key": f"ticket:{uid}"},
+                    json={"uid": uid, "title": "Seen last week"})
+    assert r.status_code == 422 and r.json()["problem"]["code"] == "expired"
+    db = SessionLocal()
+    assert db.get(Issue, uid) is None
+    db.close()
+    fresh = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    assert client.post("/v1/issues", headers={**h, "X-ARGUS-Captured-At": fresh},
+                       json={"uid": uid, "title": "Seen two days ago"}).status_code == 201
+    # A command accepted before is answered again even once it is old: nothing new is applied.
+    k = {**h, "Idempotency-Key": "k-old", "X-ARGUS-Captured-At": fresh}
+    uid2 = str(uuid.uuid4())
+    assert client.post("/v1/issues", headers=k, json={"uid": uid2, "title": "x"}).status_code == 201
+
+
+def test_the_assigned_tickets_prefetch_needs_a_person():
+    it, h, ids = setup()
+    assert client.get("/v1/issues?mine=true", headers=h).json() == []
