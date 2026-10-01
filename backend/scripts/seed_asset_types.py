@@ -100,6 +100,9 @@ def main() -> None:
             print(f"  default icons given to {len(result.iconed)} types that had none")
         if result.renamed:
             print("  renamed in place: " + ", ".join(result.renamed))
+        if result.reused:
+            print(f"  used from the catalogue, which shares them ({len(result.reused)}): "
+                  + ", ".join(result.reused))
         if result.adopted:
             print("  adopted (made by an importer, now under the catalogue): "
                   + ", ".join(result.adopted))

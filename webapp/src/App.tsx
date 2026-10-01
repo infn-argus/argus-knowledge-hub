@@ -35,6 +35,7 @@ import { MigrationPage } from "./pages/migration/Domains";
 import { CatalogueMappingPage } from "./pages/migration/CatalogueMapping";
 import { ControlBindingsPage } from "./pages/review/ControlBindings";
 import { TypeCataloguePage } from "./pages/catalogue/TypeCatalogue";
+import { AboutPage } from "./pages/about/About";
 import { CatalogueMappingReview } from "./pages/migration/CatalogueMappingReview";
 import { BulkChangesPage } from "./pages/bulk/BulkChanges";
 import { WorkflowsPage } from "./pages/workflows/Workflows";
@@ -107,6 +108,7 @@ export function App() {
           <Route path="/migration/catalogue" element={<CatalogueMappingPage />} />
           <Route path="/control-bindings" element={<ControlBindingsPage />} />
           <Route path="/catalogue/types" element={<TypeCataloguePage />} />
+          <Route path="/about" element={<AboutPage />} />
           <Route path="/migration/catalogue/:id" element={<CatalogueMappingReview />} />
           <Route path="/bulk-changes" element={<BulkChangesPage />} />
           <Route path="/catalogue/equipment-classes" element={<EquipmentClassesPage />} />

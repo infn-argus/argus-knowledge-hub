@@ -398,8 +398,13 @@ This needs a reachable PostgreSQL at `DATABASE_URL`; `GET /health` answers 500 w
 Run `create_token.py` from `backend/` and under the same `TOKEN_PEPPER` the server uses, or
 the token it prints will not be accepted.
 
-The tests use the same environment plus `IMPORT_SECRETS_KEY` (any Fernet key) and a database
-they may write to: `pytest tests`. Two drawing tests also need the `dwg2dxf` converter on `PATH`.
+The tests use the same environment plus `IMPORT_SECRETS_KEY` (any Fernet key): `pytest tests`.
+They never write to the database at `DATABASE_URL`: `tests/conftest.py` points them at a sibling
+one (`app` → `app_test`, or `TEST_DATABASE_URL` when set), creating and migrating it on first
+use, so the workspaces and shared types they make never show up in the hub. In Docker:
+`docker compose cp backend/requirements-dev.txt api:/app/`, then
+`docker compose exec api sh -c "pip install -r requirements-dev.txt && pytest tests"`.
+Two drawing tests also need the `dwg2dxf` converter on `PATH`.
 
 Web app, with hot reload. Stop the compose `web` service first
 (`docker compose stop web`), since both use port 5173:
@@ -440,4 +445,7 @@ See [`k8s/README.md`](k8s/README.md). Images are built and pushed with `backend/
 
 ## License
 
-See the INFN project terms; contact the maintainers for reuse outside INFN.
+ARGUS Knowledge Hub (the API, the web application and the ARGUS Field mobile application) is
+licensed under the [European Union Public Licence v. 1.2](LICENSE) (EUPL-1.2).
+
+Author: Andrea Michelotti — [andrea.michelotti@infn.it](mailto:andrea.michelotti@infn.it)

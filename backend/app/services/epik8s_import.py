@@ -156,6 +156,14 @@ def _present(attributes: dict) -> dict:
     return {k: v for k, v in attributes.items() if v not in (None, "", [], {})}
 
 
+def _seed_hint(workspace_id: str) -> str:
+    """What to run: shared types go in the catalogue workspace, a beamline's own (magnets, BPMs, RF
+    structures) in each beamline, hanging from it."""
+    return ("Seed the types first: `scripts/seed_asset_types.py global <catalogue>` (again, if the catalogue "
+            f"was seeded before these types existed), then `scripts/seed_asset_types.py beamline {workspace_id} "
+            "--catalogue <catalogue>`.")
+
+
 def _s_lower(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -351,9 +359,9 @@ class _Importer:
             missing = [n for n in (*ASSET_TYPES, *ELEMENT_TYPES) if n not in usable]
             if missing:
                 raise ValueError(
-                    f"Inferring elements writes objects of the catalogue's types, and this "
-                    f"workspace cannot use {len(missing)} of them (e.g. {', '.join(missing[:4])}). "
-                    f"Seed the catalogue first: scripts/seed_asset_types.py.")
+                    f"Inferring elements writes objects of the catalogue's types, and workspace "
+                    f"“{self.workspace_id}” cannot use {len(missing)} of them (e.g. {', '.join(missing[:4])}). "
+                    f"{_seed_hint(self.workspace_id)}")
         if self.it_workspace:
             # The catalogue's IT types are global, so this beamline's own catalogue already names
             # them; going through the IT workspace would pick whichever catalogue it happened to see.
@@ -373,7 +381,7 @@ class _Importer:
             if missing:
                 raise ValueError(
                     f"Inferring controllers writes objects of the catalogue's {', '.join(missing)} type, which "
-                    f"this workspace cannot use. Seed the catalogue first: scripts/seed_asset_types.py.")
+                    f"workspace “{self.workspace_id}” cannot use. {_seed_hint(self.workspace_id)}")
             for name in CONTROLLER_TYPES:
                 self.schemas[name] = self.db.get(Schema, usable[name])
         for name, description in TYPES.items():

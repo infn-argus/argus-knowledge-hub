@@ -450,6 +450,38 @@ def test_the_global_set_is_created_in_the_catalogue_and_shared(db, catalogue):
     assert {r.name for r in rows} == set(at.GLOBAL_TYPES)
 
 
+def test_a_beamline_type_the_catalogue_shares_is_used_from_there_not_copied(db, catalogue):
+    """sparc got a second control branch beside accelerator-infn's shared one, its IOCs on one copy and
+    its Access Points on the other. A type the catalogue shares is the beamline's to use, not to copy."""
+    ws, result = catalogue
+    control = Schema(uid=f"{ws}:shared:control-item", workspace_id=ws, name="Control Item", applies_to="objects",
+                     is_global=True, is_concrete=False, parent_schema_uid=result.uids["Item"])
+    ioc = Schema(uid=f"{ws}:shared:ioc", workspace_id=ws, name="IOC", applies_to="objects", is_global=True,
+                 parent_schema_uid=control.uid)
+    db.add_all([control, ioc])
+    bl = f"bl-{secrets.token_hex(4)}"
+    db.add(Workspace(id=bl, name="Beamline"))
+    db.commit()
+    try:
+        seeded = at.ensure_asset_types(db, bl, scope="beamline", catalogue_workspace_id=ws)
+        db.commit()
+        own = {s.name: s for s in db.query(Schema).filter(Schema.workspace_id == bl)}
+        assert set(seeded.reused) == {"Control Item", "IOC"} and not {"Control Item", "IOC"} & set(own)
+        assert own["Control Device"].parent_schema_uid == control.uid      # the rest of the branch hangs from it
+        assert seeded.uids["IOC"] == ioc.uid
+        # Seeding again changes nothing.
+        again = at.ensure_asset_types(db, bl, scope="beamline", catalogue_workspace_id=ws)
+        assert not again.created and set(again.reused) == {"Control Item", "IOC"}
+    finally:
+        # Shared types are seen by every workspace: these two would turn up in other tests.
+        db.rollback()
+        db.query(Schema).filter(Schema.workspace_id == bl).delete()
+        db.query(Workspace).filter(Workspace.id == bl).delete()
+        db.query(Schema).filter(Schema.uid == ioc.uid).delete()
+        db.query(Schema).filter(Schema.uid == control.uid).delete()
+        db.commit()
+
+
 # Every attribute key tools/epik8s-devices `push` can write on a Control Device. The same
 # list is asserted there against what `push` really writes: if a key is added on either
 # side, one of the two tests fails, instead of the hub quietly storing a key no type declares.

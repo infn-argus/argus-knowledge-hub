@@ -1879,6 +1879,14 @@
     }
   },
   "info": {
+    "contact": {
+      "email": "andrea.michelotti@infn.it",
+      "name": "Andrea Michelotti"
+    },
+    "license": {
+      "identifier": "EUPL-1.2",
+      "name": "EUPL-1.2"
+    },
     "title": "ARGUS field client API",
     "version": "1.0.0"
   },

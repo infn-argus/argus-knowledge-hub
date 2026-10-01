@@ -33,3 +33,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # The app's own licence (EUPL-1.2), shown on its licence page beside the packages' ones.
+  assets:
+    - LICENSE

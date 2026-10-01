@@ -750,6 +750,7 @@ class SeedResult:
     extended: list = field(default_factory=list)     # existing, gained attributes or was shared
     duplicates: list = field(default_factory=list)   # a same-named type that is not ours
     iconed: list = field(default_factory=list)       # given their default icon (catalogue_icons)
+    reused: list = field(default_factory=list)       # a beamline type the catalogue already shares
 
 
 def _bound(attributes: list, uids: dict) -> list:
@@ -896,6 +897,18 @@ def ensure_asset_types(db: Session, workspace_id: str, scope: str = SCOPE_ALL,
         s.name: s for s in db.scalars(select(Schema).where(
             Schema.workspace_id == workspace_id, Schema.applies_to == "objects"))
     }
+    if scope == SCOPE_BEAMLINE:
+        # A per-beamline type the catalogue has chosen to share (its control branch, so that several
+        # beamlines' IOCs are one kind of thing) is used from there: a beamline copy would sit beside
+        # the shared one in every picker, with the beamline's records split between the two. A
+        # beamline that already has its own copy keeps it.
+        offered = {row.name: row.uid for row in db.scalars(select(Schema).where(
+            Schema.workspace_id == catalogue_workspace_id, Schema.applies_to == "objects",
+            Schema.is_global.is_(True)))}
+        for spec in [s for s in specs if s.name in offered and s.name not in others]:
+            result.uids[spec.name] = offered[spec.name]
+            result.reused.append(spec.name)
+        specs = [s for s in specs if s.name not in result.reused]
     # References need every uid up front, before any type is written.
     for spec in specs:
         result.uids[spec.name] = _uid_for(db, workspace_id, spec, others)

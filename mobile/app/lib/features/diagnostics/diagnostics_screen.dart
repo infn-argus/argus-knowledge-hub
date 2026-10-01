@@ -3,8 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 
-/// What support asks for (flutter-app-design §9): versions, environment, device registration and
-/// whether the server answers. No token, no personal data beyond the signed-in label.
+/// Who made the app and under what licence, then what support asks for (flutter-app-design §9):
+/// versions, environment, device registration and whether the server answers. No token, no
+/// personal data beyond the signed-in label.
 class DiagnosticsScreen extends ConsumerWidget {
   const DiagnosticsScreen({super.key});
 
@@ -18,6 +19,23 @@ class DiagnosticsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('About and diagnostics')),
       body: ListView(children: [
+        row('App', 'ARGUS Field, the field client of the ARGUS Knowledge Hub'),
+        row('Author', 'Andrea Michelotti'),
+        row('Email', 'andrea.michelotti@infn.it'),
+        row('Licence', 'European Union Public Licence v. 1.2 (EUPL-1.2)'),
+        ListTile(
+          dense: true,
+          title: const Text('Licences'),
+          subtitle: const Text('This app and the open-source packages it is built with'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => showLicensePage(
+            context: context,
+            applicationName: 'ARGUS Field',
+            applicationVersion: config.appVersion,
+            applicationLegalese: 'Andrea Michelotti <andrea.michelotti@infn.it>\n'
+                'Licensed under the European Union Public Licence v. 1.2 (EUPL-1.2).',
+          ),
+        ),
         row('App version', config.appVersion),
         row('Client header', 'flutter/${config.appVersion}/${api.platform}'),
         row('Environment', config.environment),

@@ -2,6 +2,8 @@
   "name": "assetmanagement-web",
   "private": true,
   "version": "0.1.0",
+  "license": "EUPL-1.2",
+  "author": "Andrea Michelotti <andrea.michelotti@infn.it>",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -251,7 +251,7 @@ def test_without_the_catalogues_types_it_says_so_and_writes_nothing(db, tag):
     ws = f"inf-{secrets.token_hex(4)}"
     db.add(Workspace(id=ws, name="Bare"))
     db.commit()
-    with pytest.raises(ValueError, match="Seed the catalogue first"):
+    with pytest.raises(ValueError, match="Seed the types first"):
         run(db, ws, tag)
     db.rollback()
     assert not db.query(Asset).filter(Asset.workspace_id == ws).count()
