@@ -36,7 +36,13 @@ INACTIVE = ("Merged", "Retired")
 CANDIDATE = "identity_candidate"
 
 
-def strong_identifiers(attributes: dict) -> list[tuple[str, str]]:
+# A MAC identifies hardware: the network interface it is burned into (an Equipment Port, or an IT box's own
+# primary interface). A registration that names it (an Address Record, a DHCP lease) points at that hardware
+# and is not a second holder of it, so two such records are not duplicates.
+MAC_NAMES_HARDWARE_NOT = {"Address Record"}
+
+
+def strong_identifiers(attributes: dict, type_name: Optional[str] = None) -> list[tuple[str, str]]:
     """(name, normalized value) of a record's strong identifiers (§10)."""
     a = attributes or {}
     out = []
@@ -45,7 +51,7 @@ def strong_identifiers(attributes: dict) -> list[tuple[str, str]]:
         out.append(("serial", f"{str(a.get('manufacturer') or '').strip().lower()}|{str(a['serial']).strip()}"))
     if a.get("inventory_number"):
         out.append(("inventory_number", str(a["inventory_number"]).strip()))
-    if a.get("mac"):
+    if a.get("mac") and type_name not in MAC_NAMES_HARDWARE_NOT:
         out.append(("mac", str(a["mac"]).strip().lower().replace("-", ":")))
     return out
 
@@ -59,7 +65,7 @@ def _holders(db: Session, name: str, value: str, exclude: Optional[str] = None) 
                 if str((a.attributes or {}).get("manufacturer") or "").strip().lower() == manufacturer]
     else:
         rows = list(db.scalars(select(Asset).where(col[name].astext.isnot(None))))
-        rows = [a for a in rows if dict(strong_identifiers(a.attributes)).get(name) == value]
+        rows = [a for a in rows if dict(strong_identifiers(a.attributes, a.type)).get(name) == value]
     return [a for a in rows if a.uid != exclude and a.record_status not in INACTIVE]
 
 
@@ -119,7 +125,7 @@ def detect_candidates(db: Session, uids: Iterable[str], cause: str) -> None:
             continue
         wanted: dict[str, tuple] = {}
         if record.record_status not in INACTIVE:
-            for ident in strong_identifiers(record.attributes):
+            for ident in strong_identifiers(record.attributes, record.type):
                 for other in _holders(db, *ident, exclude=uid):
                     pair = tuple(sorted((uid, other.uid)))
                     if frozenset(pair) in _dismissed(db, {record.workspace_id, other.workspace_id}):
@@ -149,7 +155,7 @@ def detect_candidates(db: Session, uids: Iterable[str], cause: str) -> None:
                                         and db.get(Asset, u).record_status not in INACTIVE) for u in others) \
                     and record.record_status not in INACTIVE \
                     and frozenset(row.detail["records"]) not in _dismissed(db, {record.workspace_id}) \
-                    and any(i[0] == row.detail["identifier"] for i in strong_identifiers(record.attributes))
+                    and any(i[0] == row.detail["identifier"] for i in strong_identifiers(record.attributes, record.type))
                 if not still:
                     db.add(ConflictEvent(conflict_id=cid, kind="resolved", conflict_type=CANDIDATE,
                                          subject_uid=row.subject_uid, detail=row.detail, cause=cause, at=now()))
@@ -349,13 +355,14 @@ def _rederive_tickets(db: Session, uids: list[str]) -> None:
 
 # --------------------------------------------------------------------------- creation (I-ID-1)
 
-def assert_unique_at_creation(db: Session, workspace_id: str, attributes: dict, exclude: Optional[str] = None) -> None:
+def assert_unique_at_creation(db: Session, workspace_id: str, attributes: dict, exclude: Optional[str] = None,
+                              type_name: Optional[str] = None) -> None:
     """After cutover, a new record may not take a strong identifier an active
     record holds. The error names the existing record."""
     from app.ledger.cutover import authoritative
     if not authoritative(db, workspace_id, "objects"):
         return
-    for name, value in strong_identifiers(attributes):
+    for name, value in strong_identifiers(attributes, type_name):
         holders = _holders(db, name, value, exclude=exclude)
         if holders:
             h = holders[0]

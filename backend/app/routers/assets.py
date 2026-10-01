@@ -120,7 +120,7 @@ def create_asset(
     _check_class(db, type_name, body.attributes, None)
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
     validate_attributes(db, schema, body.attributes, workspace_id, Asset)
-    _assert_unique(db, workspace_id, body.attributes)
+    _assert_unique(db, workspace_id, body.attributes, type_name=type_name)
     data = body.model_dump()
     data["key"] = (data.get("key") or "").strip()
     if not data["key"]:
@@ -169,9 +169,10 @@ def _assert_writable(db: Session, workspace_id: str) -> None:
         raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": "I-SOR-1"})
 
 
-def _assert_unique(db: Session, workspace_id: str, attributes: dict, exclude: Optional[str] = None) -> None:
+def _assert_unique(db: Session, workspace_id: str, attributes: dict, exclude: Optional[str] = None,
+                   type_name: Optional[str] = None) -> None:
     try:
-        assert_unique_at_creation(db, workspace_id, attributes, exclude)
+        assert_unique_at_creation(db, workspace_id, attributes, exclude, type_name)
     except DuplicateIdentifier as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc), "invariant": exc.code,
                                                      "existing": exc.existing})
@@ -251,7 +252,7 @@ def update_asset(
         _check_class(db, asset.type, new_attrs, (asset.attributes or {}).get("equipment_class"))
         stamp_current_user_attributes(db, schema, new_attrs, current_user_id)
         validate_attributes(db, schema, new_attrs, workspace_id, Asset, exclude_uid=uid)
-        _assert_unique(db, workspace_id, new_attrs, exclude=uid)
+        _assert_unique(db, workspace_id, new_attrs, exclude=uid, type_name=asset.type)
         current = asset.attributes or {}
         changes.update({f"attr:{k}": v for k, v in new_attrs.items() if current.get(k) != v})
         changes.update({f"attr:{k}": None for k in current if k not in new_attrs})

@@ -107,7 +107,7 @@ export function GlobalValueForm() {
             onChange={(e) => setType(e.target.value)}
             className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
           >
-            {ATTRIBUTE_TYPES.filter((t) => t !== "user" && t !== "current_user").map((t) => (
+            {ATTRIBUTE_TYPES.filter((t) => t !== "user" && t !== "current_user" && t !== "group").map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>

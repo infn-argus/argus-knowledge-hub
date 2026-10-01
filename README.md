@@ -190,6 +190,29 @@ currently valid* revision rather than to an arbitrary PDF.
   performance targets, and a volume generator runs them at 10× (50 000 records,
   20 000 tickets and 5 000 documents): all were met. See [docs/operations.md](docs/operations.md)
   for the results, the jobs to schedule and point-in-time recovery.
+- **Type catalogue.** Every object type a workspace can use, on one page: where it sits in the
+  tree, what it is, its attributes (own and inherited), the names imports know it by, what its
+  references mean in the graph, and how many records it has. The seeded types, ticket types and
+  document types come with default icons (Tabler, plus drawn ones for magnets, quadrupoles,
+  vacuum crosses and valves); shared types get shared icons. *Assets → Type catalogue*; served by
+  `/v1/catalogue/types`.
+- **Mapping imported records.** Records imported as they were in Insight are mapped onto a
+  workspace's types with a plan per source type, from rules and, where an AI endpoint is checked,
+  the AI: target type, field mapping, fixed values, companion records (a GigE camera's Ethernet
+  port with its MAC and IP) and links, made once both ends are mapped. Hardware models map onto a
+  catalogue's Product Models and vendors the same way. Attachments, avatars, history, comments
+  and tickets come along, and nothing is shared with other workspaces unless asked.
+  *Assets → Map imported records*; served by `/v1/catalogue-mappings`.
+- **Channels ↔ hardware.** Which unit a control channel drives is proposed from the naming
+  convention (zone, function code, number) and the network address, and becomes an `acts on`
+  link only once a person confirms it; an IOC then `drives` the hardware of its channels.
+  *Assets → Channels ↔ hardware*; served by `/v1/ledger/control-bindings`.
+- **Inferring the hardware chain from EPIK8s.** An EPIK8s import can, as options, make what the
+  channels imply: the equipment and lattice elements they drive (rules), the controller each IOC
+  talks to (IPCMini, TPG 366, Pollux…) powering them, and, in a site-wide IT workspace, the serial
+  converters, servers and consoles the hostnames name with the ports the lines use. A unit the
+  inventory already holds is linked by proposal instead of duplicated, and channels no rule
+  recognises can be classified by the AI, as proposals in the review queue only.
 - **Data integrity tools**: relink of unresolved references, and a report of missing
   references, dangling links and orphaned objects, with targeted cleanup actions.
 
@@ -206,7 +229,7 @@ currently valid* revision rather than to an arbitrary PDF.
   attribution, rule versions; acceptance tests A1–A32) is the second; the transition and
   readiness gates (A33–A41: cutover, identity, restrictions, lookup, reconciliation) the third.
 - [Object schema design for a large-scale accelerator](docs/asset-schema-design.md) — the
-  type catalogue (122 types over four planes), the relation vocabulary, composite elements such
+  type catalogue (128 types over four planes), the relation vocabulary, composite elements such
   as a screen station, and how a beamline's EPIK8s control configuration and a EuPRAXIA-style
   product breakdown both come in as equipment rather than as files.
 - [The knowledge graph for root-cause analysis](docs/knowledge-graph-design.md) — what each
@@ -341,7 +364,15 @@ A few notes:
   Each Access Point also says what kind of endpoint it is, and each device on a port of a serial
   converter is on a Serial Line. Add `--it-workspace it-infrastructure` (a workspace made with
   `tools/argus-admin workspace create`) to make the converters, servers and consoles the hostnames name, once, in that
-  site-wide workspace, flagged global; each beamline's Access Point is `implemented by` them.
+  site-wide workspace, flagged global; each beamline's Access Point is `implemented by` them,
+  and each port of a converter a line uses is an Equipment Port there (TCP 4003 → P3). With
+  `--infer-elements`, `--infer-controllers` also makes the controller each IOC talks to (a Vacuum
+  or Motion Controller that `powers` what its channels drive), and `--link-inventory` links a
+  channel to the unit the inventory already holds, by tag or address, as a proposal under
+  *Channels ↔ hardware*, instead of inferring a twin. The web import (*Imports → New → EPIK8s*)
+  has the same options, plus asking the workspace's AI about channels no rule recognises; its
+  answers are proposals in the review queue. Workspaces seeded before need
+  `seed_asset_types.py` again for the `Vacuum Controller` type.
 - State lives in two named volumes and survives `docker compose down`;
   `docker compose down -v` wipes it (see [Starting over with no data](#starting-over-with-no-data)).
 

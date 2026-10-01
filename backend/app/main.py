@@ -10,6 +10,7 @@ from app.db import engine
 from app.routers import (
     access_reviews,
     catalogue,
+    catalogue_mapping,
     extensions as extensions_router,
     intake as intake_router,
     field as field_router,
@@ -170,6 +171,8 @@ app.include_router(labels.router)
 app.include_router(roles.router)
 app.include_router(sync.router)
 app.include_router(transfers.router)
+app.include_router(catalogue_mapping.router)
+app.include_router(catalogue.types_router)
 app.include_router(uploads.router)
 app.include_router(workspaces.router)
 

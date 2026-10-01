@@ -20,6 +20,9 @@
         pg_dump + attachments + a manifest with checksums and row counts
     python -m app.ledger rehearse-restore MANIFEST
         restore into a scratch database, check it, drop it
+    python -m app.ledger reference-edges [--workspace WS]
+        derive the graph edges of reference fields (instance of, located in, supplied by) for records
+        written before they were derived: every record holding one is projected again
     python -m app.ledger probe --base-url URL --token TOKEN --asset UID [...] [--edit UID]
         measure the §19 performance targets against a running API; --edit
         writes an `argus_probe` value on that (dedicated) record
@@ -34,6 +37,35 @@ import time
 from datetime import date
 
 from app.db import SessionLocal
+
+
+def reference_edges(workspace_id=None) -> dict:
+    """Project again every record holding a reference field that is an edge (asset_types.REFERENCE_RELATIONS),
+    so records written before those edges were derived get them. Idempotent."""
+    from sqlalchemy import or_, select
+
+    from app.ledger import engine
+    from app.ledger.writer import writing
+    from app.models.asset import Asset, Relation
+    from app.services.asset_types import REFERENCE_RELATIONS
+    from app.services.relations import rebuild_asset_relations_with_neighbors
+    db = SessionLocal()
+    try:
+        q = select(Asset.uid).where(or_(*[Asset.attributes.has_key(k) for k in REFERENCE_RELATIONS]))
+        if workspace_id:
+            q = q.where(Asset.workspace_id == workspace_id)
+        uids = list(db.scalars(q))
+        before = db.query(Relation).filter(Relation.relation_type.in_(REFERENCE_RELATIONS.values())).count()
+        with writing(db):
+            for uid in uids:
+                engine.project_subject(db, uid, "reference edges", emit=False)
+        for uid in uids:
+            rebuild_asset_relations_with_neighbors(db, uid)
+        db.commit()
+        after = db.query(Relation).filter(Relation.relation_type.in_(REFERENCE_RELATIONS.values())).count()
+        return {"records": len(uids), "edges_before": before, "edges_after": after}
+    finally:
+        db.close()
 
 
 def _keep_evidence(stage: str, report: dict, ok: bool) -> None:
@@ -104,6 +136,8 @@ def main(argv=None) -> int:
     b.add_argument("--attachments", default=os.environ.get("ATTACHMENTS_DIR"))
     r = sub.add_parser("rehearse-restore")
     r.add_argument("manifest")
+    re_ = sub.add_parser("reference-edges")
+    re_.add_argument("--workspace", default=None)
     pr = sub.add_parser("probe")
     pr.add_argument("--base-url", required=True)
     pr.add_argument("--token", required=True)
@@ -117,6 +151,8 @@ def main(argv=None) -> int:
         derive_worker(args.once, args.interval)
     elif args.command == "backfill-checksums":
         print(f"recorded {backfill_checksums()} checksum(s)")
+    elif args.command == "reference-edges":
+        print(json.dumps(reference_edges(args.workspace)))
     elif args.command == "audit-digest":
         from app.ledger import audit
         db = SessionLocal()

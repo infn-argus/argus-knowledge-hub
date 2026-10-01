@@ -32,6 +32,10 @@ import { IssueSearch } from "./pages/issues/Search";
 import { LabelList } from "./pages/labels/List";
 import { ReviewQueuePage } from "./pages/review/Queue";
 import { MigrationPage } from "./pages/migration/Domains";
+import { CatalogueMappingPage } from "./pages/migration/CatalogueMapping";
+import { ControlBindingsPage } from "./pages/review/ControlBindings";
+import { TypeCataloguePage } from "./pages/catalogue/TypeCatalogue";
+import { CatalogueMappingReview } from "./pages/migration/CatalogueMappingReview";
 import { BulkChangesPage } from "./pages/bulk/BulkChanges";
 import { WorkflowsPage } from "./pages/workflows/Workflows";
 import { LookupPage } from "./pages/lookup/Lookup";
@@ -100,6 +104,10 @@ export function App() {
           <Route path="/graph" element={<GraphExplorer />} />
           <Route path="/review" element={<ReviewQueuePage />} />
           <Route path="/migration" element={<MigrationPage />} />
+          <Route path="/migration/catalogue" element={<CatalogueMappingPage />} />
+          <Route path="/control-bindings" element={<ControlBindingsPage />} />
+          <Route path="/catalogue/types" element={<TypeCataloguePage />} />
+          <Route path="/migration/catalogue/:id" element={<CatalogueMappingReview />} />
           <Route path="/bulk-changes" element={<BulkChangesPage />} />
           <Route path="/catalogue/equipment-classes" element={<EquipmentClassesPage />} />
           <Route path="/lookup/*" element={<LookupPage />} />

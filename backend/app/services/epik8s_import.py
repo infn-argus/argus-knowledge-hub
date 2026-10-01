@@ -65,7 +65,8 @@ from app.services.git_import import (
 )
 from app.services.asset_types import resolve_type_uids
 from app.services.element_inference import (
-    ASSET_TYPES, CAMERA, ELEMENT_TYPES, LATTICE_NAME, SCREEN_NAME, infer_device, infer_ioc,
+    ASSET_TYPES, CAMERA, CONTROLLER_TYPES, ELEMENT_TYPES, LATTICE_NAME, SCREEN_NAME, SYSTEM_BY_GROUP,
+    infer_controller, infer_device, infer_ioc,
 )
 from app.services import dns_convention
 from app.services.network_resolve import IPV4, NetworkIndex, short_host
@@ -153,6 +154,10 @@ def _ioc_entries(iocs: Any) -> list[dict]:
 def _present(attributes: dict) -> dict:
     """What a configuration actually says: a key it leaves out is not a value of None."""
     return {k: v for k, v in attributes.items() if v not in (None, "", [], {})}
+
+
+def _s_lower(value: Any) -> str:
+    return str(value or "").strip().lower()
 
 
 def _text(value: Any) -> Optional[str]:
@@ -271,9 +276,18 @@ def _settings(entry: dict) -> dict:
 
 class _Importer:
     def __init__(self, db: Session, job: ImportJob, workspace_id: str, source_ref: str,
-                 infer_elements: bool = False, it_workspace: Optional[str] = None):
+                 infer_elements: bool = False, it_workspace: Optional[str] = None,
+                 infer_controllers: bool = False, link_inventory: bool = False):
         self.db = db
         self.infer = infer_elements
+        # The box between a line and what it runs (an IPCMini, a TPG 366, a Pollux chain), one per IOC.
+        self.controllers = infer_controllers
+        # A channel whose unit the inventory already holds (same tag, or same network address) is linked to
+        # it, as a proposal to confirm, instead of getting an inferred twin.
+        self.link = link_inventory
+        self._matcher = None
+        # Channels no rule recognised, for the AI to propose what they drive: (device, ioc, entry).
+        self.unrecognised: list = []
         # The site-wide workspace that holds IT equipment, when there is one. A converter or a
         # server is one box however many beamlines reach it, so it is made there, flagged global,
         # and each beamline's Access Point is `implemented by` it.
@@ -319,6 +333,7 @@ class _Importer:
             "access_points_reused": 0,    # created earlier in this same run
             "addresses_unresolved": 0,
             "relations": 0,
+            "inferred_controllers": 0, "linked_to_inventory": 0, "ports": 0,
         }
         # What this run created, so re-reaching one is not counted as a match.
         self.created_access_points: set[str] = set()
@@ -349,6 +364,18 @@ class _Importer:
                     f"({', '.join(missing)}). Seed the global set first: scripts/seed_asset_types.py global.")
             for name in IT_TYPES:
                 self.schemas[f"it:{name}"] = self.db.get(Schema, usable[name])
+            # Ports of the converters, where the catalogue has the type (a catalogue seeded before it had
+            # Equipment Port simply makes none).
+            if "Equipment Port" in usable:
+                self.schemas["it:Equipment Port"] = self.db.get(Schema, usable["Equipment Port"])
+        if self.controllers:
+            missing = [n for n in CONTROLLER_TYPES if n not in usable]
+            if missing:
+                raise ValueError(
+                    f"Inferring controllers writes objects of the catalogue's {', '.join(missing)} type, which "
+                    f"this workspace cannot use. Seed the catalogue first: scripts/seed_asset_types.py.")
+            for name in CONTROLLER_TYPES:
+                self.schemas[name] = self.db.get(Schema, usable[name])
         for name, description in TYPES.items():
             schema = self.db.get(Schema, usable[name]) if name in usable else None
             if schema is None:
@@ -527,6 +554,54 @@ class _Importer:
                 self.relate(element, asset, inference.element_link)
             self._count_inferred("inferred_elements", f"inferred {inference.element_type}", element.key)
         return asset
+
+    def _controller(self, ioc: dict, name: str) -> Optional[Asset]:
+        """The controller box an IOC talks to, when its devtype or template names one (element_inference)."""
+        found = infer_controller(ioc)
+        if found is None:
+            return None
+        listed = [d for d in (ioc.get("devices") or []) if isinstance(d, dict) and d.get("name")]
+        size = {"n_channels" if found.controller_type == "Vacuum Controller" else "n_axes": len(listed) or None}
+        controller = self.upsert_inferred(
+            found.controller_type, f"{self.tag}:CTL:{name}", f"{name} controller",
+            _present({"manufacturer": found.manufacturer, "model": found.model, **size,
+                      "argus_system": SYSTEM_BY_GROUP.get(_s_lower(ioc.get("devgroup"))),
+                      "argus_keywords": ["inferred"],
+                      "description": f"Inferred by the control-configuration import: {found.why}. Nobody has "
+                                     f"confirmed its serial number or where it is."}))
+        self._count_inferred("inferred_controllers", f"inferred {found.controller_type}", controller.key)
+        return controller
+
+    def _inventory_unit(self, device: Asset) -> Optional[Asset]:
+        if self._matcher is None:
+            from app.ledger.control_binding import InventoryMatcher
+            self._matcher = InventoryMatcher(self.db, self.workspace_id, exclude_source=SOURCE)
+        a = device.attributes or {}
+        return self._matcher.match(device.name, a.get("pv"), a.get("address"))
+
+    def _ports(self, tag: str) -> None:
+        """A converter's ports, in the IT workspace: a line on TCP port 4003 of a Moxa is its port P3."""
+        if "it:Equipment Port" not in self.schemas:
+            return
+        for key, line in self._lines.items():
+            converter = self._ap_equipment.get(line["ap"].uid)
+            port = line.get("port")
+            try:
+                n = int(port) - 4000
+            except (TypeError, ValueError):
+                continue
+            if converter is None or converter.type != "Serial Converter" or not 1 <= n <= 999:
+                continue
+            asset = self._upsert_it("Equipment Port", f"{converter.key}:P{n}", f"{converter.name} P{n}", _present({
+                "port_label": f"P{n}", "port_role": f"serial-data#{n}", "tcp_port": int(port),
+                "operating_mode": "TCP server", "argus_keywords": ["inferred"],
+                "description": f"Inferred by the control-configuration import: {tag} reaches "
+                               f"{converter.name} on TCP port {port}, which a Moxa serves on its port {n}.",
+            }))
+            self.relate(asset, converter, "port of")
+            if asset.uid not in self._it_seen:
+                self._it_seen.add(asset.uid)
+                self.counts["ports"] += 1
 
     def _infer_channel_element(self, element_type: str, control: Asset, unit: Asset,
                                name: str, zones: list, why: str) -> None:
@@ -852,6 +927,8 @@ class _Importer:
         self._services(epics.get("services") or {}, facility, tag)
         self._iocs(ioc_entries, defaults, facility, tag, beamline, create_missing)
         self._serial_lines(tag)
+        if self.it_workspace:
+            self._ports(tag)
         if self.infer:
             self._pair_screens(tag)
             self._wire_plant(tag)
@@ -1057,6 +1134,7 @@ class _Importer:
             if unit is not None:
                 unit_asset = self._infer_from(unit, ioc, "drives", name, name, merged,
                                               _as_list(merged.get("zones")))
+            controller = self._controller(merged, name) if self.controllers and unit is None else None
 
             if not merged.get("asset"):
                 _note(self.job, self.db,
@@ -1069,6 +1147,10 @@ class _Importer:
                 ioc_access = self.access_point(address, tag, create_missing)
                 if ioc_access is not None:
                     self.relate(ioc, ioc_access, "connects to")
+                    if controller is not None:
+                        # The controller is what the IOC reaches at that address: when the line or the
+                        # converter stops, so does the controller and everything it runs.
+                        self.relate(controller, ioc_access, "reached through")
                     # An IOC that names a `host:` runs on it; one that names a `server:` is
                     # connected to it. Both stop when it does, but only the first says where the
                     # software lives.
@@ -1087,7 +1169,7 @@ class _Importer:
                 if not isinstance(device, dict) or not device.get("name"):
                     continue
                 self._device(device, merged, ioc, ioc_access, tag, beamline, create_missing,
-                             unit=unit, unit_asset=unit_asset)
+                             unit=unit, unit_asset=unit_asset, controller=controller)
 
     @staticmethod
     def _kind_of(entry: dict) -> str:
@@ -1095,7 +1177,8 @@ class _Importer:
 
     def _device(self, device: dict, ioc: dict, ioc_asset: Asset,
                 ioc_access: Optional[Asset], tag: str, beamline: str,
-                create_missing: bool, unit=None, unit_asset: Optional[Asset] = None) -> None:
+                create_missing: bool, unit=None, unit_asset: Optional[Asset] = None,
+                controller: Optional[Asset] = None) -> None:
         device_name = str(device["name"]).strip()
         pv = _pv_prefix(ioc, device_name)
         key = f"{tag}:DEV:{ioc['name']}:{device_name}"
@@ -1149,9 +1232,18 @@ class _Importer:
             if inference is None:
                 self.not_inferred[self._kind_of({**ioc, **{k: v for k, v in device.items()
                                                            if k in ("devgroup", "template")}})] += 1
+                self.unrecognised.append((asset, ioc, device))
             else:
-                self._infer_from(inference, asset, "acts on", f"{ioc['name']}:{device_name}",
-                                 device_name, {**ioc, **device}, zones)
+                known = self._inventory_unit(asset) if self.link else None
+                if known is not None:
+                    # The inventory has it: no inferred twin. The channel's `acts on` it is proposed by the
+                    # control binding after the walk, for a person to confirm.
+                    self.counts["linked_to_inventory"] += 1
+                else:
+                    driven = self._infer_from(inference, asset, "acts on", f"{ioc['name']}:{device_name}",
+                                              device_name, {**ioc, **device}, zones)
+                    if controller is not None and driven is not None:
+                        self.relate(controller, driven, "powers")
 
         # Addressed directly, or through whatever the IOC connects to.
         line_ap, line_address, line_port = None, None, None
@@ -1255,6 +1347,10 @@ def run_epik8s_import(
     create_missing_nodes: bool = True,
     infer_elements: bool = False,
     it_workspace: Optional[str] = None,
+    infer_controllers: bool = False,
+    link_inventory: bool = False,
+    ai_unrecognised: bool = False,
+    actor: str = "import",
 ):
     """Read one beamline's values.yaml and mirror what it describes."""
     db = SessionLocal()
@@ -1274,7 +1370,8 @@ def run_epik8s_import(
         # "which revision said so" needs the commit it pointed at when read.
         revision = _resolve_commit(provider, repo_url, pat, branch) or branch
         importer = _Importer(db, job, workspace_id, f"{repo_url}@{revision}:{path}",
-                             infer_elements=infer_elements, it_workspace=it_workspace)
+                             infer_elements=infer_elements, it_workspace=it_workspace,
+                             infer_controllers=infer_controllers, link_inventory=link_inventory)
         importer.ensure_types()
 
         merge_strategy, retired = effective_strategy(merge_strategy)
@@ -1287,6 +1384,25 @@ def run_epik8s_import(
         for asset in importer.assets.values():
             rebuild_asset_relations(db, asset.uid)
         db.commit()
+
+        if link_inventory:
+            # Channels whose unit the inventory holds: their `acts on` proposed, for a person to confirm.
+            _progress(db, job, "Proposing links to the units already in the inventory")
+            from app.ledger import control_binding
+            bound = control_binding.propose(db, workspace_id)
+            importer.counts["inventory_link_proposals"] = bound["proposed"]
+            db.commit()
+        if ai_unrecognised and importer.unrecognised:
+            _progress(db, job, f"Asking the AI about {len(importer.unrecognised)} channel(s) no rule recognised")
+            from app.services import epik8s_ai
+            ai = epik8s_ai.propose(db, workspace_id, actor, importer.unrecognised)
+            importer.counts["ai_asked"] = ai.get("asked", 0)
+            importer.counts["ai_proposed"] = ai.get("proposed", 0)
+            if not ai.get("used"):
+                _note(job, db, f"AI not used: {ai.get('reason')}")
+            for err in ai.get("errors") or []:
+                _note(job, db, f"AI stopped answering: {err}")
+            db.commit()
 
         job.counts = {**(job.counts or {}), **importer.counts}
         job.status = "completed"

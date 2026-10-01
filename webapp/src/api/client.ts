@@ -76,6 +76,11 @@ import type {
   AskResult,
   WorkspaceIdRule,
   AssetKeyRule,
+  CatalogueMapping,
+  MappingItem,
+  MappingVocabulary,
+  PlanEntry,
+  MappingSourceType,
   WorkspaceIdSuggestion,
 } from "./types";
 import type {
@@ -425,6 +430,105 @@ export const importsApi = {
   get: (uid: string) => request<ImportJob>(`/v1/imports/${uid}`),
   create: (input: ImportInput) =>
     request<ImportJob>("/v1/imports", { method: "POST", body: json(input) }),
+};
+
+export const catalogueMappingApi = {
+  sources: (workspaceId: string, kind: "catalogue" | "records" = "catalogue", target?: string) =>
+    request<MappingSourceType[]>(
+      `/v1/catalogue-mappings/sources?workspace_id=${encodeURIComponent(workspaceId)}&kind=${kind}` +
+        (target ? `&target_workspace_id=${encodeURIComponent(target)}` : ""),
+    ),
+  vocabulary: (id: string) => request<MappingVocabulary>(`/v1/catalogue-mappings/${id}/vocabulary`),
+  setPlan: (
+    id: string,
+    typeUid: string,
+    input: {
+      target_type_uid?: string;
+      share?: boolean;
+      fixed?: Record<string, string>;
+      companions?: Record<
+        string,
+        {
+          type_uid?: string;
+          verb?: string;
+          from_companion?: boolean;
+          label?: string;
+          suffix?: string;
+          fixed?: Record<string, string>;
+          share?: boolean;
+        } | null
+      >;
+      fields?: Record<
+        string,
+        {
+          kind: string;
+          target?: string | null;
+          values?: Record<string, string>;
+          verb?: string | null;
+          reverse?: boolean;
+          text_to?: string;
+          create_type?: string | null;
+          companion?: string;
+          create_missing?: boolean;
+        }
+      >;
+      relations?: Record<string, { verb: string | null; reverse: boolean }>;
+    },
+  ) => request<PlanEntry>(`/v1/catalogue-mappings/${id}/plan/${typeUid}`, { method: "PUT", body: json(input) }),
+  recheck: (id: string) =>
+    request<{ rows: number; warnings: number }>(`/v1/catalogue-mappings/${id}/recheck`, { method: "POST" }),
+  share: (id: string) => request<{ shared: number }>(`/v1/catalogue-mappings/${id}/share`, { method: "POST" }),
+  list: () => request<CatalogueMapping[]>("/v1/catalogue-mappings"),
+  get: (id: string) => request<CatalogueMapping>(`/v1/catalogue-mappings/${id}`),
+  start: (input: {
+    kind?: "catalogue" | "records";
+    source_workspace_id: string;
+    target_workspace_id: string;
+    type_uids: string[];
+    use_ai: boolean;
+  }) => request<CatalogueMapping>("/v1/catalogue-mappings", { method: "POST", body: json(input) }),
+  decide: (
+    id: string,
+    itemId: string,
+    input: {
+      status?: string;
+      fields?: Record<string, string>;
+      vendor?: string;
+      action?: string;
+      merge_into_uid?: string;
+      attributes?: Record<string, unknown>;
+    },
+  ) => request<MappingItem>(`/v1/catalogue-mappings/${id}/items/${itemId}`, { method: "PATCH", body: json(input) }),
+  decideMany: (id: string, input: { item_ids?: string[]; status?: string; min_confidence?: number; type_uid?: string }) =>
+    request<{ changed: number; errors: { item: string; error: string }[] }>(`/v1/catalogue-mappings/${id}/items`, {
+      method: "POST",
+      body: json(input),
+    }),
+  apply: (id: string, keepText = false) =>
+    request<{
+      applied: number;
+      failed: { source_key: string; error: string }[];
+      carried: Record<string, number>;
+      relations?: number;
+      relations_failed?: { verb: string; error: string }[];
+    }>(
+      `/v1/catalogue-mappings/${id}/apply${keepText ? "?keep_text=true" : ""}`,
+      { method: "POST" },
+    ),
+  shareReferences: (id: string) =>
+    request<{ shared: number }>(`/v1/catalogue-mappings/${id}/share-references`, { method: "POST" }),
+  fillReferences: (id: string) =>
+    request<{ records: number; filled: number; still_hidden: number }>(
+      `/v1/catalogue-mappings/${id}/fill-references`,
+      { method: "POST" },
+    ),
+  carry: (id: string) =>
+    request<{ rows: number; failed: { source_key: string; error: string }[]; carried: Record<string, number> }>(
+      `/v1/catalogue-mappings/${id}/carry`,
+      { method: "POST" },
+    ),
+  undo: (id: string) =>
+    request<{ retired: number; relations_removed?: number }>(`/v1/catalogue-mappings/${id}/undo`, { method: "POST" }),
 };
 
 export const transfersApi = {
@@ -947,6 +1051,32 @@ export type SerialLineProposal = {
 
 /** The fact ledger: review queue, provenance, decisions and installation
  * history. Every change here is a decision recorded in the audit ledger. */
+export interface ControlBindingReport {
+  proposed: number;
+  by_tag: number;
+  by_host: number;
+  already_bound: number;
+  ambiguous: { device: string; uid: string; candidates: { uid: string; name: string; type: string }[] }[];
+  unmatched: { device: string; uid: string }[];
+}
+
+export interface ControlBindingProposal {
+  claim_id: string;
+  subject: { uid: string; name: string; type: string };
+  predicate: string;
+  target: { uid: string; name: string; type: string } | null;
+  rule: string;
+  confidence: number | null;
+  evidence: Record<string, unknown> | null;
+}
+
+export const controlBindingApi = {
+  propose: () => request<ControlBindingReport>("/v1/ledger/control-bindings/propose", { method: "POST" }),
+  list: () => request<ControlBindingProposal[]>("/v1/ledger/control-bindings"),
+  decide: (input: { claim_ids?: string[]; accept: boolean; min_confidence?: number; reason?: string }) =>
+    request<{ decided: number }>("/v1/ledger/control-bindings/decide", { method: "POST", body: json(input) }),
+};
+
 export const ledgerApi = {
   review: () => request<ReviewQueue>("/v1/ledger/review"),
   queues: () => request<QueueDashboard>("/v1/ledger/review/queues"),
@@ -1106,6 +1236,47 @@ export const legacyMigrationApi = {
     if (!resp.ok) throw new ApiError(resp.status, await resp.text());
     return URL.createObjectURL(await resp.blob());
   },
+};
+
+export interface CatalogueTypeAttribute {
+  key: string;
+  name: string;
+  type: string;
+  origin: string;
+  required: boolean;
+  multi: boolean;
+  unique: boolean;
+  options: string[];
+  refers_to: string | null;
+  relation: string | null;
+}
+
+export interface CatalogueType {
+  uid: string;
+  name: string;
+  description: string | null;
+  parent: string | null;
+  path: string[];
+  branch: string;
+  abstract: boolean;
+  shared: boolean;
+  owner_workspace: string;
+  is_global: boolean;
+  icon_uid: string | null;
+  aliases: string[];
+  attributes: CatalogueTypeAttribute[];
+  records: number;
+  records_with_subtypes: number;
+}
+
+export interface TypeCatalogueView {
+  types: CatalogueType[];
+  equipment_classes: { name: string; status: string; promoted_type: string | null; note: string | null }[];
+  branches: string[];
+}
+
+export const typeCatalogueApi = {
+  get: () => request<TypeCatalogueView>("/v1/catalogue/types"),
 };
 
 export const catalogueApi = {

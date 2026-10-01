@@ -106,6 +106,7 @@ def D(key, name, **f):  return _attr(key, name, "date", **f)            # noqa: 
 def DT(key, name, **f): return _attr(key, name, "datetime", **f)        # noqa: E704
 def E(key, name, options, **f): return _attr(key, name, "enumeration", options=options, **f)  # noqa: E704
 def U(key, name, **f):  return _attr(key, name, "user", **f)            # noqa: E704
+def G(key, name, **f):  return _attr(key, name, "group", **f)           # noqa: E704
 def R(key, name, target, **f): return _attr(key, name, "reference", ref=target, **f)  # noqa: E704
 
 
@@ -116,6 +117,18 @@ class TypeSpec:
     description: str
     attributes: list = field(default_factory=list)
     abstract: bool = False
+    # Other names records of this type go by in imports ("pipe", "bellows"): the mapping's rules match them.
+    aliases: list = field(default_factory=list)
+
+
+# The reference fields that are edges of the graph too, and the verb each one is (knowledge-graph design):
+# the ledger derives the edge from the field whenever it projects the record, so the Relations tab, the graph
+# and the impact walks see what the field says, and the edge follows every change, revocation and undo.
+REFERENCE_RELATIONS = {
+    "product_model": "instance of",       # asset → its product model
+    "argus_location": "located in",       # asset → room, area or rack: the place fails, the asset with it
+    "vendor_ref": "supplied by",          # product model → its vendor
+}
 
 
 def type_uid(workspace_id: str, name: str) -> str:
@@ -137,8 +150,8 @@ _BAND = ["S-band", "C-band", "X-band"]
 CATALOGUE: list[TypeSpec] = []
 
 
-def _t(name, parent, description, attributes=(), abstract=False):
-    CATALOGUE.append(TypeSpec(name, parent, description, list(attributes), abstract))
+def _t(name, parent, description, attributes=(), abstract=False, aliases=()):
+    CATALOGUE.append(TypeSpec(name, parent, description, list(attributes), abstract, list(aliases)))
 
 
 # Root ---------------------------------------------------------------------
@@ -151,6 +164,9 @@ _t("Item", None, "Anything the inventory holds. Carries the keys shared with tic
     S("argus_keywords", "Keywords", indexed=True, multi=True),
     E("argus_lifecycle", "Lifecycle", _LIFECYCLE),
     E("argus_criticality", "Criticality", _CRITICALITY),
+    # Who answers for it: the owning service (a group, from the directory or made here), and optionally a
+    # person. Informational: workspace roles decide what anyone may do (custody is separate: `custodian`).
+    G("argus_owner", "Owning service", indexed=True),
     U("argus_responsible", "Responsible"),
     E("argus_source", "Source", _SOURCE, readonly=True),
     S("argus_source_ref", "Source revision", readonly=True),
@@ -364,6 +380,21 @@ _t("Vacuum Valve", "Asset", "Isolates a vacuum sector.", [
     E("actuation", "Actuation", ["Manual", "Pneumatic", "Electric"]),
     B("interlocked", "Interlocked")])
 _t("Vacuum Chamber", "Asset", "What you unbolt.")
+_t("Vacuum Controller", "Asset", "The box between a control line and the vacuum equipment it runs: an ion "
+   "pump controller, a turbo controller, a gauge controller. It powers and reads what is connected to it, "
+   "so when it stops, all of that does.", [
+    I("n_channels", "Channels"), S("firmware_version", "Firmware")],
+   aliases=("ion pump controller", "turbo pump controller", "ipcmini"))
+_t("Vacuum Component", "Asset", "A passive part of the vacuum line: a length of pipe, a bellows, a cross "
+   "or a tee. Gauges, pumps and valves are mounted on it; a Vacuum Sector says which ones a valve isolates.", [
+    E("component_kind", "Kind", ["Pipe", "Bellows", "Cross", "Tee", "Elbow", "Nipple", "Reducer", "Adapter",
+                                 "Viewport", "Feedthrough", "Other"]),
+    F("length_mm", "Length (mm)"), F("inner_diameter_mm", "Inner diameter (mm)"),
+    E("flange_type", "Flange type", ["CF", "KF", "ISO-K", "ISO-F", "VCR", "Other"]),
+    S("flange_size", "Flange size"),                         # DN40, DN63…
+    S("material", "Material"), B("bakeable", "Bakeable"), F("bake_temperature_c", "Bake-out temperature (°C)")],
+   aliases=("pipe", "vacuum pipe", "beam pipe", "vacuum tube", "bellows", "cross", "tee", "elbow", "nipple",
+            "spool", "vacuum line"))
 _t("Motion Controller", "Asset", "Drives one or more motor axes.", [
     I("n_axes", "Number of axes"), S("protocol", "Protocol"),
     S("firmware_version", "Firmware version")])
@@ -536,6 +567,20 @@ _t("Serial Line", "Control Item", "One serial port of a converter and the device
     E("line_kind", "Line kind", ["Single device", "Multi-channel controller",
                                  "Multi-axis controller", "Multi-drop bus"]),
     S("serial_mode", "Serial mode"), I("baud", "Baud rate"), S("framing", "Framing")])
+# The control path the serial-line conversion builds (revision §9.1): a path from an IOC to its endpoint,
+# and the medium behind the endpoint, attached to a port of the unit installed there.
+_t("Communication Path", "Control Item", "From one IOC to one endpoint: the protocol and transport "
+   "the control software speaks.", [
+    S("protocol", "Protocol", indexed=True),                  # GigE Vision, Modbus TCP, StreamDevice, Channel Access…
+    S("transport", "Transport"),                              # TCP, UDP, serial over TCP (RFC 2217)…
+    I("tcp_port", "TCP port")])
+_t("Bus Segment", "Control Item", "The medium behind an endpoint: a serial line, a bus or a cable, "
+   "with its line parameters. It is attached to a port of the unit installed at the position.", [
+    S("medium", "Medium", indexed=True),                      # Ethernet, RS-232, RS-485, GPIB, CAN…
+    I("baud", "Baud rate"), S("framing", "Framing"), S("serial_mode", "Serial mode"),
+    E("safety_class", "Safety class", [(v, v) for v in ("none", "personnel_safety", "machine_protection",
+                                                         "interlock", "critical_rf_permit", "critical_actuator",
+                                                         "damage_risk")])])
 _t("Control Service", "Control Item", "A shared control service: archiver, gateway, "
    "alarm server, logbook.", [
     S("service", "Service", indexed=True), S("chart_url", "Chart"),
@@ -621,12 +666,32 @@ _t("Network Segment", "IT Record", "A VLAN or a subnet.", [
     I("vlan_id", "VLAN id", indexed=True), S("cidr", "CIDR", indexed=True), S("gateway", "Gateway"),
     E("purpose", "Purpose", ["Control", "Cameras", "Magnets", "Management", "Office", "Other"]),
     B("is_dhcp", "Served by DHCP")])
-_t("Address Record", "IT Record", "One registered address: a registered node, a lease, a name.", [
+_t("Address Record", "IT Record", "One registered address: a registered node, a lease, a name. "
+   "A unit with a network presence is `described by` it. The MAC here is the one the registration "
+   "names; the unit's own MAC is on its Ethernet port.", [
     E("record_kind", "Record kind", ["Registered node", "DHCP lease", "DNS name",
                                      "Ethernet configuration"]),
     S("hostname", "Hostname", indexed=True), S("ip", "IP address", indexed=True),
-    S("mac", "MAC address", indexed=True), D("registered_on", "Registered on"),
+    S("mac", "MAC address (as registered)", indexed=True), D("registered_on", "Registered on"),
     S("owner", "Owner")])
+
+# Ports: one physical interface of one unit (revision §1.4, §9.3). The unit's network, serial and bus
+# interfaces live here rather than as fields of every equipment type: a camera has one Ethernet port, a
+# converter sixteen serial ones, a server several. A port belongs to its unit (`port of`) and moves with it;
+# it sits beside Asset, as the design's tree has it next to Equipment.
+# The fields are the ones the port-matching algorithm reads; the MAC identifies the hardware.
+_t("Equipment Port", "Engineered Item", "One physical port of one unit: Ethernet, serial or a bus. It is `port of` "
+   "the unit and moves with it; a Bus Segment is attached to it.", [
+    S("port_label", "Label", indexed=True),                 # as printed or configured: P3, COM3, eth0
+    S("port_role", "Role", indexed=True),                    # governed with an index: serial-data#3, uplink…
+    E("port_kind", "Kind", ["RJ45", "SFP", "RS-232", "RS-422", "RS-485-2w", "RS-485-4w", "GPIB", "CAN",
+                            "USB", "EtherCAT", "Other"]),
+    S("mac", "MAC address", indexed=True),                    # Ethernet: the interface's own, a strong identifier
+    S("link_speed", "Link speed"),
+    S("supported_modes", "Supported modes", multi=True),
+    S("operating_mode", "Operating mode"),                   # as configured: real COM, TCP server, RFC 2217…
+    I("tcp_port", "TCP port", indexed=True),
+    S("signal_level", "Signal level"), S("termination", "Termination")])
 
 BY_NAME: dict[str, TypeSpec] = {spec.name: spec for spec in CATALOGUE}
 
@@ -684,6 +749,7 @@ class SeedResult:
     renamed: list = field(default_factory=list)      # seeded under a former name, carried across
     extended: list = field(default_factory=list)     # existing, gained attributes or was shared
     duplicates: list = field(default_factory=list)   # a same-named type that is not ours
+    iconed: list = field(default_factory=list)       # given their default icon (catalogue_icons)
 
 
 def _bound(attributes: list, uids: dict) -> list:
@@ -847,7 +913,8 @@ def ensure_asset_types(db: Session, workspace_id: str, scope: str = SCOPE_ALL,
                 uid=uid, workspace_id=workspace_id, name=spec.name,
                 description=spec.description, applies_to="objects",
                 is_concrete=not spec.abstract, parent_schema_uid=parent_uid,
-                attributes=wanted, metadata_json={"source": "argus"}, is_global=share,
+                attributes=wanted, is_global=share,
+                metadata_json={"source": "argus", **({"aliases": spec.aliases} if spec.aliases else {})},
             ))
             result.created.append(spec.name)
             db.flush()
@@ -880,7 +947,15 @@ def ensure_asset_types(db: Session, workspace_id: str, scope: str = SCOPE_ALL,
         if changed:
             schema.attributes = merged
             touched = True
+        # Aliases are the catalogue's own knowledge: a release that adds one reaches workspaces seeded before.
+        if spec.aliases and (schema.metadata_json or {}).get("aliases") != spec.aliases:
+            schema.metadata_json = {**(schema.metadata_json or {}), "aliases": spec.aliases}
+            touched = True
         if touched and spec.name not in result.adopted and spec.name not in result.renamed:
             result.extended.append(spec.name)
         db.flush()
+    # Every type a picture: its own default, or its nearest ancestor's; never over one already chosen.
+    from app.services import catalogue_icons
+    result.iconed = catalogue_icons.apply(db, workspace_id, {spec.name: result.uids[spec.name] for spec in specs},
+                                          share)
     return result

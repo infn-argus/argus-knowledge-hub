@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { assetsApi, attributeValuesApi, membersApi, schemasApi } from "../api/client";
+import { assetsApi, attributeValuesApi, directoryApi, membersApi, schemasApi } from "../api/client";
 import { SchemaAttribute } from "../api/types";
 import { AssetPicker } from "./AssetPicker";
 import { IndexedStringInput } from "./IndexedStringInput";
@@ -60,6 +60,37 @@ function UserInput({
       disabled={disabled || members.isLoading}
       placeholder={members.isLoading ? "Loading…" : "Search members…"}
     />
+  );
+}
+
+/** A group: a service or team, from the directory or made here. Groups are organisation-wide. */
+function GroupInput({
+  value,
+  onChange,
+  disabled,
+  base,
+}: {
+  value: unknown;
+  onChange: (value: unknown) => void;
+  disabled: boolean;
+  base: string;
+}) {
+  const groups = useQuery({ queryKey: ["directory-groups"], queryFn: () => directoryApi.groups() });
+  return (
+    <select
+      className={base}
+      disabled={disabled || groups.isLoading}
+      value={typeof value === "string" ? value : ""}
+      onChange={(e) => onChange(e.target.value || null)}
+    >
+      <option value="">{groups.isLoading ? "Loading…" : "— none —"}</option>
+      {(groups.data ?? []).map((g) => (
+        <option key={g.uid} value={g.uid}>
+          {g.name}
+          {g.source === "local" ? "" : ` (${g.source})`}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -285,6 +316,8 @@ function SingleAttributeInput({
       );
     case "user":
       return <UserInput value={value} onChange={onChange} disabled={disabled} />;
+    case "group":
+      return <GroupInput value={value} onChange={onChange} disabled={disabled} base={base} />;
     case "current_user":
       return <CurrentUserInput value={value} base={base} />;
     default:

@@ -49,6 +49,12 @@ class Epik8sImportConfigParams(BaseModel):
     branch: str = "main"
     path: str = "deploy/values.yaml"
     create_missing_nodes: bool = True
+    # The chain the configuration implies (see Epik8sImportRequest).
+    infer_elements: bool = False
+    infer_controllers: bool = False
+    it_workspace: Optional[str] = None
+    link_inventory: bool = False
+    ai_unrecognised: bool = False
     pat: Optional[str] = None  # omit on update to keep the stored secret
 
 

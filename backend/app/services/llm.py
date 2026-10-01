@@ -133,7 +133,10 @@ def check(endpoint: Endpoint) -> tuple[bool, Optional[str], list[str]]:
     return True, None, models
 
 
-def complete(endpoint: Endpoint, system: str, user: str, max_tokens: int = 512) -> str:
+def complete(endpoint: Endpoint, system: str, user: str, max_tokens: int = 512,
+             extra: Optional[dict] = None) -> str:
+    """`extra` goes into the request as it is, for a provider-specific switch
+    such as vLLM's chat_template_kwargs; a provider that rejects it answers 400."""
     try:
         resp = requests.post(
             f"{endpoint.root}/chat/completions",
@@ -147,6 +150,7 @@ def complete(endpoint: Endpoint, system: str, user: str, max_tokens: int = 512) 
                 "max_tokens": max_tokens,
                 # Classification should not wander between runs.
                 "temperature": 0,
+                **(extra or {}),
             },
             timeout=COMPLETION_TIMEOUT_SECONDS,
         )

@@ -35,6 +35,7 @@ export const ATTRIBUTE_TYPES = [
   "attachment",
   "user",
   "current_user",
+  "group",
 ] as const;
 
 export interface AppSchema {
@@ -457,6 +458,11 @@ export interface Epik8sImportConfigParams {
   /** Make an Access Point for an address no object in the inventory carries,
    * marked as needing confirmation; otherwise only report it. */
   create_missing_nodes?: boolean;
+  infer_elements?: boolean;
+  infer_controllers?: boolean;
+  it_workspace?: string | null;
+  link_inventory?: boolean;
+  ai_unrecognised?: boolean;
   pat?: string;
 }
 
@@ -1099,4 +1105,198 @@ export interface AssetKeyRule {
   pattern: string;
   is_default?: boolean;
   example?: string;
+}
+
+export interface MappingSourceType {
+  uid: string;
+  name: string;
+  total: number;
+  mapped: number;
+  open: number;
+  suggested: boolean;
+}
+
+export interface MappingField {
+  value: string;
+  source: "rule" | "ai" | "person";
+  confidence: number;
+  evidence: string | null;
+}
+
+export interface MappingVendor {
+  name: string;
+  existing_uid: string | null;
+  company_key: string | null;
+  source: "rule" | "ai" | "person";
+  confidence: number;
+}
+
+export type MappingAction = "create_model" | "merge" | "create_vendor";
+export type MappingStatus = "proposed" | "accepted" | "skipped" | "applied";
+
+export interface MappingItem {
+  id: string;
+  source_uid: string;
+  source_key: string;
+  source_name: string;
+  source_type: string;
+  source: Record<string, unknown> & {
+    producer?: string | null;
+    reseller?: string | null;
+    description?: string;
+    /** What applying the row brings along from the imported record. */
+    carry?: { avatar: boolean; attachments: number; history: number; comments: number; tickets: number };
+  };
+  /** What applying it actually copied or linked. */
+  carried?: Record<string, number | boolean>;
+  proposal: {
+    action: MappingAction;
+    fields: Partial<Record<"name" | "model_code" | "device_class" | "datasheet_url" | "description", MappingField>>;
+    vendor: MappingVendor | null;
+    merge_into: { uid: string; key: string; name: string } | null;
+    duplicate_of: string | null;
+    warnings: string[];
+    ai: { kind: string | null } | null;
+  };
+  confidence: number | null;
+  status: MappingStatus;
+  result_uid: string | null;
+}
+
+export interface CatalogueMapping {
+  id: string;
+  source_workspace_id: string;
+  target_workspace_id: string;
+  actor: string;
+  state: "analysing" | "ready" | "failed";
+  use_ai: boolean;
+  total: number;
+  analysed: number;
+  ai: { used?: boolean; model?: string; workspace?: string; reason?: string; error?: string; runs?: string[] };
+  error: string | null;
+  created_at: string;
+  counts: Partial<Record<MappingStatus, number>>;
+  /** Applied rows that have not yet brought their attachments, history and tickets along. */
+  pending_carry?: number;
+  kind?: "catalogue" | "records";
+  /** Catalogue mappings: created records not yet shared with every workspace. */
+  unshared?: number;
+  /** Record mappings: the plan per source type uid. */
+  plan?: Record<string, PlanEntry> | null;
+  /** Record mappings: records open rows name but cannot point at, because they are not shared with the target. */
+  hidden_references?: HiddenReference[];
+  items?: MappingItem[];
+}
+
+export type PlanSource = "rule" | "ai" | "person";
+
+export interface PlanCompanion {
+  label: string;
+  type: { uid: string; name: string };
+  verb: string;
+  /** true: the linked record points at the main one (a port is `port of` the camera). */
+  from_companion: boolean;
+  fixed: Record<string, string>;
+  suffix: string;
+  share: boolean;
+  source: PlanSource;
+}
+
+export interface PlanField {
+  kind: "copy" | "enum" | "reference" | "description" | "drop" | "link" | "companion" | "group";
+  /** kind companion: which linked record the value goes to. */
+  companion?: string;
+  /** kind group: make a local group for a name no group has. */
+  create_missing?: boolean;
+  target?: string | null;
+  values?: Record<string, string>;
+  ref_type?: string | null;
+  text_to?: string;
+  /** When no record matches, create one of this type (a missing Location as an Area). */
+  create_type?: { uid: string; name: string } | null;
+  verb?: string | null;
+  reverse?: boolean;
+  source: PlanSource;
+  confidence: number;
+}
+
+export interface PlanEntry {
+  source_type: string;
+  count: number;
+  target_type: { uid: string; name: string; source: PlanSource; confidence: number; reason?: string; alias?: string } | null;
+  /** Create its records shared with every workspace; defaults to whether the target type is shared. */
+  share?: boolean | null;
+  /** Values every row of this type gets (Kind = Pipe for "Pipes" → Vacuum Component). */
+  fixed?: Record<string, string>;
+  fields: Record<string, PlanField>;
+  /** Linked records each row brings: an Ethernet port, a network address… */
+  companions?: Record<string, PlanCompanion>;
+  relations: Record<string, { verb: string | null; reverse: boolean; source: PlanSource; confidence: number }>;
+  profile: {
+    fields: Record<string, { count: number; distinct?: number; samples?: string[]; link_to?: Record<string, number> }>;
+    relations: Record<string, { count: number; to: Record<string, number> }>;
+    examples: string[];
+  };
+}
+
+export interface HiddenReference {
+  uid: string;
+  name: string;
+  key: string;
+  workspace_id: string;
+  type: string | null;
+  rows: number;
+}
+
+export interface MappingVocabulary {
+  types: { uid: string; name: string; path: string; shared: boolean }[];
+  attributes: Record<
+    string,
+    {
+      key: string;
+      name: string;
+      type: string;
+      options: { id: string; value: string }[];
+      ref_type: string | null;
+      create_types: { uid: string; name: string }[];
+    }[]
+  >;
+  verbs: Record<string, string>;
+}
+
+export interface RecordProposal {
+  action: "create" | "merge";
+  merge_into: { uid: string; key: string; name: string } | null;
+  type: { uid: string; name: string } | null;
+  fields: { name: { value: string } };
+  attributes: Record<
+    string,
+    {
+      value: unknown;
+      label?: string | null;
+      from: string | null;
+      source: string;
+      /** A referenced record that does not exist yet and is created on apply. */
+      create?: { type_uid: string; type: string; name: string };
+      /** An owning group that does not exist yet and is made on apply. */
+      create_group?: { name: string };
+      /** Found, but not shared with the target: the row can only keep its text. */
+      hidden?: { uid: string; name: string; key: string; workspace_id: string; type: string | null };
+    }
+  >;
+  links: { to_source: string; verb: string | null; reverse: boolean; via: string }[];
+  companions?: {
+    id: string;
+    label: string;
+    type: { uid: string; name: string };
+    name: string;
+    attributes: Record<string, { value: unknown; from: string | null; source: string }>;
+    verb: string;
+    from_companion: boolean;
+    share: boolean;
+  }[];
+  warnings: string[];
+  confidence: number;
+  share?: boolean;
+  person?: boolean;
 }

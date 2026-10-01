@@ -117,7 +117,10 @@ def relink_workspace(db: Session, workspace_id: str) -> dict:
                     attrs[key] = new_values if is_list else new_values[0]
                     asset_changed = True
 
-                if attr_type == "reference":
+                # A reference the ledger turns into an edge itself (instance of, located in) gets no second,
+                # field-named one here.
+                from app.services.asset_types import REFERENCE_RELATIONS
+                if attr_type == "reference" and key not in REFERENCE_RELATIONS:
                     relation_type = attr.get("name") or key
                     for v in new_values:
                         if not isinstance(v, str) or v == "":

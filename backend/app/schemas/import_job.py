@@ -77,6 +77,16 @@ class Epik8sImportRequest(BaseModel):
     # BPM electronics, LLRF and modulator units the file refers to without listing.
     # They are inferences, marked as such, and need the catalogue's types seeded.
     infer_elements: bool = False
+    # Also make the controller box each IOC talks to (an IPCMini, a TPG 366, a Pollux chain), powering
+    # what its channels drive.
+    infer_controllers: bool = False
+    # The site-wide workspace where the converters, servers and consoles the hostnames name are made (with
+    # their ports), shared, one per box. Needs create rights there.
+    it_workspace: Optional[str] = None
+    # A channel whose unit the inventory already holds is linked to it (proposed), not given an inferred twin.
+    link_inventory: bool = False
+    # Channels no rule recognises: the workspace's AI proposes what they drive, as proposals to review.
+    ai_unrecognised: bool = False
     merge_strategy: MergeStrategy = "override"
 
 

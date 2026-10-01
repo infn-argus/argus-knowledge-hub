@@ -1,5 +1,17 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { directoryApi } from "../api/client";
 import { Asset, MemberDirectoryEntry, SchemaAttribute } from "../api/types";
+
+function GroupValue({ value }: { value: string }) {
+  const groups = useQuery({ queryKey: ["directory-groups"], queryFn: () => directoryApi.groups() });
+  const group = groups.data?.find((g) => g.uid === value);
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-slate-700" title="Group">
+      {group?.name ?? (groups.isLoading ? "…" : value)}
+    </span>
+  );
+}
 
 const URL_RE = /^https?:\/\//i;
 
@@ -62,6 +74,10 @@ function SingleAttributeValue({
         {option?.value ?? String(value)}
       </span>
     );
+  }
+
+  if (attribute.type === "group") {
+    return <GroupValue value={String(value)} />;
   }
 
   if (attribute.type === "user" || attribute.type === "current_user") {

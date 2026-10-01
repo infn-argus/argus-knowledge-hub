@@ -3,6 +3,7 @@ its workspace's pattern, a typed key is kept, and the type follows the schema.""
 import secrets
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.db import SessionLocal
@@ -13,10 +14,28 @@ from app.services import asset_keys
 from tests.test_ledger_transition import token
 
 client = TestClient(app)
+CREATED: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def _cleanup():
+    """The tests run against a real database: delete the workspaces they made, as the admin endpoint does."""
+    yield
+    from app.ledger.audit import allow_purge
+    db = SessionLocal()
+    for w in CREATED:
+        ws = db.get(Workspace, w)
+        if ws is not None:
+            allow_purge(db)
+            db.delete(ws)
+            db.commit()
+    CREATED.clear()
+    db.close()
 
 
 def setup(pattern=None):
     w = f"key-{secrets.token_hex(3)}"
+    CREATED.append(w)
     db = SessionLocal()
     db.add(Workspace(id=w, name=w, asset_key_pattern=pattern))
     db.flush()

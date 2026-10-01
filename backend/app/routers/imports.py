@@ -6,7 +6,7 @@ from pydantic import Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import require_permission
+from app.auth import PatIdentity, get_identity, require_permission
 from app.db import get_db
 from app.models.import_job import ImportJob
 from app.schemas.import_job import (
@@ -56,13 +56,34 @@ def get_import(
     return job
 
 
+def check_it_workspace(db: Session, identity, it_workspace: str) -> None:
+    """An EPIK8s import that makes IT objects writes a second workspace: only a signed-in person allowed to
+    create there may ask for it."""
+    from app.models.workspace import Workspace
+    from app.services.permissions import resolve_permission
+    if isinstance(identity, PatIdentity):
+        raise HTTPException(status_code=403, detail="An API token writes one workspace; making IT objects "
+                                                    "in another needs a signed-in person")
+    if db.get(Workspace, it_workspace) is None:
+        raise HTTPException(status_code=404, detail=f"No workspace {it_workspace}")
+    if not resolve_permission(db, identity.user, it_workspace, "create", "objects"):
+        raise HTTPException(status_code=403, detail=f"You may not create objects in {it_workspace}")
+
+
+def actor_name(identity) -> str:
+    return "api-token" if isinstance(identity, PatIdentity) else identity.user.email
+
+
 @router.post("", response_model=ImportJobOut, status_code=201)
 def create_import(
     body: ImportRequest,
     background_tasks: BackgroundTasks,
     workspace_id: str = Depends(require_permission("create")),
+    identity=Depends(get_identity),
     db: Session = Depends(get_db),
 ):
+    if isinstance(body, Epik8sImportRequest) and body.it_workspace:
+        check_it_workspace(db, identity, body.it_workspace)
     job = ImportJob(uid=str(uuid.uuid4()), workspace_id=workspace_id, source=body.source)
     db.add(job)
     db.commit()
@@ -89,6 +110,8 @@ def create_import(
             run_epik8s_import,
             job.uid, workspace_id, body.provider, body.repo_url, body.pat, body.branch,
             body.path, body.merge_strategy, body.create_missing_nodes, body.infer_elements,
+            body.it_workspace, body.infer_controllers, body.link_inventory, body.ai_unrecognised,
+            actor_name(identity),
         )
     else:
         background_tasks.add_task(

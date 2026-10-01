@@ -228,7 +228,7 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
             if isinstance(v, str) and v != v.strip():
                 checks.append(_check(INFO, "Leading or trailing spaces removed.", f"attributes.{field}",
                                      fix={"field": f"attributes.{field}", "value": v.strip()}))
-        ids = strong_identifiers(attrs)
+        ids = strong_identifiers(attrs, schema.name if schema is not None else None)
         if attrs.get("serial") and not attrs.get("manufacturer"):
             checks.append(_check(WARNING, "A serial number identifies a unit only together with its "
                                  "manufacturer. Add the manufacturer.", "attributes.manufacturer"))

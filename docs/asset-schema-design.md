@@ -143,7 +143,7 @@ Verified against the code, because the catalogue must fit the machinery that wil
 
 ## 4. The type catalogue
 
-**122 types, 17 of them abstract, maximum depth 6.** (The IT model added 11 to the 104 before it: `IT Equipment` and its tree, `IT Record`, `Serial Line`.) Abstract types are marked *(abstract)*.
+**128 types, 17 of them abstract, maximum depth 6.** (The IT model added 11 to the 104 before it: `IT Equipment` and its tree, `IT Record`, `Serial Line`. Six came after the tree below was drawn: `Equipment Port` under `Engineered Item`, one physical port of a unit that it is `port of`; `Communication Path` and `Bus Segment` under `Control Item`, see `docs/it-model-design.md`; `Address Record` under `IT Record`; and under `Asset`, `Vacuum Component`, a passive part of the vacuum line such as a pipe, bellows, cross or tee, and `Vacuum Controller`, the box between a control line and the pumps or gauges it runs.) Abstract types are marked *(abstract)*.
 
 ```
 Item (abstract)
@@ -945,6 +945,16 @@ quadrupole.
 | …whose name has `FLG` (a flag) | `Actuator`, its `poi` as `position_labels` | a `Screen Station`, `composed of` the actuator, with the `poi` as `insertion_positions` |
 | …that is an axis of a mirror (`FI4-HMN-01`, `FI8-PRH-01`, `FI3-MMR-001`) | `Motor Axis` | a `Mirror` (`FI4-MMIR-001`), `composed of` its axes |
 
+**The rest of the chain, as options** (`--infer-controllers`, `--link-inventory`, `--it-workspace`,
+and in the web import the same plus the AI):
+
+| Option | makes | linked |
+|---|---|---|
+| infer controllers | a `Vacuum Controller` (IPCMini, IPC MPC, TPG 366/300/500) or `Motion Controller` (Pollux, PI GCS2, Thorlabs, SmarAct) per IOC whose `devtype`, template or name names one, `n_channels`/`n_axes` from its channels | `powers` what each channel drives; `reached through` the IOC's Access Point |
+| IT workspace | the `Serial Converter`, `Server` or `Workstation` a hostname names, once per site, shared; an `Equipment Port` per TCP port a line uses (4003 → `P3`) | the Access Point `implemented by` it; the port `port of` it |
+| link to the inventory | nothing, where the inventory already has the unit (same zone, code and number, or the same network address) | the channel `acts on` it, proposed in *Channels ↔ hardware* for a person to confirm |
+| AI for unrecognised channels | a Provisional unit of the type the model picks, from the catalogue's equipment types only (rule `ai.epik8s.classify/1`) | the channel `acts on` it, proposed; nothing is effective until accepted in the review queue |
+
 The control device `acts on` what it drives; an IOC `drives` a unit. Assets are of shared types
 and elements of the beamline's own; both stay in the beamline that imported them, and an asset
 becomes visible elsewhere only by being flagged global (§8).
@@ -1617,7 +1627,7 @@ Ordered by what blocks what. Items 1, 3, 4, 9, 10, 11 and 12–15 are done; the 
    fix to 1 does not "tidy" it in the wrong direction.
 
 3. **DONE — the catalogue is seeded, in two sets.** `backend/app/services/asset_types.py` holds
-   all 122 types as data (`CATALOGUE`), of which 76 are global and 46 are a beamline's own
+   all 128 types as data (`CATALOGUE`), of which 80 are global and 48 are a beamline's own
    (§8), with `ensure_asset_types(db, workspace_id, scope, catalogue_workspace_id)`,
    `resolve_type_uids()` and `catalogue_of()`. Run with `scripts/seed_asset_types.py` in three
    modes: `global`, `beamline --catalogue`, and `all` for a hub with one workspace.
@@ -1853,7 +1863,7 @@ specified by [`asset-model-revision.md`](asset-model-revision.md).
 
 | | |
 |---|---|
-| Types | 122 (17 abstract), maximum depth 6: 76 shared (global), 46 a beamline's own (§8) |
+| Types | 128 (17 abstract), maximum depth 6: 80 shared (global), 48 a beamline's own (§8) |
 | Roots | `Item` → Functional, Physical, Catalogue, Control, Engineering, Location |
 | Relations | 5 existing, kept verbatim; 23 added |
 | Composites | `Screen Station`, `Spectrometer Station`, `Emittance Meter`, `RF Station`, `Machine Module`, via `composed of` |

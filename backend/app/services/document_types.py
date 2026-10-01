@@ -183,6 +183,13 @@ def ensure_document_types(
             db.add(child)
         out[name] = child_uid
     db.flush()
+    # Each type its default icon, where it has none (catalogue_icons); never over one chosen or imported.
+    from app.services import catalogue_icons
+    # Every document type of the workspace, imported ones included (they take the base type's icon).
+    from sqlalchemy import select as _select
+    every = {s.name: s.uid for s in db.scalars(_select(Schema).where(Schema.workspace_id == workspace_id,
+                                                                    Schema.applies_to == "documents"))}
+    catalogue_icons.apply(db, workspace_id, every, False, icon_of=catalogue_icons.document_icon)
     return out
 
 

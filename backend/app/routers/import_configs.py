@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import require_permission
+from app.auth import get_identity, require_permission
 from app.db import get_db
 from app.models.import_config import ImportConfig
 from app.models.import_job import ImportJob
@@ -114,10 +114,15 @@ def run_config(
     uid: str,
     background_tasks: BackgroundTasks,
     workspace_id: str = Depends(require_permission("create")),
+    identity=Depends(get_identity),
     db: Session = Depends(get_db),
 ):
     config = _get_owned_config(uid, workspace_id, db)
     pat = decrypt_secret(config.encrypted_secret) if config.encrypted_secret else None
+    if config.source == "epik8s" and config.params.get("it_workspace"):
+        from app.routers.imports import check_it_workspace
+        check_it_workspace(db, identity, config.params["it_workspace"])
+    from app.routers.imports import actor_name
 
     job = ImportJob(uid=str(uuid.uuid4()), workspace_id=workspace_id, source=config.source)
     db.add(job)
@@ -172,6 +177,12 @@ def run_config(
             config.params.get("path", "deploy/values.yaml"),
             config.merge_strategy,
             config.params.get("create_missing_nodes", True),
+            config.params.get("infer_elements", False),
+            config.params.get("it_workspace"),
+            config.params.get("infer_controllers", False),
+            config.params.get("link_inventory", False),
+            config.params.get("ai_unrecognised", False),
+            actor_name(identity),
         )
     else:
         background_tasks.add_task(

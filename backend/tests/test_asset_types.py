@@ -9,6 +9,7 @@ holds.
 """
 import re
 import secrets
+import uuid
 
 import pytest
 import yaml
@@ -69,7 +70,7 @@ def effective_keys(db, ws, name):
 # --- the shape --------------------------------------------------------------
 
 def test_the_catalogue_is_the_size_the_design_says():
-    assert len(at.CATALOGUE) == 123
+    assert len(at.CATALOGUE) == 128
     assert sum(t.abstract for t in at.CATALOGUE) == 17
     assert max(at.depth(t.name) for t in at.CATALOGUE) == 6
 
@@ -152,9 +153,9 @@ def test_the_source_options_include_the_ones_the_importers_write():
 def test_seeding_creates_the_whole_tree(db, workspace):
     result = at.ensure_asset_types(db, workspace)
     db.commit()
-    assert len(result.created) == 123 and not result.adopted and not result.duplicates
+    assert len(result.created) == 128 and not result.adopted and not result.duplicates
     rows = db.query(Schema).filter(Schema.workspace_id == workspace).all()
-    assert len(rows) == 123
+    assert len(rows) == 128
     by_name = {s.name: s for s in rows}
     assert by_name["Ion Pump"].parent_schema_uid == at.type_uid(workspace, "Vacuum Pump")
     assert by_name["Vacuum Pump"].parent_schema_uid == at.type_uid(workspace, "Asset")
@@ -169,7 +170,7 @@ def test_seeding_twice_changes_nothing(db, workspace):
     again = at.ensure_asset_types(db, workspace)
     db.commit()
     assert not again.created and not again.adopted and not again.extended
-    assert db.query(Schema).filter(Schema.workspace_id == workspace).count() == 123
+    assert db.query(Schema).filter(Schema.workspace_id == workspace).count() == 128
 
 
 def test_a_leaf_inherits_what_the_ancestors_declare(db, workspace):
@@ -223,7 +224,7 @@ def test_a_type_an_importer_made_is_adopted_not_duplicated(db, workspace):
     assert sorted(result.adopted) == ["IOC", "Power Supply"]
     assert result.uids["IOC"] == ioc_uid
     rows = db.query(Schema).filter(Schema.workspace_id == workspace).all()
-    assert len(rows) == 123 and sum(1 for s in rows if s.name == "IOC") == 1
+    assert len(rows) == 128 and sum(1 for s in rows if s.name == "IOC") == 1
     ioc = db.get(Schema, ioc_uid)
     assert ioc.parent_schema_uid == at.type_uid(workspace, "Control Item")
     assert {a["key"] for a in ioc.attributes} == keys_of("IOC")
@@ -347,7 +348,7 @@ def make(ws, headers, type_name, prefix, attributes=None, name=None):
 def test_the_seeded_types_are_listed_and_an_object_of_one_can_be_made(seeded):
     ws, headers = seeded
     listed = client.get("/v1/schemas", headers=headers).json()
-    assert len([s for s in listed if s["workspace_id"] == ws]) == 123
+    assert len([s for s in listed if s["workspace_id"] == ws]) == 128
     _, resp = make(ws, headers, "Ion Pump", "pump", {
         "serial": "IPC-1234", "manufacturer": "Agilent", "pumping_speed": 55.0,
         "argus_lifecycle": "In service", "pbs_code": "INJ-A-VAC-PUMP-001"})
@@ -396,7 +397,7 @@ def test_a_screen_station_is_composed_of_its_parts(seeded):
 def test_the_two_sets_partition_the_catalogue():
     assert set(at.GLOBAL_TYPES) | set(at.BEAMLINE_TYPES) == set(at.BY_NAME)
     assert not set(at.GLOBAL_TYPES) & set(at.BEAMLINE_TYPES)
-    assert (len(at.GLOBAL_TYPES), len(at.BEAMLINE_TYPES)) == (77, 46)
+    assert (len(at.GLOBAL_TYPES), len(at.BEAMLINE_TYPES)) == (80, 48)
 
 
 def test_a_machines_structure_and_control_are_its_own_and_the_rest_is_shared():
@@ -588,7 +589,7 @@ def test_a_workspace_seeded_under_the_old_names_is_carried_across_in_place(db, w
     db.expire_all()
 
     assert sorted(result.renamed) == ["Asset", "Location"] and not result.created
-    assert db.query(Schema).filter(Schema.workspace_id == workspace).count() == 123
+    assert db.query(Schema).filter(Schema.workspace_id == workspace).count() == 128
     asset = db.get(Schema, at.type_uid(workspace, "Equipment Item"))    # same row, same uid
     assert asset.name == "Asset"
     assert db.get(Schema, at.type_uid(workspace, "Place")).name == "Location"
@@ -759,3 +760,39 @@ def test_cables_are_classified_by_what_they_carry_and_a_line_is_not_one_of_them(
                     "RF Cable", "Signal Cable"}
     assert kids <= set(at.GLOBAL_TYPES)
     assert by["Serial Line"].parent == "Control Item"
+
+
+
+def test_every_type_gets_a_default_icon_once_and_a_chosen_one_stays(tmp_path, monkeypatch):
+    """Tabler icons, and four drawn for ARGUS; a type without its own takes its nearest ancestor's."""
+    from app.models.icon import Icon
+    from app.services import catalogue_icons
+    monkeypatch.setenv("ATTACHMENTS_DIR", str(tmp_path))
+    assert catalogue_icons.icon_for("Ion Pump") == "tabler/propeller"           # from Vacuum Pump
+    assert catalogue_icons.icon_for("Quadrupole") == "argus/quadrupole"
+    for icon in set(catalogue_icons.ICONS.values()):
+        assert (catalogue_icons.ICON_DIR / f"{icon}.svg").exists(), icon
+    assert all(catalogue_icons.icon_for(t.name) for t in at.CATALOGUE)
+    workspace = f"icons-{secrets.token_hex(3)}"
+    db = SessionLocal()
+    db.add(Workspace(id=workspace, name=workspace))
+    db.flush()
+    result = at.ensure_asset_types(db, workspace)
+    assert len(result.iconed) == len(at.CATALOGUE)
+    schemas = {s.name: s for s in db.query(Schema).filter(Schema.workspace_id == workspace)}
+    quad = db.get(Icon, schemas["Quadrupole"].icon_uid)
+    assert quad.filename == "argus-quadrupole.svg" and quad.mime_type == "image/svg+xml"
+    assert open(quad.storage_path, "rb").read().startswith(b"<svg")
+    assert schemas["Ion Pump"].icon_uid == schemas["Turbo Pump"].icon_uid              # one icon, shared
+    mine = Icon(uid=str(uuid.uuid4()), workspace_id=workspace, name="mine", filename="mine.png",
+                storage_path=str(tmp_path / "mine"), is_global=False)
+    db.add(mine)
+    schemas["Camera"].icon_uid = mine.uid
+    db.flush()
+    again = at.ensure_asset_types(db, workspace)
+    assert again.iconed == []                                                      # nothing to fill
+    assert db.get(Schema, schemas["Camera"].uid).icon_uid == mine.uid              # a chosen icon stays
+    assert db.query(Icon).filter(Icon.workspace_id == workspace, Icon.filename.like("argus-%")).count() == \
+        len(set(catalogue_icons.icon_for(t.name) for t in at.CATALOGUE))
+    db.rollback()
+    db.close()

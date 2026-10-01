@@ -96,6 +96,8 @@ def main() -> None:
         where = f"in {workspace!r}" + (f", hanging from {catalogue!r}" if catalogue else "")
         print(f"{mode}: created {len(result.created)}, adopted {len(result.adopted)}, "
               f"renamed {len(result.renamed)}, extended {len(result.extended)} {where}")
+        if result.iconed:
+            print(f"  default icons given to {len(result.iconed)} types that had none")
         if result.renamed:
             print("  renamed in place: " + ", ".join(result.renamed))
         if result.adopted:

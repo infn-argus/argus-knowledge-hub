@@ -157,6 +157,12 @@ def _check_single_attribute(
             if db.get(User, v) is None:
                 return f"{name} must reference a registered user"
 
+    if attr_type == "group":
+        from app.models.group import Group
+        for v in values:
+            if db.get(Group, v) is None:
+                return f"{name} must reference a group"
+
     if attr.get("unique") and not skip_unique:
         for v in values:
             if _is_duplicate(db, owner, schema_uid, key, v, exclude_uid, schema_uid_attr):

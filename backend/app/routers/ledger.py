@@ -199,6 +199,48 @@ def _hidden(db: Session, uid: Optional[str]) -> bool:
     return a is not None and not can_see(a)
 
 
+class BindingDecision(BaseModel):
+    claim_ids: list[str] = []
+    accept: bool = True
+    min_confidence: Optional[float] = None
+    reason: Optional[str] = None
+
+
+@router.post("/control-bindings/propose")
+def propose_control_bindings(identity=Depends(get_identity), workspace_id: str = Depends(require_permission("modify")),
+                             db: Session = Depends(get_db)):
+    """Propose which hardware each control channel drives, from the naming convention and the network
+    (control_binding). Proposals wait for a person; nothing is decided here."""
+    from app.ledger import control_binding
+    out = control_binding.propose(db, workspace_id)
+    db.commit()
+    return out
+
+
+@router.get("/control-bindings")
+def list_control_bindings(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    from app.ledger import control_binding
+    return control_binding.proposals(db, workspace_id)
+
+
+@router.post("/control-bindings/decide")
+def decide_control_bindings(body: BindingDecision, identity=Depends(get_identity),
+                            workspace_id: str = Depends(require_permission("modify")), db: Session = Depends(get_db)):
+    """Confirm or reject proposals: those listed, or every one at least this confident."""
+    from app.ledger import control_binding
+    ids = list(body.claim_ids)
+    if body.min_confidence is not None:
+        ids += [p["claim_id"] for p in control_binding.proposals(db, workspace_id)
+                if (p["confidence"] or 0) >= body.min_confidence]
+    try:
+        n = control_binding.decide(db, workspace_id, actor_of(identity), sorted(set(ids)), body.accept, body.reason)
+    except LedgerError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return {"decided": n}
+
+
 @router.get("/review")
 def review(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """Everything waiting on a person, with its owner-facing context."""

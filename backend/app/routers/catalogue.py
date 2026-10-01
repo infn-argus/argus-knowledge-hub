@@ -15,6 +15,15 @@ from app.routers.ledger import actor_of
 from app.services import equipment_classes as ec
 
 router = APIRouter(prefix="/v1/catalogue/equipment-classes", tags=["catalogue"])
+types_router = APIRouter(prefix="/v1/catalogue", tags=["catalogue"])
+
+
+@types_router.get("/types")
+def type_catalogue(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """Every object type this workspace can use, as one map: tree, description, attributes (own and
+    inherited), aliases, what references mean in the graph, record counts, and the equipment classes."""
+    from app.services.type_catalogue import catalogue
+    return catalogue(db, workspace_id)
 
 
 def _catalogue(db: Session, workspace_id: str) -> None:

@@ -121,6 +121,29 @@ RULES: dict[str, dict] = {
         "signature": {"outputs": ["exists", "attr:*", "rel:*"]},
         "impl": ["1"],
     },
+    "bind.control.tag/1": {
+        "family": "bind.control.tag",
+        "meaning": "a control channel acts on the one physical unit whose tag has the same zone, function code "
+                   "and number (FI33TRB01 and FI33-V-PMP-TRB-001)",
+        "signature": {"outputs": ["rel:acts on"], "subject_types": ["Control Device"]},
+        "impl": ["1"],
+    },
+    "bind.control.host/1": {
+        "family": "bind.control.host",
+        "meaning": "a control channel, or an Access Point of an Ethernet instrument, is the one physical unit "
+                   "that answers to its network address",
+        "signature": {"outputs": ["rel:acts on", "rel:implemented by"],
+                      "subject_types": ["Control Device", "Access Point"]},
+        "impl": ["1"],
+    },
+    "ai.epik8s.classify/1": {
+        "family": "ai.epik8s.classify",
+        "meaning": "the AI proposes which kind of equipment a control channel no rule recognised drives: a unit "
+                   "of that catalogue type exists, and the channel acts on it",
+        "signature": {"outputs": ["exists", "name", "attr:description", "rel:acts on"],
+                      "subject_types": ["Control Device"]},
+        "impl": ["1"],
+    },
     "resolve.asset_url/1": {
         "family": "resolve.asset_url",
         "meaning": "a device's asset: URL naming one inventory object, on a device acting on exactly one "

@@ -39,8 +39,13 @@ const SECTIONS: Record<SectionKey, SectionConfig> = {
     landing: "/assets/search",
     links: [
       { to: "/assets/search", label: "Browse & search" },
+      { to: "/catalogue/types", label: "Type catalogue" },
       { to: "/labels", label: "Labels & QR codes" },
       { to: "/global-values", label: "Global values" },
+      { to: "/bulk-changes", label: "Bulk changes" },
+      { to: "/catalogue/equipment-classes", label: "Equipment classes" },
+      { to: "/migration/catalogue", label: "Map imported records" },
+      { to: "/control-bindings", label: "Channels ↔ hardware" },
     ],
     treeLabel: "Object types",
     newTypeTo: "/schemas/new",
@@ -89,7 +94,16 @@ const SECTION_KEY = "assetmanagement.activeSection";
 function sectionOfPath(pathname: string, search: string): SectionKey | null {
   if (pathname.startsWith("/tickets")) return "tickets";
   if (pathname.startsWith("/documents")) return "documents";
-  if (pathname.startsWith("/assets") || pathname.startsWith("/labels") || pathname.startsWith("/global-values"))
+  if (
+    pathname.startsWith("/assets") ||
+    pathname.startsWith("/labels") ||
+    pathname.startsWith("/global-values") ||
+    // The tools that work on assets only live in the Assets section.
+    pathname.startsWith("/bulk-changes") ||
+    pathname.startsWith("/catalogue/") ||
+    pathname.startsWith("/migration/catalogue") ||
+    pathname.startsWith("/control-bindings")
+  )
     return "assets";
   if (pathname.startsWith("/schemas")) {
     if (search.includes("applies_to=tickets")) return "tickets";
@@ -280,20 +294,15 @@ export function AppShell() {
           })}
           <div className="mt-2 border-t border-slate-100 pt-2">
             {/* These cross all three kinds of record, so they sit beside the
-                sections rather than inside one of them. */}
+                sections rather than inside one of them. A tool that works on one
+                kind only belongs in that kind's section. */}
             <NavItem to="/graph">
               <span className="w-4 text-center text-slate-400">⌗</span> Knowledge graph
             </NavItem>
             <NavItem to="/ask">
               <span className="w-4 text-center text-slate-400">?</span> Ask ARGUS
             </NavItem>
-            <NavItem to="/bulk-changes">
-              <span className="w-4 text-center text-slate-400">≡</span> Bulk changes
-            </NavItem>
-            <NavItem to="/catalogue/equipment-classes">
-              <span className="w-4 text-center text-slate-400">◇</span> Equipment classes
-            </NavItem>
-            <NavItem to="/migration">
+            <NavItem to="/migration" end>
               <span className="w-4 text-center text-slate-400">⇄</span> Migration to ARGUS
             </NavItem>
           </div>

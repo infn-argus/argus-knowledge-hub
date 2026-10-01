@@ -226,7 +226,20 @@ somebody confirms the convention holds for that box. It is empty until then.
 | Type | Attributes |
 |---|---|
 | `Network Segment` | `vlan_id`, `cidr`, `gateway`, `purpose` (Control, Cameras, Magnets, Management, Office…), `is_dhcp` |
-| `Address Record` | `record_kind` (Registered node, DHCP lease, DNS name, Ethernet configuration), `hostname`, `ip`, `mac`, `registered_on`, `owner` |
+| `Address Record` | `record_kind` (Registered node, DHCP lease, DNS name, Ethernet configuration), `hostname`, `ip`, `mac` (as the registration names it), `registered_on`, `owner` |
+
+**Interfaces** (global, beside `Asset` under `Engineered Item`):
+
+| Type | Attributes |
+|---|---|
+| `Equipment Port` | `port_label` (eth0, P3, COM3), `port_role` (serial-data#3, console, uplink…), `port_kind` (RJ45, SFP, RS-232, RS-422, RS-485-2w, RS-485-4w, GPIB, CAN, USB, EtherCAT, Other), `mac`, `link_speed`, `supported_modes`, `operating_mode`, `tcp_port`, `signal_level`, `termination` |
+
+**Decision (2026-10-01): a unit's MAC is on its Ethernet port.** A MAC is burned into a network
+interface, so it identifies hardware: it is a strong identifier on an `Equipment Port` (and on an IT
+box's own primary `mac`), and two records holding it are an identity candidate. An `Address Record`
+that names a MAC (a DHCP lease, a registered node) points at that hardware and is not a second
+holder of it, so it is not compared (`identity.MAC_NAMES_HARDWARE_NOT`). The IP and hostname stay on
+the `Address Record`: they belong to the registration and change without the hardware changing.
 
 **Control path** (beamline, `Control Item` branch):
 
@@ -256,13 +269,17 @@ single explanation for symptoms on both. All cables are `Cable Run` children, wi
 | `carried by` | Serial Line → each hop it passes through: `Serial Cable`, `Ethernet Cable`, `Switch`, `Serial Converter` | the converter from the config; the cables and switches added by a person |
 | `implemented by` | Access Point → IT Equipment | resolved by hostname, IP or MAC |
 | `described by` | IT Equipment, or any Asset with a network presence → Address Record | resolved, or from the registry |
+| `port of` | Equipment Port → the unit it belongs to | the IT registry, an import, or a person |
 | `on segment` | IT Equipment, Access Point, Control Network → Network Segment | registry or IT, not the config |
 | `uplinked to` | IT Equipment → Switch | IT, not the config |
 | `runs on` | IOC → Workstation, Server, or the instrument that runs it | stated by `host:`; else the cluster |
 
 Cameras, Libera units and Ethernet power supplies keep their `Camera`, `Digitizer`, `Power Supply`
 types and are `described by` an `Address Record` rather than gaining `hostname`/`ip` attributes,
-which would appear on every pump.
+which would appear on every pump. Their MAC is on their Ethernet `Equipment Port`, which is `port of`
+the unit. A GigE camera is therefore three records: the `Camera` (serial, Product Model, `interface`
+gige), its port `eth0` (RJ45, MAC) and its `Address Record` (IP, hostname). The record mapping makes
+all three from one imported row (`record_mapping.COMPANIONS`).
 
 ### 4.3 A real case: `scsparcsipmxa001`
 

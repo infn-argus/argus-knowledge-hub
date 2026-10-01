@@ -37,6 +37,12 @@ site-wide workspace: the converter behind a `sc…` host, a server behind `pl…
 behind `pw…co…`, flagged global and keyed by the fully qualified name, so two beamlines
 that reach one host share one object. Each Access Point is `implemented by` it.
 
+With --infer-elements, --infer-controllers also makes the controller box each IOC talks to
+(an IPCMini, a TPG 366, a Pollux chain), powering what its channels drive; and
+--link-inventory links a channel to the unit the inventory already holds (by tag or
+address) instead of inferring a twin, as a proposal to confirm under Channels ↔ hardware.
+Asking the AI about unrecognised channels is in the web import only.
+
 The types are seeded first if they are not there: with --catalogue the shared ones
 are used where they are and only this beamline's own are created here; a workspace
 already seeded against a catalogue keeps using it; any other gets the whole
@@ -45,7 +51,7 @@ leaves what has been added since.
 
 Usage (from anywhere, with the backend's virtualenv and DATABASE_URL set):
   python backend/scripts/import_epik8s.py <workspace_id> <values.yaml>
-      [--catalogue <catalogue_workspace>] [--no-create-missing] [--infer-elements] [--it-workspace <workspace>] [--dry-run]
+      [--catalogue <catalogue_workspace>] [--no-create-missing] [--infer-elements [--infer-controllers] [--link-inventory]] [--it-workspace <workspace>] [--dry-run]
 """
 import os
 import sys
@@ -134,7 +140,9 @@ def main() -> None:
                         source="epik8s")
         db.add(job)
         db.commit()
-        importer = _Importer(db, job, workspace_id, path, infer_elements=infer, it_workspace=it_workspace)
+        link = infer and "--link-inventory" in sys.argv
+        importer = _Importer(db, job, workspace_id, path, infer_elements=infer, it_workspace=it_workspace,
+                             infer_controllers=infer and "--infer-controllers" in sys.argv, link_inventory=link)
         try:
             importer.ensure_types()
             importer.run(values, create_missing)
@@ -145,6 +153,10 @@ def main() -> None:
         for asset in importer.assets.values():
             rebuild_asset_relations(db, asset.uid)
         db.commit()
+        if link and not dry_run:
+            from app.ledger import control_binding
+            importer.counts["inventory_link_proposals"] = control_binding.propose(db, workspace_id)["proposed"]
+            db.commit()
 
         beamline = str(values.get("beamline") or "").strip() or "unknown"
         print(f"read {path}: beamline {beamline}")

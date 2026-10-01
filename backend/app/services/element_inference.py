@@ -226,6 +226,47 @@ def infer_ioc(ioc: dict) -> Optional[Inference]:
     return None
 
 
+# --------------------------------------------------------------------------- controllers
+
+# The box between a control line and what it runs, where the IOC talks to a controller rather than to the
+# thing itself: an IPCMini runs ion pumps, a TPG 366 reads six gauges, a Pollux chain moves motor axes. Only
+# products that are a separate box: a TwisTorr 305 is read as the turbo pump it is (PRODUCTS), so it has none.
+VACUUM_CONTROLLER, MOTION_CONTROLLER = "Vacuum Controller", "Motion Controller"
+CONTROLLERS = (  # (devtype or template contains, type, manufacturer, model)
+    ("ipcmini", VACUUM_CONTROLLER, "Agilent", "IPCMini"),
+    ("ipcmpc", VACUUM_CONTROLLER, "Agilent", "IPC Multi Pump Controller"),
+    ("tpg366", VACUUM_CONTROLLER, "Pfeiffer", "TPG 366"),
+    ("tpg300", VACUUM_CONTROLLER, "Pfeiffer", "TPG 300"),
+    ("tpg500", VACUUM_CONTROLLER, "Pfeiffer", "TPG 500"),
+    ("pollux", MOTION_CONTROLLER, "PI miCos", "Pollux"),
+    ("pigcs2", MOTION_CONTROLLER, "Physik Instrumente", "GCS2 controller"),
+    ("thorlabs", MOTION_CONTROLLER, "Thorlabs", None),
+    ("smaract", MOTION_CONTROLLER, "SmarAct", None),
+)
+CONTROLLER_TYPES = (VACUUM_CONTROLLER, MOTION_CONTROLLER)
+
+
+@dataclass
+class ControllerInference:
+    controller_type: str
+    manufacturer: Optional[str]
+    model: Optional[str]
+    why: str
+
+
+def infer_controller(ioc: dict) -> Optional[ControllerInference]:
+    """The controller an IOC talks to, when its devtype or template names one; None otherwise."""
+    devtype, template = _s(ioc.get("devtype")).lower(), _s(ioc.get("template")).lower()
+    name = _s(ioc.get("name"))
+    for code, type_name, manufacturer, model in CONTROLLERS:
+        if code in devtype or code in template or code in name.lower():
+            where = "devtype" if code in devtype else "template" if code in template else "IOC name"
+            return ControllerInference(
+                type_name, manufacturer, model,
+                f"IOC {name} talks to a {model or manufacturer} controller ({where} says {code})")
+    return None
+
+
 def _motion(name: str, ioc: dict, device: dict, where: str) -> Inference:
     """An axis of a motor controller: always a motor axis, and sometimes what it moves.
 

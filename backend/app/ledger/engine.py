@@ -548,6 +548,11 @@ def publish(db: Session, stream: LedgerStream, rev: SourceRevision, *, cause: st
     db.flush()
     changed = set(before) ^ set(after)
     affected_refs = {db.get(Claim, cid).source_ref for cid in changed}
+    for ref in affected_refs:
+        # A claim about a record by its uid, made outside the ledger (an import writes its records directly):
+        # bound to itself here, as one created through the ledger already is, so it is projected.
+        if ref.startswith("uid:"):
+            _ensure_record(db, stream, ref, None, f"revision:{rev.id}")
     for cid in after:
         c = db.get(Claim, cid)
         if c.predicate == "exists":
@@ -1086,6 +1091,7 @@ def project_subject(db: Session, uid: str, cause: str, *, emit: bool = True) -> 
         else:
             attrs.pop(name, None)
 
+    desired_edges |= reference_edges(db, uid, attrs)
     if type_fact is not None:
         _write_type(db, record, type_fact, cause, emit)
     _write_edges(db, uid, desired_edges)
@@ -1093,6 +1099,19 @@ def project_subject(db: Session, uid: str, cause: str, *, emit: bool = True) -> 
     record.attributes = attrs
     db.flush()
     _write_conflicts(db, record, new_conflicts, cause, emit)
+
+
+def reference_edges(db: Session, uid: str, attrs: dict) -> set[tuple]:
+    """The edges a record's reference fields mean (asset_types.REFERENCE_RELATIONS): a Product Model reference
+    is `instance of` it. Derived from the field, so they come and go with it."""
+    from app.services.asset_types import REFERENCE_RELATIONS
+    out = set()
+    for name, verb in REFERENCE_RELATIONS.items():
+        value = attrs.get(name)
+        for target in (value if isinstance(value, list) else [value]):
+            if isinstance(target, str) and target and target != uid and db.get(Asset, target) is not None:
+                out.add((verb, target))
+    return out
 
 
 def _original_type(db: Session, record: Asset) -> str:
@@ -1356,6 +1375,8 @@ def derive_all(db: Session, workspace_ids: Optional[Iterable[str]] = None) -> di
     out.update(derive_located_in(db, ids))
     out.update(derive_in_work_package(db, ids))
     out.update(connectivity.derive_implemented_by(db, ids))
+    from app.ledger.control_binding import derive_drives
+    out.update(derive_drives(db, ids))
     out.update(connectivity.derive_ports(db, ids))
     out.update(tickets.derive_ticket_links(db, workspace_ids=ids))
     return out

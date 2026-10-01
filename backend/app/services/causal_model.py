@@ -127,6 +127,7 @@ SEMANTICS: dict = {
     "templated from": RelationSemantics("provenance", NONE, None, note="IOC → its template"),
     "configures": RelationSemantics("provenance", NONE, None),
     "instance of": RelationSemantics("provenance", NONE, None, note="asset → its product model"),
+    "supplied by": RelationSemantics("provenance", NONE, None, note="product model → its vendor"),
     "described by": RelationSemantics("provenance", NONE, None),
     "measures": RelationSemantics("provenance", NONE, None,
                                   note="a measurement observes an element, it does not cause its faults"),

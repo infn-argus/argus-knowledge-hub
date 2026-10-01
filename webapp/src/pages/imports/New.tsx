@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { importPaths } from "./paths";
-import { ApiError, importConfigsApi } from "../../api/client";
+import { ApiError, importConfigsApi, workspacesApi } from "../../api/client";
 import { MergeStrategy, MERGE_STRATEGIES } from "../../api/types";
 import { WorkspaceScopeBanner } from "../../components/WorkspaceScopeBanner";
 
@@ -49,6 +49,18 @@ export function ImportConfigForm() {
   const [branch, setBranch] = useState("main");
   const [valuesPath, setValuesPath] = useState("deploy/values.yaml");
   const [createMissingNodes, setCreateMissingNodes] = useState(true);
+  // The chain the configuration implies, each one optional.
+  const [inferElements, setInferElements] = useState(false);
+  const [inferControllers, setInferControllers] = useState(false);
+  const [itWorkspace, setItWorkspace] = useState("");
+  const [linkInventory, setLinkInventory] = useState(true);
+  const [aiUnrecognised, setAiUnrecognised] = useState(false);
+  const myWorkspaces = useQuery({
+    queryKey: ["my-workspaces"],
+    queryFn: workspacesApi.listMine,
+    staleTime: 60_000,
+    enabled: source === "epik8s",
+  });
 
   // params holds whatever the source needs, so values arrive loosely typed.
   const param = (key: string) => {
@@ -82,6 +94,11 @@ export function ImportConfigForm() {
       setBranch(param("branch") || "main");
       setValuesPath(param("path") || "deploy/values.yaml");
       setCreateMissingNodes(existing.data.params.create_missing_nodes !== false);
+      setInferElements(existing.data.params.infer_elements === true);
+      setInferControllers(existing.data.params.infer_controllers === true);
+      setItWorkspace(param("it_workspace"));
+      setLinkInventory(existing.data.params.link_inventory !== false);
+      setAiUnrecognised(existing.data.params.ai_unrecognised === true);
     }
   }, [existing.data]);
 
@@ -120,6 +137,11 @@ export function ImportConfigForm() {
               branch,
               path: valuesPath,
               create_missing_nodes: createMissingNodes,
+              infer_elements: inferElements,
+              infer_controllers: inferElements && inferControllers,
+              it_workspace: itWorkspace || null,
+              link_inventory: inferElements && linkInventory,
+              ai_unrecognised: inferElements && aiUnrecognised,
               ...(gitPat ? { pat: gitPat } : {}),
             }
           : {
@@ -416,6 +438,69 @@ export function ImportConfigForm() {
                     </span>
                   </span>
                 </label>
+
+                <fieldset className="rounded border border-slate-200 p-3">
+                  <legend className="px-1 text-sm font-medium text-slate-700">
+                    Infer the hardware chain
+                  </legend>
+                  <p className="mb-2 text-xs text-slate-500">
+                    The file names channels, not hardware. These options make what the
+                    channels imply, marked as inferred and waiting for someone to confirm.
+                  </p>
+                  <div className="space-y-2">
+                    <Check
+                      checked={inferElements}
+                      onChange={setInferElements}
+                      label="Infer equipment and lattice elements (rules)"
+                      hint="The pumps, gauges, magnets, supplies, cameras and BPM electronics the channels drive, from the channel metadata and the naming convention. Needs the type catalogue seeded."
+                    />
+                    <div className={`space-y-2 pl-6 ${inferElements ? "" : "opacity-50"}`}>
+                      <Check
+                        checked={inferControllers}
+                        disabled={!inferElements}
+                        onChange={setInferControllers}
+                        label="Infer controllers"
+                        hint="The box an IOC talks to (an IPCMini, a TPG 366, a Pollux chain), powering what its channels drive and reached through the IOC's address."
+                      />
+                      <Check
+                        checked={linkInventory}
+                        disabled={!inferElements}
+                        onChange={setLinkInventory}
+                        label="Link to units already in the inventory"
+                        hint="When the inventory holds the unit (same tag, or the same network address), the channel is proposed as linked to it instead of getting an inferred twin. You confirm links under Assets → Channels ↔ hardware."
+                      />
+                      <Check
+                        checked={aiUnrecognised}
+                        disabled={!inferElements}
+                        onChange={setAiUnrecognised}
+                        label="Ask the AI about channels the rules don't recognise"
+                        hint="Uses this workspace's AI endpoint. The AI picks from the catalogue's equipment types only, and its answers are proposals in the review queue, never records."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-700">
+                        IT workspace for converters, servers and their ports
+                      </label>
+                      <select
+                        value={itWorkspace}
+                        onChange={(e) => setItWorkspace(e.target.value)}
+                        className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                      >
+                        <option value="">None — don't make IT equipment</option>
+                        {(myWorkspaces.data ?? []).map((w) => (
+                          <option key={w.id} value={w.id}>
+                            {w.name}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-xs text-slate-500">
+                        A serial converter or a server named by a hostname is made once
+                        there, shared, with the ports the lines use (TCP 4003 → P3). You
+                        need permission to create objects in that workspace.
+                      </p>
+                    </div>
+                  </div>
+                </fieldset>
               </>
             )}
           </>
@@ -466,5 +551,35 @@ export function ImportConfigForm() {
         </button>
       </form>
     </div>
+  );
+}
+
+function Check({
+  checked,
+  onChange,
+  label,
+  hint,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  label: string;
+  hint: string;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="flex items-start gap-2 text-sm text-slate-700">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5"
+      />
+      <span>
+        {label}
+        <span className="block text-xs text-slate-500">{hint}</span>
+      </span>
+    </label>
   );
 }
