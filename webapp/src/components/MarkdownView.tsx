@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AuthenticatedImage } from "./AuthenticatedImage";
@@ -16,9 +17,12 @@ const ATTACHMENT_URL = /^\/v1\/attachments\/([A-Za-z0-9-]+)$/;
 export function MarkdownView({
   markdown,
   className = "",
+  codeLink,
 }: {
   markdown: string;
   className?: string;
+  /** Where an inline code span links to, when it names a record (`SPARC:ELM:SBNQUA01`). */
+  codeLink?: (text: string) => string | undefined;
 }) {
   if (!markdown?.trim()) {
     return <p className={`text-sm text-slate-400 ${className}`}>—</p>;
@@ -71,6 +75,14 @@ export function MarkdownView({
           code: ({ className: lang, children, ...props }) => {
             const inline = !String(lang ?? "").startsWith("language-");
             if (inline) {
+              const target = codeLink?.(String(children ?? "").trim());
+              if (target) {
+                return (
+                  <Link to={target} className="rounded bg-indigo-50 px-1 py-0.5 font-mono text-[0.85em] text-indigo-700 hover:underline">
+                    {children}
+                  </Link>
+                );
+              }
               return (
                 <code
                   className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.85em] text-slate-800"

@@ -2,8 +2,9 @@
 
 Every test makes workspaces, types and records, and many of them shared; run against the development
 database, they show up in every workspace's pickers and lists. So before any test module imports the app,
-DATABASE_URL is pointed at a sibling database (`<name>_test`, or TEST_DATABASE_URL when set), created if it
-is missing and migrated to head, triggers included, which `Base.metadata.create_all` alone would not give.
+DATABASE_URL is pointed at a sibling database (`<name>_test`, or TEST_DATABASE_URL when set), which is
+recreated empty for each run and migrated to head, triggers included, which `Base.metadata.create_all` alone
+would not give (ARGUS_TESTS_KEEP_DATABASE=1 keeps the previous run's).
 """
 import os
 import subprocess
@@ -26,9 +27,13 @@ def _test_url() -> str:
 
 
 def _ensure(url: str) -> None:
+    """A fresh test database for every run: tests that use fixed keys, or count what they made, would
+    otherwise meet what the previous run left behind."""
     target = make_url(url)
     admin = create_engine(target.set(database="postgres"), isolation_level="AUTOCOMMIT")
     with admin.connect() as conn:
+        if os.environ.get("ARGUS_TESTS_KEEP_DATABASE") != "1":
+            conn.execute(text(f'drop database if exists "{target.database}" with (force)'))
         if not conn.scalar(text("select 1 from pg_database where datname = :n"), {"n": target.database}):
             conn.execute(text(f'create database "{target.database}"'))
     admin.dispose()

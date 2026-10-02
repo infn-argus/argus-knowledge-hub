@@ -209,6 +209,39 @@ class AskStep(BaseModel):
     seconds: float = 0
 
 
+class ChatIn(BaseModel):
+    question: str
+    # Omitted to start a conversation; given to continue one.
+    conversation_id: Optional[str] = None
+
+
+class AskMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    seq: int
+    role: str
+    content: str = ""
+    steps: Optional[list[AskStep]] = None
+    stopped: Optional[str] = None
+    error: Optional[str] = None
+    seconds: Optional[float] = None
+    created_at: Optional[datetime] = None
+
+
+class AskConversationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class AskConversationDetail(AskConversationOut):
+    messages: list[AskMessageOut] = []
+
+
 class AskOut(BaseModel):
     answer: str = ""
     steps: list[AskStep] = []

@@ -1,151 +1,122 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { assetsApi, relationsApi } from "../api/client";
+import { GraphCanvas, IN, OUT } from "./graph/GraphCanvas";
+import { edgeKey, type GEdge } from "./graph/model";
+import { useBranches } from "./graph/useBranches";
 
-const SIZE = 560;
-const CENTER = SIZE / 2;
-const RADIUS = 200;
-
-export function RelationGraph({
-  assetUid,
-  onClose,
-}: {
-  assetUid: string;
-  onClose: () => void;
-}) {
+/* An asset's relations as a directed graph that grows on demand: what points at a node to its left, what it
+   points at to its right. Double-clicking a node opens its branches on the same rule, and folds them again;
+   many neighbours of one kind arrive as one group that opens on demand. */
+export function RelationGraph({ assetUid, onClose }: { assetUid: string; onClose: () => void }) {
   const navigate = useNavigate();
-  const relations = useQuery({ queryKey: ["relations"], queryFn: relationsApi.list });
-  const assets = useQuery({ queryKey: ["assets"], queryFn: () => assetsApi.list() });
+  const [rootUid, setRootUid] = useState(assetUid);
+  const graph = useBranches({ kind: "asset", uid: rootUid }, ["asset"]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [showIn, setShowIn] = useState(true);
+  const [showOut, setShowOut] = useState(true);
+  const current = selected && graph.nodes.has(selected) ? selected : graph.rootId;
+  const sel = current ? graph.nodes.get(current) : undefined;
 
-  const byUid = new Map((assets.data ?? []).map((a) => [a.uid, a]));
-  const center = byUid.get(assetUid);
-
-  const edges = (relations.data ?? [])
-    .filter((r) => r.from_asset_uid === assetUid || r.to_asset_uid === assetUid)
-    .map((r) => ({
-      relation: r,
-      direction: r.from_asset_uid === assetUid ? "out" : ("in" as const),
-      neighborUid: r.from_asset_uid === assetUid ? r.to_asset_uid : r.from_asset_uid,
-    }));
-
-  const n = edges.length;
-  const positioned = edges.map((e, i) => {
-    const angle = (2 * Math.PI * i) / Math.max(n, 1) - Math.PI / 2;
-    return {
-      ...e,
-      x: CENTER + RADIUS * Math.cos(angle),
-      y: CENTER + RADIUS * Math.sin(angle),
-    };
-  });
+  const edges = graph.edges.filter((e) => (e.to === current ? showIn : e.from === current ? showOut : true));
+  const selIn = graph.edges.filter((e) => e.to === current && graph.nodes.has(e.from));
+  const selOut = graph.edges.filter((e) => e.from === current && graph.nodes.has(e.to));
+  const name = (id: string) => graph.nodes.get(id)?.label ?? id;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-full w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-900">
-            Relations for {center?.name ?? assetUid}
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded px-2 py-1 text-sm text-slate-500 hover:bg-slate-100"
-          >
-            Close
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="flex h-full max-h-[90vh] w-full max-w-7xl flex-col rounded-lg bg-white shadow-xl"
+           onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-2">
+          <h2 className="text-sm font-semibold text-slate-900">Relations of {graph.rootId ? name(graph.rootId) : ""}</h2>
+          <DirectionLegend />
+          <label className="flex items-center gap-1 text-xs text-slate-600">
+            <input type="checkbox" checked={showIn} onChange={(e) => setShowIn(e.target.checked)} /> inbound
+          </label>
+          <label className="flex items-center gap-1 text-xs text-slate-600">
+            <input type="checkbox" checked={showOut} onChange={(e) => setShowOut(e.target.checked)} /> outbound
+          </label>
+          <span className="text-xs text-slate-400">Click to select · double-click to open or fold · drag to pan · scroll to zoom</span>
+          <button onClick={onClose} className="ml-auto rounded px-2 py-1 text-sm text-slate-500 hover:bg-slate-100">Close</button>
         </div>
-
-        {n === 0 ? (
-          <p className="p-8 text-center text-sm text-slate-400">No relations to graph.</p>
-        ) : (
-          <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="mx-auto w-full max-w-xl">
-            <defs>
-              <marker
-                id="arrow"
-                viewBox="0 0 10 10"
-                refX="9"
-                refY="5"
-                markerWidth="6"
-                markerHeight="6"
-                orient="auto-start-reverse"
-              >
-                <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8" />
-              </marker>
-            </defs>
-
-            {positioned.map((e, i) => {
-              const [x1, y1, x2, y2] =
-                e.direction === "out"
-                  ? [CENTER, CENTER, e.x, e.y]
-                  : [e.x, e.y, CENTER, CENTER];
-              return (
-                <g key={i}>
-                  <line
-                    x1={x1}
-                    y1={y1}
-                    x2={x2}
-                    y2={y2}
-                    stroke="#94a3b8"
-                    strokeWidth={1.5}
-                    markerEnd="url(#arrow)"
-                  />
-                  <text
-                    x={(e.x + CENTER) / 2}
-                    y={(e.y + CENTER) / 2 - 4}
-                    textAnchor="middle"
-                    className="fill-slate-500"
-                    fontSize={10}
-                  >
-                    {e.relation.relation_type}
-                  </text>
-                </g>
-              );
-            })}
-
-            {positioned.map((e, i) => {
-              const neighbor = byUid.get(e.neighborUid);
-              return (
-                <g
-                  key={`node-${i}`}
-                  className="cursor-pointer"
-                  onClick={() => {
-                    onClose();
-                    navigate(`/assets/${e.neighborUid}`);
-                  }}
-                >
-                  <circle cx={e.x} cy={e.y} r={28} fill="#eef2ff" stroke="#6366f1" />
-                  <text
-                    x={e.x}
-                    y={e.y}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontSize={9}
-                    className="fill-indigo-700"
-                  >
-                    {(neighbor?.name ?? e.neighborUid).slice(0, 14)}
-                  </text>
-                </g>
-              );
-            })}
-
-            <circle cx={CENTER} cy={CENTER} r={34} fill="#0f172a" />
-            <text
-              x={CENTER}
-              y={CENTER}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fontSize={10}
-              fill="white"
-            >
-              {(center?.name ?? assetUid).slice(0, 16)}
-            </text>
-          </svg>
-        )}
+        {graph.error && <p className="px-4 py-2 text-sm text-red-600">{graph.error}</p>}
+        <div className="flex min-h-0 flex-1">
+          <div className="min-w-0 flex-1">
+            <GraphCanvas nodes={graph.nodes} edges={edges} rootId={graph.rootId} selected={current}
+                         onSelect={setSelected} onOpen={graph.toggle} open={graph.open} loading={graph.loading} />
+          </div>
+          {sel && (
+            <aside className="w-72 shrink-0 overflow-y-auto border-l border-slate-200 p-3 text-sm">
+              <div className="font-semibold text-slate-900">{sel.restricted ? "Restricted" : sel.label}</div>
+              <div className="text-xs text-slate-500">{sel.bundle ? `grouped by “${sel.sub}”` : sel.sub}</div>
+              {sel.bundle ? (
+                <button onClick={() => graph.toggle(sel)} className="mt-2 rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">
+                  Show all {sel.bundle.members.length}
+                </button>
+              ) : !sel.restricted && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  <button onClick={() => { onClose(); navigate(`/assets/${sel.uid}`); }}
+                          className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">Open</button>
+                  <button onClick={() => graph.toggle(sel)}
+                          className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">
+                    {graph.open.has(sel.id) ? "Fold branches" : "Open branches"}
+                  </button>
+                  {sel.id !== graph.rootId && (
+                    <button onClick={() => { setSelected(null); setRootUid(sel.uid); }}
+                            className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">Centre here</button>
+                  )}
+                </div>
+              )}
+              <RelationList title="Inbound" color={IN} edges={selIn} side="in" name={name} onPick={setSelected} />
+              <RelationList title="Outbound" color={OUT} edges={selOut} side="out" name={name} onPick={setSelected} />
+              {!graph.open.has(sel.id) && !sel.bundle && (
+                <p className="mt-3 text-xs text-slate-400">Only the relations already drawn are listed: open its branches to see all.</p>
+              )}
+            </aside>
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+export function DirectionLegend() {
+  return (
+    <span className="flex items-center gap-3 text-xs text-slate-600">
+      <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-5" style={{ background: IN }} /> inbound (points at the selected)</span>
+      <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-5" style={{ background: OUT }} /> outbound (the selected points at)</span>
+    </span>
+  );
+}
+
+export function RelationList({
+  title, color, edges, side, name, onPick,
+}: {
+  title: string; color: string; edges: GEdge[]; side: "in" | "out";
+  name: (id: string) => string; onPick: (id: string) => void;
+}) {
+  return (
+    <div className="mt-3">
+      <div className="text-xs font-semibold uppercase tracking-wide" style={{ color }}>{title} ({edges.length})</div>
+      {edges.length === 0 ? (
+        <div className="text-xs text-slate-400">none shown</div>
+      ) : (
+        <ul className="mt-1 space-y-0.5">
+          {edges.map((e) => {
+            const other = side === "in" ? e.from : e.to;
+            return (
+              <li key={edgeKey(e)} className="text-xs">
+                <button onClick={() => onPick(other)} className="text-left hover:underline">
+                  {side === "in" ? (
+                    <><span className="text-slate-900">{name(other)}</span> <span className="text-slate-500">{e.relation} →</span> this</>
+                  ) : (
+                    <>this <span className="text-slate-500">{e.relation} →</span> <span className="text-slate-900">{name(other)}</span></>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

@@ -8,11 +8,11 @@ values file or a chat window to get there.
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import require_permission
+from app.auth import get_identity, require_permission
 from app.db import get_db
 from app.models.llm_config import LLMConfig
 from app.models.ai_suggestion import AISuggestion
@@ -20,8 +20,12 @@ from app.models.document import Document
 from app.models.schema import Schema
 from app.schemas.ai import (
     AIStatus,
+    AskConversationDetail,
+    AskConversationOut,
     AskIn,
+    AskMessageOut,
     AskOut,
+    ChatIn,
     LLMCheckResult,
     LLMConfigIn,
     LLMConfigOut,
@@ -41,6 +45,7 @@ from app.schemas.ai import (
 from app.services.ai_authoring import draft_document, draft_ticket_fields, review_document
 from app.services.ai_config import resolve as resolve_config
 from app.services.ask import ask as run_ask
+from app.services.ask import ask_events
 from app.services.asset_vision import MAX_IMAGE_BYTES, identify
 from app.services.text_links import objects_mentioned
 from app.services.ai_suggestions import suggest_document_types
@@ -440,3 +445,212 @@ def ask_the_knowledge(
         return AskOut(**run_ask(db, workspace_id, endpoint_for(config), question))
     except LLMError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+# --------------------------------------------------------------------------- Ask as a chat
+
+def _owner(identity) -> str:
+    from app.routers.ledger import actor_of
+    return actor_of(identity)
+
+
+def _sse(event: dict) -> str:
+    import json
+    return f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+
+
+def _chat_events(workspace_id: str, owner: str, question: str, conversation_id: Optional[str],
+                 endpoint: Endpoint, grants):
+    """The chat turn as server-sent events, saved as it ends. Runs after the request's own session is
+    gone, so it has its own, and the viewer's restricted-class grants are set again here: the lookups
+    must see what the person may see, no more."""
+    import uuid
+    from app.db import SessionLocal
+    from app.models.ask_conversation import AskConversation, AskMessage
+    from app.services.visibility import set_current_grants
+    set_current_grants(grants)
+    db = SessionLocal()
+    steps: list = []
+    final: Optional[dict] = None
+    conversation = None
+    try:
+        conversation = db.get(AskConversation, conversation_id) if conversation_id else None
+        if conversation is None:
+            conversation = AskConversation(id=str(uuid.uuid4()), workspace_id=workspace_id, owner=owner,
+                                           title=question[:80])
+            db.add(conversation)
+            db.flush()
+        earlier = list(db.scalars(select(AskMessage).where(AskMessage.conversation_id == conversation.id)
+                                  .order_by(AskMessage.seq)))
+        history = [{"role": m.role, "content": m.content} for m in earlier]
+        seq = (earlier[-1].seq + 1) if earlier else 0
+        db.add(AskMessage(id=str(uuid.uuid4()), conversation_id=conversation.id, seq=seq, role="user",
+                          content=question))
+        db.commit()
+        yield _sse({"type": "conversation", "id": conversation.id, "title": conversation.title})
+        try:
+            for event in ask_events(db, workspace_id, endpoint, question, history=history):
+                if event["type"] == "step":
+                    steps.append({k: event[k] for k in ("tool", "arguments", "result", "error", "seconds")})
+                if event["type"] == "done":
+                    final = event
+                yield _sse(event)
+        except LLMError as e:
+            final = {"answer": "", "steps": steps, "stopped": "failed", "error": str(e), "seconds": None}
+            yield _sse({"type": "done", **final})
+    except GeneratorExit:
+        # The person stopped it, or closed the page: what was found so far is kept, marked as such.
+        final = final or {"answer": "", "steps": steps, "stopped": "cancelled", "error": None, "seconds": None}
+        raise
+    finally:
+        if conversation is not None and final is not None:
+            try:
+                db.rollback()
+                last = db.scalar(select(AskMessage.seq).where(AskMessage.conversation_id == conversation.id)
+                                 .order_by(AskMessage.seq.desc()).limit(1))
+                db.add(AskMessage(id=str(uuid.uuid4()), conversation_id=conversation.id, seq=(last or 0) + 1,
+                                  role="assistant", content=final.get("answer") or "",
+                                  steps=final.get("steps") or steps, stopped=final.get("stopped"),
+                                  error=final.get("error"), seconds=final.get("seconds")))
+                convo = db.get(AskConversation, conversation.id)
+                if convo is not None:
+                    convo.updated_at = datetime.now(timezone.utc)
+                db.commit()
+            except Exception:  # noqa: BLE001 — a failed save must not hide the answer already sent
+                db.rollback()
+        db.close()
+
+
+@router.post("/chat")
+def chat(
+    body: ChatIn,
+    workspace_id: str = Depends(require_permission("read")),
+    identity=Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    """Ask, as a conversation, answered as it is worked out: server-sent events (one JSON object per
+    `data:` line) for what the model is doing, each lookup and its result, and the answer as it is
+    written. The turn is saved in the conversation, which a follow-up continues. Same permission as
+    reading the records by hand: the lookups only retrieve."""
+    from fastapi.responses import StreamingResponse
+    from app.models.ask_conversation import AskConversation
+    from app.services.visibility import current_grants
+    question = (body.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Ask something.")
+    owner = _owner(identity)
+    if body.conversation_id:
+        conversation = db.get(AskConversation, body.conversation_id)
+        if conversation is None or conversation.workspace_id != workspace_id or conversation.owner != owner:
+            raise HTTPException(status_code=404, detail="No such conversation")
+    config = _usable_config(db, workspace_id)
+    return StreamingResponse(
+        _chat_events(workspace_id, owner, question, body.conversation_id, endpoint_for(config), current_grants()),
+        media_type="text/event-stream",
+        # Proxies (the cluster's ingress, nginx) would otherwise hold the events back until the end.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/conversations", response_model=list[AskConversationOut])
+def list_conversations(
+    workspace_id: str = Depends(require_permission("read")),
+    identity=Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    """Your conversations in this workspace, most recent first."""
+    from app.models.ask_conversation import AskConversation
+    return list(db.scalars(select(AskConversation).where(
+        AskConversation.workspace_id == workspace_id, AskConversation.owner == _owner(identity))
+        .order_by(AskConversation.updated_at.desc()).limit(200)))
+
+
+def _own_conversation(db: Session, workspace_id: str, identity, conversation_id: str):
+    from app.models.ask_conversation import AskConversation
+    conversation = db.get(AskConversation, conversation_id)
+    if conversation is None or conversation.workspace_id != workspace_id or conversation.owner != _owner(identity):
+        raise HTTPException(status_code=404, detail="No such conversation")
+    return conversation
+
+
+@router.get("/conversations/{conversation_id}", response_model=AskConversationDetail)
+def get_conversation(
+    conversation_id: str,
+    workspace_id: str = Depends(require_permission("read")),
+    identity=Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    from app.models.ask_conversation import AskMessage
+    conversation = _own_conversation(db, workspace_id, identity, conversation_id)
+    messages = list(db.scalars(select(AskMessage).where(AskMessage.conversation_id == conversation.id)
+                               .order_by(AskMessage.seq)))
+    return AskConversationDetail(id=conversation.id, title=conversation.title, created_at=conversation.created_at,
+                                 updated_at=conversation.updated_at,
+                                 messages=[AskMessageOut.model_validate(m) for m in messages])
+
+
+@router.delete("/conversations/{conversation_id}", status_code=204)
+def delete_conversation(
+    conversation_id: str,
+    workspace_id: str = Depends(require_permission("read")),
+    identity=Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    db.delete(_own_conversation(db, workspace_id, identity, conversation_id))
+    db.commit()
+
+
+# --------------------------------------------------------------------------- the written knowledge (RAG)
+
+@router.get("/knowledge")
+def knowledge_status(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """What of this workspace's written knowledge is indexed for Ask ARGUS, and whether it can be."""
+    from app.services import knowledge_index
+    from app.services.ai_config import resolve
+    config, _from = resolve(db, workspace_id)
+    out = knowledge_index.status(db, workspace_id)
+    out["embedding_model"] = config.embedding_model if config else None
+    return out
+
+
+def _index_in_background(workspace_id: str) -> None:
+    from app.db import SessionLocal
+    from app.services import knowledge_index
+    from app.services.ai_config import resolve
+    db = SessionLocal()
+    try:
+        config, _from = resolve(db, workspace_id)
+        if config is not None:
+            knowledge_index.index_workspace(db, workspace_id, endpoint_for(config))
+    except LLMError as e:
+        db.rollback()
+        from sqlalchemy import text as sql
+        import json
+        db.execute(sql("UPDATE knowledge_index_runs SET state = 'failed', finished_at = now(), "
+                       "result = CAST(:r AS jsonb) WHERE workspace_id = :w"),
+                   {"w": workspace_id, "r": json.dumps({"failed": [str(e)]})})
+        db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/knowledge/reindex", status_code=202)
+def knowledge_reindex(
+    background: BackgroundTasks,
+    workspace_id: str = Depends(require_permission("modify")),
+    db: Session = Depends(get_db),
+):
+    """Brings the index up to date in the background: only what changed since the last run is embedded."""
+    from app.services import knowledge_index
+    config = _usable_config(db, workspace_id)
+    if not config.embedding_model:
+        raise HTTPException(status_code=400, detail="Set an embedding model in the AI settings first.")
+    try:
+        knowledge_index.ensure_store(db)
+    except LLMError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    current = knowledge_index.status(db, workspace_id).get("run")
+    if current and current.get("state") == "running":
+        raise HTTPException(status_code=409, detail="An indexing run is already going.")
+    background.add_task(_index_in_background, workspace_id)
+    return {"started": True}

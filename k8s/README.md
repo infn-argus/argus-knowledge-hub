@@ -69,6 +69,37 @@ Save the printed token — it's the `Authorization: Bearer <token>` value for ev
 request after this, and it is not recoverable once you lose it (mint a new one
 with the same command if that happens).
 
+## Postgres with pgvector (Ask ARGUS's written-knowledge search)
+
+The API runs without it, but Ask ARGUS can then only use exact lookups. To enable the search over
+documents, tickets and attached files, run the same Postgres 16 with the pgvector extension. Use the
+build with the **same Debian release** as the current one, or Postgres reports a collation version
+mismatch (text indexes built under one C library may sort differently under another):
+
+```
+$KC -n assetmanagement exec deploy/postgres -- psql -U assetmanagement -d assetmanagement -tAc "select version()"
+```
+
+`pgdg13` in the answer is Debian 13: use `pgvector/pgvector:pg16-trixie`; `pgdg12` is Debian 12: use
+`pgvector/pgvector:pg16-bookworm`. Back up first, then:
+
+```
+$KC -n assetmanagement exec deploy/postgres -- pg_dump -U assetmanagement -Fc assetmanagement > argus-before-pgvector.dump
+$KC -n assetmanagement set image deployment/postgres postgres=pgvector/pgvector:pg16-trixie
+$KC -n assetmanagement rollout status deployment/postgres
+```
+
+The data volume is reused as it is. Then restart the API (its startup migration creates the extension and
+the index tables) and build the index from *Workspace → AI*, or:
+
+```
+$KC -n assetmanagement rollout restart deployment/assetmanagement-api
+$KC -n assetmanagement exec deploy/assetmanagement-api -- python -m app.services.knowledge_index all
+```
+
+The chat streams its answers as server-sent events: an ingress that buffers responses would hold them
+back until the end. The API sends `X-Accel-Buffering: no`, which nginx ingress honours.
+
 ## Redeploying a new API image version
 
 ```

@@ -190,6 +190,18 @@ currently valid* revision rather than to an arbitrary PDF.
   performance targets, and a volume generator runs them at 10× (50 000 records,
   20 000 tickets and 5 000 documents): all were met. See [docs/operations.md](docs/operations.md)
   for the results, the jobs to schedule and point-in-time recovery.
+- **Ask ARGUS.** A chat that answers from the workspace's own records, in any language, showing every
+  lookup as it runs and writing the answer as it arrives; a follow-up continues the conversation, which
+  is kept for its author, and every key an answer cites opens its record. The model works through
+  read-only lookups (the same ones the hub's MCP server at `/mcp` offers to external assistants): exact
+  ones for what exists (equipment by type and subtype, counts per type, the type tree, the graph, impact
+  and root cause) and `search_knowledge` for what is written. That is retrieval-augmented: procedures,
+  tickets and their comments, comments on equipment and the text of attached files (datasheets and
+  manuals, page by page) are indexed with the workspace's embedding model in Postgres (pgvector) and
+  searched by meaning and by words together, only ever returning what the person asking may read.
+  Build or update the index on *Workspace → AI* (only what changed is embedded again), or
+  `python -m app.services.knowledge_index <workspace|all>`, e.g. nightly. Served by `/v1/ai/chat`
+  (server-sent events), `/v1/ai/conversations` and `/v1/ai/knowledge`.
 - **Type catalogue.** Every object type a workspace can use, on one page: where it sits in the
   tree, what it is, its attributes (own and inherited), the names imports know it by, what its
   references mean in the graph, and how many records it has. The seeded types, ticket types and

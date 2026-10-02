@@ -1,86 +1,130 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { aiApi } from "../../api/client";
-import { ApiError } from "../../api/client";
-import type { AskResult, AskStep } from "../../api/types";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { aiApi, ApiError, streamChat } from "../../api/client";
+import type { AskMessage, AskStep, ChatEvent } from "../../api/types";
 import { MarkdownView } from "../../components/MarkdownView";
+import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 
-/** Asking the hub a question, and watching where the answer came from.
+/** Ask ARGUS, as a conversation.
  *
- * This is a test harness, not a chat product. ARGUS claims that structured
- * knowledge answers what a pile of documents cannot; the only honest way
- * to find out is to ask in your own words and see which records were
- * actually opened. So the lookups are the main content of the page, not a
- * debug panel — an answer with no lookups behind it is the model talking
- * about some other laboratory, and it should be obvious at a glance.
- */
+ * Answers come only from this workspace's records, and the lookups they rest on are shown as they run:
+ * an answer with no lookups behind it is the model talking about some other laboratory, and it should be
+ * obvious at a glance. The answer is written as it arrives, a follow-up continues the conversation with
+ * the earlier turns as context, and every key an answer cites links to its record. */
 
-/** Questions worth trying first, each aimed at something different: a
- * count, a traversal, a document lookup, and one the corpus probably
- * cannot answer yet. */
 const STARTERS = [
   "How many objects, tickets and documents are in this workspace?",
-  "What cameras do we have, and where are they mounted?",
+  "Can you list the magnets?",
   "Which procedures cover the vacuum system?",
   "What has gone wrong with the BTF line before?",
 ];
 
-function toolLabel(step: AskStep): string {
-  const args = Object.entries(step.arguments)
-    .filter(([, v]) => v !== null && v !== undefined && v !== "")
-    .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
-    .join(", ");
-  return args ? `${step.tool}(${args})` : `${step.tool}()`;
+/** What each lookup is, in words. */
+const TOOL_WORDS: Record<string, string> = {
+  search_objects: "Searching equipment",
+  list_types: "Looking up the types",
+  get_object: "Opening a record",
+  search_tickets: "Searching tickets",
+  get_ticket: "Opening a ticket",
+  search_documents: "Searching documentation",
+  search_knowledge: "Reading what is written",
+  get_document: "Opening a document",
+  graph_neighbours: "Following connections",
+  impact_analysis: "Working out what depends on it",
+  root_cause_analysis: "Looking for root causes",
+  root_cause_from_alarms: "Looking for the cause of the alarms",
+  single_points_of_failure: "Looking for single points of failure",
+  knowledge_summary: "Counting what this workspace holds",
+};
+
+interface Turn {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  steps: (AskStep & { running?: boolean; summary?: string })[];
+  thinking: string;
+  stopped: string | null;
+  error: string | null;
+  seconds: number | null;
+  live?: boolean;
 }
 
-/** How many records a result carried, for the one-line summary. */
-function resultSummary(step: AskStep): string {
+function fromMessage(m: AskMessage): Turn {
+  return {
+    id: m.id, role: m.role, content: m.content, steps: m.steps ?? [], thinking: "",
+    stopped: m.stopped, error: m.error, seconds: m.seconds,
+  };
+}
+
+function argsText(args: Record<string, unknown>): string {
+  return Object.entries(args)
+    .filter(([k, v]) => v !== null && v !== undefined && v !== "" && k !== "limit")
+    .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join(" · ");
+}
+
+function summaryOf(step: AskStep & { summary?: string }): string {
+  if (step.summary !== undefined) return step.summary;
   if (step.error) return step.error;
   try {
     const data = JSON.parse(step.result) as Record<string, unknown>;
+    if (data.available === false) return "not available here";
+    if (Array.isArray(data.results)) return `${data.results.length} passages`;
     if (typeof data.total === "number") return `${data.total} found`;
-    if (Array.isArray(data.nodes)) {
-      const edges = Array.isArray(data.edges) ? data.edges.length : 0;
-      return `${data.nodes.length} connected records, ${edges} links`;
-    }
+    if (Array.isArray(data.nodes)) return `${data.nodes.length} connected records`;
     if (data.found === false) return "not found";
     if (data.found === true) return "1 record";
-    return "";
   } catch {
-    return "";
+    /* not JSON: nothing to summarise */
   }
+  return "";
 }
 
-function Step({ step, index }: { step: AskStep; index: number }) {
+/** Every record the lookups returned, by the key or code an answer cites it with, to its page. */
+function recordLinks(steps: AskStep[]): Map<string, string> {
+  const links = new Map<string, string>();
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (!v || typeof v !== "object") return;
+    const o = v as Record<string, unknown>;
+    if (typeof o.uid === "string") {
+      if (typeof o.key === "string") links.set(o.key, `/assets/${encodeURIComponent(o.uid)}`);
+      if (typeof o.code === "string") links.set(o.code, `/documents/${encodeURIComponent(o.uid)}`);
+      if (typeof o.source_key === "string") links.set(o.source_key, `/tickets/${encodeURIComponent(o.uid)}`);
+    }
+    Object.values(o).forEach(walk);
+  };
+  for (const s of steps) {
+    try {
+      walk(JSON.parse(s.result));
+    } catch {
+      /* a truncated result is not JSON; its records just are not linked */
+    }
+  }
+  return links;
+}
+
+function StepRow({ step }: { step: Turn["steps"][number] }) {
   const [open, setOpen] = useState(false);
-  const summary = resultSummary(step);
+  const summary = step.running ? "" : summaryOf(step);
   return (
-    <li className="border-b border-slate-100 last:border-b-0">
+    <li>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-baseline gap-2 px-3 py-2 text-left hover:bg-slate-50"
+        onClick={() => !step.running && setOpen((v) => !v)}
+        className="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-xs hover:bg-slate-50"
       >
-        <span className="w-5 shrink-0 text-xs tabular-nums text-slate-400">{index + 1}</span>
-        <code
-          className={`min-w-0 flex-1 truncate text-xs ${
-            step.error ? "text-rose-700" : "text-slate-700"
-          }`}
-        >
-          {toolLabel(step)}
-        </code>
-        {summary && (
-          <span
-            className={`shrink-0 text-xs ${step.error ? "text-rose-600" : "text-slate-500"}`}
-          >
-            {summary}
-          </span>
-        )}
-        <span className="shrink-0 text-xs text-slate-400">{open ? "▾" : "▸"}</span>
+        <span className={`shrink-0 ${step.error ? "text-rose-500" : step.running ? "text-indigo-500" : "text-emerald-600"}`}>
+          {step.running ? <Spinner /> : step.error ? "✕" : "✓"}
+        </span>
+        <span className="shrink-0 font-medium text-slate-700">{TOOL_WORDS[step.tool] ?? step.tool}</span>
+        <span className="min-w-0 flex-1 truncate text-slate-500">{argsText(step.arguments)}</span>
+        {summary && <span className={`shrink-0 ${step.error ? "text-rose-600" : "text-slate-500"}`}>{summary}</span>}
+        {!step.running && <span className="shrink-0 text-slate-400">{open ? "▾" : "▸"}</span>}
       </button>
       {open && (
-        <pre className="max-h-80 overflow-auto border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-700">
+        <pre className="mx-2 mb-1 max-h-72 overflow-auto rounded bg-slate-50 px-2 py-1 text-[11px] leading-relaxed text-slate-700">
           {step.result}
         </pre>
       )}
@@ -88,142 +132,320 @@ function Step({ step, index }: { step: AskStep; index: number }) {
   );
 }
 
-export function Ask() {
-  const [question, setQuestion] = useState("");
-  const [asked, setAsked] = useState("");
-  const status = useQuery({ queryKey: ["ai-status"], queryFn: aiApi.status });
+function Spinner() {
+  return <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600 align-middle" />;
+}
 
-  const ask = useMutation<AskResult, Error, string>({
-    mutationFn: (q: string) => aiApi.ask(q),
-    onMutate: (q) => setAsked(q),
-  });
+function AssistantTurn({ turn }: { turn: Turn }) {
+  const [showThinking, setShowThinking] = useState(false);
+  const links = useMemo(() => recordLinks(turn.steps), [turn.steps]);
+  const working = turn.live && !turn.content;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white">
+      {turn.steps.length > 0 && (
+        <ul className="border-b border-slate-100 px-1 py-1">
+          {turn.steps.map((s, i) => <StepRow key={i} step={s} />)}
+        </ul>
+      )}
+      {working && (
+        <div className="px-4 py-2 text-xs text-slate-500">
+          <Spinner />{" "}
+          {turn.thinking ? "Thinking" : turn.steps.some((s) => s.running) ? "Looking it up" : "Starting"}…
+          {turn.thinking && (
+            <button type="button" onClick={() => setShowThinking((v) => !v)} className="ml-2 underline">
+              {showThinking ? "hide reasoning" : "show reasoning"}
+            </button>
+          )}
+          {showThinking && (
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 text-[11px] text-slate-500">
+              {turn.thinking.slice(-4000)}
+            </pre>
+          )}
+        </div>
+      )}
+      {turn.content && (
+        <div className="px-4 py-3">
+          <MarkdownView markdown={turn.content} codeLink={(t) => links.get(t)} />
+        </div>
+      )}
+      {!turn.live && !turn.content && (
+        <p className="px-4 py-3 text-sm text-slate-500">
+          {turn.stopped === "cancelled" ? "Stopped before an answer was written." : `No answer came back${turn.error ? `: ${turn.error}` : "."}`}
+        </p>
+      )}
+      {!turn.live && (
+        <div className="flex flex-wrap gap-x-3 border-t border-slate-100 px-3 py-1.5 text-[11px] text-slate-400">
+          {turn.seconds != null && <span>{turn.seconds}s</span>}
+          <span>{turn.steps.length === 1 ? "1 lookup" : `${turn.steps.length} lookups`}</span>
+          {turn.steps.length === 0 && turn.content && (
+            <span className="text-rose-600">No lookups: this answer is not from the records — treat it as unfounded.</span>
+          )}
+          {turn.stopped === "exhausted" && (
+            <span className="text-amber-700">Cut short at the lookup limit: what had been found by then, not a complete answer.</span>
+          )}
+          {turn.stopped === "cancelled" && <span className="text-amber-700">Stopped.</span>}
+          {turn.stopped === "failed" && <span className="text-rose-600">{turn.error}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Ask() {
+  const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const current = params.get("c");
+  const status = useQuery({ queryKey: ["ai-status"], queryFn: aiApi.status });
+  const conversations = useQuery({ queryKey: ["ask-conversations"], queryFn: aiApi.conversations });
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const abort = useRef<AbortController | null>(null);
+  const bottom = useRef<HTMLDivElement>(null);
+  // Set while a turn is streaming into a conversation it created, so loading that conversation from the
+  // URL does not replace the turn being written.
+  const own = useRef<string | null>(null);
 
   const usable = status.data?.validated && status.data?.enabled;
-  const result = ask.data;
+  const workspaceId = useCurrentWorkspaceId();
 
-  const submit = (q: string) => {
-    const text = q.trim();
-    if (!text || ask.isPending) return;
-    setQuestion(text);
-    ask.mutate(text);
+  const loaded = useQuery({
+    queryKey: ["ask-conversation", current],
+    queryFn: () => aiApi.conversation(current!),
+    enabled: !!current && own.current !== current,
+  });
+  useEffect(() => {
+    if (!current) setTurns([]);
+  }, [current]);
+  useEffect(() => {
+    if (loaded.data && own.current !== current) setTurns(loaded.data.messages.map(fromMessage));
+  }, [loaded.data, current]);
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ block: "end" });
+  }, [turns]);
+
+  const remove = useMutation({
+    mutationFn: (id: string) => aiApi.deleteConversation(id),
+    onSuccess: (_d, id) => {
+      void queryClient.invalidateQueries({ queryKey: ["ask-conversations"] });
+      if (id === current) setParams({});
+    },
+  });
+
+  const update = (fn: (t: Turn) => Turn) =>
+    setTurns((all) => all.map((t, i) => (i === all.length - 1 && t.role === "assistant" ? fn(t) : t)));
+
+  const onEvent = (ev: ChatEvent) => {
+    switch (ev.type) {
+      case "conversation":
+        own.current = ev.id;
+        if (ev.id !== current) setParams({ c: ev.id });
+        break;
+      case "thinking":
+        update((t) => ({ ...t, thinking: (t.thinking + ev.text).slice(-8000) }));
+        break;
+      case "text":
+        update((t) => ({ ...t, content: t.content + ev.text }));
+        break;
+      case "text_reset":
+        update((t) => ({ ...t, content: "" }));
+        break;
+      case "step_start":
+        update((t) => ({
+          ...t,
+          thinking: "",
+          steps: [...t.steps, { tool: ev.tool, arguments: ev.arguments, result: "", error: null, seconds: 0, running: true }],
+        }));
+        break;
+      case "step":
+        update((t) => ({
+          ...t,
+          steps: t.steps.map((s, i) => (i === ev.index ? { ...ev, running: false } : s)),
+        }));
+        break;
+      case "done":
+        update((t) => ({
+          ...t, live: false, content: ev.answer || t.content, stopped: ev.stopped, error: ev.error, seconds: ev.seconds,
+          steps: t.steps.map((s) => ({ ...s, running: false })),
+        }));
+        break;
+    }
+  };
+
+  const send = async (text: string) => {
+    const question = text.trim();
+    if (!question || busy) return;
+    setDraft("");
+    setError(null);
+    setBusy(true);
+    const controller = new AbortController();
+    abort.current = controller;
+    own.current = current;
+    setTurns((all) => [
+      ...all,
+      { id: `u-${Date.now()}`, role: "user", content: question, steps: [], thinking: "", stopped: null, error: null, seconds: null },
+      { id: `a-${Date.now()}`, role: "assistant", content: "", steps: [], thinking: "", stopped: null, error: null, seconds: null, live: true },
+    ]);
+    try {
+      await streamChat({ question, conversation_id: current }, onEvent, controller.signal);
+    } catch (e) {
+      if (controller.signal.aborted) {
+        update((t) => ({ ...t, live: false, stopped: "cancelled", steps: t.steps.map((s) => ({ ...s, running: false })) }));
+      } else {
+        setError(e instanceof ApiError ? String(e.detail ?? e.message) : e instanceof Error ? e.message : String(e));
+        setTurns((all) => all.slice(0, -2));
+        setDraft(question);
+      }
+    } finally {
+      setBusy(false);
+      abort.current = null;
+      void queryClient.invalidateQueries({ queryKey: ["ask-conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["ask-conversation"] });
+    }
   };
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
-      <header>
-        <h1 className="text-lg font-semibold text-slate-900">Ask</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          A question answered only from this workspace's records — objects, tickets and
-          documentation — showing every lookup it made. If the answer rests on nothing,
-          you will see that here.
-        </p>
-      </header>
-
-      {status.isSuccess && !usable && (
-        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {status.data?.reason ?? "AI features are not available in this workspace."}{" "}
-          <Link className="underline" to="/workspace/ai">
-            Configure the AI endpoint
-          </Link>
+    <div className="-m-6 flex h-[calc(100vh-3.5rem)] min-h-0">
+      <aside className="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-white">
+        <div className="p-3">
+          <button
+            type="button"
+            onClick={() => {
+              own.current = null;
+              setParams({});
+            }}
+            disabled={busy}
+            className="w-full rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:bg-slate-300"
+          >
+            New chat
+          </button>
         </div>
-      )}
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit(question);
-        }}
-        className="flex gap-2"
-      >
-        <input
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="What has gone wrong with this magnet before?"
-          disabled={!usable || ask.isPending}
-          className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-        />
-        <button
-          type="submit"
-          disabled={!usable || ask.isPending || !question.trim()}
-          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:bg-slate-300"
-        >
-          {ask.isPending ? "Looking…" : "Ask"}
-        </button>
-      </form>
-
-      {!ask.data && !ask.isPending && (
-        <div className="flex flex-wrap gap-2">
-          {STARTERS.map((q) => (
-            <button
-              key={q}
-              type="button"
-              disabled={!usable}
-              onClick={() => submit(q)}
-              className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {q}
-            </button>
+        <ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          {(conversations.data ?? []).map((c) => (
+            <li key={c.id} className="group flex items-center">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  own.current = null;
+                  setParams({ c: c.id });
+                }}
+                className={`min-w-0 flex-1 truncate rounded px-2 py-1.5 text-left text-sm ${
+                  c.id === current ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50"
+                }`}
+                title={c.title}
+              >
+                {c.title}
+              </button>
+              <button
+                type="button"
+                aria-label="Delete conversation"
+                disabled={busy}
+                onClick={() => remove.mutate(c.id)}
+                className="ml-1 hidden rounded px-1 text-xs text-slate-400 hover:bg-rose-50 hover:text-rose-600 group-hover:block"
+              >
+                ✕
+              </button>
+            </li>
           ))}
-        </div>
-      )}
+          {conversations.data?.length === 0 && <li className="px-2 py-1 text-xs text-slate-400">No conversations yet.</li>}
+        </ul>
+      </aside>
 
-      {ask.isPending && (
-        <p className="text-sm text-slate-500">
-          Searching the records for “{asked}” — this takes a few seconds per lookup.
-        </p>
-      )}
-
-      {ask.isError && (
-        <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
-          {ask.error instanceof ApiError
-            ? String(ask.error.detail ?? ask.error.message)
-            : ask.error.message}
-        </div>
-      )}
-
-      {result && (
-        <>
-          <section className="rounded border border-slate-200 bg-white">
-            <div className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
-              “{asked}” · {result.seconds}s ·{" "}
-              {result.steps.length === 1 ? "1 lookup" : `${result.steps.length} lookups`}
-            </div>
-            <div className="px-4 py-3">
-              {result.answer ? (
-                <MarkdownView markdown={result.answer} />
-              ) : (
-                <p className="text-sm text-slate-500">
-                  No answer came back{result.error ? `: ${result.error}` : "."}
+      <section className="flex min-w-0 flex-1 flex-col bg-slate-50">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
+            {turns.length === 0 && (
+              <header>
+                <h1 className="text-lg font-semibold text-slate-900">Ask ARGUS</h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  Answers come only from this workspace's records — objects, tickets and documentation — and
+                  every lookup is shown as it runs. Ask a follow-up to continue the conversation.
                 </p>
-              )}
-            </div>
-            {result.stopped === "exhausted" && (
-              <p className="border-t border-slate-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                This was cut short at the lookup limit — the answer is whatever had been
-                found by then, not a complete one.
-              </p>
+                {status.isSuccess && !usable && (
+                  <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    {status.data?.reason ?? "AI features are not available in this workspace."}{" "}
+                    <Link className="underline" to={workspaceId ? `/workspaces/${workspaceId}/ai` : "/"}>
+                      Configure the AI endpoint
+                    </Link>
+                  </div>
+                )}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {STARTERS.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      disabled={!usable || busy}
+                      onClick={() => void send(q)}
+                      className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </header>
             )}
-          </section>
+            {loaded.isLoading && <p className="text-sm text-slate-400">Loading the conversation…</p>}
+            {turns.map((t) =>
+              t.role === "user" ? (
+                <div key={t.id} className="self-end whitespace-pre-wrap rounded-lg bg-slate-900 px-3 py-2 text-sm text-white">
+                  {t.content}
+                </div>
+              ) : (
+                <AssistantTurn key={t.id} turn={t} />
+              ),
+            )}
+            <div ref={bottom} />
+          </div>
+        </div>
 
-          <section className="rounded border border-slate-200 bg-white">
-            <h2 className="border-b border-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              What it looked at
-            </h2>
-            {result.steps.length === 0 ? (
-              <p className="px-3 py-3 text-sm text-rose-700">
-                Nothing. The answer above came from the model alone, not from this
-                workspace — treat it as unfounded.
-              </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send(draft);
+          }}
+          className="border-t border-slate-200 bg-white p-3"
+        >
+          <div className="mx-auto flex max-w-3xl items-end gap-2">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send(draft);
+                }
+              }}
+              rows={Math.min(6, Math.max(1, draft.split("\n").length))}
+              placeholder={turns.length ? "Ask a follow-up…" : "What has gone wrong with this magnet before?"}
+              disabled={!usable}
+              className="min-h-[2.5rem] flex-1 resize-none rounded border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
+            />
+            {busy ? (
+              <button
+                type="button"
+                onClick={() => abort.current?.abort()}
+                className="rounded border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Stop
+              </button>
             ) : (
-              <ol>
-                {result.steps.map((step, i) => (
-                  <Step key={i} step={step} index={i} />
-                ))}
-              </ol>
+              <button
+                type="submit"
+                disabled={!usable || !draft.trim()}
+                className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:bg-slate-300"
+              >
+                Send
+              </button>
             )}
-          </section>
-        </>
-      )}
+          </div>
+          {error && <p className="mx-auto mt-2 max-w-3xl text-sm text-rose-700">{error}</p>}
+          <p className="mx-auto mt-1 max-w-3xl text-[11px] text-slate-400">
+            Enter to send · Shift+Enter for a new line · keys in answers open their records
+          </p>
+        </form>
+      </section>
     </div>
   );
 }

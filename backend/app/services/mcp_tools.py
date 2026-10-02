@@ -12,6 +12,8 @@ who is accountable for the change; retrieval is where the value is and
 where the risk is not.
 """
 import json
+import re
+from collections import Counter
 from typing import Any, Callable, Optional
 
 from sqlalchemy import and_, or_, select
@@ -28,7 +30,8 @@ from app.services.alarm_symptoms import root_cause_from_alarms as _root_cause_fr
 from app.services.root_cause import blast_radius as _blast_radius
 from app.services.root_cause import impact_of as _impact_of
 from app.services.root_cause import root_causes as _root_causes
-from app.services.visibility import can_see, redacted_attributes, restriction_clause, visible_issues_clause
+from app.services.visibility import (can_see, redacted_attributes, restriction_clause, visible_assets_clause,
+                                     visible_issues_clause)
 
 # Enough to answer with, small enough not to bury the model.
 DEFAULT_LIMIT = 20
@@ -103,35 +106,129 @@ def _document_summary(document: Document, type_name: Optional[str]) -> dict:
 
 # --- the tools ----------------------------------------------------------
 
+def _singular(word: str) -> str:
+    """'magnets' → 'magnet', 'supplies' → 'supply', 'boxes' → 'box': what a person types is a plural."""
+    w = word.strip().lower()
+    if w.endswith("ies") and len(w) > 4:
+        return w[:-3] + "y"
+    if w.endswith(("ches", "shes", "xes", "sses")):
+        return w[:-2]
+    if w.endswith("s") and not w.endswith("ss") and len(w) > 3:
+        return w[:-1]
+    return w
+
+
+def _types(db: Session, workspace_id: str) -> list[dict]:
+    from app.services.type_catalogue import catalogue as type_catalogue
+    return type_catalogue(db, workspace_id, classes=False)["types"]
+
+
+def _with_subtypes(types: list[dict], names: set) -> set:
+    """The named types and every type below them: a Vacuum Pump is an Ion Pump or a Turbo Pump."""
+    return {t["name"] for t in types if names & set(t["path"])}
+
+
+def _named(types: list[dict], word: str) -> set:
+    """Types a word names: by type name or an alias, ignoring case and plurals."""
+    w = _singular(word)
+    return {t["name"] for t in types
+            if w and (w == _singular(t["name"]) or w in t["name"].lower()
+                      or any(w == _singular(a) for a in t.get("aliases") or []))}
+
+
+def _first_sentence(text: Optional[str]) -> str:
+    return (text or "").split(". ")[0].strip()[:160]
+
+
+def _mentioning(types: list[dict], word: str) -> list[dict]:
+    """Types whose description mentions the word ('A focusing magnet.'): suggestions only, because a
+    description also mentions what a type is *not* ('powers a magnet')."""
+    w = re.escape(_singular(word))
+    return [{"name": t["name"], "description": _first_sentence(t["description"]),
+             "records": t["records_with_subtypes"]}
+            for t in types if re.search(rf"\b{w}(e?s)?\b", _first_sentence(t["description"]), re.I)]
+
+
 def search_objects(db: Session, workspace_id: str, query: str = "",
-                   type: Optional[str] = None, limit: int = DEFAULT_LIMIT) -> dict:
-    """Equipment by name, key or type."""
+                   type: Optional[str] = None, types: Optional[list] = None,
+                   limit: int = DEFAULT_LIMIT) -> dict:
+    """Equipment by name, key or type. A type includes its subtypes; a word that names a type matches
+    the objects of that type and of the types below it. Returns the total and the count per type, so a
+    question about how many there are is answered from all of them, not from the first page."""
     needle = (query or "").strip().lower()
-    stmt = select(Asset).where(
-        or_(
-            Asset.workspace_id == workspace_id,
-            Asset.is_global.is_(True),
-            Asset.schema_uid.in_(
-                select(Schema.uid).where(Schema.is_global.is_(True))
-            ),
-        )
-    )
-    stmt = stmt.where(restriction_clause(Asset))
-    if type:
-        stmt = stmt.where(Asset.type == type)
+    catalogue = _types(db, workspace_id)
+    asked = [x for x in ([type] if type else []) + list(types or []) if isinstance(x, str) and x.strip()]
+    wanted: Optional[set] = None
+    unknown = []
+    if asked:
+        wanted = set()
+        for name in asked:
+            named = _named(catalogue, name)
+            if not named:
+                unknown.append(name)
+            wanted |= named
+        wanted = _with_subtypes(catalogue, wanted)
+        if not wanted:
+            return {"total": 0, "objects": [], "unknown_types": unknown,
+                    "hint": "No type has that name here. Call list_types to see the types, or search by text."}
+    by_word = _with_subtypes(catalogue, _named(catalogue, needle)) if needle else set()
+    # The rule the REST API and the graph apply: this workspace's objects and the ones flagged shared. An
+    # object of a shared *type* is not itself shared — every beamline's pumps are of the catalogue's type.
+    stmt = select(Asset).where(visible_assets_clause(workspace_id), Asset.deleted_at.is_(None))
+    if wanted is not None:
+        stmt = stmt.where(Asset.type.in_(wanted))
     # The type counts as a match. Equipment here is named FI4-B-CAM-VIS-001,
     # so searching "camera" finds nothing by name — and an assistant asked
-    # about cameras concludes there are none.
+    # about cameras concludes there are none. So does a type above it: "vacuum pumps" are the ion,
+    # turbo and primary pumps.
+    single = _singular(needle)
     rows = [
         a for a in db.scalars(stmt)
         if not needle
         or needle in (a.name or "").lower()
         or needle in (a.key or "").lower()
-        or needle in (a.type or "").lower()
+        or single in (a.type or "").lower()
+        or a.type in by_word
     ]
+    # This workspace's own first: the shared catalogue's records are there to be referenced, not to bury
+    # the answer about this beamline.
+    rows.sort(key=lambda a: a.workspace_id != workspace_id)
+    out = {
+        "total": len(rows),
+        "by_type": dict(Counter(a.type for a in rows).most_common(40)),
+        "objects": [_asset_summary(a) for a in rows[: min(limit or DEFAULT_LIMIT, MAX_LIMIT)]],
+    }
+    if unknown:
+        out["unknown_types"] = unknown
+    by_type = sum(1 for a in rows if a.type in by_word or single in (a.type or "").lower())
+    if needle and not by_type and wanted is None:
+        # No object matched by its type, so what matched (if anything) matched by name only: the kind may
+        # still be here under the names the catalogue uses ('magnet' → Quadrupole, "A focusing magnet"), and
+        # a network called sparc-magnets is not the magnets. Offered, not assumed.
+        suggestions = [t for t in _mentioning(catalogue, needle) if t["records"]]
+        if suggestions:
+            out["types_whose_description_mentions_it"] = suggestions
+            out["hint"] = ("No type is called that, so these results match by name only. Check which of the "
+                           "types listed are what was meant, then search again with types=[...].")
+    return out
+
+
+def list_types(db: Session, workspace_id: str, query: Optional[str] = None) -> dict:
+    """The object types here, as a tree: what each is, in one line, and how many records it and the types
+    below it hold. A kind of equipment is often several types: this is how to find which."""
+    catalogue = _types(db, workspace_id)
+    if query and query.strip():
+        named = _named(catalogue, query)
+        mentioned = {t["name"] for t in _mentioning(catalogue, query)}
+        keep = _with_subtypes(catalogue, named | mentioned)
+    else:
+        keep = {t["name"] for t in catalogue if t["records_with_subtypes"]}
+    rows = [t for t in catalogue if t["name"] in keep]
     return {
         "total": len(rows),
-        "objects": [_asset_summary(a) for a in rows[: min(limit, MAX_LIMIT)]],
+        "types": [{"name": t["name"], "path": " > ".join(t["path"]),
+                   "description": _first_sentence(t["description"]), "abstract": t["abstract"],
+                   "records": t["records_with_subtypes"]} for t in rows[:150]],
     }
 
 
@@ -403,6 +500,20 @@ def single_points_of_failure(db: Session, workspace_id: str, layers: Optional[st
     ], "considered": result["considered"]}
 
 
+def search_knowledge(db: Session, workspace_id: str, query: str, kinds: Optional[list] = None,
+                     limit: int = 8) -> dict:
+    """Passages of procedures, tickets and their comments, comments on equipment and attached files
+    (datasheets, manuals), found by meaning as well as by words."""
+    from app.services import knowledge_index
+    from app.services.ai_config import resolve
+    config, _from = resolve(db, workspace_id)
+    if config is None or not config.embedding_model:
+        return {"available": False, "reason": "No embedding model is configured for this workspace's AI endpoint."}
+    from app.routers.ai import endpoint_for
+    return knowledge_index.search(db, workspace_id, endpoint_for(config), query, kinds=kinds, limit=limit,
+                                  confidential_ok=_confidential_allowed(db, workspace_id))
+
+
 def knowledge_summary(db: Session, workspace_id: str) -> dict:
     """How much of a graph this workspace actually has."""
     return graph_summary(db, workspace_id)
@@ -413,15 +524,35 @@ def knowledge_summary(db: Session, workspace_id: str) -> dict:
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "search_objects",
-        "description": "Search equipment (objects) by name, key or type name. Returns "
-                       "uid, key, name and type.",
+        "description": "Search equipment (objects) by name, key or type. A type includes the types "
+                       "below it. Returns the total, the count per type (by_type) and the first "
+                       "objects (uid, key, name, type).",
         "handler": search_objects,
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Text to look for in the name or key"},
-                "type": {"type": "string", "description": "Restrict to one object type"},
-                "limit": {"type": "integer", "description": f"Default {DEFAULT_LIMIT}"},
+                "query": {"type": "string", "description": "Text to look for in the name, key or type"},
+                "type": {"type": "string", "description": "Restrict to one object type (and its subtypes)"},
+                "types": {"type": "array", "items": {"type": "string"},
+                          "description": "Restrict to several object types (and their subtypes)"},
+                "limit": {"type": "integer", "description": f"Objects to return; default {DEFAULT_LIMIT}, "
+                                                            f"at most {MAX_LIMIT}"},
+            },
+        },
+    },
+    {
+        "name": "list_types",
+        "description": "The object types in this workspace as a tree, each with a one-line description "
+                       "and how many records it holds. Use it to find which types a kind of equipment "
+                       "is: 'magnets' are several types (Dipole, Quadrupole, Corrector…), none of them "
+                       "called Magnet.",
+        "handler": list_types,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                          "description": "A word to look for in type names, aliases and descriptions; "
+                                         "omit to list every type that has records"},
             },
         },
     },
@@ -594,6 +725,27 @@ TOOLS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {"layers": {"type": "string"}, "top": {"type": "integer"}},
+        },
+    },
+    {
+        "name": "search_knowledge",
+        "description": "Search what is written: procedures and documents, tickets and their comments (what "
+                       "went wrong and how it was fixed), comments on equipment, and the text of attached "
+                       "files such as datasheets and manuals (with the page). Finds passages by meaning, "
+                       "in any language, as well as by exact words. Use it for how-to, history and "
+                       "'what does the manual say' questions; use search_objects for what equipment exists.",
+        "handler": search_knowledge,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The question, or what the passage should say"},
+                "kinds": {"type": "array", "items": {"type": "string",
+                                                     "enum": ["document", "ticket", "ticket_comment",
+                                                              "attachment", "asset_comment"]},
+                          "description": "Restrict to these kinds of source"},
+                "limit": {"type": "integer", "description": "Passages to return; default 8, at most 20"},
+            },
+            "required": ["query"],
         },
     },
     {

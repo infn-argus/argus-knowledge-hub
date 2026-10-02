@@ -1,63 +1,37 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { assetsApi, documentsApi, graphApi, issuesApi } from "../../api/client";
-import type { Graph, GraphEdge, GraphNode } from "../../api/types";
+import type { FailureNode, FailureStep, ImpactResult, RootCauseCandidate } from "../../api/types";
+import { GraphCanvas, IN, OUT } from "../../components/graph/GraphCanvas";
+import { KIND_STYLE, LAYER_STYLE, LOSS_LABEL, nodeId, place, bundleEdges, openBundle, type GEdge, type GNode, type Neighbour } from "../../components/graph/model";
+import { useBranches } from "../../components/graph/useBranches";
+import { DirectionLegend, RelationList } from "../../components/RelationGraph";
 
-/** Colour by what a node *is*. The whole point of the picture is that a
- * camera, the work done on it and the procedure covering it are different
- * kinds of fact, so they must not look alike. */
-const KIND_STYLE: Record<string, { fill: string; stroke: string; label: string }> = {
-  asset: { fill: "#e0e7ff", stroke: "#4f46e5", label: "Objects" },
-  ticket: { fill: "#fef3c7", stroke: "#d97706", label: "Tickets" },
-  document: { fill: "#d1fae5", stroke: "#059669", label: "Documents" },
-  group: { fill: "#e0f2fe", stroke: "#0284c7", label: "Groups" },
-  person: { fill: "#ede9fe", stroke: "#7c3aed", label: "People" },
-};
-
-/** Edges are coloured by what sort of connection they are, not by their
- * endpoints: "this is mounted in that" and "this ticket mentioned that"
- * are both asset-to-asset-ish but mean very different things. */
-const VIA_STYLE: Record<string, { stroke: string; label: string }> = {
-  structure: { stroke: "#6366f1", label: "structure" },
-  work: { stroke: "#f59e0b", label: "work" },
-  documentation: { stroke: "#10b981", label: "documentation" },
-  people: { stroke: "#0ea5e9", label: "people" },
-};
+/** The knowledge graph, three ways.
+ *
+ * Explore: start from any object, ticket or document; what points at a node is drawn to its left, what it
+ * points at to its right, and double-clicking a node opens its branches (many neighbours of one kind arrive
+ * as one group). Impact: this fails — what stops with it, what it loses, and by which path. Root cause:
+ * these misbehave — what would explain them, ranked, with the path from each candidate to each symptom.
+ * Impact and root cause follow how a failure travels along each relation (services/causal_model.py). */
 
 const START_KINDS = [
   { kind: "asset", label: "Object" },
   { kind: "ticket", label: "Ticket" },
   { kind: "document", label: "Document" },
 ] as const;
-
-const W = 1000;
-const H = 680;
-const CX = W / 2;
-const CY = H / 2;
-// Rings tighten as they go out: the outer hops hold far more nodes than
-// the inner ones, and even spacing wastes the middle of the canvas. The
-// outermost must still clear the canvas edge with room for its labels —
-// a fourth hop drawn off-frame is a fourth hop nobody asked for.
-const RING = [0, 115, 200, 258, 295];
-// Screens are wider than they are tall, so the rings are ellipses.
-const X_STRETCH = 1.45;
-
 type StartKind = (typeof START_KINDS)[number]["kind"];
+type Mode = "explore" | "impact" | "rootcause";
 
-interface Placed extends GraphNode {
-  x: number;
-  y: number;
-  /** Labels alternate above and below around a ring: neighbours on a
-   * crowded ring otherwise write over each other. */
-  labelAbove: boolean;
-}
+const LAYERS = ["power", "cooling", "vacuum", "control", "timing", "interlock", "function", "composition", "membership", "beam", "environment"];
 
-function detailPath(node: GraphNode): string | null {
-  if (node.restricted) return null;
-  if (node.kind === "asset") return `/assets/${node.uid}`;
-  if (node.kind === "ticket") return `/tickets/${node.uid}`;
-  if (node.kind === "document") return `/documents/${node.uid}`;
+function detailPath(n: { kind: string; uid: string; restricted?: boolean }): string | null {
+  // A root-cause step known only by its key (keys have colons, uids do not) has no page to open from here.
+  if (n.restricted || n.uid.includes(":")) return null;
+  if (n.kind === "asset") return `/assets/${n.uid}`;
+  if (n.kind === "ticket") return `/tickets/${n.uid}`;
+  if (n.kind === "document") return `/documents/${n.uid}`;
   return null;
 }
 
@@ -65,57 +39,96 @@ function truncate(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-/** Concentric rings by hop count. A force layout would look livelier, but
- * distance-from-centre is the one thing the traversal actually computes,
- * and a ring says it exactly. */
-function layout(graph: Graph): Placed[] {
-  const byDepth = new Map<number, GraphNode[]>();
-  for (const node of graph.nodes) {
-    const bucket = byDepth.get(node.depth) ?? [];
-    bucket.push(node);
-    byDepth.set(node.depth, bucket);
-  }
-
-  const placed: Placed[] = [];
-  for (const [depth, nodes] of [...byDepth.entries()].sort((a, b) => a[0] - b[0])) {
-    if (depth === 0) {
-      placed.push({ ...nodes[0], x: CX, y: CY, labelAbove: false });
-      continue;
-    }
-    // Group same kinds together around the ring so the picture reads as
-    // "equipment over here, work over there".
-    const ordered = [...nodes].sort(
-      (a, b) => a.kind.localeCompare(b.kind) || a.label.localeCompare(b.label),
-    );
-    const radius = RING[Math.min(depth, RING.length - 1)];
-    // Offset each ring so nodes don't line up radially with the ring inside.
-    const offset = depth % 2 ? -Math.PI / 2 : -Math.PI / 2 + Math.PI / ordered.length;
-    ordered.forEach((node, i) => {
-      const angle = offset + (2 * Math.PI * i) / ordered.length;
-      placed.push({
-        ...node,
-        x: CX + radius * Math.cos(angle) * X_STRETCH,
-        y: CY + radius * Math.sin(angle),
-        labelAbove: i % 2 === 1,
-      });
-    });
-  }
-  return placed;
+/** The losses an affected object suffers, worst first. */
+function lossOf(losses: Record<string, number>): string {
+  for (const k of ["function", "permit", "control"]) if (losses[k]) return LOSS_LABEL[k];
+  return Object.keys(losses)[0] ?? "";
 }
 
-function edgeKey(edge: GraphEdge) {
-  const a = `${edge.from_kind}:${edge.from_uid}`;
-  const b = `${edge.to_kind}:${edge.to_uid}`;
-  return [a < b ? a : b, a < b ? b : a, edge.relation].join("|");
+/** Impact as a graph: the failed object, then each affected one a column per hop, joined by the last step of
+ *  its path. Leaves of one type from one parent are grouped. */
+function impactGraph(result: ImpactResult) {
+  const seq = { current: 0 };
+  const byKey = new Map<string, FailureNode>([[result.origin.key, result.origin], ...result.affected.map((a) => [a.key, a] as const)]);
+  const id = (key: string) => nodeId("asset", byKey.get(key)?.uid ?? key);
+  const origin: GNode = { id: nodeId("asset", result.origin.uid), kind: "asset", uid: result.origin.uid, label: result.origin.name,
+                          sub: result.origin.type, col: 0, y: 0, parent: null, seq: seq.current++, mark: "origin" };
+  const nodes = new Map<string, GNode>([[origin.id, origin]]);
+  const edges: GEdge[] = [];
+  const children = new Map<string, Neighbour[]>();
+  const hasChildren = new Set(result.affected.map((a) => a.path[a.path.length - 1]?.provider).filter(Boolean).map((k) => id(k!)));
+  for (const a of [...result.affected].sort((x, y) => x.depth - y.depth)) {
+    const step = a.path[a.path.length - 1];
+    if (!step) continue;
+    const parent = id(step.provider);
+    const edge: GEdge = { from: parent, to: nodeId("asset", a.uid), relation: step.relation, via: step.layer };
+    children.set(parent, [...(children.get(parent) ?? []), {
+      node: { id: edge.to, kind: "asset", uid: a.uid, label: a.name, sub: a.type, mark: "affected", loss: lossOf(a.losses) },
+      edge,
+    }]);
+  }
+  // Breadth first, so a parent is placed before its children.
+  const queue = [origin.id];
+  while (queue.length) {
+    const pid = queue.shift()!;
+    const parent = nodes.get(pid);
+    const kids = children.get(pid) ?? [];
+    if (!parent || !kids.length) continue;
+    const inner = kids.filter((k) => hasChildren.has(k.node.id));
+    const leaves = kids.filter((k) => !hasChildren.has(k.node.id));
+    for (const [list, grouping] of [[inner, false], [leaves, true]] as const) {
+      for (const n of place(nodes, parent, parent.col + 1, list, seq, grouping)) {
+        nodes.set(n.id, n);
+        if (n.bundle) edges.push(...bundleEdges(n));
+        else queue.push(n.id);
+      }
+    }
+    edges.push(...kids.filter((k) => nodes.has(k.node.id)).map((k) => k.edge));
+  }
+  return { nodes, edges };
+}
+
+/** One candidate cause and its paths to the symptoms it explains: the cause, then one column per step. */
+function causeGraph(c: RootCauseCandidate, symptoms: FailureNode[]) {
+  const seq = { current: 0 };
+  const names = new Map<string, FailureNode>([[c.key, c], ...symptoms.map((s) => [s.key, s] as const), ...c.explains.map((e) => [e.key, e] as const)]);
+  const symptomKeys = new Set(symptoms.map((s) => s.key));
+  const nodes = new Map<string, GNode>();
+  const edges: GEdge[] = [];
+  const idOf = (key: string) => nodeId("asset", names.get(key)?.uid ?? key);
+  const put = (key: string, col: number, parent: string | null) => {
+    const id = idOf(key);
+    if (nodes.has(id)) return nodes.get(id)!;
+    const known = names.get(key);
+    const taken = [...nodes.values()].filter((n) => n.col === col).length;
+    // A step in the middle of a path is known only by its key (SPARC:IOC:vac-gunvpc): its last part reads as a name.
+    const n: GNode = { id, kind: "asset", uid: known?.uid ?? key, label: known?.name ?? key.split(":").pop() ?? key,
+                       sub: known?.type ?? (known ? null : key),
+                       col, y: taken * 58, parent, seq: seq.current++,
+                       mark: key === c.key ? "cause" : symptomKeys.has(key) ? "symptom" : undefined };
+    nodes.set(id, n);
+    return n;
+  };
+  put(c.key, 0, null);
+  for (const e of c.explains) {
+    e.path.forEach((step: FailureStep, i: number) => {
+      const from = put(step.provider, i, null);
+      const to = put(step.dependent, i + 1, from.id);
+      edges.push({ from: from.id, to: to.id, relation: step.relation, via: step.layer });
+    });
+  }
+  return { nodes, edges };
 }
 
 function StartPicker({
   kind,
   value,
   onPick,
+  placeholder,
 }: {
   kind: StartKind;
-  value: GraphNode | null;
+  placeholder?: string;
+  value: { label: string } | null;
   onPick: (uid: string, label: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -174,7 +187,7 @@ function StartPicker({
           setOpen(true);
         }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder={loading ? "Loading…" : `Search ${kind}s…`}
+        placeholder={loading ? "Loading…" : placeholder ?? `Search ${kind}s…`}
         className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
       />
       {open && (
@@ -205,409 +218,316 @@ function StartPicker({
   );
 }
 
+
 export function GraphExplorer() {
+  const [mode, setMode] = useState<Mode>("explore");
   const [startKind, setStartKind] = useState<StartKind>("asset");
-  const [startUid, setStartUid] = useState<string | null>(null);
-  const [startLabel, setStartLabel] = useState("");
-  const [depth, setDepth] = useState(2);
+  const [start, setStart] = useState<{ uid: string; label: string } | null>(null);
   const [kinds, setKinds] = useState<string[]>([]);
+  const [layers, setLayers] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [view, setView] = useState({ x: 0, y: 0, w: W, h: H });
-  const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  const [symptoms, setSymptoms] = useState<{ uid: string; label: string }[]>([]);
+  const [healthy, setHealthy] = useState<{ uid: string; label: string }[]>([]);
+  const [candidate, setCandidate] = useState(0);
+  const [opened, setOpened] = useState<Set<string>>(new Set());   // groups opened in an analysis view
 
   const summary = useQuery({ queryKey: ["graph-summary"], queryFn: graphApi.summary });
-
-  const graph = useQuery({
-    queryKey: ["graph", startKind, startUid, depth, kinds.join(",")],
-    queryFn: () =>
-      graphApi.walk({ kind: startKind, uid: startUid!, depth, kinds: kinds.length ? kinds : undefined }),
-    enabled: !!startUid,
+  const explore = useBranches(mode === "explore" && start ? { kind: startKind, uid: start.uid } : null,
+                              kinds.length ? kinds : undefined);
+  const impact = useQuery({
+    queryKey: ["impact", start?.uid, layers.join(",")],
+    queryFn: () => graphApi.impact(start!.uid, layers.length ? layers : undefined),
+    enabled: mode === "impact" && !!start && startKind === "asset",
+  });
+  const rootCause = useQuery({
+    queryKey: ["root-cause", symptoms.map((s) => s.uid).join(","), healthy.map((h) => h.uid).join(","), layers.join(",")],
+    queryFn: () => graphApi.rootCause({ symptoms: symptoms.map((s) => s.uid), healthy: healthy.map((h) => h.uid),
+                                        layers: layers.length ? layers : undefined, top: 10 }),
+    enabled: false,
   });
 
-  const placed = useMemo(() => (graph.data ? layout(graph.data) : []), [graph.data]);
-  const byRef = useMemo(
-    () => new Map(placed.map((n) => [`${n.kind}:${n.uid}`, n])),
-    [placed],
-  );
+  // What is drawn.
+  const analysis = useMemo(() => {
+    if (mode === "impact" && impact.data) return impactGraph(impact.data);
+    if (mode === "rootcause" && rootCause.data?.candidates[candidate])
+      return causeGraph(rootCause.data.candidates[candidate], rootCause.data.symptoms);
+    return null;
+  }, [mode, impact.data, rootCause.data, candidate]);
+  const drawn = useMemo(() => {
+    if (mode === "explore") return { nodes: explore.nodes, edges: explore.edges, rootId: explore.rootId };
+    if (!analysis) return { nodes: new Map<string, GNode>(), edges: [] as GEdge[], rootId: null };
+    // Groups the person opened in this view, replaced by their members.
+    const nodes = new Map(analysis.nodes);
+    let edges = analysis.edges;
+    for (const gid of opened) {
+      const group = nodes.get(gid);
+      if (!group?.bundle) continue;
+      const { nodes: ms, edges: es } = openBundle(nodes, group, { current: 0 });
+      nodes.delete(gid);
+      for (const m of ms) nodes.set(m.id, { ...m, mark: "affected" });
+      edges = [...edges.filter((e) => e.from !== gid && e.to !== gid), ...es];
+    }
+    const root = [...nodes.values()].find((n) => n.mark === "origin" || n.mark === "cause");
+    return { nodes, edges, rootId: root?.id ?? null };
+  }, [mode, explore.nodes, explore.edges, explore.rootId, analysis, opened]);
 
-  const edges = useMemo(() => {
-    if (!graph.data) return [];
-    const seen = new Set<string>();
-    return graph.data.edges.filter((e) => {
-      const key = edgeKey(e);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return byRef.has(`${e.from_kind}:${e.from_uid}`) && byRef.has(`${e.to_kind}:${e.to_uid}`);
-    });
-  }, [graph.data, byRef]);
+  const current = selected && drawn.nodes.has(selected) ? selected : drawn.rootId;
+  const sel = current ? drawn.nodes.get(current) : undefined;
+  const name = (id: string) => drawn.nodes.get(id)?.label ?? id;
+  const affected = impact.data?.affected.find((a) => sel && a.uid === sel.uid);
 
-  // Above this many nodes every label becomes unreadable overlap, so they
-  // come off and hover/selection carries the naming instead.
-  const showLabels = placed.length <= 45;
-
-  const selectedNode = selected ? byRef.get(selected) : null;
-  const selectedEdges = selectedNode
-    ? edges.filter(
-        (e) =>
-          `${e.from_kind}:${e.from_uid}` === selected || `${e.to_kind}:${e.to_uid}` === selected,
-      )
-    : [];
-
-  const recenter = (node: GraphNode) => {
-    if (node.restricted) return;
-    if (node.kind !== "asset" && node.kind !== "ticket" && node.kind !== "document") return;
-    setStartKind(node.kind);
-    setStartUid(node.uid);
-    setStartLabel(node.label);
+  const go = (m: Mode) => {
+    setMode(m);
     setSelected(null);
-    setView({ x: 0, y: 0, w: W, h: H });
+    setOpened(new Set());
   };
-
-  const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
-    const factor = e.deltaY > 0 ? 1.12 : 1 / 1.12;
-    setView((v) => {
-      const w = Math.min(W * 2.5, Math.max(W * 0.25, v.w * factor));
-      const h = (w / W) * H;
-      return { x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h };
-    });
+  const openNode = (n: GNode) => {
+    if (mode === "explore") return explore.toggle(n);
+    if (n.bundle) setOpened((o) => new Set(o).add(n.id));
   };
+  const addSymptom = (uid: string, label: string) => setSymptoms((s) => (s.some((x) => x.uid === uid) ? s : [...s, { uid, label }]));
 
   return (
-    <div>
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Knowledge graph</h1>
-        {summary.data && (
-          <p className="text-xs text-slate-500">
-            {summary.data.nodes.assets} objects · {summary.data.nodes.tickets} tickets ·{" "}
-            {summary.data.nodes.documents} documents ·{" "}
-            {Object.values(summary.data.edges).reduce((a, b) => a + b, 0)} connections
-          </p>
-        )}
-      </div>
-      <p className="mt-1 text-sm text-slate-500">
-        Start from anything and walk outwards: what it is part of, what work touched it, what
-        documents it.
-      </p>
-
-      <div className="mt-4 flex flex-wrap items-end gap-3 rounded border border-slate-200 bg-white p-3">
-        <div className="w-28">
-          <label className="block text-xs font-medium text-slate-500">Start from</label>
-          <select
-            value={startKind}
-            onChange={(e) => {
-              setStartKind(e.target.value as StartKind);
-              setStartUid(null);
-              setStartLabel("");
-            }}
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
-          >
-            {START_KINDS.map((k) => (
-              <option key={k.kind} value={k.kind}>
-                {k.label}
-              </option>
-            ))}
-          </select>
+    <div className="-m-6 flex h-[calc(100vh-3.5rem)] min-h-0 flex-col">
+      <div className="border-b border-slate-200 bg-white px-6 py-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h1 className="text-xl font-semibold text-slate-900">Knowledge graph</h1>
+          {summary.data && (
+            <p className="text-xs text-slate-500">
+              {summary.data.nodes.assets} objects · {summary.data.nodes.tickets} tickets · {summary.data.nodes.documents} documents ·{" "}
+              {Object.values(summary.data.edges).reduce((a, b) => a + b, 0)} connections
+            </p>
+          )}
         </div>
-
-        <div className="min-w-[18rem] flex-1">
-          <label className="block text-xs font-medium text-slate-500">
-            {START_KINDS.find((k) => k.kind === startKind)!.label}
-          </label>
-          <div className="mt-1">
-            <StartPicker
-              kind={startKind}
-              value={startUid ? ({ label: startLabel } as GraphNode) : null}
-              onPick={(uid, label) => {
-                setStartUid(uid);
-                setStartLabel(label);
-                setSelected(null);
-                setView({ x: 0, y: 0, w: W, h: H });
-              }}
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-slate-500">Hops</label>
-          <div className="mt-1 flex gap-1">
-            {[1, 2, 3, 4].map((d) => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => setDepth(d)}
-                className={`h-8 w-8 rounded text-sm ${
-                  depth === d
-                    ? "bg-slate-900 text-white"
-                    : "border border-slate-300 text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {d}
+        <div className="mt-2 flex flex-wrap items-end gap-3">
+          <div className="flex rounded border border-slate-300 text-sm">
+            {([["explore", "Explore"], ["impact", "Impact"], ["rootcause", "Root cause"]] as const).map(([m, label]) => (
+              <button key={m} type="button" onClick={() => go(m)}
+                      className={`px-3 py-1.5 ${mode === m ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
+                {label}
               </button>
             ))}
           </div>
-        </div>
 
-        <div>
-          <label className="block text-xs font-medium text-slate-500">Show</label>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {Object.entries(KIND_STYLE).map(([kind, style]) => {
-              const on = kinds.length === 0 || kinds.includes(kind);
-              return (
-                <button
-                  key={kind}
-                  type="button"
-                  onClick={() =>
-                    setKinds((current) => {
-                      // An empty filter means "everything", so the first
-                      // click has to turn the others off rather than this
-                      // one on.
-                      const base =
-                        current.length === 0 ? Object.keys(KIND_STYLE) : current;
-                      const next = base.includes(kind)
-                        ? base.filter((k) => k !== kind)
-                        : [...base, kind];
-                      return next.length === Object.keys(KIND_STYLE).length ? [] : next;
-                    })
-                  }
-                  className={`rounded-full border px-2.5 py-1 text-xs ${
-                    on ? "text-slate-700" : "text-slate-300"
-                  }`}
-                  style={{
-                    borderColor: on ? style.stroke : "#e2e8f0",
-                    background: on ? style.fill : "#fff",
-                  }}
-                >
-                  {style.label}
-                </button>
-              );
-            })}
-          </div>
+          {mode !== "rootcause" && (
+            <>
+              {mode === "explore" && (
+                <select value={startKind} onChange={(e) => { setStartKind(e.target.value as StartKind); setStart(null); }}
+                        className="rounded border border-slate-300 px-2 py-1.5 text-sm">
+                  {START_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}
+                </select>
+              )}
+              <div className="w-80">
+                <StartPicker kind={mode === "impact" ? "asset" : startKind} value={start}
+                             placeholder={mode === "impact" ? "What fails? Search objects…" : undefined}
+                             onPick={(uid, label) => { if (mode === "impact") setStartKind("asset"); setStart({ uid, label }); setSelected(null); setOpened(new Set()); }} />
+              </div>
+            </>
+          )}
+
+          {mode === "rootcause" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="w-64">
+                <StartPicker kind="asset" value={null} placeholder="Add what misbehaves…" onPick={addSymptom} />
+              </div>
+              <div className="w-56">
+                <StartPicker kind="asset" value={null} placeholder="Add what still works…"
+                             onPick={(uid, label) => setHealthy((h) => (h.some((x) => x.uid === uid) ? h : [...h, { uid, label }]))} />
+              </div>
+              <button type="button" disabled={!symptoms.length || rootCause.isFetching}
+                      onClick={() => { setCandidate(0); setSelected(null); setOpened(new Set()); void rootCause.refetch(); }}
+                      className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:bg-slate-300">
+                {rootCause.isFetching ? "Working it out…" : "Find causes"}
+              </button>
+            </div>
+          )}
+
+          {mode === "explore" ? (
+            <div className="flex flex-wrap gap-1">
+              {["asset", "ticket", "document", "group", "person"].map((k) => {
+                const style = KIND_STYLE[k];
+                const on = kinds.length === 0 || kinds.includes(k);
+                return (
+                  <button key={k} type="button"
+                          onClick={() => setKinds((cur) => {
+                            const base = cur.length === 0 ? ["asset", "ticket", "document", "group", "person"] : cur;
+                            const next = base.includes(k) ? base.filter((x) => x !== k) : [...base, k];
+                            return next.length === 5 ? [] : next;
+                          })}
+                          className={`rounded-full border px-2.5 py-1 text-xs ${on ? "text-slate-700" : "text-slate-300"}`}
+                          style={{ borderColor: on ? style.stroke : "#e2e8f0", background: on ? style.fill : "#fff" }}>
+                    {style.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1" title="Which ways a failure may travel; none selected means all">
+              {LAYERS.map((l) => {
+                const on = layers.length === 0 || layers.includes(l);
+                return (
+                  <button key={l} type="button"
+                          onClick={() => setLayers((cur) => {
+                            const base = cur.length === 0 ? LAYERS : cur;
+                            const next = base.includes(l) ? base.filter((x) => x !== l) : [...base, l];
+                            return next.length === LAYERS.length ? [] : next;
+                          })}
+                          className={`rounded-full border px-2 py-0.5 text-[11px] ${on ? "text-slate-700" : "text-slate-300"}`}
+                          style={{ borderColor: on ? LAYER_STYLE[l] : "#e2e8f0" }}>
+                    {l}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
+        {mode === "rootcause" && (symptoms.length > 0 || healthy.length > 0) && (
+          <div className="mt-2 flex flex-wrap gap-1 text-xs">
+            {symptoms.map((s) => (
+              <span key={s.uid} className="rounded-full border border-red-300 bg-red-50 px-2 py-0.5 text-red-800">
+                ✕ {s.label} <button onClick={() => setSymptoms((x) => x.filter((y) => y.uid !== s.uid))} className="ml-1 text-red-400">×</button>
+              </span>
+            ))}
+            {healthy.map((s) => (
+              <span key={s.uid} className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-emerald-800">
+                ✓ {s.label} <button onClick={() => setHealthy((x) => x.filter((y) => y.uid !== s.uid))} className="ml-1 text-emerald-400">×</button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
-      {graph.data?.truncated && (
-        <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Too much to draw at this distance — this is a subset. Reduce the hops or filter to
-          fewer kinds to see a complete answer.
-        </p>
-      )}
-
-      <div className="mt-3 flex gap-4">
-        <div className="min-w-0 flex-1 rounded border border-slate-200 bg-white">
-          <div className="flex items-center justify-between border-b border-slate-100 px-3 py-1.5">
-            <div className="flex flex-wrap gap-3 text-[11px] text-slate-500">
-              {Object.entries(VIA_STYLE).map(([via, style]) => (
-                <span key={via} className="inline-flex items-center gap-1">
-                  <span className="inline-block h-0.5 w-4" style={{ background: style.stroke }} />
-                  {style.label}
-                </span>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => setView({ x: 0, y: 0, w: W, h: H })}
-              className="text-xs text-slate-500 hover:text-slate-900"
-            >
-              Reset view
-            </button>
-          </div>
-
-          {!startUid ? (
-            <p className="py-24 text-center text-sm text-slate-400">
-              Pick something above to see what it connects to.
-            </p>
-          ) : graph.isLoading ? (
-            <p className="py-24 text-center text-sm text-slate-400">Walking…</p>
-          ) : graph.isError ? (
-            <p className="py-24 text-center text-sm text-slate-400">
-              Nothing found for that node in this workspace.
-            </p>
-          ) : placed.length <= 1 ? (
-            <p className="py-24 text-center text-sm text-slate-400">
-              Nothing is linked to this yet.
-            </p>
-          ) : (
-            <svg
-              viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
-              className="w-full cursor-grab active:cursor-grabbing"
-              // Keep the whole picture and the controls on one screen; a
-              // graph you have to scroll to see is a graph you can't read.
-              style={{ touchAction: "none", maxHeight: "68vh" }}
-              onWheel={onWheel}
-              onPointerDown={(e) => {
-                drag.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
-                e.currentTarget.setPointerCapture(e.pointerId);
-              }}
-              onPointerMove={(e) => {
-                const d = drag.current;
-                if (!d) return;
-                const rect = e.currentTarget.getBoundingClientRect();
-                const scale = view.w / rect.width;
-                setView((v) => ({
-                  ...v,
-                  x: d.vx - (e.clientX - d.x) * scale,
-                  y: d.vy - (e.clientY - d.y) * scale,
-                }));
-              }}
-              onPointerUp={() => {
-                drag.current = null;
-              }}
-            >
-              {edges.map((e, i) => {
-                const a = byRef.get(`${e.from_kind}:${e.from_uid}`)!;
-                const b = byRef.get(`${e.to_kind}:${e.to_uid}`)!;
-                const touched =
-                  !selected ||
-                  `${e.from_kind}:${e.from_uid}` === selected ||
-                  `${e.to_kind}:${e.to_uid}` === selected;
-                return (
-                  <line
-                    key={`${edgeKey(e)}-${i}`}
-                    x1={a.x}
-                    y1={a.y}
-                    x2={b.x}
-                    y2={b.y}
-                    stroke={VIA_STYLE[e.via]?.stroke ?? "#94a3b8"}
-                    strokeWidth={touched ? 1.4 : 1}
-                    strokeOpacity={touched ? 0.55 : 0.12}
-                  />
-                );
-              })}
-
-              {placed.map((node) => {
-                const ref = `${node.kind}:${node.uid}`;
-                const style = KIND_STYLE[node.kind] ?? KIND_STYLE.asset;
-                const isRoot = node.depth === 0;
-                const isSelected = selected === ref;
-                const r = isRoot ? 15 : 8;
-                return (
-                  <g
-                    key={ref}
-                    className="cursor-pointer"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={() => setSelected(isSelected ? null : ref)}
-                    onDoubleClick={() => recenter(node)}
-                  >
-                    <circle
-                      cx={node.x}
-                      cy={node.y}
-                      r={r}
-                      fill={isRoot ? "#0f172a" : style.fill}
-                      stroke={isSelected ? "#0f172a" : style.stroke}
-                      strokeWidth={isSelected ? 3 : 1.6}
-                    />
-                    {(showLabels || isRoot || isSelected) && (
-                      <text
-                        x={node.x}
-                        y={node.labelAbove ? node.y - r - 6 : node.y + r + 12}
-                        textAnchor="middle"
-                        style={{ fontSize: isRoot ? 13 : 11, fill: "#334155" }}
-                      >
-                        {truncate(node.label, isRoot ? 38 : 24)}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
+      <div className="flex min-h-0 flex-1">
+        <div className="relative min-w-0 flex-1">
+          {mode === "explore" && !start && <Hint>Pick an object, ticket or document to see what points at it and what it points at.</Hint>}
+          {mode === "impact" && !start && <Hint>Pick an object: everything that stops when it fails is drawn, with what it loses and the path.</Hint>}
+          {mode === "rootcause" && !rootCause.data && <Hint>Add what misbehaves (and, if you know, what still works), then Find causes.</Hint>}
+          {mode === "impact" && impact.isFetching && <Hint>Working out what depends on it…</Hint>}
+          {mode === "impact" && impact.data && impact.data.count === 0 && <Hint>Nothing depends on it along the selected layers.</Hint>}
+          {mode === "rootcause" && rootCause.data && rootCause.data.candidates.length === 0 && <Hint>No candidate explains these symptoms along the selected layers.</Hint>}
+          {explore.error && mode === "explore" && <Hint>{explore.error}</Hint>}
+          {drawn.nodes.size > 0 && (
+            <GraphCanvas nodes={drawn.nodes} edges={drawn.edges} rootId={drawn.rootId} selected={current}
+                         onSelect={setSelected} onOpen={openNode} colouring={mode === "explore" ? "direction" : "layer"}
+                         expandable={mode === "explore"}
+                         fitKey={mode === "rootcause" ? `${candidate}:${rootCause.dataUpdatedAt}` : undefined}
+                         open={mode === "explore" ? explore.open : undefined} loading={mode === "explore" ? explore.loading : undefined} />
           )}
         </div>
 
-        <aside className="w-72 shrink-0">
-          {selectedNode ? (
-            <div className="rounded border border-slate-200 bg-white p-3">
-              <span
-                className="inline-block rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide"
-                style={{
-                  background: KIND_STYLE[selectedNode.kind]?.fill,
-                  color: KIND_STYLE[selectedNode.kind]?.stroke,
-                }}
-              >
-                {selectedNode.type_name ?? selectedNode.kind}
-              </span>
-              <h2 className="mt-2 text-sm font-semibold text-slate-900">{selectedNode.label}</h2>
-              {selectedNode.sublabel && (
-                <p className="text-xs text-slate-500">{selectedNode.sublabel}</p>
-              )}
-              <p className="mt-1 text-xs text-slate-400">
-                {selectedNode.depth === 0
-                  ? "starting point"
-                  : `${selectedNode.depth} hop${selectedNode.depth > 1 ? "s" : ""} away`}
-                {selectedNode.state ? ` · ${selectedNode.state}` : ""}
-              </p>
+        <aside className="w-80 shrink-0 overflow-y-auto border-l border-slate-200 bg-white p-3 text-sm">
+          <div className="mb-3 text-xs text-slate-500">
+            {mode === "explore" ? <DirectionLegend /> : <LayerLegend edges={drawn.edges} />}
+          </div>
 
-              <div className="mt-3 flex gap-2">
-                {detailPath(selectedNode) && (
-                  <Link
-                    to={detailPath(selectedNode)!}
-                    className="rounded bg-slate-900 px-2 py-1 text-xs text-white"
-                  >
-                    Open
-                  </Link>
-                )}
-                {selectedNode.depth > 0 && detailPath(selectedNode) && (
-                  <button
-                    type="button"
-                    onClick={() => recenter(selectedNode)}
-                    className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-                  >
-                    Walk from here
-                  </button>
-                )}
-              </div>
-
-              <ul className="mt-3 space-y-1 border-t border-slate-100 pt-2">
-                {selectedEdges.map((e, i) => {
-                  const otherRef =
-                    `${e.from_kind}:${e.from_uid}` === selected
-                      ? `${e.to_kind}:${e.to_uid}`
-                      : `${e.from_kind}:${e.from_uid}`;
-                  const other = byRef.get(otherRef);
-                  if (!other) return null;
-                  return (
-                    <li key={`${edgeKey(e)}-${i}`} className="text-xs">
-                      <span className="text-slate-400">{e.relation}</span>{" "}
-                      <button
-                        type="button"
-                        onClick={() => setSelected(otherRef)}
-                        className="text-slate-700 hover:underline"
-                      >
-                        {truncate(other.label, 30)}
-                      </button>
-                    </li>
-                  );
-                })}
+          {mode === "impact" && impact.data && (
+            <div className="mb-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-900">
+              If <b>{impact.data.origin.name}</b> fails, <b>{impact.data.count}</b> objects are affected
+              {Object.keys(impact.data.by_loss).length > 0 && ": "}
+              {Object.entries(impact.data.by_loss).map(([k, v]) => `${v} ${LOSS_LABEL[k] ?? k}`).join(", ")}.
+              <ul className="mt-1 text-red-800">
+                {Object.entries(impact.data.by_type).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([t, n]) => <li key={t}>{n} × {t}</li>)}
               </ul>
-            </div>
-          ) : (
-            <div className="rounded border border-dashed border-slate-200 p-3 text-xs text-slate-500">
-              <p>Click a node to see what it is and where it goes. Double-click to walk from it.</p>
-              <p className="mt-2">Drag to pan, scroll to zoom.</p>
-              {graph.data && (
-                <p className="mt-3 text-slate-400">
-                  {graph.data.nodes.length} nodes · {edges.length} connections
-                </p>
-              )}
+              {impact.data.truncated && <p className="mt-1 text-amber-800">Cut short: there is more than shown.</p>}
             </div>
           )}
 
-          {summary.data && (
-            <div className="mt-3 rounded border border-slate-200 bg-white p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                This workspace
-              </p>
-              <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
-                {Object.entries(summary.data.edges).map(([name, count]) => (
-                  <li key={name} className="flex justify-between">
-                    <span>{name.replace(/_/g, " ")}</span>
-                    <span className="tabular-nums text-slate-900">{count}</span>
+          {mode === "rootcause" && rootCause.data && (
+            <div className="mb-3">
+              {rootCause.data.hypotheses[0] && (
+                <p className="mb-2 rounded bg-amber-50 p-2 text-xs text-amber-900">
+                  Fewest causes that explain everything:{" "}
+                  {rootCause.data.hypotheses[0].causes.map((c) => c.name).join(" + ")}
+                  {rootCause.data.hypotheses[0].unexplained.length > 0 && ` (still unexplained: ${rootCause.data.hypotheses[0].unexplained.join(", ")})`}
+                </p>
+              )}
+              <ol className="space-y-1">
+                {rootCause.data.candidates.map((c, i) => (
+                  <li key={c.uid}>
+                    <button type="button" onClick={() => { setCandidate(i); setSelected(null); setOpened(new Set()); }}
+                            className={`w-full rounded px-2 py-1 text-left text-xs ${i === candidate ? "bg-slate-900 text-white" : "hover:bg-slate-50"}`}>
+                      <span className="font-medium">{i + 1}. {c.name}</span>{" "}
+                      <span className={i === candidate ? "text-slate-300" : "text-slate-500"}>
+                        {c.type} · fit {Math.round(c.fit * 100)}% · explains {c.explains.length}/{rootCause.data!.symptoms.length}
+                        {c.would_also_affect ? ` · would also affect ${c.would_also_affect}` : ""}
+                        {c.history.tickets ? ` · ${c.history.tickets} past tickets` : ""}
+                        {c.contradicted_by.length ? " · contradicted" : ""}
+                      </span>
+                    </button>
                   </li>
                 ))}
-              </ul>
+              </ol>
+              {rootCause.data.not_found.length > 0 && <p className="mt-1 text-xs text-slate-400">Not found: {rootCause.data.not_found.join(", ")}</p>}
+            </div>
+          )}
+
+          {sel && (
+            <div className="border-t border-slate-100 pt-3">
+              <div className="font-semibold text-slate-900">{sel.restricted ? "Restricted" : sel.label}</div>
+              <div className="text-xs text-slate-500">{sel.bundle ? `grouped by “${sel.sub}”` : sel.sub}{sel.loss ? ` · ${sel.loss}` : ""}</div>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {sel.bundle ? (
+                  <Btn onClick={() => openNode(sel)}>Show all {sel.bundle.members.length}</Btn>
+                ) : (
+                  <>
+                    {detailPath(sel) && <Link to={detailPath(sel)!} className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">Open</Link>}
+                    {mode === "explore" && !sel.restricted && <Btn onClick={() => explore.toggle(sel)}>{explore.open.has(sel.id) ? "Fold branches" : "Open branches"}</Btn>}
+                    {mode === "explore" && sel.id !== drawn.rootId && ["asset", "ticket", "document"].includes(sel.kind) && (
+                      <Btn onClick={() => { setStartKind(sel.kind as StartKind); setStart({ uid: sel.uid, label: sel.label }); setSelected(null); }}>Centre here</Btn>
+                    )}
+                    {sel.kind === "asset" && !sel.restricted && mode !== "impact" && (
+                      <Btn onClick={() => { setStartKind("asset"); setStart({ uid: sel.uid, label: sel.label }); go("impact"); }}>What stops if it fails?</Btn>
+                    )}
+                    {sel.kind === "asset" && !sel.restricted && (
+                      <Btn onClick={() => { addSymptom(sel.uid, sel.label); go("rootcause"); }}>It misbehaves: find causes</Btn>
+                    )}
+                  </>
+                )}
+              </div>
+              {mode === "explore" && !sel.bundle && (
+                <>
+                  <RelationList title="Inbound" color={IN} edges={drawn.edges.filter((e) => e.to === sel.id && drawn.nodes.has(e.from))} side="in" name={name} onPick={setSelected} />
+                  <RelationList title="Outbound" color={OUT} edges={drawn.edges.filter((e) => e.from === sel.id && drawn.nodes.has(e.to))} side="out" name={name} onPick={setSelected} />
+                </>
+              )}
+              {mode === "impact" && affected && (
+                <div className="mt-3 text-xs">
+                  <div className="font-semibold uppercase tracking-wide text-slate-500">How it is reached</div>
+                  <ol className="mt-1 space-y-0.5">
+                    {affected.path.map((s, i) => (
+                      <li key={i}>
+                        <span className="text-slate-900">{s.provider}</span>{" "}
+                        <span style={{ color: LAYER_STYLE[s.layer] ?? "#64748b" }}>{s.relation} ({s.layer})</span> →{" "}
+                        <span className="text-slate-900">{s.dependent}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
             </div>
           )}
         </aside>
       </div>
     </div>
+  );
+}
+
+function Hint({ children }: { children: React.ReactNode }) {
+  return <p className="absolute inset-x-0 top-16 z-10 mx-auto w-fit rounded bg-white/90 px-3 py-2 text-sm text-slate-500 shadow-sm">{children}</p>;
+}
+
+function Btn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return <button type="button" onClick={onClick} className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">{children}</button>;
+}
+
+function LayerLegend({ edges }: { edges: GEdge[] }) {
+  const used = [...new Set(edges.map((e) => e.via).filter((v): v is string => !!v && !!LAYER_STYLE[v]))];
+  if (!used.length) return <span>Paths are coloured by how the failure travels.</span>;
+  return (
+    <span className="flex flex-wrap gap-x-3 gap-y-1">
+      {used.map((l) => (
+        <span key={l} className="flex items-center gap-1"><span className="inline-block h-0.5 w-5" style={{ background: LAYER_STYLE[l] }} /> {l}</span>
+      ))}
+    </span>
   );
 }

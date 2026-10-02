@@ -74,6 +74,12 @@ import type {
   Graph,
   GraphSummary,
   AskResult,
+  AskConversation,
+  AskConversationDetail,
+  ChatEvent,
+  KnowledgeStatus,
+  ImpactResult,
+  RootCauseResult,
   WorkspaceIdRule,
   AssetKeyRule,
   CatalogueMapping,
@@ -793,6 +799,15 @@ export const directoryApi = {
 
 export const graphApi = {
   summary: () => request<GraphSummary>("/v1/graph/summary"),
+  /** This failed: what it takes with it, how, and by which path. */
+  impact: (uid: string, layers?: string[]) => {
+    const q = new URLSearchParams({ uid });
+    if (layers?.length) q.set("layers", layers.join(","));
+    return request<ImpactResult>(`/v1/graph/impact?${q.toString()}`);
+  },
+  /** These misbehave (and these work): what would explain them, ranked, with the paths. */
+  rootCause: (body: { symptoms: string[]; healthy?: string[]; layers?: string[]; top?: number }) =>
+    request<RootCauseResult>("/v1/graph/root-cause", { method: "POST", body: json(body) }),
   walk: (params: {
     kind: string;
     uid: string;
@@ -1015,6 +1030,12 @@ export const aiApi = {
   /** A question answered from this workspace's records, with its working. */
   ask: (question: string) =>
     request<AskResult>("/v1/ai/ask", { method: "POST", body: json({ question }) }),
+  knowledge: () => request<KnowledgeStatus>("/v1/ai/knowledge"),
+  reindexKnowledge: () => request<{ started: boolean }>("/v1/ai/knowledge/reindex", { method: "POST" }),
+  conversations: () => request<AskConversation[]>("/v1/ai/conversations"),
+  conversation: (id: string) => request<AskConversationDetail>(`/v1/ai/conversations/${encodeURIComponent(id)}`),
+  deleteConversation: (id: string) =>
+    request<void>(`/v1/ai/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   reject: (ids: number[]) =>
     request<{ rejected: number; skipped: number[] }>("/v1/ai/suggestions/reject", {
@@ -1364,3 +1385,43 @@ export const domainsApi = {
   exit: (id: string, attestations: Record<string, boolean>) =>
     request<DomainView>(`/v1/domains/${encodeURIComponent(id)}/exit`, { method: "POST", body: json({ attestations }) }),
 };
+
+/** A chat turn as it is worked out: each server-sent event is handed to `onEvent` as it arrives. Resolves
+ * when the turn ends; rejects with an ApiError when the request is refused before it starts. */
+export async function streamChat(
+  body: { question: string; conversation_id?: string | null },
+  onEvent: (event: ChatEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const session = await loadSession();
+  if (!session) throw new Error("Not signed in");
+  const headers = new Headers({ "Content-Type": "application/json", Accept: "text/event-stream" });
+  headers.set("Authorization", `Bearer ${session.token}`);
+  if (session.workspaceId) headers.set("X-Workspace-Id", session.workspaceId);
+  const resp = await fetch(`${session.baseUrl}/v1/ai/chat`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text();
+    throw new ApiError(resp.status, text ? JSON.parse(text) : undefined);
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let cut: number;
+    while ((cut = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      for (const line of block.split("\n")) {
+        if (line.startsWith("data:")) onEvent(JSON.parse(line.slice(5).trim()) as ChatEvent);
+      }
+    }
+  }
+}

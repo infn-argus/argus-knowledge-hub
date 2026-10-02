@@ -32,7 +32,9 @@ def _attr_view(a: dict, origin: str, ref_names: dict, relations: dict) -> dict:
             "relation": relations.get(key) if a.get("type") == "reference" else None}
 
 
-def catalogue(db: Session, workspace_id: str) -> dict:
+def catalogue(db: Session, workspace_id: str, classes: bool = True) -> dict:
+    """The map. `classes=False` leaves out the equipment-class vocabulary, which reading seeds (a write):
+    a read-only caller such as an Ask ARGUS lookup must not hold an insert open for a whole conversation."""
     from app.services.asset_types import REFERENCE_RELATIONS
     rows = list(db.scalars(select(Schema).where(
         Schema.applies_to == "objects", or_(Schema.workspace_id == workspace_id, Schema.is_global.is_(True)))))
@@ -96,8 +98,10 @@ def catalogue(db: Session, workspace_id: str) -> dict:
     for t in types:
         t["records_with_subtypes"] = total(t["name"])
 
-    from app.services import equipment_classes as ec
-    classes = [{"name": c.name, "status": c.status, "promoted_type": c.promoted_type, "note": c.note}
-               for c in ec.vocabulary(db)]
-    return {"types": sorted(types, key=lambda t: t["path"]), "equipment_classes": classes,
+    vocabulary = []
+    if classes:
+        from app.services import equipment_classes as ec
+        vocabulary = [{"name": c.name, "status": c.status, "promoted_type": c.promoted_type, "note": c.note}
+                      for c in ec.vocabulary(db)]
+    return {"types": sorted(types, key=lambda t: t["path"]), "equipment_classes": vocabulary,
             "branches": sorted(set(BRANCHES.values()) | {"other"})}

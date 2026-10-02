@@ -10,8 +10,9 @@ practice — the host is unreachable, the key is rejected, or the model name
 is not one this endpoint serves — and the third passes a naive health
 check and then fails on first use, so it is checked explicitly.
 """
+import json
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterator, Optional
 
 import requests
 
@@ -204,6 +205,71 @@ def converse(endpoint: Endpoint, messages: list[dict], tools: Optional[list[dict
         return resp.json()["choices"][0]["message"]
     except (ValueError, KeyError, IndexError) as e:
         raise LLMError("The endpoint's reply was not in the expected shape.") from e
+
+
+def converse_stream(endpoint: Endpoint, messages: list[dict], tools: Optional[list[dict]] = None,
+                    max_tokens: int = 1200) -> Iterator[tuple[str, object]]:
+    """One turn of a tool-calling conversation, as it is written.
+
+    Yields ("reasoning", text) while a reasoning model thinks, ("content", text) as the answer is
+    written, and last ("message", message): the assistant message assembled from the pieces, in the shape
+    `converse` returns, tool calls included. A tool call arrives in fragments (its name, then its
+    arguments a few characters at a time) keyed by index, and is only usable once the stream ends.
+    """
+    payload: dict = {"model": endpoint.model, "messages": messages, "max_tokens": max_tokens,
+                     "temperature": 0, "stream": True}
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+    try:
+        resp = requests.post(f"{endpoint.root}/chat/completions", headers=endpoint.headers(), json=payload,
+                             stream=True, timeout=COMPLETION_TIMEOUT_SECONDS)
+    except requests.RequestException as e:
+        raise LLMError(f"Could not reach {endpoint.root}: {e}") from e
+    if resp.status_code >= 400:
+        detail = (resp.text or "")[:300]
+        raise LLMError(f"The endpoint answered {resp.status_code}: {detail}")
+    content: list[str] = []
+    calls: dict[int, dict] = {}
+    try:
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except ValueError:
+                continue
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            thinking = delta.get("reasoning") or delta.get("reasoning_content")
+            if thinking:
+                yield "reasoning", thinking
+            if delta.get("content"):
+                content.append(delta["content"])
+                yield "content", delta["content"]
+            for piece in delta.get("tool_calls") or []:
+                call = calls.setdefault(piece.get("index", 0),
+                                        {"id": None, "type": "function", "function": {"name": "", "arguments": ""}})
+                if piece.get("id"):
+                    call["id"] = piece["id"]
+                fn = piece.get("function") or {}
+                if fn.get("name"):
+                    call["function"]["name"] += fn["name"]
+                if fn.get("arguments"):
+                    call["function"]["arguments"] += fn["arguments"]
+    except requests.RequestException as e:
+        raise LLMError(f"The connection to {endpoint.root} dropped: {e}") from e
+    finally:
+        resp.close()
+    message: dict = {"role": "assistant", "content": "".join(content)}
+    if calls:
+        message["tool_calls"] = [calls[i] for i in sorted(calls)]
+    yield "message", message
 
 
 def embed(endpoint: Endpoint, texts: list[str]) -> list[list[float]]:

@@ -54,7 +54,7 @@ def _endpoint(db: Session, workspace_id: str):
 
 def _equipment_types(db: Session, workspace_id: str) -> list[str]:
     from app.services.type_catalogue import catalogue
-    return sorted(t["name"] for t in catalogue(db, workspace_id)["types"]
+    return sorted(t["name"] for t in catalogue(db, workspace_id, classes=False)["types"]
                   if t["branch"] == "equipment" and not t["abstract"]
                   and t["name"] not in ("Other Equipment", "Equipment Port", "Spare Part"))
 

@@ -29,7 +29,8 @@ name: argus-knowledge-hub
 
 services:
   db:
-    image: postgres:16
+    # Postgres 16 with pgvector, for Ask ARGUS's semantic search (services/knowledge_index.py).
+    image: pgvector/pgvector:pg16-trixie
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

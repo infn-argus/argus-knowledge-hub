@@ -21,12 +21,14 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.services.llm import Endpoint, LLMError, converse
+from app.services.llm import Endpoint, LLMError, converse, converse_stream
 from app.services.mcp_tools import BY_NAME, catalogue
 
 # Enough hops for search → open → traverse, and a stop before a confused
 # model spends a workspace's quota going in circles.
 MAX_ROUNDS = 8
+# Room for an answer that lists records: at the 1200 default a list of 79 magnets stopped mid-key.
+ANSWER_TOKENS = 3000
 # What comes back from a tool can be long; the model does not need all of
 # it and the context window certainly does not.
 MAX_TOOL_CHARS = 12000
@@ -58,6 +60,17 @@ SYSTEM = (
     "word somebody uses ('camera', 'quadrupole') is usually the type rather than the "
     "name. If a search finds nothing, try the word as a type, or a shorter fragment, "
     "before concluding there is none.\n"
+    "A kind of equipment is often several types, organised in a tree, and none of them may "
+    "carry the word used in the question. When you are not sure which types a word means, "
+    "call list_types (with the word, or with nothing to see every type), choose the types "
+    "whose descriptions match, and search_objects with types=[...]. For a question about "
+    "what there is or how many, give the total and the count per type from by_type, not "
+    "just the objects listed. List at most 40 records; when there are more, say how many "
+    "more there are rather than stopping part way.\n"
+    "For what is written rather than what exists — how to do something, what a manual or "
+    "datasheet says, what went wrong before and how it was fixed — use search_knowledge: it "
+    "finds passages by meaning, in any language. Cite a passage by its title, and its page or "
+    "section when it has one.\n"
     "For anything that spans records — what has failed before, what a procedure "
     "covers, what depends on what — use graph_neighbours. Searching text alone will "
     "miss it, because the answer is in no single record.\n\n"
@@ -116,26 +129,122 @@ def _arguments_of(call: dict) -> dict:
         return {}
 
 
-def ask(db: Session, workspace_id: str, endpoint: Endpoint, question: str) -> dict:
-    """A question, the answer, and every record the answer was built from."""
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": question},
-    ]
+# Earlier turns of a conversation sent with a follow-up: enough for "and which of those are in AC1?",
+# not so much that a long chat crowds out the records looked up for this question.
+HISTORY_TURNS = 6
+HISTORY_CHARS = 4000
+
+
+def _history(history: Optional[list]) -> list[dict]:
+    """A conversation's earlier questions and answers, newest last, trimmed."""
+    turns = [m for m in (history or []) if m.get("role") in ("user", "assistant") and m.get("content")]
+    return [{"role": m["role"], "content": str(m["content"])[:HISTORY_CHARS]}
+            for m in turns[-2 * HISTORY_TURNS:]]
+
+
+def _summary(name: str, text: str, error: Optional[str]) -> str:
+    """One line for a lookup's result, for the person watching it run."""
+    if error:
+        return error
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    if data.get("available") is False:
+        return "not available here"
+    if isinstance(data.get("results"), list):
+        return f"{len(data['results'])} passages"
+    if isinstance(data.get("total"), int):
+        return f"{data['total']} found"
+    if isinstance(data.get("nodes"), list):
+        return f"{len(data['nodes'])} connected records"
+    if data.get("found") is False:
+        return "not found"
+    if data.get("found") is True:
+        return "1 record"
+    return ""
+
+
+class _ThinkFilter:
+    """Drops a <think>…</think> block from text that arrives a few characters at a time, for models that
+    narrate their reasoning in the answer instead of in a separate field. A tag split across two pieces
+    is held back until it can be told apart."""
+
+    def __init__(self):
+        self.inside = False
+        self.pending = ""
+
+    def feed(self, piece: str) -> str:
+        text, out = self.pending + piece, []
+        self.pending = ""
+        while text:
+            tag = "</think>" if self.inside else "<think>"
+            at = text.lower().find(tag)
+            if at >= 0:
+                if not self.inside:
+                    out.append(text[:at])
+                text, self.inside = text[at + len(tag):], not self.inside
+                continue
+            keep = next((k for k in range(min(len(tag) - 1, len(text)), 0, -1)
+                         if tag.startswith(text[-k:].lower())), 0)
+            if not self.inside:
+                out.append(text[:len(text) - keep])
+            self.pending = text[len(text) - keep:] if keep else ""
+            break
+        return "".join(out)
+
+
+def ask_events(db: Session, workspace_id: str, endpoint: Endpoint, question: str,
+               history: Optional[list] = None, stream: bool = True):
+    """The answer to a question, as it is worked out: what the model is doing, each lookup as it starts
+    and what it found, the answer as it is written, and last the whole of it ("done").
+
+    Events: {"type": "thinking", "text"}, {"type": "text", "text"}, {"type": "text_reset"} (what was
+    written turned out to precede lookups, not to be the answer), {"type": "step_start", "index", "tool",
+    "arguments"}, {"type": "step", "index", "tool", "arguments", "result", "error", "seconds",
+    "summary"}, {"type": "done", "answer", "steps", "stopped", "seconds", "error"}.
+    """
+    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM}, *_history(history),
+                                      {"role": "user", "content": question}]
     tools = _tool_specs()
     steps: list[dict] = []
     started = time.monotonic()
 
+    def turn(with_tools: bool):
+        """One model turn; yields events, and returns the assistant message."""
+        if not stream:
+            message = converse(endpoint, messages, tools=tools if with_tools else None, max_tokens=ANSWER_TOKENS)
+            return message
+        think = _ThinkFilter()
+        message: dict = {}
+        wrote = False
+        for kind, value in converse_stream(endpoint, messages, tools=tools if with_tools else None,
+                                           max_tokens=ANSWER_TOKENS):
+            if kind == "reasoning":
+                yield {"type": "thinking", "text": value}
+            elif kind == "content":
+                visible = think.feed(str(value))
+                if visible:
+                    wrote = True
+                    yield {"type": "text", "text": visible}
+            elif kind == "message":
+                message = value  # type: ignore[assignment]
+        if wrote and message.get("tool_calls"):
+            yield {"type": "text_reset"}
+        return message
+
+    def done(answer: str, stopped: str, error: Optional[str] = None) -> dict:
+        return {"type": "done", "answer": answer, "steps": steps, "stopped": stopped, "error": error,
+                "seconds": round(time.monotonic() - started, 1)}
+
     for _round in range(MAX_ROUNDS):
-        message = converse(endpoint, messages, tools=tools)
+        message = yield from turn(True)
         calls = message.get("tool_calls") or []
         if not calls:
-            return {
-                "answer": _answer_of(message),
-                "steps": steps,
-                "stopped": "answered",
-                "seconds": round(time.monotonic() - started, 1),
-            }
+            yield done(_answer_of(message), "answered")
+            return
 
         # The assistant's own message has to go back verbatim, tool calls
         # and all, or the results that follow refer to nothing.
@@ -148,15 +257,14 @@ def ask(db: Session, workspace_id: str, endpoint: Endpoint, question: str) -> di
         for call in calls:
             name = (call.get("function") or {}).get("name") or ""
             arguments = _arguments_of(call)
+            index = len(steps)
+            yield {"type": "step_start", "index": index, "tool": name, "arguments": arguments}
             at = time.monotonic()
             text, error = _run_tool(db, workspace_id, name, arguments)
-            steps.append({
-                "tool": name,
-                "arguments": arguments,
-                "result": text,
-                "error": error,
-                "seconds": round(time.monotonic() - at, 1),
-            })
+            step = {"tool": name, "arguments": arguments, "result": text, "error": error,
+                    "seconds": round(time.monotonic() - at, 1)}
+            steps.append(step)
+            yield {"type": "step", "index": index, **step, "summary": _summary(name, text, error)}
             messages.append({
                 "role": "tool",
                 "tool_call_id": call.get("id") or name,
@@ -170,18 +278,21 @@ def ask(db: Session, workspace_id: str, endpoint: Endpoint, question: str) -> di
         "content": "Stop looking things up and answer with what you have found so far.",
     })
     try:
-        final = converse(endpoint, messages)
+        final = yield from turn(False)
     except LLMError as e:
-        return {
-            "answer": "",
-            "steps": steps,
-            "stopped": "exhausted",
-            "error": str(e),
-            "seconds": round(time.monotonic() - started, 1),
-        }
-    return {
-        "answer": _answer_of(final),
-        "steps": steps,
-        "stopped": "exhausted",
-        "seconds": round(time.monotonic() - started, 1),
-    }
+        yield done("", "exhausted", str(e))
+        return
+    yield done(_answer_of(final), "exhausted")
+
+
+def ask(db: Session, workspace_id: str, endpoint: Endpoint, question: str,
+        history: Optional[list] = None) -> dict:
+    """A question, the answer, and every record the answer was built from — all at once."""
+    result: dict = {}
+    for event in ask_events(db, workspace_id, endpoint, question, history=history, stream=False):
+        if event["type"] == "done":
+            result = event
+    out = {k: v for k, v in result.items() if k != "type"}
+    if not out.get("error"):
+        out.pop("error", None)
+    return out

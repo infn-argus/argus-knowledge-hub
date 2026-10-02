@@ -1300,3 +1300,104 @@ export interface RecordProposal {
   share?: boolean;
   person?: boolean;
 }
+
+export interface AskConversation {
+  id: string;
+  title: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AskMessage {
+  id: string;
+  seq: number;
+  role: "user" | "assistant";
+  content: string;
+  steps: AskStep[] | null;
+  stopped: string | null;
+  error: string | null;
+  seconds: number | null;
+  created_at: string | null;
+}
+
+export interface AskConversationDetail extends AskConversation {
+  messages: AskMessage[];
+}
+
+/** One server-sent event of a chat turn (POST /v1/ai/chat). */
+export type ChatEvent =
+  | { type: "conversation"; id: string; title: string }
+  | { type: "thinking"; text: string }
+  | { type: "text"; text: string }
+  | { type: "text_reset" }
+  | { type: "step_start"; index: number; tool: string; arguments: Record<string, unknown> }
+  | ({ type: "step"; index: number; summary: string } & AskStep)
+  | { type: "done"; answer: string; steps: AskStep[]; stopped: string; error: string | null; seconds: number | null };
+
+export interface KnowledgeStatus {
+  ready: boolean;
+  pgvector: boolean;
+  embedding_model: string | null;
+  /** Indexed sources and passages, by kind (document, ticket, ticket_comment, attachment, asset_comment). */
+  sources: Record<string, number>;
+  passages: Record<string, number>;
+  run: {
+    state: "running" | "done" | "failed";
+    started_at: string | null;
+    finished_at: string | null;
+    result: {
+      indexed?: number; unchanged?: number; removed?: number; unreadable?: number; chunks?: number;
+      seconds?: number; failed?: string[];
+    } | null;
+  } | null;
+}
+
+/** One hop of a failure's path: the provider stops, so the dependent loses what the relation carries. */
+export interface FailureStep {
+  provider: string;   // key
+  dependent: string;  // key
+  relation: string;
+  layer: string;
+  carries: string;
+}
+
+export interface FailureNode {
+  uid: string;
+  key: string;
+  name: string;
+  type: string;
+  inferred?: boolean;
+}
+
+export interface ImpactAffected extends FailureNode {
+  depth: number;
+  losses: Record<string, number>;
+  path: FailureStep[];
+  layers: string[];
+  weak: boolean;
+}
+
+export interface ImpactResult {
+  origin: FailureNode;
+  affected: ImpactAffected[];
+  count: number;
+  by_type: Record<string, number>;
+  by_loss: Record<string, number>;
+  truncated: boolean;
+}
+
+export interface RootCauseCandidate extends FailureNode {
+  fit: number;
+  coverage: number;
+  explains: (FailureNode & { loss: string; depth: number; path: FailureStep[] })[];
+  would_also_affect: number;
+  contradicted_by: FailureNode[];
+  history: { tickets: number; recent: { uid?: string; title?: string }[] };
+}
+
+export interface RootCauseResult {
+  symptoms: FailureNode[];
+  candidates: RootCauseCandidate[];
+  hypotheses: { causes: (FailureNode & { explains: string[] })[]; unexplained: string[] }[];
+  not_found: string[];
+}
