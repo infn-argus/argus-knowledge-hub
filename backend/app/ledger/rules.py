@@ -144,6 +144,21 @@ RULES: dict[str, dict] = {
                       "subject_types": ["Control Device"]},
         "impl": ["1"],
     },
+    "beam-model.canonical/1": {
+        "family": "beam-model.canonical",
+        "meaning": "a canonical beam model (docs/beam-model.md) states its beam systems, beams, paths, elements, "
+                   "their topology, the observables its diagnostics observe and its model datasets",
+        "signature": {"outputs": ["exists", "name", "attr:*", "rel:*"]},
+        "impl": ["1"],
+    },
+    "beam-model.bind-by-name/1": {
+        "family": "beam-model.bind-by-name",
+        "meaning": "a physical asset whose name or tag names exactly one beam element of its workspace is proposed "
+                   "as installed at that position; a person confirms it, a name alone never does",
+        "signature": {"outputs": ["exists", "rel:installed at", "rel:installation of", "attr:valid_from"],
+                      "subject_types": ["Installation"]},
+        "impl": ["1"],
+    },
     "resolve.asset_url/1": {
         "family": "resolve.asset_url",
         "meaning": "a device's asset: URL naming one inventory object, on a device acting on exactly one "

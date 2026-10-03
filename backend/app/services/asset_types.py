@@ -227,6 +227,12 @@ _t("Beam Element", "Functional Element", "Something the beam passes through or i
     S("family", "Family", indexed=True), F("design_value", "Design strength"),
     S("design_unit", "Design strength unit", indexed=True),
     E("polarity", "Polarity", ["Positive", "Negative", "Bipolar"]),
+    # From a canonical beam model (services/beam_model.py, docs/beam-model.md): the element's name in its
+    # model, its normalised kind, what it does (an element may do several things), and the simulator's own
+    # spelling. Values that depend on the optics (s, strengths, Twiss) live in a Model Dataset, not here.
+    S("model_name", "Model name", indexed=True), S("element_kind", "Element kind", indexed=True),
+    S("capabilities", "Capabilities", indexed=True, multi=True),
+    S("native_type", "Native type", indexed=True), S("native_source", "Native source", indexed=True),
 ])
 _t("Dipole", "Beam Element", "A bending magnet.", [
     F("bend_angle", "Bend angle (rad)"), F("bend_radius", "Bend radius (m)"), F("field", "Field (T)")])
@@ -305,6 +311,51 @@ _t("Beam Arrival Monitor", "Diagnostic Element", "Measures arrival time.", [
 _t("Bunch Length Monitor", "Diagnostic Element", "Measures the bunch length.", [
     E("method", "Method", ["Electro-optic sampling", "Streak camera", "CTR", "CDR", "RF deflector"]),
     F("time_range_ps", "Time range (ps)")])
+_t("Generic Monitor", "Diagnostic Element", "A diagnostic location a model names without saying what kind: "
+   "a particle monitor, a photodiode, a camera on a laser line.")
+
+# The beam model (docs/beam-model.md): the elements a canonical model has that the lattice above lacks,
+# and the systems, beams and paths they are placed on. Positions, not hardware: a physical unit is installed
+# at one through an Installation, as for every Beam Element.
+_t("Drift", "Beam Element", "A field-free length between elements.")
+_t("Kicker", "Beam Element", "A fast pulsed magnet for injection or extraction.", [
+    E("plane", "Plane", ["H", "V"]), F("max_kick", "Maximum kick (mrad)")])
+_t("Septum", "Beam Element", "Separates two beam paths: where a line branches off or joins.", [
+    E("septum_kind", "Septum kind", ["Magnetic", "Electrostatic", "Lambertson"])])
+_t("RF Cavity", "Beam Element", "A cavity giving the beam energy or bunching it, in a ring or a linac.", [
+    F("frequency", "Frequency (MHz)"), I("harmonic", "Harmonic number")])
+_t("Beam Source", "Beam Element", "Where a beam starts: an electron gun, an ion source, a laser oscillator.")
+_t("Beam Dump", "Beam Element", "Where a beam ends: absorbed for good.", [S("material", "Material", indexed=True)])
+_t("Lens", "Beam Element", "Focuses a photon beam.", [F("focal_length", "Focal length (m)")])
+_t("Beam Splitter", "Beam Element", "Divides a photon beam between two paths.", [F("split_ratio", "Split ratio")])
+_t("Generic Beam Element", "Beam Element", "An element a model has and this catalogue has no kind for; "
+   "its native type says what it is.")
+
+_t("Beam System", "Functional Element", "A system that produces or transports a beam: a storage ring, an "
+   "accumulator, a linac, a transfer line, a laser transport, an FEL line.", [
+    E("system_kind", "System kind", ["Storage ring", "Synchrotron", "Accumulator", "Linac", "Transfer line",
+                                     "Laser transport", "FEL line", "Other"]),
+    S("model_id", "Model id", indexed=True),
+    # The model it was read from, so an export says what was imported (docs/beam-model.md §8).
+    S("model_name", "Model name"), S("model_source", "Model source", indexed=True),
+    S("model_version", "Model version"), S("model_git_commit", "Model git commit"),
+    S("model_simulator", "Model simulator", indexed=True)], aliases=("beam system", "accelerator", "beamline system"))
+_t("Beam", "Functional Element", "What a beam system carries: the reference beam, separately from the "
+   "topology it travels.", abstract=True, attributes=[S("model_id", "Model id", indexed=True)])
+_t("Particle Beam", "Beam", "A beam of charged (or neutral) particles.", [
+    S("species", "Species", indexed=True), F("charge", "Charge (e)"),
+    F("reference_energy", "Reference energy (GeV)"), F("reference_momentum", "Reference momentum (GeV/c)"),
+    F("rest_mass", "Rest mass (MeV/c²)")])
+_t("Photon Beam", "Beam", "A photon beam: a laser, or radiation transported to an experiment.", [
+    F("wavelength", "Wavelength (nm)"), F("frequency", "Frequency (THz)"),
+    F("pulse_duration", "Pulse duration (fs)"), F("repetition_rate", "Repetition rate (Hz)"),
+    S("polarization", "Polarization", indexed=True)])
+_t("Beam Path", "Functional Element", "The route a beam takes: open (a linac, a transfer line, a laser line) "
+   "or closed (a ring). Its elements are joined by `upstream of`, its branches by `branches to`, and a closed "
+   "path's last element by `closes to` its first; `s` is a coordinate along it, not its topology.", [
+    E("topology", "Topology", ["open", "closed"]),
+    F("length", "Length or circumference (m)"), E("direction", "Direction", ["forward", "backward"]),
+    S("model_id", "Model id", indexed=True)])
 
 # Plane B: physical -------------------------------------------------------------
 _t("Asset", "Engineered Item", "The serialised box, with a purchase order.",
@@ -510,6 +561,12 @@ _t("Vendor", "Catalog Item", "The company, its support contract and RMA route.",
     S("contact", "Contact"), S("support_contract", "Support contract"),
     D("support_expires", "Support expires"), X("rma_procedure", "RMA procedure"),
     S("website", "Website")])
+_t("Observable", "Catalog Item", "A physical quantity a model predicts and a diagnostic measures: "
+   "beam.position.x, beam.intensity, optical.power. The meaning, not a value: live values stay in the "
+   "control system.", [
+    S("quantity", "Quantity", unique=True, indexed=True, regex=r"^[a-z]+(\.[a-z_]+)+$"),
+    S("unit", "Unit", indexed=True), E("domain", "Domain", ["particle", "optical", "any"]),
+    E("plane", "Plane", ["x", "y", "z", "none"])])
 
 # Plane D: control --------------------------------------------------------------
 _t("Control Item", "Item", "The control configuration, as objects.", abstract=True, attributes=[
@@ -594,6 +651,12 @@ _t("Storage Mount", "Control Item", "An NFS mount or backup target.", [
     E("mount_kind", "Mount kind", ["NFS", "Local", "S3"]), S("server", "Server", indexed=True),
     S("export_path", "Export path"), S("mount_path", "Mount path"), F("size_gb", "Size (GB)"),
     B("is_backup", "Backup")])
+_t("Control Signal", "Control Item", "One signal's identity in the control system: the PV or channel that "
+   "carries a setpoint, a readback, a status or a measurement. Its value is read there, never stored here.", [
+    E("signal_system", "Control system", ["EPICS", "!CHAOS", "Tango", "OPC UA", "Other"]),
+    S("address", "Address (PV, channel)", indexed=True),
+    E("role", "Role", ["setpoint", "readback", "status", "measurement", "command"]),
+    S("quantity", "Quantity", indexed=True), S("unit", "Unit")])
 
 # Engineering record -----------------------------------------------------------
 _t("Engineering Record", "Item", "What the design says a component needs and costs.",
@@ -641,6 +704,15 @@ _t("Work Package", "Engineering Record", "WP-01 … WP-13.", [
     S("wbs_code", "WBS code", unique=True, indexed=True), U("leader", "Leader"),
     S("institute", "Institute", indexed=True), F("budget_eur", "Budget (€)"),
     D("start_date", "Start date"), D("end_date", "End date")])
+_t("Model Dataset", "Engineering Record", "One version of a physics model of a beam path: design optics, a "
+   "year's nominal lattice, measured optics. The values that depend on it (s, strengths, Twiss, geometry) "
+   "are kept with it, never on the hardware.", [
+    E("dataset_kind", "Kind", ["design", "nominal", "current model", "measured", "commissioning",
+                               "configuration", "other"]),
+    S("model_id", "Model id", indexed=True), S("source", "Source", indexed=True), S("version", "Version"),
+    S("git_commit", "Git commit"), S("simulator", "Simulator", indexed=True),
+    S("simulator_version", "Simulator version"), S("generated_at", "Generated at"),
+    S("valid_from", "Valid from"), S("valid_until", "Valid until")])
 
 # Location ----------------------------------------------------------------------
 _t("Location", "Item", "Where something is, and the rules for reaching it.", abstract=True, attributes=[

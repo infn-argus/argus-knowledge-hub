@@ -3,6 +3,8 @@
   "ai.document.describe/1": "ea4628db70ee880d",
   "ai.epik8s.classify/1": "0879fec4cdaa3496",
   "ai.ticket.describe/1": "c9b3a8d8de02a1e4",
+  "beam-model.bind-by-name/1": "497afae37ff50578",
+  "beam-model.canonical/1": "5a8a76a801014379",
   "bind.control.host/1": "0a848480b16a895b",
   "bind.control.tag/1": "80b694c3c7793848",
   "epik8s.device/1": "b0f050ea7de1fcdd",

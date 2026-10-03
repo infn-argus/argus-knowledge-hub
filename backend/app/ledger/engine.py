@@ -55,7 +55,12 @@ SINGLE_RELATIONS = {"rel:installed at", "rel:installation of", "rel:assigned to"
 INSTALLATION = "Installation"
 ACCESS_POINT = "Access Point"
 INSTALLABLE = {"Equipment Position", "Motion Axis", "Mirror", "Dipole", "Quadrupole", "Sextupole",
-               "Corrector", "Solenoid", "Accelerating Structure", "RF Gun", "Beam Position Monitor"}
+               "Corrector", "Solenoid", "Accelerating Structure", "RF Gun", "Beam Position Monitor",
+               # The beam model's positions (docs/beam-model.md): a lattice or optical position stays while the
+               # unit installed at it changes. A drift has nothing installed at it.
+               "Kicker", "Septum", "RF Cavity", "Beam Source", "Beam Dump", "Lens", "Beam Splitter",
+               "Generic Beam Element", "Screen Station", "Generic Monitor", "Collimator", "Beam Stopper",
+               "Undulator", "Beam Charge Monitor", "Beam Loss Monitor", "Faraday Cup", "Wire Scanner"}
 
 
 class LedgerError(ValueError):

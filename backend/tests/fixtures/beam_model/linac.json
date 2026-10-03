@@ -1,0 +1,154 @@
+{
+ "format": "argus.beam-model/1",
+ "model": {
+  "id": "linac-demo",
+  "name": "Electron linac",
+  "source": "accelerator-model-toolbox",
+  "version": "1",
+  "simulator": "elegant",
+  "dataset": "linac-design"
+ },
+ "systems": [
+  {
+   "id": "linac",
+   "name": "Electron linac",
+   "kind": "Linac",
+   "beams": [
+    {
+     "id": "e-",
+     "kind": "particle",
+     "parameters": {
+      "species": "electron",
+      "charge": -1,
+      "reference_energy": 0.15
+     }
+    }
+   ]
+  }
+ ],
+ "paths": [
+  {
+   "id": "linac-line",
+   "name": "Linac",
+   "system": "linac",
+   "topology": "open",
+   "elements": [
+    "GUN01",
+    "BUN01",
+    "ACC01",
+    "QUA01",
+    "BPM01",
+    "ACC02",
+    "DIP01",
+    "SCR01",
+    "DMP01"
+   ]
+  }
+ ],
+ "elements": [
+  {
+   "id": "GUN01",
+   "type": "source",
+   "s": 0.0,
+   "native": {
+    "source": "elegant",
+    "type": "CHARGE",
+    "parameters": {}
+   }
+  },
+  {
+   "id": "BUN01",
+   "type": "rf_cavity",
+   "s": 0.5,
+   "physics": {
+    "length": 0.3,
+    "voltage": 1200000.0
+   },
+   "capabilities": [
+    "beam_transport",
+    "bunching",
+    "powered"
+   ],
+   "native": {
+    "source": "elegant",
+    "type": "RFCA",
+    "parameters": {
+     "L": 0.3,
+     "VOLT": 1200000.0
+    }
+   }
+  },
+  {
+   "id": "ACC01",
+   "type": "rf_cavity",
+   "s": 1.5,
+   "physics": {
+    "length": 3.0,
+    "gradient": 20000000.0
+   }
+  },
+  {
+   "id": "QUA01",
+   "type": "quadrupole",
+   "s": 5.0,
+   "physics": {
+    "length": 0.1,
+    "k1": 8.2
+   },
+   "native": {
+    "source": "elegant",
+    "type": "KQUAD",
+    "parameters": {
+     "L": 0.1,
+     "K1": 8.2
+    }
+   }
+  },
+  {
+   "id": "BPM01",
+   "type": "bpm",
+   "s": 5.4,
+   "observes": [
+    "beam.position.x",
+    "beam.position.y"
+   ],
+   "optics": {
+    "beta_x": 7.1,
+    "beta_y": 5.3
+   }
+  },
+  {
+   "id": "ACC02",
+   "type": "rf_cavity",
+   "s": 6.0,
+   "physics": {
+    "length": 3.0,
+    "gradient": 20000000.0
+   }
+  },
+  {
+   "id": "DIP01",
+   "type": "dipole",
+   "s": 9.5,
+   "physics": {
+    "length": 0.5,
+    "angle": 0.35
+   }
+  },
+  {
+   "id": "SCR01",
+   "type": "screen",
+   "s": 10.3,
+   "observes": [
+    "beam.size.x",
+    "beam.size.y",
+    "beam.energy"
+   ]
+  },
+  {
+   "id": "DMP01",
+   "type": "dump",
+   "s": 11.0
+  }
+ ]
+}

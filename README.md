@@ -202,6 +202,18 @@ currently valid* revision rather than to an arbitrary PDF.
   Build or update the index on *Workspace → AI* (only what changed is embedded again), or
   `python -m app.services.knowledge_index <workspace|all>`, e.g. nightly. Served by `/v1/ai/chat`
   (server-sent events), `/v1/ai/conversations` and `/v1/ai/knowledge`.
+- **Beam model.** A simulator-independent physics model linked to the facility: beam systems, beams
+  (particle or photon), paths (open or closed, joined by real branch and ring-closing relations, with `s`
+  as a coordinate, not the topology), elements with normalised kinds, capabilities and the simulator's own
+  parameters kept whole, diagnostics and the observables they observe, and model datasets holding what
+  depends on the optics (s, geometry, strengths, Twiss). A physics position stays while the hardware
+  installed at it changes (Installations); a name match only proposes a binding; control signals are
+  identities, never values. Imported from the canonical `argus.beam-model/1` JSON
+  ([format](docs/beam-model-format.md)), or from MAD-X, TFS and Elegant files through converters that
+  produce it, as ledger claims with provenance; drawn to scale in the hall and along `s`. See
+  [docs/beam-model.md](docs/beam-model.md); served
+  by `/v1/beam-systems`, `/v1/beam-paths`, `/v1/beam-elements`, `/v1/diagnostics`, `/v1/observables`,
+  `/v1/model-datasets`, `/v1/model-bindings` and `/v1/beam-model/import`.
 - **Type catalogue.** Every object type a workspace can use, on one page: where it sits in the
   tree, what it is, its attributes (own and inherited), the names imports know it by, what its
   references mean in the graph, and how many records it has. The seeded types, ticket types and
@@ -241,9 +253,13 @@ currently valid* revision rather than to an arbitrary PDF.
   attribution, rule versions; acceptance tests A1–A32) is the second; the transition and
   readiness gates (A33–A41: cutover, identity, restrictions, lookup, reconciliation) the third.
 - [Object schema design for a large-scale accelerator](docs/asset-schema-design.md) — the
-  type catalogue (128 types over four planes), the relation vocabulary, composite elements such
+  type catalogue (146 types over four planes), the relation vocabulary, composite elements such
   as a screen station, and how a beamline's EPIK8s control configuration and a EuPRAXIA-style
   product breakdown both come in as equipment rather than as files.
+- [The beam model](docs/beam-model.md) — physics positions, topology, diagnostics, observables and model
+  datasets, linked to equipment, controls and documentation without becoming a simulator or a telemetry store.
+- [The beam model format](docs/beam-model-format.md) — `argus.beam-model/1` field by field, bundles, what the
+  importer refuses, and the converters from simulator files (MAD-X, TFS, Elegant) with how to add one.
 - [The knowledge graph for root-cause analysis](docs/knowledge-graph-design.md) — what each
   relation means for a failure (which way it travels, and whether the dependent loses its readout,
   its function, a permit or part of itself), impact and root-cause analysis over it

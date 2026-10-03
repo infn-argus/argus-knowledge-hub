@@ -80,6 +80,15 @@ import type {
   KnowledgeStatus,
   ImpactResult,
   RootCauseResult,
+  BeamSystem,
+  BeamPathGraph,
+  BeamElementContext,
+  BeamRecord,
+  BeamModelSummary,
+  BeamModelCheck,
+  BeamConversionReport,
+  BeamImportReport,
+  CanonicalBeamModel,
   WorkspaceIdRule,
   AssetKeyRule,
   CatalogueMapping,
@@ -1425,3 +1434,25 @@ export async function streamChat(
     }
   }
 }
+
+/** The beam model (docs/beam-model.md): read-only views for the viewer page. */
+export const beamModelApi = {
+  models: () => request<BeamModelSummary[]>("/v1/beam-model/models"),
+  exportModel: (id: string) => request<CanonicalBeamModel>(`/v1/beam-model/models/${encodeURIComponent(id)}/export`),
+  exportAll: () => request<{ format: string; models: CanonicalBeamModel[] }>("/v1/beam-model/export"),
+  validate: (doc: unknown) =>
+    request<{ models: BeamModelCheck[] }>("/v1/beam-model/validate", { method: "POST", body: json(doc) }),
+  importModels: (doc: unknown) =>
+    request<BeamImportReport | { models: BeamImportReport[] }>("/v1/beam-model/import", { method: "POST", body: json(doc) }),
+  schema: () => request<Record<string, unknown>>("/v1/beam-model/schema"),
+  formats: () => request<{ name: string; label: string; extensions: string[] }[]>("/v1/beam-model/formats"),
+  convert: (filename: string, content: string, options: Record<string, unknown> = {}, converter?: string) =>
+    request<{ model: CanonicalBeamModel; report: BeamConversionReport; check: BeamModelCheck }>("/v1/beam-model/convert",
+      { method: "POST", body: json({ filename, content, options, converter }) }),
+  systems: () => request<BeamSystem[]>("/v1/beam-systems"),
+  pathGraph: (uid: string, dataset?: string | null) =>
+    request<BeamPathGraph>(`/v1/beam-paths/${encodeURIComponent(uid)}/graph${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ""}`),
+  datasets: (path: string) => request<BeamRecord[]>(`/v1/model-datasets?path=${encodeURIComponent(path)}`),
+  context: (uid: string, dataset?: string | null) =>
+    request<BeamElementContext>(`/v1/beam-elements/${encodeURIComponent(uid)}/context${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ""}`),
+};

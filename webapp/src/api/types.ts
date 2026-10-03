@@ -1401,3 +1401,188 @@ export interface RootCauseResult {
   hypotheses: { causes: (FailureNode & { explains: string[] })[]; unexplained: string[] }[];
   not_found: string[];
 }
+
+/* The beam model (docs/beam-model.md). */
+export interface BeamRecord {
+  uid: string;
+  key: string;
+  name: string;
+  type: string;
+  model_name?: string;
+  element_kind?: string;
+  capabilities?: string[];
+  topology?: string;
+  system_kind?: string;
+  dataset_kind?: string;
+  model_id?: string;
+  serial?: string;
+  manufacturer?: string;
+  model?: string;
+  address?: string;
+  role?: string;
+  quantity?: string;
+  signal_system?: string;
+  attributes?: Record<string, unknown>;
+}
+
+export interface BeamSystem extends BeamRecord {
+  beams: BeamRecord[];
+  paths: BeamRecord[];
+}
+
+export interface BeamNode extends BeamRecord {
+  index: number;
+  s?: number | null;
+  length?: number | null;
+  angle?: number | null;
+  optics?: { beta_x?: number; beta_y?: number; dx?: number } | null;
+  geometry?: { x?: number; y?: number; z?: number; yaw?: number; pitch?: number; roll?: number } | null;
+}
+
+export interface BeamPathGraph {
+  path: BeamRecord;
+  topology: "open" | "closed" | null;
+  length: number | null;
+  reference: string | null;
+  dataset_uid: string | null;
+  nodes: BeamNode[];
+  edges: { from: string; to: string; relation: string }[];
+  branches_out: { from: string; to: string; to_path: BeamRecord | null }[];
+  branches_in: { from: string; to: string; from_path: BeamRecord | null }[];
+}
+
+export interface BeamConversionReport {
+  converter: string;
+  file: string;
+  elements: number;
+  total_bend: number;
+  ring: boolean;
+  survey_closure_m: number | null;
+  not_executed?: string[];
+  tunes?: Record<string, string>;
+}
+
+export interface BeamValues {
+  dataset_uid: string;
+  path_uid: string | null;
+  s: number | null;
+  geometry: Record<string, number> | null;
+  physics: Record<string, unknown>;
+  optics: Record<string, unknown>;
+  native: { source?: string; type?: string; parameters?: Record<string, unknown> };
+}
+
+export interface BeamSignal extends BeamRecord {
+  measures: string[];
+  device: BeamRecord | null;
+}
+
+export interface BeamElementContext {
+  element: BeamRecord;
+  path: BeamRecord | null;
+  physics: (BeamRecord & BeamValues) | null;
+  datasets: (BeamRecord & BeamValues)[];
+  equipment: {
+    installed: { asset: BeamRecord | null; certainty: string; valid_from: unknown; valid_until: unknown }[];
+    history: { asset: BeamRecord | null; status: string; valid_from: unknown; valid_until: unknown }[];
+  };
+  power: BeamRecord[];
+  controls: {
+    control_devices: BeamRecord[];
+    iocs: BeamRecord[];
+    signals: BeamSignal[];
+    connected_electronics: BeamRecord[];
+  };
+  observables: (BeamRecord & { measured_by: BeamSignal[] })[];
+  documentation: { uid: string; code: string | null; title: string; via: string; for: string }[];
+  tickets: { uid: string; title: string; state: string; for: string }[];
+  upstream: (BeamRecord & { via: string; distance: number })[];
+  downstream: (BeamRecord & { via: string; distance: number })[];
+}
+
+export interface BeamModelSummary {
+  model_id: string;
+  name: string | null;
+  source: string | null;
+  version: string | null;
+  systems: BeamRecord[];
+  paths: number;
+  elements: number;
+  datasets: number;
+}
+
+export interface BeamModelCheck {
+  index: number;
+  model: string | null;
+  ok: boolean;
+  problems: string[];
+  summary: { systems: number; paths: number; elements: number; datasets: number; observables: number } | null;
+}
+
+export interface BeamImportReport {
+  model: string;
+  state: string;
+  systems: number;
+  paths: number;
+  elements: number;
+  datasets: number;
+  values: number;
+  awaiting_policy: boolean;
+}
+
+/** The canonical representation (argus.beam-model/1, docs/beam-model.md §8). */
+export interface CanonicalValues {
+  s?: number | null;
+  geometry?: Record<string, number> | null;
+  physics?: Record<string, unknown>;
+  optics?: Record<string, unknown>;
+  native?: { source?: string; type?: string; parameters?: Record<string, unknown> };
+}
+export interface CanonicalElement {
+  id: string;
+  name?: string;
+  type: string;
+  capabilities?: string[];
+  observes?: string[];
+  native?: { source?: string; type?: string; parameters?: Record<string, unknown> };
+}
+export interface CanonicalPath {
+  id: string;
+  name?: string;
+  system: string;
+  topology: "open" | "closed";
+  elements: string[];
+  reference?: string;
+  length?: number;
+  direction?: string;
+  branches?: { at: string; to_path: string }[];
+}
+export interface CanonicalBeam {
+  id: string;
+  name?: string;
+  kind: "particle" | "photon";
+  parameters: Record<string, unknown>;
+}
+export interface CanonicalSystem {
+  id: string;
+  name?: string;
+  kind: string;
+  beams: CanonicalBeam[];
+}
+export interface CanonicalDataset {
+  id: string;
+  name?: string;
+  kind: string;
+  path: string;
+  values: Record<string, CanonicalValues>;
+  [k: string]: unknown;
+}
+export interface CanonicalBeamModel {
+  format: string;
+  model: { id: string; name?: string; source?: string; version?: string; git_commit?: string; simulator?: string };
+  systems: CanonicalSystem[];
+  paths: CanonicalPath[];
+  elements: CanonicalElement[];
+  observables?: { quantity: string; unit?: string; domain?: string; plane?: string }[];
+  datasets?: CanonicalDataset[];
+}

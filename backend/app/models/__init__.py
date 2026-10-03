@@ -68,3 +68,4 @@ from app.models import intake  # noqa: F401,E402
 from app.models import catalogue_mapping  # noqa: F401,E402
 from app.models import device  # noqa: F401,E402
 from app.models import ask_conversation  # noqa: F401,E402
+from app.models import beam_model  # noqa: F401,E402

@@ -19,6 +19,8 @@ import { DocumentSuggestions } from "./pages/documents/Suggestions";
 import { GlobalValueForm } from "./pages/globalvalues/Form";
 import { Ask } from "./pages/ai/Ask";
 import { GraphExplorer } from "./pages/graph/Explorer";
+import { BeamModelPage } from "./pages/beam/BeamModel";
+import { BeamModelEditorPage } from "./pages/beam/BeamModelEditor";
 import { GlobalValueList } from "./pages/globalvalues/List";
 import { ImportList } from "./pages/imports/List";
 import { MarkdownImport } from "./pages/imports/Markdown";
@@ -103,6 +105,9 @@ export function App() {
           <Route path="/documents/:uid" element={<DocumentDetail />} />
 
           <Route path="/graph" element={<GraphExplorer />} />
+          <Route path="/beam-model" element={<BeamModelPage />} />
+          <Route path="/beam-model/new" element={<BeamModelEditorPage />} />
+          <Route path="/beam-model/edit/:modelId" element={<BeamModelEditorPage />} />
           <Route path="/review" element={<ReviewQueuePage />} />
           <Route path="/migration" element={<MigrationPage />} />
           <Route path="/migration/catalogue" element={<CatalogueMappingPage />} />

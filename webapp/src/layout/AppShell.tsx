@@ -163,6 +163,7 @@ function NewMenu() {
     { to: "/tickets/new", label: "Ticket", hint: "Report an issue or request work", dot: "bg-amber-500" },
     { to: "/assets/new", label: "Asset", hint: "Register equipment or a position", dot: "bg-indigo-500" },
     { to: "/documents/new", label: "Document", hint: "Procedure, manual, report", dot: "bg-emerald-500" },
+    { to: "/beam-model/new", label: "Beam model", hint: "Upload machine models, or write one", dot: "bg-violet-500" },
   ];
   return (
     <div className="relative" ref={ref}>
@@ -298,6 +299,9 @@ export function AppShell() {
                 kind only belongs in that kind's section. */}
             <NavItem to="/graph">
               <span className="w-4 text-center text-slate-400">⌗</span> Knowledge graph
+            </NavItem>
+            <NavItem to="/beam-model">
+              <span className="w-4 text-center text-slate-400">◎</span> Beam model
             </NavItem>
             <NavItem to="/ask">
               <span className="w-4 text-center text-slate-400">?</span> Ask ARGUS

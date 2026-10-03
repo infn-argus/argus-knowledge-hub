@@ -28,6 +28,21 @@ NOT_EQUIPMENT = POS | CONTROL | {INSTALLATION, ACCESS_POINT, "Location", "Facili
                                  "Machine Module", "Product Model", "Work Package", "Equipment Port"}
 DEPRECATED = {"replaced", "carried by", "on line", "spare for"}
 
+
+def _beam_elements() -> set:
+    from app.services.asset_types import BY_NAME
+    out = set()
+    for name in BY_NAME:
+        cur = name
+        while cur is not None and cur != "Beam Element":
+            cur = BY_NAME[cur].parent
+        if cur == "Beam Element":
+            out.add(name)
+    return out - {"Beam Element"}
+
+
+BEAM_ELEMENTS = _beam_elements()
+
 # name: (source rule, target rule); a rule is ("in", types) or ("not in", types) or None.
 ENDPOINTS = {
     "installed at": (("in", {INSTALLATION}), ("in", POS)),
@@ -39,6 +54,15 @@ ENDPOINTS = {
     "port of": (("in", {"Equipment Port"}), ("not in", NOT_EQUIPMENT - {"Equipment Port"})),
     "runs on": (("in", {"IOC"}), None),
     "part of": (None, ("not in", {"Location"})),
+    # The beam model (docs/beam-model.md).
+    "branches to": (("in", BEAM_ELEMENTS), ("in", BEAM_ELEMENTS)),
+    "closes to": (("in", BEAM_ELEMENTS), ("in", BEAM_ELEMENTS)),
+    "observes": (("in", BEAM_ELEMENTS), ("in", {"Observable"})),
+    "signal of": (("in", {"Control Signal"}), ("in", CONTROL)),
+    "signal for": (("in", {"Control Signal"}), ("not in", {INSTALLATION, ACCESS_POINT, "Control Signal"})),
+    "starts at": (("in", {"Beam Path"}), ("in", BEAM_ELEMENTS)),
+    "beam of": (("in", {"Particle Beam", "Photon Beam"}), ("in", {"Beam System"})),
+    "models": (("in", {"Model Dataset"}), ("in", {"Beam Path", "Beam System"})),
 }
 # name: (at most per source, at most per target); None is unbounded.
 CARDINALITY = {
@@ -49,6 +73,10 @@ CARDINALITY = {
     "part of": (1, None),
     "composed of": (None, 1),
     "runs on": (1, None),
+    "closes to": (1, 1),
+    "starts at": (1, None),
+    "signal of": (1, None),
+    "models": (1, None),
 }
 ACYCLIC = {"part of", "composed of"}
 # Edges that may keep pointing at a retired record (history of the retired thing itself).

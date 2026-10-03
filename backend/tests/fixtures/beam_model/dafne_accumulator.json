@@ -1,0 +1,1113 @@
+{
+ "format": "argus.beam-model/1",
+ "model": {
+  "id": "dafne-accumulator",
+  "name": "DAΦNE Accumulator",
+  "source": "accelerator-model-toolbox",
+  "version": "2026.1",
+  "git_commit": "1a2b3c4",
+  "simulator": "madx"
+ },
+ "systems": [
+  {
+   "id": "dafne-accumulator",
+   "name": "DAΦNE Accumulator",
+   "kind": "Accumulator",
+   "beams": [
+    {
+     "id": "e-",
+     "name": "Accumulator electrons",
+     "kind": "particle",
+     "parameters": {
+      "species": "electron",
+      "charge": -1,
+      "reference_energy": 0.51
+     }
+    }
+   ]
+  }
+ ],
+ "paths": [
+  {
+   "id": "accumulator-ring",
+   "name": "Accumulator ring",
+   "system": "dafne-accumulator",
+   "topology": "closed",
+   "length": 32.56,
+   "direction": "forward",
+   "reference": "SEPA101",
+   "elements": [
+    "SEPA101",
+    "KCKA101",
+    "QUAA101",
+    "SXTA101",
+    "BPSA101",
+    "CHHA101",
+    "DHRA101",
+    "QUAA102",
+    "BPSA102",
+    "CHVA101",
+    "DHRA102",
+    "QUAA103",
+    "SXTA102",
+    "BPSA103",
+    "KCKA102",
+    "SEPA102",
+    "QUAA104",
+    "DHRA103",
+    "BPSA104",
+    "CHHA102",
+    "QUAA105",
+    "DHRA104",
+    "BPSA105",
+    "CHVA102"
+   ],
+   "branches": [
+    {
+     "at": "SEPA102",
+     "to_path": "extraction-line"
+    }
+   ]
+  },
+  {
+   "id": "extraction-line",
+   "name": "Extraction line",
+   "system": "dafne-accumulator",
+   "topology": "open",
+   "elements": [
+    "QUAT101",
+    "BPST101",
+    "DHPT101",
+    "DMPT101"
+   ]
+  }
+ ],
+ "elements": [
+  {
+   "id": "SEPA101",
+   "type": "septum",
+   "native": {
+    "source": "madx",
+    "type": "SEPTUM",
+    "parameters": {
+     "L": 0.6
+    }
+   }
+  },
+  {
+   "id": "KCKA101",
+   "type": "kicker",
+   "native": {
+    "source": "madx",
+    "type": "HKICKER",
+    "parameters": {
+     "L": 0.3
+    }
+   },
+   "capabilities": [
+    "beam_transport",
+    "steering",
+    "horizontal_steering",
+    "powered",
+    "pulsed"
+   ]
+  },
+  {
+   "id": "QUAA101",
+   "type": "quadrupole",
+   "native": {
+    "source": "madx",
+    "type": "QUADRUPOLE",
+    "parameters": {
+     "L": 0.3
+    }
+   }
+  },
+  {
+   "id": "SXTA101",
+   "type": "sextupole",
+   "native": {
+    "source": "madx",
+    "type": "SEXTUPOLE",
+    "parameters": {
+     "L": 0.1
+    }
+   }
+  },
+  {
+   "id": "BPSA101",
+   "type": "bpm",
+   "native": {
+    "source": "madx",
+    "type": "MONITOR",
+    "parameters": {
+     "L": 0.0
+    }
+   },
+   "observes": [
+    "beam.position.x",
+    "beam.position.y"
+   ]
+  },
+  {
+   "id": "CHHA101",
+   "type": "corrector",
+   "native": {
+    "source": "madx",
+    "type": "KICKER",
+    "parameters": {
+     "L": 0.1
+    }
+   },
+   "capabilities": [
+    "beam_transport",
+    "steering",
+    "horizontal_steering",
+    "powered"
+   ]
+  },
+  {
+   "id": "DHRA101",
+   "type": "dipole",
+   "native": {
+    "source": "madx",
+    "type": "SBEND",
+    "parameters": {
+     "L": 1.2
+    }
+   }
+  },
+  {
+   "id": "QUAA102",
+   "type": "quadrupole",
+   "native": {
+    "source": "madx",
+    "type": "QUADRUPOLE",
+    "parameters": {
+     "L": 0.3
+    }
+   }
+  },
+  {
+   "id": "BPSA102",
+   "type": "bpm",
+   "native": {
+    "source": "madx",
+    "type": "MONITOR",
+    "parameters": {
+     "L": 0.0
+    }
+   },
+   "observes": [
+    "beam.position.x",
+    "beam.position.y"
+   ]
+  },
+  {
+   "id": "CHVA101",
+   "type": "corrector",
+   "native": {
+    "source": "madx",
+    "type": "KICKER",
+    "parameters": {
+     "L": 0.1
+    }
+   },
+   "capabilities": [
+    "beam_transport",
+    "steering",
+    "vertical_steering",
+    "powered"
+   ]
+  },
+  {
+   "id": "DHRA102",
+   "type": "dipole",
+   "native": {
+    "source": "madx",
+    "type": "SBEND",
+    "parameters": {
+     "L": 1.2
+    }
+   }
+  },
+  {
+   "id": "QUAA103",
+   "type": "quadrupole",
+   "native": {
+    "source": "madx",
+    "type": "QUADRUPOLE",
+    "parameters": {
+     "L": 0.3
+    }
+   }
+  },
+  {
+   "id": "SXTA102",
+   "type": "sextupole",
+   "native": {
+    "source": "madx",
+    "type": "SEXTUPOLE",
+    "parameters": {
+     "L": 0.1
+    }
+   }
+  },
+  {
+   "id": "BPSA103",
+   "type": "bpm",
+   "native": {
+    "source": "madx",
+    "type": "MONITOR",
+    "parameters": {
+     "L": 0.0
+    }
+   },
+   "observes": [
+    "beam.position.x",
+    "beam.position.y"
+   ]
+  },
+  {
+   "id": "KCKA102",
+   "type": "kicker",
+   "native": {
+    "source": "madx",
+    "type": "HKICKER",
+    "parameters": {
+     "L": 0.3
+    }
+   },
+   "capabilities": [
+    "beam_transport",
+    "steering",
+    "horizontal_steering",
+    "powered",
+    "pulsed"
+   ]
+  },
+  {
+   "id": "SEPA102",
+   "type": "septum",
+   "native": {
+    "source": "madx",
+    "type": "SEPTUM",
+    "parameters": {
+     "L": 0.6
+    }
+   }
+  },
+  {
+   "id": "QUAA104",
+   "type": "quadrupole",
+   "native": {
+    "source": "madx",
+    "type": "QUADRUPOLE",
+    "parameters": {
+     "L": 0.3
+    }
+   }
+  },
+  {
+   "id": "DHRA103",
+   "type": "dipole",
+   "native": {
+    "source": "madx",
+    "type": "SBEND",
+    "parameters": {
+     "L": 1.2
+    }
+   }
+  },
+  {
+   "id": "BPSA104",
+   "type": "bpm",
+   "native": {
+    "source": "madx",
+    "type": "MONITOR",
+    "parameters": {
+     "L": 0.0
+    }
+   },
+   "observes": [
+    "beam.position.x",
+    "beam.position.y"
+   ]
+  },
+  {
+   "id": "CHHA102",
+   "type": "corrector",
+   "native": {
+    "source": "madx",
+    "type": "KICKER",
+    "parameters": {
+     "L": 0.1
+    }
+   },
+   "capabilities": [
+    "beam_transport",
+    "steering",
+    "horizontal_steering",
+    "powered"
+   ]
+  },
+  {
+   "id": "QUAA105",
+   "type": "quadrupole",
+   "native": {
+    "source": "madx",
+    "type": "QUADRUPOLE",
+    "parameters": {
+     "L": 0.3
+    }
+   }
+  },
+  {
+   "id": "DHRA104",
+   "type": "dipole",
+   "native": {
+    "source": "madx",
+    "type": "SBEND",
+    "parameters": {
+     "L": 1.2
+    }
+   }
+  },
+  {
+   "id": "BPSA105",
+   "type": "bpm",
+   "native": {
+    "source": "madx",
+    "type": "MONITOR",
+    "parameters": {
+     "L": 0.0
+    }
+   },
+   "observes": [
+    "beam.position.x",
+    "beam.position.y"
+   ]
+  },
+  {
+   "id": "CHVA102",
+   "type": "corrector",
+   "native": {
+    "source": "madx",
+    "type": "KICKER",
+    "parameters": {
+     "L": 0.1
+    }
+   },
+   "capabilities": [
+    "beam_transport",
+    "steering",
+    "vertical_steering",
+    "powered"
+   ]
+  },
+  {
+   "id": "QUAT101",
+   "type": "quadrupole"
+  },
+  {
+   "id": "BPST101",
+   "type": "bpm",
+   "observes": [
+    "beam.position.x",
+    "beam.position.y"
+   ]
+  },
+  {
+   "id": "DHPT101",
+   "type": "dipole"
+  },
+  {
+   "id": "DMPT101",
+   "type": "dump"
+  }
+ ],
+ "datasets": [
+  {
+   "id": "design-2026",
+   "name": "Design optics 2026",
+   "kind": "design",
+   "path": "accumulator-ring",
+   "simulator": "madx",
+   "simulator_version": "5.09.00",
+   "generated_at": "2026-02-01T10:00:00Z",
+   "valid_from": "2026-01-01",
+   "values": {
+    "SEPA101": {
+     "s": 0.0,
+     "geometry": {
+      "x": 0.0,
+      "y": 0.0,
+      "yaw": 0.0
+     },
+     "physics": {
+      "length": 0.6
+     },
+     "native": {
+      "source": "madx",
+      "type": "SEPTUM",
+      "parameters": {
+       "L": 0.6
+      }
+     },
+     "optics": {
+      "beta_x": 3.017,
+      "beta_y": 4.992,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.073,
+      "mux": 0.045,
+      "muy": 0.032
+     }
+    },
+    "KCKA101": {
+     "s": 0.8667,
+     "geometry": {
+      "x": 0.8667,
+      "y": 0.0,
+      "yaw": 0.0
+     },
+     "physics": {
+      "length": 0.3
+     },
+     "native": {
+      "source": "madx",
+      "type": "HKICKER",
+      "parameters": {
+       "L": 0.3
+      }
+     },
+     "optics": {
+      "beta_x": 3.239,
+      "beta_y": 4.88,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.26,
+      "mux": 0.1742,
+      "muy": 0.1236
+     }
+    },
+    "QUAA101": {
+     "s": 1.4333,
+     "geometry": {
+      "x": 1.4333,
+      "y": 0.0,
+      "yaw": 0.0
+     },
+     "physics": {
+      "length": 0.3,
+      "k1": 4.30926
+     },
+     "native": {
+      "source": "madx",
+      "type": "QUADRUPOLE",
+      "parameters": {
+       "L": 0.3,
+       "K1": 4.30926
+      }
+     },
+     "optics": {
+      "beta_x": 3.665,
+      "beta_y": 4.667,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.377,
+      "mux": 0.3033,
+      "muy": 0.2153
+     }
+    },
+    "SXTA101": {
+     "s": 2.0,
+     "geometry": {
+      "x": 2.0,
+      "y": 0.0,
+      "yaw": 0.0
+     },
+     "physics": {
+      "length": 0.1,
+      "k2": 12.5
+     },
+     "native": {
+      "source": "madx",
+      "type": "SEXTUPOLE",
+      "parameters": {
+       "L": 0.1,
+       "K2": 12.5
+      }
+     },
+     "optics": {
+      "beta_x": 4.182,
+      "beta_y": 4.409,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.393,
+      "mux": 0.4325,
+      "muy": 0.307
+     }
+    },
+    "BPSA101": {
+     "s": 2.3667,
+     "geometry": {
+      "x": 2.3667,
+      "y": 0.0,
+      "yaw": 0.0
+     },
+     "physics": {
+      "length": 0.0
+     },
+     "native": {
+      "source": "madx",
+      "type": "MONITOR",
+      "parameters": {
+       "L": 0.0
+      }
+     },
+     "optics": {
+      "beta_x": 4.649,
+      "beta_y": 4.175,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.304,
+      "mux": 0.5617,
+      "muy": 0.3986
+     }
+    },
+    "CHHA101": {
+     "s": 2.6333,
+     "geometry": {
+      "x": 2.6333,
+      "y": 0.0,
+      "yaw": 0.0
+     },
+     "physics": {
+      "length": 0.1
+     },
+     "native": {
+      "source": "madx",
+      "type": "KICKER",
+      "parameters": {
+       "L": 0.1
+      }
+     },
+     "optics": {
+      "beta_x": 4.942,
+      "beta_y": 4.029,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.134,
+      "mux": 0.6908,
+      "muy": 0.4903
+     }
+    },
+    "DHRA101": {
+     "s": 3.0,
+     "geometry": {
+      "x": 3.0,
+      "y": 0.0,
+      "yaw": 0.0
+     },
+     "physics": {
+      "length": 1.2,
+      "angle": 1.570796
+     },
+     "native": {
+      "source": "madx",
+      "type": "SBEND",
+      "parameters": {
+       "L": 1.2,
+       "ANGLE": 1.570796
+      }
+     },
+     "optics": {
+      "beta_x": 4.983,
+      "beta_y": 4.008,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.073,
+      "mux": 0.82,
+      "muy": 0.582
+     }
+    },
+    "QUAA102": {
+     "s": 5.835,
+     "geometry": {
+      "x": 3.7639,
+      "y": 2.3989,
+      "yaw": 1.5708
+     },
+     "physics": {
+      "length": 0.3,
+      "k1": 4.9
+     },
+     "native": {
+      "source": "madx",
+      "type": "QUADRUPOLE",
+      "parameters": {
+       "L": 0.3,
+       "K1": 4.9
+      }
+     },
+     "optics": {
+      "beta_x": 4.761,
+      "beta_y": 4.12,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.26,
+      "mux": 0.9492,
+      "muy": 0.6736
+     }
+    },
+    "BPSA102": {
+     "s": 7.77,
+     "geometry": {
+      "x": 3.7639,
+      "y": 4.3339,
+      "yaw": 1.5708
+     },
+     "physics": {
+      "length": 0.0
+     },
+     "native": {
+      "source": "madx",
+      "type": "MONITOR",
+      "parameters": {
+       "L": 0.0
+      }
+     },
+     "optics": {
+      "beta_x": 4.335,
+      "beta_y": 4.333,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.377,
+      "mux": 1.0783,
+      "muy": 0.7653
+     }
+    },
+    "CHVA101": {
+     "s": 9.405,
+     "geometry": {
+      "x": 3.7639,
+      "y": 5.9689,
+      "yaw": 1.5708
+     },
+     "physics": {
+      "length": 0.1
+     },
+     "native": {
+      "source": "madx",
+      "type": "KICKER",
+      "parameters": {
+       "L": 0.1
+      }
+     },
+     "optics": {
+      "beta_x": 3.818,
+      "beta_y": 4.591,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.393,
+      "mux": 1.2075,
+      "muy": 0.857
+     }
+    },
+    "DHRA102": {
+     "s": 11.14,
+     "geometry": {
+      "x": 3.7639,
+      "y": 7.7039,
+      "yaw": 1.5708
+     },
+     "physics": {
+      "length": 1.2,
+      "angle": 1.570796
+     },
+     "native": {
+      "source": "madx",
+      "type": "SBEND",
+      "parameters": {
+       "L": 1.2,
+       "ANGLE": 1.570796
+      }
+     },
+     "optics": {
+      "beta_x": 3.351,
+      "beta_y": 4.825,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.304,
+      "mux": 1.3367,
+      "muy": 0.9486
+     }
+    },
+    "QUAA103": {
+     "s": 13.1029,
+     "geometry": {
+      "x": 2.2371,
+      "y": 8.4679,
+      "yaw": 3.1416
+     },
+     "physics": {
+      "length": 0.3,
+      "k1": 4.2
+     },
+     "native": {
+      "source": "madx",
+      "type": "QUADRUPOLE",
+      "parameters": {
+       "L": 0.3,
+       "K1": 4.2
+      }
+     },
+     "optics": {
+      "beta_x": 3.058,
+      "beta_y": 4.971,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.134,
+      "mux": 1.4658,
+      "muy": 1.0403
+     }
+    },
+    "SXTA102": {
+     "s": 14.1657,
+     "geometry": {
+      "x": 1.1743,
+      "y": 8.4679,
+      "yaw": 3.1416
+     },
+     "physics": {
+      "length": 0.1,
+      "k2": 12.5
+     },
+     "native": {
+      "source": "madx",
+      "type": "SEXTUPOLE",
+      "parameters": {
+       "L": 0.1,
+       "K2": 12.5
+      }
+     },
+     "optics": {
+      "beta_x": 3.017,
+      "beta_y": 4.992,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.073,
+      "mux": 1.595,
+      "muy": 1.132
+     }
+    },
+    "BPSA103": {
+     "s": 15.0286,
+     "geometry": {
+      "x": 0.3114,
+      "y": 8.4679,
+      "yaw": 3.1416
+     },
+     "physics": {
+      "length": 0.0
+     },
+     "native": {
+      "source": "madx",
+      "type": "MONITOR",
+      "parameters": {
+       "L": 0.0
+      }
+     },
+     "optics": {
+      "beta_x": 3.239,
+      "beta_y": 4.88,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.26,
+      "mux": 1.7242,
+      "muy": 1.2236
+     }
+    },
+    "KCKA102": {
+     "s": 15.7914,
+     "geometry": {
+      "x": -0.4514,
+      "y": 8.4679,
+      "yaw": 3.1416
+     },
+     "physics": {
+      "length": 0.3
+     },
+     "native": {
+      "source": "madx",
+      "type": "HKICKER",
+      "parameters": {
+       "L": 0.3
+      }
+     },
+     "optics": {
+      "beta_x": 3.665,
+      "beta_y": 4.667,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.377,
+      "mux": 1.8533,
+      "muy": 1.3153
+     }
+    },
+    "SEPA102": {
+     "s": 16.8543,
+     "geometry": {
+      "x": -1.5143,
+      "y": 8.4679,
+      "yaw": 3.1416
+     },
+     "physics": {
+      "length": 0.6
+     },
+     "native": {
+      "source": "madx",
+      "type": "SEPTUM",
+      "parameters": {
+       "L": 0.6
+      }
+     },
+     "optics": {
+      "beta_x": 4.182,
+      "beta_y": 4.409,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.393,
+      "mux": 1.9825,
+      "muy": 1.407
+     }
+    },
+    "QUAA104": {
+     "s": 18.2171,
+     "geometry": {
+      "x": -2.8771,
+      "y": 8.4679,
+      "yaw": 3.1416
+     },
+     "physics": {
+      "length": 0.3,
+      "k1": 3.7
+     },
+     "native": {
+      "source": "madx",
+      "type": "QUADRUPOLE",
+      "parameters": {
+       "L": 0.3,
+       "K1": 3.7
+      }
+     },
+     "optics": {
+      "beta_x": 4.649,
+      "beta_y": 4.175,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.304,
+      "mux": 2.1117,
+      "muy": 1.4986
+     }
+    },
+    "DHRA103": {
+     "s": 19.28,
+     "geometry": {
+      "x": -3.94,
+      "y": 8.4679,
+      "yaw": 3.1416
+     },
+     "physics": {
+      "length": 1.2,
+      "angle": 1.570796
+     },
+     "native": {
+      "source": "madx",
+      "type": "SBEND",
+      "parameters": {
+       "L": 1.2,
+       "ANGLE": 1.570796
+      }
+     },
+     "optics": {
+      "beta_x": 4.942,
+      "beta_y": 4.029,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.134,
+      "mux": 2.2408,
+      "muy": 1.5903
+     }
+    },
+    "BPSA104": {
+     "s": 22.115,
+     "geometry": {
+      "x": -4.7039,
+      "y": 6.0689,
+      "yaw": 4.7124
+     },
+     "physics": {
+      "length": 0.0
+     },
+     "native": {
+      "source": "madx",
+      "type": "MONITOR",
+      "parameters": {
+       "L": 0.0
+      }
+     },
+     "optics": {
+      "beta_x": 4.983,
+      "beta_y": 4.008,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.073,
+      "mux": 2.37,
+      "muy": 1.682
+     }
+    },
+    "CHHA102": {
+     "s": 23.75,
+     "geometry": {
+      "x": -4.7039,
+      "y": 4.4339,
+      "yaw": 4.7124
+     },
+     "physics": {
+      "length": 0.1
+     },
+     "native": {
+      "source": "madx",
+      "type": "KICKER",
+      "parameters": {
+       "L": 0.1
+      }
+     },
+     "optics": {
+      "beta_x": 4.761,
+      "beta_y": 4.12,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.26,
+      "mux": 2.4992,
+      "muy": 1.7736
+     }
+    },
+    "QUAA105": {
+     "s": 25.485,
+     "geometry": {
+      "x": -4.7039,
+      "y": 2.6989,
+      "yaw": 4.7124
+     },
+     "physics": {
+      "length": 0.3,
+      "k1": 4.5
+     },
+     "native": {
+      "source": "madx",
+      "type": "QUADRUPOLE",
+      "parameters": {
+       "L": 0.3,
+       "K1": 4.5
+      }
+     },
+     "optics": {
+      "beta_x": 4.335,
+      "beta_y": 4.333,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.377,
+      "mux": 2.6283,
+      "muy": 1.8653
+     }
+    },
+    "DHRA104": {
+     "s": 27.42,
+     "geometry": {
+      "x": -4.7039,
+      "y": 0.7639,
+      "yaw": 4.7124
+     },
+     "physics": {
+      "length": 1.2,
+      "angle": 1.570796
+     },
+     "native": {
+      "source": "madx",
+      "type": "SBEND",
+      "parameters": {
+       "L": 1.2,
+       "ANGLE": 1.570796
+      }
+     },
+     "optics": {
+      "beta_x": 3.818,
+      "beta_y": 4.591,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.393,
+      "mux": 2.7575,
+      "muy": 1.957
+     }
+    },
+    "BPSA105": {
+     "s": 29.9,
+     "geometry": {
+      "x": -2.66,
+      "y": 0.0,
+      "yaw": 6.2832
+     },
+     "physics": {
+      "length": 0.0
+     },
+     "native": {
+      "source": "madx",
+      "type": "MONITOR",
+      "parameters": {
+       "L": 0.0
+      }
+     },
+     "optics": {
+      "beta_x": 3.351,
+      "beta_y": 4.825,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.304,
+      "mux": 2.8867,
+      "muy": 2.0486
+     }
+    },
+    "CHVA102": {
+     "s": 31.18,
+     "geometry": {
+      "x": -1.38,
+      "y": 0.0,
+      "yaw": 6.2832
+     },
+     "physics": {
+      "length": 0.1
+     },
+     "native": {
+      "source": "madx",
+      "type": "KICKER",
+      "parameters": {
+       "L": 0.1
+      }
+     },
+     "optics": {
+      "beta_x": 3.058,
+      "beta_y": 4.971,
+      "alpha_x": 0.0,
+      "alpha_y": 0.0,
+      "dx": 0.134,
+      "mux": 3.0158,
+      "muy": 2.1403
+     }
+    }
+   }
+  }
+ ]
+}

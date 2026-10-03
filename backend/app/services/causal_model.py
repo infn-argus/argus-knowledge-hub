@@ -118,6 +118,17 @@ SEMANTICS: dict = {
                                  note="member → section: a member failing degrades the section"),
     "upstream of": RelationSemantics("beam", FORWARD, DEGRADATION,
                                      note="beam element → the next one downstream"),
+    # The beam model's topology (docs/beam-model.md). `s` orders elements along one path; these say how
+    # paths are actually joined, so a branch never has to be faked with a coordinate.
+    "branches to": RelationSemantics("beam", FORWARD, DEGRADATION,
+                                     note="branch point (a septum, a splitter) → the first element of a branch path"),
+    "closes to": RelationSemantics("beam", FORWARD, DEGRADATION,
+                                   note="last element of a closed path → its first: a ring has no end"),
+    # A sensor's signal reaches the electronics that read it: when the pickup fails, its reading is gone.
+    "connected to": RelationSemantics("control", FORWARD, CONTROL,
+                                      note="pickup or sensor → the electronics that read it"),
+    "signal of": RelationSemantics("control", REVERSE, CONTROL,
+                                   note="control signal → the control device (or IOC) that provides it"),
     "located in": RelationSemantics("environment", REVERSE, FUNCTION,
                                     note="asset → room or rack: the place fails, the asset with it"),
 
@@ -131,6 +142,14 @@ SEMANTICS: dict = {
     "described by": RelationSemantics("provenance", NONE, None),
     "measures": RelationSemantics("provenance", NONE, None,
                                   note="a measurement observes an element, it does not cause its faults"),
+    # The beam model: what a model says and what a signal means. Knowing a diagnostic observes beam.position.x
+    # does not make a fault travel; the hardware and control edges above carry that.
+    "observes": RelationSemantics("provenance", NONE, None, note="diagnostic element → an observable it measures"),
+    "signal for": RelationSemantics("provenance", NONE, None,
+                                    note="control signal → the beam element or asset whose quantity it carries"),
+    "starts at": RelationSemantics("provenance", NONE, None, note="beam path → its reference element (s = 0)"),
+    "beam of": RelationSemantics("provenance", NONE, None, note="beam → the beam system that carries it"),
+    "models": RelationSemantics("provenance", NONE, None, note="model dataset → the beam path it describes"),
     "replaced": RelationSemantics("provenance", NONE, None),
     "spare for": RelationSemantics("provenance", NONE, None),
     "requires": RelationSemantics("provenance", NONE, None),
