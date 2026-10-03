@@ -20,6 +20,7 @@ export function AdminShell() {
     items.push({ to: "/admin/workspaces", label: "Workspaces" });
     items.push({ to: "/admin/users", label: "Users" });
     items.push({ to: "/admin/settings", label: "Settings" });
+    items.push({ to: "/admin/portability", label: "Portability" });
   }
 
   return (

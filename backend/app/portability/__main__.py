@@ -94,6 +94,33 @@ def restore_drill(cfg: service.Config, repository: str, database_url: str, prefi
         admin.dispose()
 
 
+def dev_setup() -> dict:
+    """For a development instance only: create what the configuration names, where it is missing — a
+    throwaway Ed25519 key and its allowed-signers file, the registered repositories as local bare
+    repositories, and the artifact stores. Never overwrites a key. Production keys come from the
+    institution's secret store (docs/operations.md, "Key management")."""
+    from app.portability import signing
+    done = {}
+    key = os.environ.get("ARGUS_PORTABILITY_SIGNING_KEY")
+    if key and not Path(key).exists():
+        Path(key).parent.mkdir(parents=True, exist_ok=True)
+        signer = signing.new_key(Path(key))
+        done["signing_key"] = signer.key_id
+        trusted = os.environ.get("ARGUS_PORTABILITY_TRUSTED_KEYS")
+        if trusted:
+            Path(trusted).write_text(signing.allowed_signers_line(signer))
+            done["trusted_keys"] = trusted
+    cfg = service.config()
+    for name, url in cfg.repositories.items():
+        if url.startswith("/") and not Path(url).exists():
+            gitrepo.init_bare(Path(url))
+            done[f"repository {name}"] = url
+    for name, store in cfg.stores.items():
+        store.root.mkdir(parents=True, exist_ok=True)
+        done[f"store {name}"] = str(store.root)
+    return done or {"note": "everything was already in place"}
+
+
 def main(argv=None) -> int:
     from app.db import SessionLocal, engine
     ap = argparse.ArgumentParser(prog="python -m app.portability")
@@ -124,6 +151,7 @@ def main(argv=None) -> int:
     d = sub.add_parser("drill")
     d.add_argument("--repository", required=True)
     d.add_argument("--prefix", default="export/full/")
+    sub.add_parser("dev-setup", help="development only: a throwaway key, a local bare repository, an artifact store")
     sc = sub.add_parser("schemas")
     sc.add_argument("--out", required=True)
     a = ap.parse_args(argv)
@@ -134,6 +162,9 @@ def main(argv=None) -> int:
         for rel, body in exporter.json_schemas().items():
             (out / rel).parent.mkdir(parents=True, exist_ok=True)
             (out / rel).write_text(json.dumps(body, indent=1, sort_keys=True) + "\n")
+        return 0
+    if a.cmd == "dev-setup":
+        _print(dev_setup())
         return 0
     if a.cmd == "drill":
         report = restore_drill(cfg, a.repository, os.environ["DATABASE_URL"], a.prefix)

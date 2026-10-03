@@ -36298,6 +36298,75 @@
         ]
       }
     },
+    "/v1/portability/config": {
+      "get": {
+        "description": "What a person can choose from: registered repositories and artifact stores (names only, never\nURLs or paths), whether signing and verification are set up, restricted classes, modes, outcomes.",
+        "operationId": "portability_config_v1_portability_config_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Portability Config",
+        "tags": [
+          "portability"
+        ]
+      }
+    },
     "/v1/portability/exports": {
       "get": {
         "operationId": "list_exports_v1_portability_exports_get",

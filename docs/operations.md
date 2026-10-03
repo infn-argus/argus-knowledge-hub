@@ -148,6 +148,19 @@ The API image includes `git` and `openssh-client`. Nothing from Git is checked o
   `sha256/<aa>/<digest>` files as they are. They are immutable and named by content.
 * Keep the store as long as the repository's history that references it.
 
+### In the web application
+
+**Administration → Portability** runs the same lifecycles (export-import-design §17):
+* Exports: request, give dependencies their outcome, approve (another administrator for high-risk
+  ones), generate, publish to Git, download, revoke.
+* Imports: register a tag (or upload a checkpoint), fetch, verify, dry run with decisions, approve,
+  execute or resume, finalize or discard.
+
+For a development instance, `docker compose exec api python -m app.portability dev-setup` creates a
+throwaway signing key, the allowed-signers file, a local bare repository `escrow-dev` and an artifact
+store `vault-dev` under the `portability` volume (the variables are set in `docker-compose.yml`).
+Never use that key for anything real.
+
 ### A full export, and increments
 
 ```

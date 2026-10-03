@@ -48,7 +48,7 @@ Each capability is one of:
 | Increments: chain, order, equality with a checkpoint | Tested (A10, A11) |
 | Periodic restore drill | Tested (A30); its schedule is operations' |
 | API with state machines, audit, separation of duties | Tested |
-| Web user interface | Proposed (API and CLI only) |
+| Web user interface (Administration → Portability) | Implemented; checked by hand in a browser (export, publish, evidence import, blocked clone, discard), no automated UI test |
 | Step-up authentication for high-risk exports | Proposed (§15) |
 | Foreign and legacy schemas through AI-assisted mapping | Proposed (§11) |
 | Catalogue and policy changes reviewed in Git, then activated | Proposed (the repository shows them; activation from Git is not built) |
@@ -569,7 +569,7 @@ goes to `awaiting_mapping` and then through the governed path of `asset-model-re
 ARGUS already has the parts this reuses: AI Intake, catalogue mapping with AI passes, record
 mapping and legacy migration plans. Wiring them to `awaiting_mapping` is not built.
 
-## 17. User experience (proposed)
+## 17. User experience
 
 The API returns, for each export and import, the labels a page must show:
 
@@ -587,14 +587,34 @@ It also returns the dependency report and its outcomes, size estimates, the mani
 results, the dry-run report (catalogue, identity and merge conflicts, unresolved references,
 chain), checkpoints, the reconciliation and the provenance.
 
-A web page under Administration is proposed for:
+**Administration → Portability** (`webapp/src/pages/admin/portability/`, implemented) shows them:
 
-* choosing the scope and destination;
-* previewing the tag or commit;
-* warnings and approval ownership;
-* progress of generation, upload and publication.
+* **Exports.** A list with state and labels. "New export" chooses the scope (workspaces, everything, an
+  increment of a published export, evidence only), the registered repository and artifact store, and
+  the restricted classes to include, and warns when the export is high-risk. Its page shows:
+  * the lifecycle as steps;
+  * the estimate and warnings;
+  * every dependency with a choice of outcome, analysed again on saving;
+  * approval, refused to the requester of a high-risk export;
+  * generation, publication to Git with a confirmation, a download, and revocation with a reason;
+  * the watermark, the Git tag and commit, and the manifest (summary by group, or raw JSON).
+* **Imports.** "New import" takes a registered repository and a signed tag or commit (with an
+  optional expected commit), or an uploaded checkpoint, and a mode. Its page shows:
+  * the source and signature, and the verification results;
+  * the archive;
+  * decisions for the dry run: workspace mapping, unresolved references, loading governance;
+  * the dry-run report per family and outcome, with blocking items, catalogue conflicts, identity
+    candidates, unresolved references and the chain;
+  * approval, refused to the requester when a second person is needed;
+  * execute and resume, with the number of finished steps; finalize; discard;
+  * the reconciliation: authoritative families row by row, projections rebuilt against exported,
+    and events the rebuild wrote;
+  * an evidence browser for evidence imports, and the provenance and audit timeline.
+* Labels are shown only once a checkpoint is verified. Confirmations are inline, never browser
+  dialogs.
 
-Until then the CLI and the API are the interface.
+*Still proposed:* live progress while a long generation or import runs (the request waits for the
+step to finish today), and showing the analysis of a selective export before it is requested.
 
 ## 18. Acceptance tests
 
@@ -650,7 +670,8 @@ Until then the CLI and the API are the interface.
 5. The signing key in the secret store, with a rotation procedure.
 6. Short-lived repository credentials.
 7. The merge-into-sealed-instance audit question.
-8. A web page for the lifecycle, or an accepted CLI-only procedure.
+8. The web page is implemented but has no automated UI test, and long steps block the request
+   (no background job or live progress yet).
 9. A restore drill on production-sized data, with timings.
 10. The full export of production rehearsed; its memory and time measured. Chunks are written in
     memory per family today, and a streaming writer is needed for large families.

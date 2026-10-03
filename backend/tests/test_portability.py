@@ -816,6 +816,10 @@ def test_the_api_enforces_people_administrators_separation_and_idempotent_transi
         assert client.post("/v1/portability/exports", json={"mode": "full"}).status_code == 403
         assert client.post("/v1/portability/imports", json={"mode": "clone"}).status_code == 403
         app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=alice)
+        cfg = client.get("/v1/portability/config").json()
+        assert cfg["repositories"] == ["escrow"] and cfg["artifact_stores"] == ["vault"]
+        assert cfg["signing"]["configured"] and cfg["trusted_keys"] and "costs" in cfg["restricted_classes"]
+        assert str(env.repo) not in json.dumps(cfg)                    # names only, never locations
         r = client.post("/v1/portability/exports", json={"mode": "workspace", "workspaces": [ws], "repository": "escrow",
                                              "artifact_store": "vault", "classifications": ["costs"]})
         assert r.status_code == 201, r.text

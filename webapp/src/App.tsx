@@ -8,6 +8,9 @@ import { NewWorkspace } from "./pages/admin/NewWorkspace";
 import { AdminSettings } from "./pages/admin/Settings";
 import { AdminUsers } from "./pages/admin/Users";
 import { AdminWorkspaces } from "./pages/admin/Workspaces";
+import { ExportDetailPage } from "./pages/admin/portability/ExportDetail";
+import { ImportDetailPage } from "./pages/admin/portability/ImportDetail";
+import { PortabilityPage } from "./pages/admin/portability/Portability";
 import { AssetDetail } from "./pages/assets/Detail";
 import { AssetForm } from "./pages/assets/Form";
 import { AssetSearch } from "./pages/assets/Search";
@@ -156,6 +159,9 @@ export function App() {
           <Route path="/admin/new-workspace" element={<NewWorkspace />} />
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
+          <Route path="/admin/portability" element={<PortabilityPage />} />
+          <Route path="/admin/portability/exports/:id" element={<ExportDetailPage />} />
+          <Route path="/admin/portability/imports/:id" element={<ImportDetailPage />} />
         </Route>
       </Routes>
     </TokenGate>

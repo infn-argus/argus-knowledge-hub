@@ -76,6 +76,28 @@ def _commit(db: Session, view: dict) -> dict:
     return view
 
 
+config_router = APIRouter(prefix="/v1/portability", tags=["portability"])
+
+
+@config_router.get("/config")
+def portability_config(identity=Depends(get_identity)):
+    """What a person can choose from: registered repositories and artifact stores (names only, never
+    URLs or paths), whether signing and verification are set up, restricted classes, modes, outcomes."""
+    _person(identity)
+    from app.portability import closure, exporter
+    from app.services.visibility import RESTRICTED_CLASSES
+    cfg = service.config()
+    return {"repositories": sorted(cfg.repositories), "artifact_stores": sorted(cfg.stores),
+            "signing": {"configured": cfg.signer is not None and cfg.signer.key_path.exists(),
+                        "key_id": cfg.signer.key_id if cfg.signer is not None and cfg.signer.key_path.exists() else None,
+                        "principal": cfg.signer.principal if cfg.signer is not None else None},
+            "trusted_keys": cfg.trusted is not None and cfg.trusted.exists(),
+            "restricted_classes": list(RESTRICTED_CLASSES),
+            "export_modes": [m for m in exporter.MODES if m != "backup-reference"],
+            "import_modes": list(service.IMPORT_MODES), "outcomes": sorted(closure.OUTCOMES),
+            "is_admin": bool(identity.user.is_admin)}
+
+
 # --------------------------------------------------------------------------- exports
 
 class ExportIn(BaseModel):
@@ -293,4 +315,4 @@ def evidence(import_id: str, family: str, offset: int = 0, limit: int = Query(50
     return _guard(lambda: service.evidence_rows(imp, service.config(), family, offset, limit))
 
 
-ROUTERS = (exports_router, imports_router)
+ROUTERS = (config_router, exports_router, imports_router)

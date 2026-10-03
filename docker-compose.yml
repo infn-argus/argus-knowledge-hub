@@ -64,8 +64,17 @@ services:
       OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/argus-dev
       OIDC_JWKS_URI: http://keycloak:8080/realms/argus-dev/protocol/openid-connect/certs
       OIDC_AUDIENCE: argus-webapp
+      # Portable exports (docs/operations.md). Development values: `python -m app.portability dev-setup`
+      # creates a throwaway signing key, a local bare repository and an artifact store under the volume.
+      ARGUS_PORTABILITY_ROOT: /data/portability
+      ARGUS_PORTABILITY_REPOSITORIES: escrow-dev=/data/portability/dev/escrow.git
+      ARGUS_PORTABILITY_ARTIFACT_STORES: vault-dev=/data/portability/dev/artifacts
+      ARGUS_PORTABILITY_SIGNING_KEY: /data/portability/dev/signing_key
+      ARGUS_PORTABILITY_TRUSTED_KEYS: /data/portability/dev/allowed_signers
+      ARGUS_INSTANCE_NAME: argus-dev
     volumes:
       - attachments:/data/attachments
+      - portability:/data/portability
     ports:
       - "${API_PORT:-8080}:8080"
     healthcheck:
@@ -125,5 +134,6 @@ services:
       start_period: 20s
 
 volumes:
+  portability:
   pgdata:
   attachments:

@@ -219,7 +219,8 @@ currently valid* revision rather than to an arbitrary PDF.
   JSON Schemas, published to a Git portability repository as a signed tag, with attachments as
   content-addressed artifacts; fetched into quarantine, verified, dry-run, imported idempotently,
   projections rebuilt and reconciled. See [docs/export-import-design.md](docs/export-import-design.md);
-  served by `/v1/portability/exports` and `/v1/portability/imports`, and `python -m app.portability`.
+  served by `/v1/portability/exports` and `/v1/portability/imports`, `python -m app.portability`, and
+  Administration → Portability in the web app.
 - **Type catalogue.** Every object type a workspace can use, on one page: where it sits in the
   tree, what it is, its attributes (own and inherited), the names imports know it by, what its
   references mean in the graph, and how many records it has. The seeded types, ticket types and

@@ -1,5 +1,13 @@
 import { loadSession } from "./session";
 import type {
+  ArchiveManifest,
+  ExportView,
+  ImportView,
+  PortabilityConfig,
+  ProvenanceView,
+  ReconciliationReport,
+} from "./portabilityTypes";
+import type {
   AppSchema,
   Asset,
   AssetComment,
@@ -1456,3 +1464,64 @@ export const beamModelApi = {
   context: (uid: string, dataset?: string | null) =>
     request<BeamElementContext>(`/v1/beam-elements/${encodeURIComponent(uid)}/context${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ""}`),
 };
+
+const P = "/v1/portability";
+
+/** Portable exports and imports (docs/export-import-design.md §14). */
+export const portabilityApi = {
+  config: () => request<PortabilityConfig>(`${P}/config`),
+  exports: () => request<ExportView[]>(`${P}/exports`),
+  getExport: (id: string) => request<ExportView>(`${P}/exports/${encodeURIComponent(id)}`),
+  createExport: (body: {
+    mode: string; workspaces: string[]; classifications: string[]; repository: string | null;
+    artifact_store: string | null; decisions?: Record<string, string>; base_export_id?: string | null;
+  }) => request<ExportView>(`${P}/exports`, { method: "POST", body: json(body) }),
+  decideExport: (id: string, decisions: Record<string, string>) =>
+    request<ExportView>(`${P}/exports/${encodeURIComponent(id)}/decisions`, { method: "POST", body: json({ decisions }) }),
+  exportStep: (id: string, step: "approve" | "generate" | "publish-git") =>
+    request<ExportView>(`${P}/exports/${encodeURIComponent(id)}/${step}`, { method: "POST" }),
+  revokeExport: (id: string, reason: string) =>
+    request<ExportView>(`${P}/exports/${encodeURIComponent(id)}/revoke`, { method: "POST", body: json({ reason }) }),
+  manifest: (id: string) =>
+    request<{ manifest: ArchiveManifest; sha256: string }>(`${P}/exports/${encodeURIComponent(id)}/manifest`),
+  downloadUrl: async (id: string): Promise<string> => {
+    const session = await loadSession();
+    if (!session) throw new Error("Not signed in");
+    const t = await request<{ token: string; expires: number }>(
+      `${P}/exports/${encodeURIComponent(id)}/download-token`, { method: "POST" });
+    return `${session.baseUrl}${P}/exports/${encodeURIComponent(id)}/download?token=${encodeURIComponent(t.token)}`;
+  },
+  imports: () => request<ImportView[]>(`${P}/imports`),
+  getImport: (id: string) => request<ImportView>(`${P}/imports/${encodeURIComponent(id)}`),
+  createImport: (body: { mode: string; repository: string | null; ref: string | null; expected_commit?: string | null;
+                         decisions?: Record<string, unknown> }) =>
+    request<ImportView>(`${P}/imports`, { method: "POST", body: json(body) }),
+  importStep: (id: string, step: "fetch-git" | "verify" | "approve" | "execute" | "resume" | "finalize" | "discard") =>
+    request<ImportView>(`${P}/imports/${encodeURIComponent(id)}/${step}`, { method: "POST" }),
+  dryRun: (id: string, decisions?: Record<string, unknown>) =>
+    request<ImportView>(`${P}/imports/${encodeURIComponent(id)}/dry-run`, {
+      method: "POST", body: json({ decisions: decisions ?? {} }) }),
+  upload: async (id: string, file: File): Promise<ImportView> => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<ImportView>(`${P}/imports/${encodeURIComponent(id)}/upload`, { method: "POST", body: form });
+  },
+  reconciliation: (id: string) =>
+    request<{ report: ReconciliationReport; sha256: string }>(`${P}/imports/${encodeURIComponent(id)}/reconciliation`),
+  provenance: (id: string) => request<ProvenanceView>(`${P}/imports/${encodeURIComponent(id)}/provenance`),
+  evidence: (id: string, family: string, offset = 0, limit = 50) =>
+    request<{ family: string; total: number; offset: number; rows: { key: string; row: Record<string, unknown> }[] }>(
+      `${P}/imports/${encodeURIComponent(id)}/evidence/${encodeURIComponent(family)}?offset=${offset}&limit=${limit}`),
+};
+
+/** The person-readable message of a portability error (the API's problem shape). */
+export function problemText(e: unknown): string {
+  if (e instanceof ApiError) {
+    const body = e.body as { problem?: { error?: string; code?: string }; detail?: unknown } | undefined;
+    const p = body?.problem;
+    if (p?.error) return p.code && p.code !== "invalid" ? `${p.error} (${p.code})` : p.error;
+    if (typeof body?.detail === "string") return body.detail;
+    return `Request failed (${e.status})`;
+  }
+  return e instanceof Error ? e.message : String(e);
+}
