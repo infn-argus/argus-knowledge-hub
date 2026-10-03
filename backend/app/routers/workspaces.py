@@ -42,6 +42,9 @@ from app.schemas.workspace import (
     WorkspaceIdSuggestion,
 )
 
+# A workspace a portable import is staging is nobody's to pick until the import is finalized.
+NOT_STAGED = Workspace.import_state.is_distinct_from("staging")
+
 router = APIRouter(prefix="/v1", tags=["workspaces"])
 
 
@@ -155,7 +158,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
                 can_read_documents=True, can_create_documents=True,
                 can_modify_documents=True, can_delete_documents=True, can_approve_documents=True,
             )
-            for ws in db.scalars(select(Workspace)).all()
+            for ws in db.scalars(select(Workspace).where(NOT_STAGED)).all()
         ]
 
     # Reachability has to follow exactly what require_permission() enforces,
@@ -174,7 +177,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     granted_ws_ids |= set(db.scalars(select(RoleBinding.workspace_id).where(binding_clause)))
 
     result = []
-    for ws in db.scalars(select(Workspace).where(Workspace.id.in_(granted_ws_ids))) if granted_ws_ids else []:
+    for ws in db.scalars(select(Workspace).where(Workspace.id.in_(granted_ws_ids), NOT_STAGED)) if granted_ws_ids else []:
         granted = effective_permissions(db, user, ws.id)
         result.append(MyWorkspaceOut(
             id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
@@ -198,6 +201,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     member_ws_ids = granted_ws_ids
     default_accessible = db.scalars(
         select(Workspace).where(
+            NOT_STAGED,
             Workspace.id.not_in(member_ws_ids) if member_ws_ids else True,
             (
                 Workspace.default_can_read | Workspace.default_can_create

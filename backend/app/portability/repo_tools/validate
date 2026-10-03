@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Validate an ARGUS checkpoint without ARGUS: checksums, signature, blobs.
+
+    tools/validate exports/checkpoints/<export-id> [--trusted allowed_signers] [--artifacts name=/path ...]
+
+Needs Python 3.9+; the signature check needs the `cryptography` package. Exit 0 when everything
+listed was verified, 1 otherwise. ARGUS never runs this script: it is for independent verification.
+"""
+import argparse
+import base64
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+
+def sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("checkpoint")
+    ap.add_argument("--trusted")
+    ap.add_argument("--artifacts", nargs="*", default=[])
+    a = ap.parse_args()
+    cp = Path(a.checkpoint)
+    problems = []
+    sums = (cp / "checksums.sha256").read_text()
+    listed = {}
+    for line in sums.splitlines():
+        digest, _, name = line.partition("  ")
+        listed[name] = digest
+        if "/" in name or not (cp / name).is_file():
+            problems.append(f"missing {name}")
+        elif sha256(cp / name) != digest:
+            problems.append(f"checksum differs: {name}")
+    extra = {p.name for p in cp.iterdir()} - set(listed) - {"checksums.sha256", "signature.json"}
+    problems += [f"not covered by checksums: {n}" for n in sorted(extra)]
+    manifest_sha = sha256(cp / "manifest.json")
+    sig_file = cp / "signature.json"
+    if not sig_file.exists():
+        problems.append("not signed")
+    elif a.trusted:
+        try:
+            from cryptography.hazmat.primitives import serialization
+            sig = json.loads(sig_file.read_text())
+            msg = json.dumps({"namespace": "argus-archive", "checksums_sha256": hashlib.sha256(sums.encode()).hexdigest(),
+                              "manifest_sha256": manifest_sha}, sort_keys=True).encode()
+            ok = False
+            for raw in Path(a.trusted).read_text().splitlines():
+                parts = raw.split()
+                keys = [i for i, p in enumerate(parts) if p.startswith("ssh-ed25519")]
+                if not keys:
+                    continue
+                pub = serialization.load_ssh_public_key(" ".join(parts[keys[0]:keys[0] + 2]).encode())
+                try:
+                    pub.verify(base64.b64decode(sig["signature"]), msg)
+                    ok = True
+                    break
+                except Exception:  # noqa: BLE001
+                    continue
+            if not ok:
+                problems.append("the signature does not verify against the trusted keys")
+        except ImportError:
+            print("note: `cryptography` is not installed; signature not checked")
+    stores = dict(x.split("=", 1) for x in a.artifacts)
+    manifest = json.loads((cp / "manifest.json").read_text())
+    blobs = [json.loads(x) for x in (cp / manifest["blobs"]["manifest"]).read_text().splitlines() if x.strip()]
+    for b in blobs:
+        name = b["locator"].split("://", 1)[1].split("/", 1)[0]
+        if name not in stores:
+            problems.append(f"no path given for artifact store {name}")
+            continue
+        p = Path(stores[name]) / "sha256" / b["sha256"][:2] / b["sha256"]
+        if not p.is_file():
+            problems.append(f"artifact missing: sha256:{b['sha256']}")
+        elif sha256(p) != b["sha256"]:
+            problems.append(f"artifact content differs: sha256:{b['sha256']}")
+    print(json.dumps({"export_id": manifest["export_id"], "files": len(listed), "blobs": len(blobs),
+                      "problems": problems}, indent=1))
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

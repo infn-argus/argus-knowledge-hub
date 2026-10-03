@@ -1,0 +1,6 @@
+#!/bin/sh
+# Imports are run by ARGUS, never by a script in this repository. On an ARGUS host:
+#   python -m app.portability dry-run --help
+# or use the web application: Administration → Portability → Imports.
+echo "Run 'python -m app.portability dry-run' on an ARGUS host; this repository never executes import code." >&2
+exit 2

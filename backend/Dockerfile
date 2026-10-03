@@ -30,6 +30,8 @@ WORKDIR /app
 # libkrb5-dev builds the gssapi wheel; libkrb5-3 and the GSSAPI module are
 # what it needs at run time, for binding to a Kerberos-backed LDAP with a
 # service keytab instead of a password.
+# git and openssh-client publish and fetch portable exports: commits and tags are signed with
+# an SSH key (gpg.format=ssh), and a fetched repository is read object by object, never checked out.
 # fonts-dejavu-core is not decoration: the drawing renderer reads glyphs
 # from real font files, and without one it draws every dimension and label
 # as nothing at all.
@@ -38,6 +40,8 @@ RUN apt-get update && apt-get install -y \
     libkrb5-dev \
     libgssapi-krb5-2 \
     fonts-dejavu-core \
+    git \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Just the converter and its library — the toolchain that built it stays in

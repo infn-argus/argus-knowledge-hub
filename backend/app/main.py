@@ -180,6 +180,9 @@ app.include_router(catalogue_mapping.router)
 app.include_router(catalogue.types_router)
 for _r in beam_model.ROUTERS:
     app.include_router(_r)
+from app.routers import portability as portability_router  # noqa: E402
+for _r in portability_router.ROUTERS:
+    app.include_router(_r)
 app.include_router(uploads.router)
 app.include_router(workspaces.router)
 

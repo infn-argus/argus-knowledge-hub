@@ -80,6 +80,11 @@ def resolve_permission(db: Session, user: User, workspace_id: str, action: str, 
     `require_permission`'s dependency runs for the X-Workspace-Id header;
     factored out here so a second workspace (e.g. a transfer's target) can
     be checked with the exact same semantics."""
+    staged = db.get(Workspace, workspace_id)
+    if staged is not None and staged.import_state == "staging":
+        return False            # a portable import is staging it: nobody works in it until it is finalized
+    if staged is not None and staged.import_state == "evidence" and action != "read":
+        return False            # read-only evidence
     if user.is_admin:
         return True
 

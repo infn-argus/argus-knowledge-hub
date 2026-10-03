@@ -24,7 +24,12 @@ The documents in this directory play different roles. Read them in this order:
    - distribution, testing and rollout.
 
    Its rules are normative in `asset-model-revision.md` §24.
-6. [`oidc-dev-setup.md`](oidc-dev-setup.md) is an independent development setup guide:
+6. [`export-import-design.md`](export-import-design.md) designs the **institutional escape hatch**:
+   the portable archive (`argus-archive/1`), selective workspace packages, and the Git portability
+   project with signed checkpoints and content-addressed artifacts. It states, per capability,
+   whether it is proposed, implemented, tested or production-approved. Its rules are normative in
+   `asset-model-revision.md` §25.
+7. [`oidc-dev-setup.md`](oidc-dev-setup.md) is an independent development setup guide:
    - §6.1 lists the authorization tests for AI retrieval and proposal creation;
    - §6.2 lists those for the mobile client.
 
@@ -73,6 +78,11 @@ AI-assisted data entry is a first-class, optional capability:
                                             │
                                             ▼
                     derived relations · confirmed and investigative graph views · analysis
+
+ Escape hatch (asset-model-revision §25, export-import-design.md):
+   ledger + records at watermark W ─▶ argus-archive/1 (signed chunks, manifest) ─▶ Git portability repo
+                                       blobs ─▶ content-addressed artifact store       (signed tags)
+   Git tag ─▶ quarantine ─▶ verify ─▶ dry run ─▶ staged load ─▶ rebuild projections ─▶ reconcile ─▶ finalize
 ```
 
 **Nothing writes the projection directly:**

@@ -1,0 +1,121 @@
+"""Portable exports and imports (docs/export-import-design.md).
+
+* `PortabilityExport` and `PortabilityImport` are the two lifecycles. Their `state` moves only
+  through `app.portability.lifecycle`, which checks the transition, who may make it, and writes
+  a `PortabilityEvent` for it.
+* `PortabilityEvent` is the audit of both: append-only (the same database guard as the ledger's
+  audit tables) and sealed in the daily digest chain. No second audit system.
+* `PortabilityRowMap` is what makes an import idempotent and undoable while it is staged: every
+  row an import wrote, by its key in the archive and its key here.
+* `PortabilityTagSeen` remembers which commit each export tag named when it was imported, so a
+  tag that has since moved is refused.
+"""
+from typing import Optional
+
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+from app.models.mixins import utcnow
+
+
+class PortabilityExport(Base):
+    __tablename__ = "portability_exports"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    mode: Mapped[str] = mapped_column(String)        # full | incremental | workspace | evidence-only | backup-reference
+    workspaces: Mapped[list] = mapped_column(JSONB, default=list)
+    base_export_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    classifications: Mapped[list] = mapped_column(JSONB, default=list)   # restricted classes included
+    decisions: Mapped[dict] = mapped_column(JSONB, default=dict)         # dependency outcomes, by dependency id
+    destination: Mapped[dict] = mapped_column(JSONB, default=dict)       # {"repository": ..., "artifact_store": ...}
+    state: Mapped[str] = mapped_column(String, default="requested", index=True)
+    risk: Mapped[str] = mapped_column(String, default="normal")          # normal | high
+    requested_by: Mapped[str] = mapped_column(String)
+    approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    analysis: Mapped[dict] = mapped_column(JSONB, default=dict)          # closure, estimate, warnings
+    watermark: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    manifest: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    manifest_sha256: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    out_dir: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    git: Mapped[dict] = mapped_column(JSONB, default=dict)               # repository, commit, tag, parent
+    error: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PortabilityImport(Base):
+    __tablename__ = "portability_imports"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    mode: Mapped[str] = mapped_column(String)        # restore | clone | merge | selective | evidence
+    source: Mapped[dict] = mapped_column(JSONB, default=dict)   # {"repository", "ref", "expected_commit"} or {"upload"}
+    state: Mapped[str] = mapped_column(String, default="created", index=True)
+    requested_by: Mapped[str] = mapped_column(String)
+    approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    quarantine_dir: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    commit: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    manifest: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    verification: Mapped[dict] = mapped_column(JSONB, default=dict)
+    dry_run: Mapped[dict] = mapped_column(JSONB, default=dict)
+    decisions: Mapped[dict] = mapped_column(JSONB, default=dict)      # workspace map, conflict outcomes
+    checkpoints: Mapped[dict] = mapped_column(JSONB, default=dict)    # {"done": ["family:chunk", ...]}
+    reconciliation: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    reconciliation_sha256: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    error: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PortabilityEvent(Base):
+    """One transition or audited action of an export or import. Append-only."""
+    __tablename__ = "portability_events"
+
+    seq: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    subject_kind: Mapped[str] = mapped_column(String)          # export | import
+    subject_id: Mapped[str] = mapped_column(String, index=True)
+    kind: Mapped[str] = mapped_column(String)                  # the action: approve, generate, download …
+    from_state: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    to_state: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    actor: Mapped[str] = mapped_column(String)
+    detail: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PortabilityRowMap(Base):
+    __tablename__ = "portability_row_map"
+    __table_args__ = (UniqueConstraint("origin", "family", "source_key", name="uq_portability_row"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    origin: Mapped[str] = mapped_column(String)                # the exporting instance's identity
+    family: Mapped[str] = mapped_column(String)
+    source_key: Mapped[str] = mapped_column(String)
+    local_key: Mapped[str] = mapped_column(String)
+    import_id: Mapped[str] = mapped_column(String, index=True)
+    created: Mapped[bool] = mapped_column(Boolean, default=True)   # False: an identical row was already here
+    # The row as this import left it: a later increment may update it only if nobody here changed it since.
+    content_sha256: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+
+class PortabilityTagSeen(Base):
+    __tablename__ = "portability_tags_seen"
+
+    repository_id: Mapped[str] = mapped_column(String, primary_key=True)
+    tag: Mapped[str] = mapped_column(String, primary_key=True)
+    commit: Mapped[str] = mapped_column(String)
+    tag_object: Mapped[str] = mapped_column(String)
+    first_seen: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    import_id: Mapped[str] = mapped_column(String)
+
+
+class PortabilityChainLink(Base):
+    """An export applied here, per origin: the order increments must follow."""
+    __tablename__ = "portability_chain"
+
+    origin: Mapped[str] = mapped_column(String, primary_key=True)
+    export_id: Mapped[str] = mapped_column(String, primary_key=True)
+    position: Mapped[int] = mapped_column(Integer)
+    watermark_label: Mapped[int] = mapped_column(BigInteger)
+    import_id: Mapped[str] = mapped_column(String)
+    applied_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)

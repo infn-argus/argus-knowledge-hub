@@ -214,6 +214,12 @@ currently valid* revision rather than to an arbitrary PDF.
   [docs/beam-model.md](docs/beam-model.md); served
   by `/v1/beam-systems`, `/v1/beam-paths`, `/v1/beam-elements`, `/v1/diagnostics`, `/v1/observables`,
   `/v1/model-datasets`, `/v1/model-bindings` and `/v1/beam-model/import`.
+- **Portable archives (tested slice, not production-approved).** A workspace or the whole
+  instance exported at one ledger watermark as signed, immutable NDJSON chunks with a manifest and
+  JSON Schemas, published to a Git portability repository as a signed tag, with attachments as
+  content-addressed artifacts; fetched into quarantine, verified, dry-run, imported idempotently,
+  projections rebuilt and reconciled. See [docs/export-import-design.md](docs/export-import-design.md);
+  served by `/v1/portability/exports` and `/v1/portability/imports`, and `python -m app.portability`.
 - **Type catalogue.** Every object type a workspace can use, on one page: where it sits in the
   tree, what it is, its attributes (own and inherited), the names imports know it by, what its
   references mean in the graph, and how many records it has. The seeded types, ticket types and
@@ -258,6 +264,10 @@ currently valid* revision rather than to an arbitrary PDF.
   product breakdown both come in as equipment rather than as files.
 - [The beam model](docs/beam-model.md) — physics positions, topology, diagnostics, observables and model
   datasets, linked to equipment, controls and documentation without becoming a simulator or a telemetry store.
+- [Export, import and the Git portability project](docs/export-import-design.md) — the escape
+  hatch: signed `argus-archive/1` checkpoints at a ledger watermark, selective packages with an
+  explicit dependency closure, a Git repository of immutable chunks and signed tags, quarantined
+  verification, staged idempotent import, and reconciliation; with the status of each part.
 - [The beam model format](docs/beam-model-format.md) — `argus.beam-model/1` field by field, bundles, what the
   importer refuses, and the converters from simulator files (MAD-X, TFS, Elegant) with how to add one.
 - [The knowledge graph for root-cause analysis](docs/knowledge-graph-design.md) — what each

@@ -20,6 +20,9 @@ class Workspace(Base):
     ledger_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # §13 S7: the relation registry warns (reports) or enforces (refuses new edges that break it).
     registry_mode: Mapped[str] = mapped_column(String, default="warn", server_default="warn")
+    # Set while a portable import is staged into this workspace (`staging`: nobody but the import
+    # sees it), or when it holds read-only evidence (`evidence`). See app/portability.
+    import_state: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # How keys are made for records created without one; null is the default
     # pattern. See app/services/asset_keys.py.
     asset_key_pattern: Mapped[Optional[str]] = mapped_column(String, nullable=True)

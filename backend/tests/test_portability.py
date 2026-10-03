@@ -1,0 +1,862 @@
+"""Portable archives and the Git portability project (docs/export-import-design.md §16).
+
+Each test builds a source instance and a target instance as two fresh databases at the migration
+head, so a checkpoint is proved to rebuild ARGUS somewhere it has never been. Test names carry the
+acceptance-test numbers of the design (A1–A30).
+"""
+import hashlib
+import json
+import os
+import secrets
+import shutil
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.orm import Session
+
+from app.db import DATABASE_URL
+from app.ledger import engine as ledger, service as ledger_service
+from app.models.asset import Asset, Relation
+from app.models.attachment import Attachment
+from app.models.document import Document, DocumentRevision
+from app.models.issue import Issue, IssueComment, IssueHistory
+from app.models.ledger import Claim, ClaimEvent, Decision
+from app.models.portability import PortabilityEvent, PortabilityExport, PortabilityImport, PortabilityRowMap
+from app.models.user import User
+from app.models.workspace import Workspace
+from app.portability import chunks, gitrepo, service, signing
+from app.portability.artifacts import DirectoryStore
+from tests.test_ledger_slice import T0, insight_json, values_yaml
+
+pytestmark = pytest.mark.skipif(not DATABASE_URL.startswith("postgresql"), reason="needs Postgres")
+BACKEND = Path(__file__).resolve().parents[1]
+
+
+def _url(name: str) -> str:
+    return DATABASE_URL.rsplit("/", 1)[0] + f"/{name}"
+
+
+def fresh_db():
+    name = f"argus_port_{secrets.token_hex(4)}"
+    admin = create_engine(_url("postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as c:
+        c.execute(text(f'CREATE DATABASE "{name}"'))
+    admin.dispose()
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=BACKEND, check=True,
+                   env={**os.environ, "DATABASE_URL": _url(name)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return name, create_engine(_url(name))
+
+
+def drop_db(name, eng):
+    eng.dispose()
+    admin = create_engine(_url("postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as c:
+        c.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+    admin.dispose()
+
+
+@pytest.fixture()
+def dbs():
+    made = []
+
+    def make():
+        name, eng = fresh_db()
+        made.append((name, eng))
+        return eng
+    yield make
+    for name, eng in made:
+        drop_db(name, eng)
+
+
+@pytest.fixture()
+def env(tmp_path):
+    """Keys, an artifact store, a bare portability repository and the service configuration."""
+    signer = signing.new_key(tmp_path / "signing_key")
+    allowed = tmp_path / "allowed_signers"
+    allowed.write_text(signing.allowed_signers_line(signer))
+    repo = gitrepo.init_bare(tmp_path / "escrow.git")
+    store = DirectoryStore("vault", tmp_path / "vault")
+
+    def cfg(name: str) -> service.Config:
+        return service.Config(root=tmp_path / name, attachments_dir=tmp_path / name / "attachments",
+                              stores={"vault": store}, signer=signer, trusted=allowed,
+                              repositories={"escrow": repo})
+    return SimpleNamespace(signer=signer, allowed=allowed, repo=repo, store=store, cfg=cfg, tmp=tmp_path)
+
+
+def populate(eng, tmp: Path) -> SimpleNamespace:
+    """A small facility: configuration and inventory streams, a confirmed Installation, a person's
+    edit, a Jira-sourced ticket with comments and history, a document with a superseded revision,
+    an attachment, an asserted relation, a retired record and a merge tombstone."""
+    s = SimpleNamespace(fac=f"P{secrets.token_hex(2).upper()}", ws=f"cfg-{secrets.token_hex(3)}",
+                        inv=f"inv-{secrets.token_hex(3)}", oid1=str(secrets.randbelow(10 ** 9)),
+                        oid2=str(secrets.randbelow(10 ** 9)))
+    s.config = f"epik8s:{s.fac}#values.yaml@main"
+    s.insight = f"insight:{s.fac}:schema=44"
+    with Session(eng) as db:
+        db.add_all([Workspace(id=s.ws, name="Configuration"), Workspace(id=s.inv, name="Inventory")])
+        db.add(User(id="u-rossi", email="rossi@example.org", name="M. Rossi", oidc_sub="sub-rossi"))
+        db.flush()
+        ledger.register_stream(db, s.config, s.ws, "epik8s", facility=s.fac,
+                               may_create=["IOC", "Control Device", "Equipment Position"])
+        ledger.register_stream(db, s.insight, s.inv, "insight", may_create=["Ion Pump"])
+        ledger.activate_policy(db)
+        ledger.ingest(db, s.config, revision="r1", content=values_yaml(s.fac, s.oid1), observed_at=T0,
+                      parser="epik8s-slice")
+        ledger.ingest(db, s.insight, revision="i1", content=insight_json(s.fac, s.oid1, s.oid2), observed_at=T0,
+                      parser="insight-fixture")
+        pos = db.scalar(select(Asset).where(Asset.key == f"{s.fac}:POS:GUNSIP01"))
+        [prop] = [v for v in ledger.installations(db, position_uid=pos.uid) if v["status"] == "Proposed"]
+        ledger_service.confirm_installation(db, s.ws, "operator@example.org", prop["uid"])
+        s.installation = prop["uid"]
+        s.unit = db.scalar(select(Asset).where(Asset.key == f"{s.fac}INV-84321")).uid
+        s.spare = db.scalar(select(Asset).where(Asset.key == f"{s.fac}INV-90001")).uid
+        ledger_service.edit_value(db, s.inv, "rossi@example.org", s.unit, "attr:argus_location", "Rack B13")
+        pump = ledger.ensure_type(db, s.inv, "Ion Pump")
+        s.retired = str(uuid.uuid4())
+        s.survivor, s.tomb = str(uuid.uuid4()), str(uuid.uuid4())
+        db.add_all([
+            Asset(uid=s.retired, workspace_id=s.inv, key=f"{s.fac}-OLD-1", name="Old pump", type="Ion Pump",
+                  schema_uid=pump.uid, record_status="Retired", attributes={"argus_source_key": f"{s.fac}OLD-1"}),
+            Asset(uid=s.survivor, workspace_id=s.inv, key=f"{s.fac}-SURV", name="Survivor", type="Ion Pump",
+                  schema_uid=pump.uid, attributes={}),
+        ])
+        db.flush()
+        db.add(Asset(uid=s.tomb, workspace_id=s.inv, key=f"{s.fac}-TOMB", name="Duplicate", type="Ion Pump",
+                     schema_uid=pump.uid, record_status="Merged", merged_into_uid=s.survivor, attributes={}))
+        db.add(Relation(workspace_id=s.inv, from_asset_uid=s.spare, to_asset_uid=s.unit, relation_type="spare for"))
+        s.issue = str(uuid.uuid4())
+        db.add(Issue(uid=s.issue, workspace_id=s.inv, title="Pump noisy", asset_uid=s.unit, state="closed",
+                     created_at=T0, closed_at=T0,
+                     attributes={"argus_source": "jira", "argus_source_key": f"{s.fac}-9",
+                                 "argus_source_url": f"https://jira.example/browse/{s.fac}-9"}))
+        db.flush()
+        db.add(IssueComment(uid=str(uuid.uuid4()), issue_uid=s.issue, author="rossi", body="replaced the gasket",
+                            created_at=T0))
+        db.add(IssueHistory(uid=str(uuid.uuid4()), issue_uid=s.issue, type="transition", author="rossi",
+                            field="state", from_value="open", to_value="closed", timestamp=T0))
+        s.doc = str(uuid.uuid4())
+        db.add(Document(uid=s.doc, workspace_id=s.inv, code=f"{s.fac}-PROC-1", title="Pump procedure",
+                        owner_user_id="u-rossi"))
+        db.flush()
+        r1, r2 = str(uuid.uuid4()), str(uuid.uuid4())
+        db.add(DocumentRevision(uid=r1, document_uid=s.doc, revision_number=1, state="superseded",
+                                body_markdown="v1", approved_by="u-rossi", approved_at=T0))
+        db.add(DocumentRevision(uid=r2, document_uid=s.doc, revision_number=2, state="published",
+                                body_markdown="v2", approved_by="u-rossi", approved_at=T0))
+        db.flush()
+        db.get(DocumentRevision, r1).superseded_by_uid = r2
+        db.get(Document, s.doc).current_revision_uid = r2
+        photo = tmp / "files" / f"{s.fac}.jpg"
+        photo.parent.mkdir(exist_ok=True)
+        photo.write_bytes(b"a photo of the pump " + s.fac.encode())
+        db.add(Attachment(uid=str(uuid.uuid4()), workspace_id=s.inv, issue_uid=s.issue, filename="photo.jpg",
+                          mime_type="image/jpeg", file_size=photo.stat().st_size, storage_path=str(photo)))
+        db.flush()
+        ledger.derive_all(db, [s.ws, s.inv])      # what the write paths do: ticket links, derived edges
+        db.commit()
+    return s
+
+
+def run_export(eng, env, s, *, mode="workspace", workspaces=None, decisions=None, base=None,
+               requester="alice@example.org", approver="bob@example.org", publish=True, root="src"):
+    cfg = env.cfg(root)
+    with Session(eng) as db:
+        exp = service.create_export(db, requester, mode=mode, workspaces=workspaces or [s.ws, s.inv],
+                                    classifications=[], destination={"repository": "escrow", "artifact_store": "vault"},
+                                    decisions=decisions or {}, base_export_id=base, cfg=cfg)
+        service.analyse_export(db, exp, requester)
+        db.commit()
+        assert exp.analysis["ready"], exp.analysis["closure"]
+        service.approve_export(db, exp, approver, admin=True)
+        db.commit()
+        service.generate_export(eng, db, exp, approver, cfg)
+        if publish:
+            service.publish_export(db, exp, approver, cfg)
+        db.commit()
+        return service.export_view(db.get(PortabilityExport, exp.id)), db.get(PortabilityExport, exp.id).manifest
+
+
+def run_import(eng, env, ref, *, mode="clone", decisions=None, root="dst", finalize=True, expect_ready=True,
+               stop_after=None, requester="carol@example.org", approver="dave@example.org"):
+    cfg = env.cfg(root)
+    with Session(eng) as db:
+        imp = service.create_import(db, requester, mode=mode, source={"repository": "escrow", "ref": ref},
+                                    decisions=decisions or {}, cfg=cfg)
+        db.commit()
+        service.fetch_git(db, imp, requester, cfg)
+        service.verify_import(db, imp, requester, cfg)
+        service.dry_run(db, imp, requester, cfg)
+        db.commit()
+        if not expect_ready:
+            return imp.id, imp.dry_run
+        assert imp.state == "awaiting_approval", imp.dry_run
+        service.approve_import(db, imp, approver)
+        db.commit()
+        if stop_after is not None:
+            with pytest.raises(service.ServiceError):
+                service.execute(db, imp, approver, cfg, stop_after=stop_after)
+            return imp.id, None
+        service.execute(db, imp, approver, cfg)
+        db.commit()
+        assert imp.reconciliation["passed"], json.dumps(_failures(imp.reconciliation), indent=1, default=str)
+        if finalize:
+            service.finalize(db, imp, approver, cfg)
+            db.commit()
+        return imp.id, imp.reconciliation
+
+
+def _failures(rec: dict) -> dict:
+    return {"families": {k: v for k, v in rec["families"].items() if not v["ok"]},
+            "projections": {k: v for k, v in rec["projections"].items() if not v["ok"]},
+            "invariants": rec["invariants"]}
+
+
+# =========================================================================== the slice
+
+def test_A1_A2_A3_A28_a_signed_git_checkpoint_rebuilds_the_same_state_in_an_empty_instance(dbs, env):
+    src, dst = dbs(), dbs()
+    s = populate(src, env.tmp)
+    view, manifest = run_export(src, env, s)
+    assert view["state"] == "published" and view["labels"]["signed"] and view["labels"]["git_published"]
+    tag = view["git"]["tag"]
+    assert tag.startswith("export/workspace/") and f"@ledger-{manifest['watermark']['label']}" in tag
+    assert manifest["families"]["claim_events"]["rows"] > 0
+    # The attachment and every source revision's content travel as artifacts, not in Git.
+    blobs = [json.loads(x) for x in (Path(view["git"] and env.cfg("src").export_dir(manifest["export_id"]))
+                                     / "blobs.manifest.ndjson").read_text().splitlines()]
+    assert any(r.startswith("attachments:") for b in blobs for r in b["referenced_by"])
+    assert any(r.startswith("source_revisions:") for b in blobs for r in b["referenced_by"])
+
+    # A28: a clone of the repository plus the artifacts is enough to verify, without ARGUS.
+    clone = env.tmp / "clone"
+    subprocess.run(["git", "clone", "-q", "--branch", tag, env.repo, str(clone)], check=True, capture_output=True)
+    cp = clone / gitrepo.CHECKPOINTS / manifest["export_id"]
+    out = subprocess.run([sys.executable, str(clone / "tools" / "validate"), str(cp), "--trusted", str(env.allowed),
+                          "--artifacts", f"vault={env.store.root}"], capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert json.loads(out.stdout)["problems"] == []
+    for name in ("format/manifest.schema.json", "format/families/claims.schema.json", "catalogue/types.yaml",
+                 "governance/authority-policy.yaml", "README.md", "VERSION", ".argus-portability.json"):
+        assert (clone / name).exists(), name
+
+    imp_id, rec = run_import(dst, env, tag)
+    # A2: what the target rebuilt from the ledger equals the projection the export carried.
+    assert all(p["ok"] for p in rec["projections"].values())
+    assert rec["families"]["claims"]["sha256"] == manifest["families"]["claims"]["sha256"]
+    with Session(dst) as db:
+        assert db.get(Workspace, s.inv).import_state is None
+        unit = db.get(Asset, s.unit)
+        assert unit.attributes["argus_location"] == "Rack B13"
+        # A3: the attachment is the same bytes as in the source.
+        att = db.scalar(select(Attachment).where(Attachment.issue_uid == s.issue))
+        assert Path(att.storage_path).read_bytes().startswith(b"a photo of the pump")
+        assert hashlib.sha256(Path(att.storage_path).read_bytes()).hexdigest() == att.sha256
+        # A15: retired records, merge tombstones and Installation history survive.
+        assert db.get(Asset, s.retired).record_status == "Retired"
+        assert db.get(Asset, s.tomb).merged_into_uid == s.survivor
+        inst = ledger.installation_view(db, db.get(Asset, s.installation))
+        assert inst["status"] == "Confirmed"
+        with Session(src) as sdb:
+            def events(d, uid):
+                from app.models.ledger import StatusEvent
+                return sorted((e.predicate, e.to_status) for e in d.scalars(
+                    select(StatusEvent).where(StatusEvent.subject_uid == uid)))
+            assert events(db, s.installation) == events(sdb, s.installation)
+            assert db.scalar(select(func.count()).select_from(Decision)) == \
+                sdb.scalar(select(func.count()).select_from(Decision))
+        # A16: Jira keys and URLs still resolve.
+        issue = db.scalar(select(Issue).where(Issue.attributes["argus_source_key"].astext == f"{s.fac}-9"))
+        assert issue.uid == s.issue and issue.attributes["argus_source_url"].endswith(f"{s.fac}-9")
+        # A17: tickets, comments, history, documents, revisions and approvals keep their history.
+        assert issue.closed_at == T0 and issue.state == "closed"
+        assert db.scalar(select(IssueComment.body).where(IssueComment.issue_uid == s.issue)) == "replaced the gasket"
+        assert db.scalar(select(IssueHistory.to_value).where(IssueHistory.issue_uid == s.issue)) == "closed"
+        doc = db.get(Document, s.doc)
+        revs = {r.revision_number: r for r in db.scalars(select(DocumentRevision).where(
+            DocumentRevision.document_uid == s.doc))}
+        assert doc.current_revision_uid == revs[2].uid and revs[1].superseded_by_uid == revs[2].uid
+        assert revs[1].approved_by == "u-rossi" and revs[1].approved_at == T0
+        # A26: historical actors without their identity provider: references, not accounts.
+        assert db.scalar(select(func.count()).select_from(Decision).where(
+            Decision.actor == "operator@example.org")) >= 1
+        rossi = db.get(User, "u-rossi")
+        assert rossi.email == "rossi@example.org" and rossi.oidc_sub == "sub-rossi"
+        imp = db.get(PortabilityImport, imp_id)
+        assert imp.state == "finalized" and imp.reconciliation["signature"]["algorithm"] == "ed25519"
+        kinds = [e.kind for e in db.scalars(select(PortabilityEvent).where(PortabilityEvent.subject_id == imp_id)
+                                            .order_by(PortabilityEvent.seq))]
+        assert kinds[:3] == ["request", "fetch", "fetched"] and kinds[-1] == "finalize"
+
+
+# =========================================================================== helpers for the rest
+
+def counts(eng, models=(Asset, Issue, IssueComment, Relation, Attachment, Claim, ClaimEvent, Decision,
+                        Document, DocumentRevision, User, Workspace)) -> dict:
+    with Session(eng) as db:
+        return {m.__tablename__: db.scalar(select(func.count()).select_from(m)) for m in models}
+
+
+def all_counts(eng) -> dict:
+    """Every table except the portability bookkeeping: what "active state unchanged" compares."""
+    with eng.connect() as c:
+        tables = [r[0] for r in c.execute(text(
+            "select tablename from pg_tables where schemaname = 'public' and tablename not like 'portability_%' "
+            "and tablename <> 'alembic_version' and tablename <> 'app_settings'"))]
+        return {t: c.execute(text(f'select count(*) from "{t}"')).scalar() for t in sorted(tables)}
+
+
+def state_digest(eng, workspaces) -> dict:
+    """Authoritative content per family, independent of local sequence numbers."""
+    from app.portability.exporter import rows_of
+    from app.portability.families import FAMILIES, Scope
+    out = {}
+    with Session(eng) as db:
+        sc = Scope(workspaces=sorted(workspaces), watermark={t: 10 ** 12 for t in
+                                                             __import__("app.portability.families", fromlist=["x"])
+                                                             .SEQUENCED_TABLES})
+        for fam in FAMILIES:
+            if not fam.authoritative or fam.name in ("identities",):
+                continue
+            lines = []
+            for _, row in rows_of(db, fam, sc, None if not fam.blobs else _NullStore(), {}, [], []):
+                row = {k: v for k, v in row.items() if k not in ("seq", "updated_at")}
+                lines.append(json.dumps(row, sort_keys=True, default=str))
+            out[fam.name] = hashlib.sha256("\n".join(sorted(lines)).encode()).hexdigest()
+    return out
+
+
+class _NullStore:
+    """Hash blobs without storing them (for comparing states)."""
+    name = "null"
+
+    def put_file(self, p):
+        data = Path(p).read_bytes()
+        return hashlib.sha256(data).hexdigest(), len(data)
+
+    def put_bytes(self, data):
+        return hashlib.sha256(data).hexdigest(), len(data)
+
+    def locator(self, d):
+        return f"null://{d}"
+
+
+def signed_repo(env, name: str, build) -> str:
+    """A repository shaped like a portability repository, built by `build(work)` and published with a
+    signed commit and a signed export tag — for content an honest exporter would never write."""
+    bare = gitrepo.init_bare(env.tmp / f"{name}.git")
+    work = env.tmp / f"{name}-work"
+    work.mkdir()
+    gitrepo.git(["init", "-q", "-b", "main"], cwd=work)
+    (work / gitrepo.IDENTITY_FILE).write_text(json.dumps({"repository_id": str(uuid.uuid4())}))
+    (work / gitrepo.CHECKPOINTS / "exp-x").mkdir(parents=True)
+    (work / gitrepo.CHECKPOINTS / "exp-x" / "manifest.json").write_text("{}")
+    build(work)
+    gitrepo.git(["add", "-A"], cwd=work)
+    gitrepo.git(["commit", "-q", "-S", "-m", "export-id: exp-x\n"], cwd=work, signer=env.signer)
+    gitrepo.git(["tag", "-s", "export/full/2026-10-03@ledger-1", "-m", "export-id: exp-x\n"], cwd=work,
+                signer=env.signer)
+    gitrepo.git(["push", "-q", bare, "main", "--tags"], cwd=work)
+    return bare
+
+
+# =========================================================================== chain and Git rules
+
+def test_A8_A10_A11_increments_in_order_equal_a_full_export_and_out_of_order_is_refused(dbs, env):
+    src, chain_target, full_target, lone_target = dbs(), dbs(), dbs(), dbs()
+    s = populate(src, env.tmp)
+    first, m1 = run_export(src, env, s)
+    with Session(src) as db:                                  # later work at the source
+        ledger_service.edit_value(db, s.inv, "rossi@example.org", s.unit, "attr:argus_location", "Rack C1")
+        ledger.ingest(db, s.insight, revision="i2", content=insight_json(s.fac, s.oid1, s.oid2, location="Hall 2"),
+                      observed_at=T0, parser="insight-fixture")
+        db.add(IssueComment(uid=str(uuid.uuid4()), issue_uid=s.issue, author="rossi", body="checked again",
+                            created_at=T0))
+        db.commit()
+    inc, m2 = run_export(src, env, s, mode="incremental", base=first["id"])
+    full, m3 = run_export(src, env, s)                        # the same watermark, as one checkpoint
+    assert m2["watermark"]["tables"] == m3["watermark"]["tables"]
+    assert m2["base"]["export_id"] == first["id"] and inc["git"]["previous_tag"] == first["git"]["tag"]
+    assert m2["families"]["claim_events"]["rows"] < m3["families"]["claim_events"]["rows"]
+
+    # A11: the increment alone, without its base, is refused.
+    _, report = run_import(lone_target, env, inc["git"]["tag"], root="lone", expect_ready=False)
+    assert not report["ready"] and report["chain"]["status"] == "out_of_order"
+
+    # A10: base then increment equals the full checkpoint at the same watermark.
+    run_import(chain_target, env, first["git"]["tag"], root="chain")
+    run_import(chain_target, env, inc["git"]["tag"], root="chain")
+    run_import(full_target, env, full["git"]["tag"], root="full")
+    assert state_digest(chain_target, [s.ws, s.inv]) == state_digest(full_target, [s.ws, s.inv])
+    with Session(chain_target) as db:
+        assert db.get(Asset, s.unit).attributes["argus_location"] == "Rack C1"
+
+    # A8: importing the same commit again changes nothing.
+    before = counts(chain_target)
+    _, rec = run_import(chain_target, env, inc["git"]["tag"], root="again")
+    assert rec.get("already_applied") and counts(chain_target) == before
+
+
+def test_A4_A5_A7_missing_commits_moved_and_unsigned_tags_and_branches_are_refused(dbs, env):
+    src, dst = dbs(), dbs()
+    s = populate(src, env.tmp)
+    view, _ = run_export(src, env, s)
+    cfg = env.cfg("dst")
+    with Session(dst) as db:
+        def attempt(ref, **source):
+            imp = service.create_import(db, "carol", mode="clone", source={"repository": "escrow", "ref": ref,
+                                                                            **source}, decisions={}, cfg=cfg)
+            db.commit()
+            with pytest.raises(service.ServiceError) as e:
+                service.fetch_git(db, imp, "carol", cfg)
+            assert db.get(PortabilityImport, imp.id).state == "invalid"
+            return e.value.code
+        assert attempt("main") == "not_a_tag"                                      # A7
+        assert attempt("refs/heads/main") == "not_a_tag"
+        assert attempt("0" * 40) == "missing_commit"                               # A4
+        assert attempt(view["git"]["tag"], expected_commit="1" * 40) == "unexpected_commit"
+    # A5: a lightweight (unsigned) tag.
+    work = env.cfg("src").work("escrow")
+    gitrepo.git(["tag", "export/full/2026-10-03@ledger-999", view["git"]["commit"]], cwd=work)
+    gitrepo.git(["push", "-q", "origin", "refs/tags/export/full/2026-10-03@ledger-999"], cwd=work)
+    with Session(dst) as db:
+        assert attempt("export/full/2026-10-03@ledger-999") == "unsigned"
+    # A5: a tag signed by an untrusted key.
+    rogue = signing.new_key(env.tmp / "rogue")
+    gitrepo.git(["tag", "-s", "export/full/2026-10-03@ledger-998", "-m", "export-id: x", view["git"]["commit"]],
+                cwd=work, signer=rogue)
+    gitrepo.git(["push", "-q", "origin", "refs/tags/export/full/2026-10-03@ledger-998"], cwd=work)
+    with Session(dst) as db:
+        assert attempt("export/full/2026-10-03@ledger-998") == "bad_signature"
+    # A5: a tag that moved after it was imported here.
+    run_import(dst, env, view["git"]["tag"])
+    gitrepo.git(["commit", "-q", "--allow-empty", "-S", "-m", "something else"], cwd=work, signer=env.signer)
+    gitrepo.git(["tag", "-f", "-s", view["git"]["tag"], "-m", f"export-id: {view['id']}"], cwd=work, signer=env.signer)
+    gitrepo.git(["push", "-q", "-f", "origin", f"refs/tags/{view['git']['tag']}"], cwd=work)
+    with Session(dst) as db:
+        assert attempt(view["git"]["tag"]) == "moved_tag"
+
+
+def test_A6_A29_a_modified_file_or_a_missing_lfs_object_fails_verification(dbs, env):
+    from app.portability import verify as verifier
+    src = dbs()
+    s = populate(src, env.tmp)
+    _, manifest = run_export(src, env, s, publish=False)
+    cp = env.cfg("src").export_dir(manifest["export_id"])
+    assert verifier.verify(cp, trusted=env.allowed)["report"]["signed_by"] == "argus-portability"
+
+    tampered = env.tmp / "tampered"
+    shutil.copytree(cp, tampered)
+    chunk = next(tampered.glob("records-assets-*.ndjson.zst"))
+    chunk.write_bytes(chunk.read_bytes()[:-3] + b"xyz")
+    with pytest.raises(verifier.VerificationError) as e:
+        verifier.verify(tampered, trusted=env.allowed)
+    assert e.value.code == "checksum_mismatch"
+
+    # Re-computed checksums without the key: the signature no longer covers them.
+    resummed = env.tmp / "resummed"
+    shutil.copytree(tampered, resummed)
+    sums = "".join(f"{chunks.sha256_file(resummed / n)}  {n}\n" for n in sorted(
+        p.name for p in resummed.iterdir() if p.name not in ("checksums.sha256", "signature.json")))
+    (resummed / "checksums.sha256").write_text(sums)
+    with pytest.raises(verifier.VerificationError) as e:
+        verifier.verify(resummed, trusted=env.allowed)
+    assert e.value.code == "bad_signature"
+
+    # A29: a chunk replaced by a Git LFS pointer is recovered only if its object is available.
+    lfs = env.tmp / "lfs"
+    shutil.copytree(cp, lfs)
+    chunk = next(lfs.glob("ledger-claim_events-*.ndjson.zst"))
+    real = chunk.read_bytes()
+    digest = hashlib.sha256(real).hexdigest()
+    chunk.write_bytes(b"version https://git-lfs.github.com/spec/v1\noid sha256:" + digest.encode() +
+                      f"\nsize {len(real)}\n".encode())
+    pointer = [{"file": chunk.name, "sha256": digest, "size": len(real)}]
+    with pytest.raises(verifier.VerificationError) as e:
+        verifier.verify(lfs, trusted=env.allowed, stores={"vault": env.store}, lfs=pointer)
+    assert e.value.code == "missing_lfs_object"
+    env.store.put_bytes(real)
+    assert verifier.verify(lfs, trusted=env.allowed, stores={"vault": env.store}, lfs=pointer)["report"]["files"] > 0
+    # A4: a blob missing from the artifact store.
+    gone = next(iter(json.loads(x) for x in (cp / "blobs.manifest.ndjson").read_text().splitlines()))
+    path = env.store._path(gone["sha256"])
+    os.chmod(path, 0o644)
+    path.unlink()
+    with pytest.raises(verifier.VerificationError) as e:
+        verifier.verify(cp, trusted=env.allowed, stores={"vault": env.store}, blob_dir=env.tmp / "blobs")
+    assert e.value.code == "missing_artifact"
+
+
+@pytest.mark.parametrize("payload, problem", [
+    (lambda w: os.symlink("/etc/passwd", w / gitrepo.CHECKPOINTS / "exp-x" / "link"), "symbolic link"),
+    (lambda w: (w / ".gitmodules").write_text('[submodule "x"]\n\tpath = x\n\turl = ../x\n'), "submodule"),
+    (lambda w: (lambda p: (p.write_text("#!/bin/sh\nrm -rf /\n"), os.chmod(p, 0o755)))(
+        w / gitrepo.CHECKPOINTS / "exp-x" / "run.sh"), "executable payload"),
+    (lambda w: (w / "hooks").mkdir() or (lambda p: (p.write_text("#!/bin/sh\n"), os.chmod(p, 0o755)))(
+        w / "hooks" / "post-checkout"), "executable payload"),
+])
+def test_A21_malicious_paths_links_submodules_hooks_and_executables_are_refused(env, payload, problem):
+    bare = signed_repo(env, f"bad{secrets.token_hex(2)}", payload)
+    with pytest.raises(gitrepo.GitError) as e:
+        gitrepo.fetch_into_quarantine(bare, "export/full/2026-10-03@ledger-1", env.tmp / "q", env.allowed)
+    assert e.value.code == "unsafe_repository"
+    assert any(problem in p for p in e.value.detail["problems"])
+    assert not (env.tmp / "q" / "checkpoint").exists() or not any((env.tmp / "q" / "checkpoint").iterdir())
+
+
+def test_A22_decompression_bombs_oversized_and_malformed_lines_are_rejected(tmp_path):
+    import zstandard
+    small = chunks.Limits(max_chunk_bytes=1 << 20, max_ratio=50, max_line_bytes=1024)
+    bomb = tmp_path / "bomb.ndjson.zst"
+    bomb.write_bytes(zstandard.ZstdCompressor().compress(b"0" * (64 << 20)))
+    with pytest.raises(chunks.ChunkError, match="decompress"):
+        list(chunks.read_chunk(bomb, "assets", small))
+    long = tmp_path / "long.ndjson.zst"
+    long.write_bytes(zstandard.ZstdCompressor().compress(chunks.line("assets", "k", {"x": secrets.token_hex(3000)})))
+    with pytest.raises(chunks.ChunkError, match="longer than"):
+        list(chunks.read_chunk(long, "assets", small))
+    bad = tmp_path / "bad.ndjson.zst"
+    bad.write_bytes(zstandard.ZstdCompressor().compress(b'{"f": "assets", "k": "a", "d": [1]}\n'))
+    with pytest.raises(chunks.ChunkError, match="envelope"):
+        list(chunks.read_chunk(bad, "assets"))
+    other = tmp_path / "other.ndjson.zst"
+    other.write_bytes(zstandard.ZstdCompressor().compress(chunks.line("claims", "a", {})))
+    with pytest.raises(chunks.ChunkError, match="declared"):
+        list(chunks.read_chunk(other, "assets"))
+    with pytest.raises(chunks.ChunkError, match="zstd"):
+        (tmp_path / "junk.ndjson.zst").write_bytes(b"not zstd at all")
+        list(chunks.read_chunk(tmp_path / "junk.ndjson.zst", "assets"))
+
+
+# =========================================================================== import outcomes
+
+def test_A9_A23_an_interrupted_import_resumes_without_duplicates_and_a_discard_leaves_nothing(dbs, env):
+    src, dst, ref = dbs(), dbs(), dbs()
+    s = populate(src, env.tmp)
+    view, _ = run_export(src, env, s)
+    run_import(ref, env, view["git"]["tag"], root="ref")              # a clean import, to compare with
+
+    with Session(dst) as db:                                         # the target has work of its own
+        db.add(Workspace(id="local", name="Local work"))
+        db.commit()
+    untouched = all_counts(dst)
+    imp_id, _ = run_import(dst, env, view["git"]["tag"], stop_after=4)
+    with Session(dst) as db:
+        imp = db.get(PortabilityImport, imp_id)
+        assert imp.state == "importing" and len(imp.checkpoints["done"]) == 4 and imp.error["code"] == "interrupted"
+        assert db.get(Workspace, s.inv).import_state == "staging"   # staged: nobody else sees it
+        # A23: discarding leaves the target exactly as it was.
+        service.discard(db, imp, "dave@example.org", env.cfg("dst"))
+        db.commit()
+    assert all_counts(dst) == untouched
+
+    imp_id, _ = run_import(dst, env, view["git"]["tag"], stop_after=6, root="dst2")
+    with Session(dst) as db:
+        imp = db.get(PortabilityImport, imp_id)
+        service.execute(db, imp, "dave@example.org", env.cfg("dst2"))           # resume
+        db.commit()
+        assert imp.reconciliation["passed"]
+        service.finalize(db, imp, "dave@example.org", env.cfg("dst2"))
+        db.commit()
+        dupes = db.scalar(select(func.count()).select_from(
+            select(PortabilityRowMap.origin, PortabilityRowMap.family, PortabilityRowMap.source_key)
+            .group_by(PortabilityRowMap.origin, PortabilityRowMap.family, PortabilityRowMap.source_key)
+            .having(func.count() > 1).subquery()))
+        assert dupes == 0
+    assert state_digest(dst, [s.ws, s.inv]) == state_digest(ref, [s.ws, s.inv])
+    assert counts(dst)["ledger_claims"] == counts(ref)["ledger_claims"]
+
+
+def test_A12_A13_A14_merge_blocks_divergent_uids_proposes_candidates_and_never_overwrites_types(dbs, env):
+    src, dst = dbs(), dbs()
+    s = populate(src, env.tmp)
+    view, _ = run_export(src, env, s)
+    from app.models.schema import Schema
+    with Session(src) as sdb:
+        schema = sdb.get(Schema, sdb.get(Asset, s.unit).schema_uid)
+        schema_row = {c.key: getattr(schema, c.key) for c in Schema.__mapper__.column_attrs}
+    with Session(dst) as db:
+        db.add(Workspace(id=schema_row["workspace_id"], name="theirs"))
+        db.add(Workspace(id="local", name="Local"))
+        db.flush()
+        # A14: a type with the same id and another definition.
+        db.add(Schema(**{**schema_row, "attributes": [{"name": "something_else", "type": "text"}]}))
+        db.flush()
+        # A12: the same uid with other content, made here.
+        db.add(Asset(uid=s.spare, workspace_id="local", key="LOCAL-1", name="Not that pump", type="Ion Pump",
+                     schema_uid=schema.uid, attributes={}))
+        # A13: an immutable external identifier the archive's unit also holds.
+        db.add(Asset(uid=str(uuid.uuid4()), workspace_id="local", key="LOCAL-2", name="Pump", type="Ion Pump",
+                     schema_uid=schema.uid, attributes={"serial": "84321"}))
+        db.commit()
+    before = all_counts(dst)
+    _, report = run_import(dst, env, view["git"]["tag"], mode="merge", expect_ready=False)
+    assert not report["ready"]
+    assert any(b["family"] == "assets" and b["key"] == s.spare for b in report["blocking"])
+    assert any(c["family"] == "types" and c["key"] == schema.uid for c in report["catalogue_conflicts"])
+    assert any(c["identifier"] == "serial" and c["value"] == "84321" for c in report["identity_candidates"])
+    assert all_counts(dst) == before                       # a dry run writes nothing
+    with Session(dst) as db:
+        assert db.get(Schema, schema.uid).attributes == [{"name": "something_else", "type": "text"}]
+        assert db.get(Asset, s.spare).name == "Not that pump"
+        imp = db.scalar(select(PortabilityImport).order_by(PortabilityImport.created_at.desc()).limit(1))
+        from app.portability.lifecycle import TransitionError
+        with pytest.raises((service.ServiceError, TransitionError)):
+            service.approve_import(db, imp, "dave@example.org")        # not ready: nothing to approve
+
+
+def test_A13_a_candidate_is_opened_never_merged(dbs, env):
+    src, dst = dbs(), dbs()
+    s = populate(src, env.tmp)
+    view, _ = run_export(src, env, s)
+    other = str(uuid.uuid4())
+    with Session(dst) as db:
+        db.add(Workspace(id="local", name="Local"))
+        db.flush()
+        pump = ledger.ensure_type(db, "local", "Ion Pump")
+        db.add(Asset(uid=other, workspace_id="local", key="LOCAL-2", name="Pump", type="Ion Pump",
+                     schema_uid=pump.uid, attributes={"serial": "84321"}))
+        db.commit()
+    _, rec = run_import(dst, env, view["git"]["tag"], mode="clone", decisions={})
+    with Session(dst) as db:
+        assert db.get(Asset, other).merged_into_uid is None and db.get(Asset, s.unit).merged_into_uid is None
+        assert db.get(Asset, other).record_status != "Merged"
+
+
+# =========================================================================== what never leaves
+
+def test_A18_A19_A20_restricted_records_and_secrets_never_reach_git_or_the_archive(dbs, env):
+    src = dbs()
+    s = populate(src, env.tmp)
+    secret_uid, secret_name = str(uuid.uuid4()), f"Budget line {secrets.token_hex(4)}"
+    raw_token = secrets.token_urlsafe(24)
+    with Session(src) as db:
+        from app.auth import hash_token
+        from app.models.api_token import ApiToken
+        pump = ledger.ensure_type(db, s.inv, "Ion Pump")
+        db.add(Asset(uid=secret_uid, workspace_id=s.inv, key=f"{s.fac}-COST", name=secret_name, type="Ion Pump",
+                     schema_uid=pump.uid, attributes={"classification": "restricted:costs", "cost": 12345}))
+        db.add(Relation(workspace_id=s.inv, from_asset_uid=s.unit, to_asset_uid=secret_uid, relation_type="funded by"))
+        db.add(ApiToken(workspace_id=s.inv, token_hash=hash_token(raw_token)))
+        db.commit()
+    cfg = env.cfg("src")
+    with Session(src) as db:
+        exp = service.create_export(db, "alice", mode="workspace", workspaces=[s.ws, s.inv], classifications=[],
+                                    destination={"repository": "escrow", "artifact_store": "vault"}, cfg=cfg)
+        service.analyse_export(db, exp, "alice")
+        db.commit()
+        dep = {d["id"]: d for d in exp.analysis["closure"]["dependencies"]}
+        assert "restricted_reference" in dep and not exp.analysis["ready"]
+        assert all(ex["to"] == "(restricted)" for ex in dep["restricted_reference"]["examples"])
+        with pytest.raises(service.ServiceError):
+            service.approve_export(db, exp, "bob", admin=True)          # never chosen silently
+        service.set_export_decisions(db, exp, {"restricted_reference": "exclude_referrers"}, "alice")
+        service.approve_export(db, exp, "bob", admin=True)
+        service.generate_export(src, db, exp, "bob", cfg)
+        service.publish_export(db, exp, "bob", cfg)
+        db.commit()
+        view = service.export_view(exp)
+    assert not view["labels"]["complete"] and view["labels"]["selective"]
+    clone = env.tmp / "clone18"
+    subprocess.run(["git", "clone", "-q", env.repo, str(clone)], check=True, capture_output=True)
+    files: dict[str, bytes] = {}
+    for p in clone.rglob("*"):
+        if p.is_file() and ".git" not in p.parts:
+            data = p.read_bytes()
+            files[str(p.relative_to(clone))] = __import__("zstandard").ZstdDecompressor().decompressobj().decompress(
+                data) if p.name.endswith(".zst") else data
+    for stored in env.store.root.rglob("*"):
+        if stored.is_file():
+            files[f"artifact:{stored.name}"] = stored.read_bytes()
+
+    def leaks(needle: bytes) -> list[str]:
+        return [name for name, data in files.items() if needle in data]
+    assert leaks(secret_uid.encode()) == [] and leaks(secret_name.encode()) == []           # A18
+    assert leaks(b"funded by") == [] and leaks(b"12345") == []
+    assert leaks(raw_token.encode()) == [] and leaks(b"token_hash") == []                    # A19
+    assert leaks(b"PRIVATE KEY") == [] and leaks(env.signer.key_path.read_bytes()) == []
+    manifest = json.loads((clone / gitrepo.CHECKPOINTS / view["id"] / "manifest.json").read_text())
+    assert manifest["classifications"]["excluded_classes"] == ["costs"]
+    assert "restricted" not in json.dumps(manifest["families"])
+
+    # A20: a credential in the data stops the export before anything is published.
+    with Session(src) as db:
+        db.get(Asset, s.spare).attributes = {**db.get(Asset, s.spare).attributes,
+                                             "notes": "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"}
+        db.commit()
+        tags_before = gitrepo.git(["tag", "-l"], cwd=Path(env.repo)).stdout
+        exp = service.create_export(db, "alice", mode="workspace", workspaces=[s.ws, s.inv], classifications=[],
+                                    destination={"repository": "escrow", "artifact_store": "vault"},
+                                    decisions={"restricted_reference": "exclude_referrers"}, cfg=cfg)
+        service.analyse_export(db, exp, "alice")
+        service.approve_export(db, exp, "bob", admin=True)
+        db.commit()
+        with pytest.raises(service.ServiceError) as e:
+            service.generate_export(src, db, exp, "bob", cfg)
+        assert e.value.code == "secret_found"
+        assert e.value.detail["findings"][0]["where"].startswith("assets[")
+        assert "ghp_" not in json.dumps(e.value.detail)
+        assert db.get(PortabilityExport, exp.id).state == "failed"
+        assert gitrepo.git(["tag", "-l"], cwd=Path(env.repo)).stdout == tags_before
+        assert not env.cfg("src").export_dir(exp.id).exists()
+
+
+# =========================================================================== modes and closure
+
+def test_A24_an_evidence_import_creates_no_active_projection(dbs, env):
+    src, dst = dbs(), dbs()
+    s = populate(src, env.tmp)
+    view, manifest = run_export(src, env, s)
+    before = all_counts(dst)
+    imp_id, rec = run_import(dst, env, view["git"]["tag"], mode="evidence")
+    assert rec["evidence_only"] and all_counts(dst) == before
+    with Session(dst) as db:
+        imp = db.get(PortabilityImport, imp_id)
+        rows = service.evidence_rows(imp, env.cfg("dst"), "claims", 0, 5)
+        assert rows["total"] == manifest["families"]["claims"]["rows"] and len(rows["rows"]) == 5
+
+
+def test_A25_a_selective_export_includes_or_explicitly_resolves_every_dependency(dbs, env):
+    src = dbs()
+    s = populate(src, env.tmp)
+    cfg = env.cfg("src")
+    with Session(src) as db:
+        exp = service.create_export(db, "alice", mode="workspace", workspaces=[s.ws], classifications=[],
+                                    destination={"repository": "escrow", "artifact_store": "vault"}, cfg=cfg)
+        service.analyse_export(db, exp, "alice")
+        db.commit()
+        deps = {d["id"]: d for d in exp.analysis["closure"]["dependencies"]}
+        assert f"derived_endpoint:{s.inv}" in deps or f"claim_subject:{s.inv}" in deps
+        assert not exp.analysis["ready"] and set(exp.analysis["closure"]["unresolved"]) == set(deps)
+        with pytest.raises(service.ServiceError):
+            service.approve_export(db, exp, "bob", admin=True)
+        # Including the inventory's workspace closes the dependency.
+        service.set_export_decisions(db, exp, {d: "include_workspace" for d in deps
+                                               if "include_workspace" in deps[d]["options"]}, "alice")
+        assert exp.analysis["ready"] and s.inv in exp.analysis["closure"]["workspaces"]
+        # A blocked dependency stops the export.
+        service.set_export_decisions(db, exp, {next(iter(deps)): "block"}, "alice")
+        assert not exp.analysis["ready"] and exp.analysis["closure"]["blocked"]
+
+
+def test_A27_an_export_at_W_excludes_later_transactions(dbs, env):
+    from app.portability.exporter import at_watermark
+    src = dbs()
+    s = populate(src, env.tmp)
+    with at_watermark(src) as (db, wm):
+        with Session(src) as writer:                            # commits after W
+            ledger_service.edit_value(writer, s.inv, "rossi@example.org", s.unit, "attr:argus_location", "Later")
+            writer.commit()
+            latest = writer.scalar(select(func.max(Decision.seq)))
+        assert latest > wm["tables"]["ledger_decisions"]
+        assert db.scalar(select(func.max(Decision.seq))) == wm["tables"]["ledger_decisions"]
+        assert db.get(Asset, s.unit).attributes["argus_location"] == "Rack B13"   # records at W, too
+        for table, high in wm["tables"].items():
+            assert db.execute(text(f"select coalesce(max(seq),0) from {table}")).scalar() == high
+
+
+def test_A30_the_restore_drill_verifies_the_latest_signed_full_checkpoint(dbs, env):
+    from app.portability.__main__ import restore_drill
+    src = dbs()
+    populate(src, env.tmp)
+    with Session(src) as db:                                   # a full export of this instance
+        exp = service.create_export(db, "alice", mode="full", workspaces=[], classifications=[],
+                                    destination={"repository": "escrow", "artifact_store": "vault"},
+                                    cfg=env.cfg("src"))
+        service.analyse_export(db, exp, "alice")
+        service.approve_export(db, exp, "bob", admin=True)
+        db.commit()
+        service.generate_export(src, db, exp, "bob", env.cfg("src"))
+        service.publish_export(db, exp, "bob", env.cfg("src"))
+        db.commit()
+        assert exp.git["tag"].startswith("export/full/") and exp.manifest["labels"]["complete"]
+    report = restore_drill(env.cfg("drill"), "escrow", str(src.url.render_as_string(hide_password=False)))
+    assert report["passed"], report
+    assert report["tag"] == exp.git["tag"] and all(report["families"].values())
+
+
+# =========================================================================== the API
+
+def test_the_api_enforces_people_administrators_separation_and_idempotent_transitions(env, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.auth import OidcIdentity, PatIdentity, get_identity
+    from app.db import SessionLocal
+    from app.main import app
+    monkeypatch.setenv("ARGUS_PORTABILITY_ROOT", str(env.tmp / "api"))
+    monkeypatch.setenv("ARGUS_PORTABILITY_REPOSITORIES", f"escrow={env.repo}")
+    monkeypatch.setenv("ARGUS_PORTABILITY_ARTIFACT_STORES", f"vault={env.store.root}")
+    monkeypatch.setenv("ARGUS_PORTABILITY_SIGNING_KEY", str(env.signer.key_path))
+    monkeypatch.setenv("ARGUS_PORTABILITY_TRUSTED_KEYS", str(env.allowed))
+    ws = f"api-{secrets.token_hex(3)}"
+    db = SessionLocal()
+    alice = User(id=f"a-{ws}", email=f"alice-{ws}@example.org", is_admin=True)
+    bob = User(id=f"b-{ws}", email=f"bob-{ws}@example.org", is_admin=True)
+    eve = User(id=f"e-{ws}", email=f"eve-{ws}@example.org", is_admin=False)
+    db.add_all([Workspace(id=ws, name="API"), alice, bob, eve])
+    db.flush()
+    pump = ledger.ensure_type(db, ws, "Ion Pump")
+    db.add(Asset(uid=str(uuid.uuid4()), workspace_id=ws, key=f"{ws}-1", name="Pump", type="Ion Pump",
+                 schema_uid=pump.uid, attributes={}))
+    db.commit()
+    for u in (alice, bob, eve):
+        db.refresh(u)
+        db.expunge(u)
+    db.close()
+    client = TestClient(app)
+    try:
+        app.dependency_overrides[get_identity] = lambda: PatIdentity(workspace_id=ws, restricted_grants=())
+        assert client.post("/v1/portability/exports", json={"mode": "workspace", "workspaces": [ws]}).status_code == 403
+        app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=eve)
+        assert client.post("/v1/portability/exports", json={"mode": "full"}).status_code == 403
+        assert client.post("/v1/portability/imports", json={"mode": "clone"}).status_code == 403
+        app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=alice)
+        r = client.post("/v1/portability/exports", json={"mode": "workspace", "workspaces": [ws], "repository": "escrow",
+                                             "artifact_store": "vault", "classifications": ["costs"]})
+        assert r.status_code == 201, r.text
+        exp = r.json()
+        assert exp["state"] == "awaiting_approval" and exp["risk"] == "high" and exp["analysis"]["ready"]
+        r = client.post(f"/v1/portability/exports/{exp['id']}/approve")
+        assert r.status_code == 403 and r.json()["problem"]["code"] == "separation"
+        app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=bob)
+        assert client.post(f"/v1/portability/exports/{exp['id']}/approve").json()["state"] == "approved"
+        assert client.post(f"/v1/portability/exports/{exp['id']}/approve").json()["state"] == "approved"   # idempotent
+        assert client.post(f"/v1/portability/exports/{exp['id']}/generate").json()["state"] == "ready_to_publish"
+        r = client.post(f"/v1/portability/exports/{exp['id']}/publish-git")
+        assert r.status_code == 200, r.text
+        tag = r.json()["git"]["tag"]
+        assert client.get(f"/v1/portability/exports/{exp['id']}/manifest").json()["manifest"]["workspaces"] == [ws]
+        tok = client.post(f"/v1/portability/exports/{exp['id']}/download-token").json()["token"]
+        assert client.get(f"/v1/portability/exports/{exp['id']}/download", params={"token": tok}).status_code == 200
+        assert client.get(f"/v1/portability/exports/{exp['id']}/download", params={"token": tok + "x"}).status_code == 403
+        r = client.post(f"/v1/portability/exports/{exp['id']}/revoke", json={"reason": "test"})
+        assert r.json()["state"] == "revoked"
+        assert client.post(f"/v1/portability/exports/{exp['id']}/generate").status_code == 409             # invalid transition
+
+        imp = client.post("/v1/portability/imports", json={"mode": "evidence", "repository": "escrow", "ref": tag}).json()
+        for step, state in (("fetch-git", "quarantined"), ("verify", "dry_run_ready"), ("dry-run", "awaiting_approval"),
+                            ("approve", "approved"), ("execute", "ready_to_finalize"), ("finalize", "finalized")):
+            if step == "approve":           # restricted classes inside: the requester may not approve
+                r = client.post(f"/v1/portability/imports/{imp['id']}/approve")
+                assert r.status_code == 403 and r.json()["problem"]["code"] == "separation"
+                app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=alice)
+            r = client.post(f"/v1/portability/imports/{imp['id']}/{step}")
+            assert r.status_code == 200 and r.json()["state"] == state, (step, r.text)
+        prov = client.get(f"/v1/portability/imports/{imp['id']}/provenance").json()
+        assert prov["git"]["tag"] == tag and [e["kind"] for e in prov["events"]][-1] == "finalize"
+        assert client.get(f"/v1/portability/imports/{imp['id']}/evidence/assets").json()["total"] == 1
+    finally:
+        app.dependency_overrides.pop(get_identity, None)
+    with SessionLocal() as db:
+        kinds = [e.kind for e in db.scalars(select(PortabilityEvent).where(PortabilityEvent.subject_id == exp["id"])
+                                            .order_by(PortabilityEvent.seq))]
+        assert kinds[:2] == ["request", "analyse"] and "download_token" in kinds and "download" in kinds
+        assert kinds.count("approve") == 1 and kinds[-1] == "revoke"
+        with pytest.raises(Exception):                         # the audit is append-only in the database
+            db.execute(text("update portability_events set actor = 'x'"))
+            db.flush()

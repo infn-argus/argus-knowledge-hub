@@ -175,3 +175,37 @@ The limits are set per environment until decision U23:
 - `ARGUS_UPLOAD_TYPES`, the accepted types.
 
 Unfinished uploads expire like idempotency keys.
+
+## Archive format: `argus-archive/1`
+
+Portable archives (export-import-design.md) have their own version, independent of the API's.
+
+*Status: these guarantees describe the tested slice. They become binding when the portable archive
+is production-approved (export-import-design §0).*
+
+- **Identification.** Every manifest names `format` (`argus-archive/1`) and `format_major` (1). The
+  JSON Schemas are published in every portability repository (`format/`) and generated from the
+  same table definitions the exporter reads (`python -m app.portability schemas --out DIR`).
+- **Within a major version, changes are additive only:** new families, new optional columns, new
+  manifest fields, new labels. An importer of the same major version must load an archive that
+  lacks a column it knows (the column's default applies).
+- **What an importer refuses.** It refuses an archive carrying a family or a column it does not
+  know (`incompatible`), rather than drop data silently. Within a major version, archives are
+  therefore read by an ARGUS at least as new as the one that wrote them.
+- **Capabilities.** `manifest.importer.requires` lists what an importer must support
+  (`argus-archive/1`, `zstd`, `ed25519`, `ledger-replay/1`). An importer that lacks one refuses
+  with `incompatible`.
+- **A new major version** comes with a deterministic migration from the previous one
+  (`app/portability/verify.py`, `MIGRATIONS`), applied in quarantine before anything is loaded.
+  ARGUS keeps reading archives of every major version it has ever written for as long as it
+  runs: an escape hatch that newer software cannot open is no escape hatch.
+- **Supported versions.**
+  - Importing: archives written by this ARGUS release and by every earlier release of the same
+    major version.
+  - Exporting: the current major version only.
+- **The database schema** of the exporting instance (its migration head) is recorded in the
+  manifest for diagnosis. It is not a compatibility gate: the families and columns are.
+- **Repository tools.** The standalone tools in a portability repository (`tools/validate`,
+  `tools/inspect`) read their own major version without ARGUS, needing only Python 3.9 and,
+  for signatures, `cryptography`.
+- **Endpoints.** The endpoints under `/v1/portability/` follow the API policy above.

@@ -22,13 +22,14 @@ from sqlalchemy.orm import Session
 from app.ledger.engine import canonical, now
 from app.models.ledger import (AuditDigest, ClaimEvent, ConflictEvent, Decision, IdentityBinding, IdentityEvent,
                                RecordEvent, RevisionEvent, StatusEvent)
+from app.models.portability import PortabilityEvent
 
 APPEND_ONLY_TABLES = (
     "ledger_claims", "ledger_claim_events", "ledger_source_revisions", "ledger_revision_events",
     "ledger_decisions", "ledger_status_events", "ledger_identity_events", "ledger_record_events",
     "ledger_conflict_events", "ledger_job_runs", "ledger_rulesets", "ledger_migration_map",
     "ledger_reconciliation_reports", "ledger_audit_digests",
-    "intake_runs", "intake_outcomes",
+    "intake_runs", "intake_outcomes", "portability_events",
 )
 
 GUARD_FUNCTION = """
@@ -88,6 +89,9 @@ EVENT_TABLES = (
     ("record_events", RecordEvent, ("seq", "uid", "kind", "before", "after", "cause")),
     ("conflict_events", ConflictEvent, ("seq", "conflict_id", "kind", "conflict_type", "subject_uid", "detail",
                                         "cause")),
+    # Exports and imports: who asked, approved, generated, published, downloaded, imported, finalized.
+    ("portability_events", PortabilityEvent, ("seq", "subject_kind", "subject_id", "kind", "from_state",
+                                              "to_state", "actor", "detail")),
 )
 
 

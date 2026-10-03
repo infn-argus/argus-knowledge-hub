@@ -2088,7 +2088,7 @@ Performance and recovery targets are proposed defaults for sign-off (U10).
 | 6 | Search and cross-linking | one search across assets, documents and tickets, respecting access control; links navigable in both directions; search p95 < 1 s at 10× current volume | P |
 | 7 | Controlled imports and bulk operations | every bulk change is a ledger batch with a dry-run preview; approval required above 100 records; undo by `revoke` | P |
 | 8 | Stable APIs and external identifiers | a versioned API with a deprecation policy; Jira and Insight identifiers resolvable through the API | D |
-| 9 | Complete export in open formats | JSON or CSV plus attachments plus the ledger as JSON lines, with a documented schema; a tested load of an export into an empty instance | P |
+| 9 | Complete export in open formats | JSON or CSV plus attachments plus the ledger as JSON lines, with a documented schema; a tested load of an export into an empty instance. The portable archive and Git portability project (§25) extend this to a signed, verifiable escape hatch | P |
 | 10 | Backup, restore, disaster recovery, point-in-time recovery | scheduled backups; a point-in-time restore rehearsed at least quarterly; RPO ≤ 15 min and RTO ≤ 4 h; one disaster-recovery drill | P |
 | 11 | Historical Jira keys and URLs | lookup and redirects (A40); redirect of the Jira host after retirement | D; R for the host |
 | 12 | Reconciliation reports | per domain and per run, stored immutably; they prove that records, relationships, comments, attachments and history were not lost (A41) | D |
@@ -2811,6 +2811,29 @@ disable intake at any time without affecting its data.
 | **I-AI-8** | the model never closes, deletes, retires, notifies externally or executes an action. Such actions happen only through an explicit authorized decision |
 | **I-AI-9** | every statement about a ticket's cause or impact is labelled with one evidence class, and a hypothesis is never stored as a confirmed cause |
 
+### 23.17 Foreign and legacy schemas from a portability repository
+
+*Status: proposed. Not built.* A portability repository (§25) may hold a schema that is not
+ARGUS's: an inventory from another institution, a legacy database export, a Jira Insight schema
+without ARGUS's migration streams. Such a repository is never imported as an archive. Its import
+stops at `awaiting_mapping` and follows the AI Intake rules:
+
+1. AI may propose type, attribute, enumeration, unit and relation mappings, as an intake
+   operation of class R2 (a proposal about structure, not about records). It does so under the
+   requesting user's permissions, with the repository's content as untrusted input (§23.10).
+2. Deterministic validation checks every proposal against the catalogue, the relation registry
+   (§6) and the unit and enumeration definitions before anyone reviews it.
+3. Authorized reviewers approve the mapping. A catalogue extension needs the catalogue curator
+   (§5.5). Identity merges, Installations, retirement and protected predicates need explicit
+   authorization, as for any intake (§23.9, R5–R7).
+4. The approved **mapping profile** is committed under `mappings/foreign-schemas/` and reviewed
+   as code. It is kept in provenance separately from the **model profile** that proposed it and
+   from the **source commit** it maps. Rows imported through it carry all three.
+5. A change of model never redefines an approved mapping rule. A new model may propose a new
+   profile version, which is reviewed like the first.
+
+An exact ARGUS-to-ARGUS import never involves an LLM (§25.1).
+
 ---
 
 ## 24. The field client: a Flutter companion application
@@ -3120,3 +3143,89 @@ notification about a record they may not read is never sent.
 | **I-MOB-6** | no Equipment is created from a Position, channel, hostname or scanned name alone |
 | **I-MOB-7** | a device holds no provider credential, no protected prompt and no data beyond the person's grants and the retention period; it is wiped on logout, revocation or expiry |
 | **I-MOB-8** | notifications, logs, analytics, crash reports and diagnostic exports carry no restricted details and no record values |
+
+---
+
+## 25. Export, import and portability
+
+*Normative. The design, its status and its tests are in [`export-import-design.md`](export-import-design.md).
+Status of this section: the rules are decided; their implementation is tested as a vertical slice and
+not production-approved (export-import-design §0, §19).*
+
+### 25.1 Rules
+
+1. **Authority.** The append-only ledger (§7) and the immutable domain history (record events,
+   ticket and document history, revisions, approvals) are authoritative. Projections, indexes and
+   derived edges are rebuilt, never imported over (I-PROJ-1).
+2. **Four mechanisms, kept apart:** disaster-recovery backup (§19 item 10); the full portable
+   archive; the selective workspace package; the Git portability project. Only the last three use
+   the archive format, and only the last uses Git.
+3. **Git distributes and reviews.** It is never the database, the backup or the system of record.
+4. **Determinism.** ARGUS-to-ARGUS import is deterministic and uses no LLM. AI assists only in
+   mapping a foreign or legacy schema (§23.17).
+5. **Nothing silent.** An import never overwrites history, never activates a policy it was not
+   told to, never resolves a conflict by itself. An export never chooses a dependency's outcome
+   by itself and never discloses what its scope excludes.
+
+### 25.2 The archive
+
+* The format is `argus-archive/1`: a manifest, NDJSON envelopes in zstd chunks, a blob manifest,
+  checksums and an Ed25519 signature. JSON Schemas are published for the manifest and every family.
+* Every export is taken at one consistent ledger watermark `W`. Nothing committed after `W` is in
+  it.
+* Families are an allow-list. Credentials, tokens, keys, sessions, devices, push tokens, upload
+  sessions, caches, indexes and queues have none. Every row is scanned for secrets before
+  anything is published.
+* People travel as historical identity references (uid, issuer and subject, display data), never
+  as credentials.
+* Restricted classes and fields not included in an export are left out together with every row
+  that names them, and the manifest records only which classes were left out.
+* Blobs are content-addressed artifacts outside Git. The repository holds their digest, size,
+  type, classification, encryption, retention class, locator and recipients.
+
+### 25.3 The Git portability project
+
+* An export is identified by a commit and a signed annotated tag (`export/full/…`,
+  `export/workspace/…`, `export/increment/…`), never by a branch.
+* Checkpoints are immutable. Increments add, never rewrite, and form an ordered chain. Applied out
+  of order or with a gap, an increment is refused.
+* Importers accept only a signed tag or a signed commit named by its hash, from a registered
+  repository, after verifying signatures, identity, checksums and artifacts in quarantine.
+* Repository content is untrusted data. Nothing from it is executed.
+* Restricted and unrestricted exports share a repository only if every reader may see both.
+* Catalogue, policy, workflow and mapping changes are reviewed as code before activation.
+
+### 25.4 Import
+
+* Imports are staged, idempotent and resumable, and finalized only when the reconciliation passes:
+  * authoritative rows equal to the archive, row by row;
+  * every projection rebuilt here equal to the one exported;
+  * invariants no worse than at the source.
+* A discarded import leaves active state as it was.
+* Modes are `restore`, `clone`, `merge`, `selective` and `evidence`. Merge outcomes are fixed
+  (export-import-design §11): identical → skip; new → create; divergent uid → block; matching
+  immutable external identifier → identity candidate (§10), never a merge; differing type
+  definition → catalogue review, never an overwrite; missing dependency → an explicit decision.
+
+### 25.5 Authorization and audit
+
+* Only people export or import: API tokens cannot.
+* High-risk exports (full, evidence-only, with restricted classes) and merge or restore imports
+  need two people.
+* Every transition is audited in an append-only table, sealed in the audit digest chain (§19
+  item 2).
+* Step-up authentication for high-risk exports is required before production (export-import-design
+  §15).
+
+### 25.6 Invariants
+
+| Id | Invariant |
+|---|---|
+| **I-PORT-1** | an import never writes a projection from an archive; projections are rebuilt and compared |
+| **I-PORT-2** | an import never replaces a row whose content differs and that this origin did not write |
+| **I-PORT-3** | importing the same export twice changes nothing |
+| **I-PORT-4** | no credential, token, private key or excluded restricted record (or its existence, count or relations) is in an archive or a portability repository |
+| **I-PORT-5** | an increment applies only directly after its base, from the same origin |
+| **I-PORT-6** | an import is executed only from a verified, signed tag or commit; never from a branch, never by running repository content |
+| **I-PORT-7** | a discarded or failed import leaves every active table as it was |
+

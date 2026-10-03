@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Summarize an ARGUS checkpoint's manifest: mode, labels, watermark, families, blobs, closure.
+
+    tools/inspect exports/checkpoints/<export-id>
+"""
+import json
+import sys
+from pathlib import Path
+
+m = json.loads((Path(sys.argv[1]) / "manifest.json").read_text())
+print(f"{m['export_id']}  {m['mode']}  {m['format']}  watermark {m['watermark']['label']} at {m['watermark']['snapshot_at']}")
+print("labels:", ", ".join(k for k, v in m["labels"].items() if v) or "none")
+print("workspaces:", ", ".join(m["workspaces"]))
+print("from:", m["argus"]["instance_id"], "schema", m["argus"]["database_schema"])
+for name, f in m["families"].items():
+    print(f"  {name:24} {f['group']:10} {f['rows']:>8} rows{'' if f['authoritative'] else '  (not authoritative)'}")
+print(f"blobs: {m['blobs']['count']} ({m['blobs']['bytes']} bytes)")
+for d in m["closure"]["dependencies"]:
+    print(f"dependency {d['id']}: {d['count']} → {d.get('outcome')}")
