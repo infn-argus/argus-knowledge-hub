@@ -332,3 +332,33 @@ def test_two_files_ai_proposals_do_not_withdraw_each_other(world, monkeypatch):
                                                      Asset.record_status == "Provisional")}
     assert {"ZZZ01 Chiller", "YYY01 Chiller"} <= names
     db.close()
+
+
+ELI_SCREENS = """
+beamline: BEAMLINE
+epicsConfiguration:
+  iocs:
+    cam01: {template: adcamera, devgroup: cam, devtype: camera, iocprefix: LEL, devices: [{name: "SCN01:CAM01", id: 10.16.4.21}]}
+    cam02: {template: adcamera, devgroup: cam, devtype: camera, iocprefix: LEL, devices: [{name: "SCN02:CAM01", id: 10.16.4.22}]}
+    diag-tml:
+      template: motor
+      devgroup: mot
+      devtype: technosoft-asyn
+      iocprefix: LEL
+      devices: [{axid: 1, name: "SCN01:MOT01"}, {axid: 2, name: "SCN02:MOT01"}]
+"""
+
+
+def test_eli_screen_stations_are_composed_of_their_camera_and_motor(world, monkeypatch):
+    w = world
+    monkeypatch.setattr(epik8s_import, "_fetch", lambda *a, **k: ELI_SCREENS.replace("BEAMLINE", w["tag"]))
+    counts = run(w, infer_elements=True)
+    db = SessionLocal()
+    for n in ("01", "02"):
+        station = db.query(Asset).filter(Asset.workspace_id == w["ws"], Asset.key == f"{w['tag']}:ELM:SCN{n}").one()
+        assert station.type == "Screen Station"
+        parts = {db.get(Asset, r.to_asset_uid).type for r in db.query(Relation).filter(
+            Relation.from_asset_uid == station.uid, Relation.relation_type == "composed of")}
+        assert parts == {"Camera", "Motor Axis"}
+    assert counts["inferred Screen Station"] == 2
+    db.close()

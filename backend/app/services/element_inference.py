@@ -109,6 +109,9 @@ FATHER_WORDS = {"MMIR": "the main-laser mirror", "PMIR": "the probe-laser mirror
                 "PAR": "the parabolic mirror"}
 # The camera a flag is read with is named after it: AC1FLG01 → AC101, FELFLG03A → FEL03.
 SCREEN_NAME = re.compile(r"^(?P<section>[A-Z0-9]*?)FLG(?P<n>\d+)[A-Z]?$")
+# ELI names a screen station's parts after it, EPICS-style: `SCN01:CAM01` is its camera, `SCN01:MOT01`
+# the axis that drives the screen in. The station is what joins them, on two different IOCs.
+STATION_PART = re.compile(r"^(?P<station>(?:SCN|SCR|YAG)\d+[A-Z]?):(?P<part>[A-Z0-9_-]+)$")
 GAUGE_DEVTYPES = {"img", "tpg", "tpg300", "tpg366", "tpg500"}
 
 
@@ -267,6 +270,18 @@ def infer_controller(ioc: dict) -> Optional[ControllerInference]:
     return None
 
 
+def _station_part(name: str, where: str) -> Optional[dict]:
+    """The screen station a `SCN01:CAM01`-style channel belongs to, as Inference fields; None otherwise."""
+    found = STATION_PART.match(name.upper())
+    if not found:
+        return None
+    station = found["station"]
+    return {"element_type": SCREEN, "element_name": station, "element_link": "composed of",
+            "element_attrs": {"argus_system": "Diagnostics",
+                              **({"lattice_name": station} if LATTICE_NAME.match(station) else {})},
+            "why": f"{where}); {name} names it a part of {station}, a screen station's code"}
+
+
 def _motion(name: str, ioc: dict, device: dict, where: str) -> Inference:
     """An axis of a motor controller: always a motor axis, and sometimes what it moves.
 
@@ -278,6 +293,10 @@ def _motion(name: str, ioc: dict, device: dict, where: str) -> Inference:
     axis = _s(device.get("axid"))
     positions = [_s(p.get("name")) for p in (device.get("poi") or []) if isinstance(p, dict) and p.get("name")]
     base = {"argus_system": SYSTEM_BY_GROUP["mot"]}
+    station = _station_part(name, where)
+    if station:
+        return Inference(asset_type=MOTOR_AXIS, asset_attrs={**base, "axis_id": axis},
+                         **station)
     if FLAG.search(upper):
         return Inference(
             asset_type=ACTUATOR, asset_attrs={**base, "position_labels": positions},
@@ -409,5 +428,8 @@ def infer_device(ioc: dict, device: dict) -> Optional[Inference]:
         made = re.match(r"^([A-Za-z]+)-(.+)$", devtype)
         if made and devtype.lower() not in ("camera", "adcamera"):
             attrs.update({"manufacturer": made.group(1), "model": made.group(2)})
+        station = _station_part(name, where)
+        if station:
+            return Inference(asset_type=CAMERA, asset_attrs=attrs, **station)
         return Inference(asset_type=CAMERA, asset_attrs=attrs, why=f"{where})")
     return None

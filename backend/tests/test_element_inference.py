@@ -202,7 +202,7 @@ def test_an_axis_of_a_mirror_belongs_to_the_mirror_the_utility_matrix_names(name
     "FI2-MPB-001", "FI2-MPB-002",             # the probe delay line and in/out stage in the matrix
     "FI8-SLT-01", "FP4-SLT-001", "FI8-HEX-01", "FI8-DIP-01", "FI8-PBM-01",   # EuAPS: "slitte?"
     "CMBTHV01", "CMBEOS01", "CMBPLV01", "SBNROT01",     # SPARC: a YAG among their positions, but not flags
-    "SLTTB004L", "SCN01:MOT01",
+    "SLTTB004L",                              # SCN01:MOT01 is a part of screen station SCN01 (ELI)
 ])
 def test_an_axis_whose_code_does_not_say_what_it_moves_gets_no_element(name):
     found = infer_device(MOTOR, {"name": name, "poi": [{"name": "YAG", "value": 1}]})
@@ -356,3 +356,17 @@ def test_the_real_motor_channels_are_axes_and_only_what_is_named_is_more(tag, fl
                 names.add(found.element_name)
     assert screens == flags
     assert len(names) == mirrors
+
+
+def test_a_station_part_channel_belongs_to_its_screen_station():
+    """ELI: `SCN01:CAM01` on a camera IOC and `SCN01:MOT01` on the motor IOC are both parts of SCN01."""
+    camera = infer_device({"name": "cam01", "template": "adcamera", "devgroup": "cam", "devtype": "camera"},
+                          {"name": "SCN01:CAM01"})
+    motor = infer_device({"name": "diag-tml", "template": "motor", "devgroup": "mot"},
+                         {"name": "SCN01:MOT01", "axid": 1})
+    for found, kind in ((camera, "Camera"), (motor, "Motor Axis")):
+        assert found.asset_type == kind
+        assert (found.element_type, found.element_name, found.element_link) == ("Screen Station", "SCN01",
+                                                                                 "composed of")
+    # Not every colon is a station: a magnet's or an unrelated camera's name makes no screen.
+    assert infer_device({"name": "c", "devgroup": "cam"}, {"name": "LAS:CAM01"}).element_type is None
