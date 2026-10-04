@@ -279,7 +279,11 @@ same model.
     * a panel per component: aliases, family, definition, capabilities, observables and measurement model,
       supports, containment and fiducials, boundaries of any shape (and the state they apply in), alignment
       (reference point, the object's pose in the hall, design and surveyed poses, the offset — computed from
-      the survey on request — survey date and campaign), material, states, parameters.
+      the survey on request — survey date and campaign), material, states (each one's meaning for the beam —
+      passes, intercepts, limits the aperture, acts —, the state assumed, and mappings from a signal's value
+      to a state), parameters and their provenance;
+    * the provenance of every value: per dataset row (`k1` ← source, file, symbol, expression, line, note), per
+      component and definition parameter, and the document's own provenance as JSON.
 
     *Check* shows the completeness levels and what each missing level needs. What the editor does not show is
     kept and saved as it came: bindings, provenance, a tool's own fields. Editing an existing model loads its v2 export and saves it back as an import, so its
@@ -361,8 +365,8 @@ by `branches to` from the beam splitter `BSP01`, observes `optical.profile` and 
   (they are reported); Elegant's SDDS outputs (twiss) are left to the Toolbox.
 * **The editor writes canonical values only**: simulator-specific types and parameters come with an uploaded
   file, and are kept through edits.
-* **Not editable there:** state-to-signal mappings, the meaning of each state (beam passes, intercepts…) and
-  value provenance. They are kept, and come from the Toolbox or a file.
+* **Not editable there:** the simulator's native data (types and parameters as the simulator wrote them):
+  shown, and kept as it came.
 * **Not modelled here, on purpose**: vacuum pumping, electrical distribution, cooling, PLC logic, networks,
   maintenance, documents and inventory. The beam model identifies a component and its relevance to the beam;
   the Knowledge Hub holds the engineering detail, linked by the binding.

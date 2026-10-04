@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { ApiError, beamModelApi } from "../../api/client";
 import type {
   BeamImportReport, BeamModelCheck, BeamModelV2, BeamVocabulary, V2Boundary, V2Component, V2Dataset, V2Definition,
-  V2Field, V2Path, V2Placement, V2Profile,
+  V2Field, V2Path, V2Placement, V2Profile, V2Provenance, V2StateModel,
 } from "../../api/types";
 
 /** The beam model editor for argus.beam-model/2 (docs/beam-model-format.md). It edits the document an import
@@ -290,6 +290,8 @@ function ModelBox({ doc, update, editing }: { doc: BeamModelV2; update: Update; 
         <Field label="Namespace" value={doc.facility?.namespace ?? ""} disabled={!doc.facility} placeholder="dafne/accumulator" onChange={(v) => update((d) => { if (d.facility) d.facility.namespace = v || undefined; })} />
         <Field label="Site" value={doc.facility?.site ?? ""} disabled={!doc.facility} onChange={(v) => update((d) => { if (d.facility) d.facility.site = v || undefined; })} />
       </div>
+      <JsonField label="Provenance of the document (JSON: converter, source files, a tool's notes)" value={doc.provenance}
+                 onChange={(v) => update((d) => { if (v && Object.keys(v).length) d.provenance = v; else delete d.provenance; })} />
     </Box>
   );
 }
@@ -798,29 +800,15 @@ function ComponentPanel({ doc, id, vocab, update, onRenamed, onClose, onDefiniti
         )}
       </Group>
 
-      <Group title="States" hint="what each means for the beam; never the live state"
-             action={!c.states ? (typeStates
-               ? <button type="button" className="text-indigo-700 hover:underline" onClick={() => edit((el) => {
-                 el.states = { states: Object.entries(typeStates).map(([name, meaning]) => ({ name, meaning })), default: Object.keys(typeStates)[0] };
-               })}>use the type's</button>
-               : <button type="button" className="text-indigo-700 hover:underline" onClick={() => edit((el) => { el.states = { states: [{ name: "ON" }, { name: "OFF" }], default: "ON" }; })}>add</button>)
-               : <button type="button" className="text-rose-700 hover:underline" onClick={() => edit((el) => { delete el.states; })}>remove</button>}>
-        {c.states && (
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="States" value={stateNames.join(", ")} onChange={(v) => edit((el) => {
-              const names = v.split(",").map((x) => x.trim().toUpperCase()).filter(Boolean);
-              const old = new Map((el.states!.states ?? []).map((s) => [s.name, s]));
-              el.states!.states = names.map((n) => old.get(n) ?? { name: n });
-              if (el.states!.default && !names.includes(el.states!.default)) el.states!.default = names[0];
-            })} />
-            <Select label="Assumed (normal operation)" value={c.states.default ?? ""} options={["", ...stateNames]} onChange={(v) => edit((el) => { el.states!.default = v || undefined; })} />
-          </div>
-        )}
-      </Group>
+      <StatesGroup model={c.states} typeStates={typeStates}
+                   onChange={(m) => edit((el) => { if (m) el.states = m; else delete el.states; })} />
 
       <Group title="Parameters" hint="normalised, not configuration-dependent (those go in a dataset)">
         <Cell value={kv(c.parameters ?? {})} placeholder="length=0.3, gradient=12" onCommit={(v) => edit((el) => { el.parameters = parseKv(v); if (!Object.keys(el.parameters).length) delete el.parameters; })} />
       </Group>
+      <ProvenanceGroup prov={c.provenance} keys={["length", ...Object.keys(c.parameters ?? {})]}
+                       hint="where its parameters came from"
+                       onChange={(pv) => edit((el) => { if (pv) el.provenance = pv; else delete el.provenance; })} />
       <Field label="Description" value={c.description ?? ""} onChange={(v) => edit((el) => { el.description = v || undefined; })} />
       {c.native && (
         <p className="text-[11px] text-slate-400">Native: {c.native.format} {c.native.type} {c.native.name ? `“${c.native.name}”` : ""} {c.native.file ? `· ${c.native.file}` : ""} — kept as it came.</p>
@@ -954,6 +942,11 @@ function DefinitionPanel({ doc, id, vocab, update, onRenamed, onClose }: {
           </div>
         )}
       </Group>
+      <StatesGroup model={def.states} typeStates={typeStates}
+                   onChange={(m) => edit((x) => { if (m) x.states = m; else delete x.states; })} />
+      <ProvenanceGroup prov={def.provenance} keys={["length", ...Object.keys(def.parameters ?? {})]}
+                       hint="where its parameters came from"
+                       onChange={(pv) => edit((x) => { if (pv) x.provenance = pv; else delete x.provenance; })} />
       {def.native && <p className="text-[11px] text-slate-400">Native: {def.native.format} {def.native.type} {def.native.name ? `“${def.native.name}”` : ""} — kept as it came.</p>}
       <div className="border-t border-slate-100 pt-2">
         <button type="button" className="text-rose-700 hover:underline" onClick={() => {
@@ -1055,6 +1048,7 @@ function DatasetEditor({ doc, ds, update, onRenamed, onRemoved, vocab }: {
   });
   const freeRows = !path;
   const [addRow, setAddRow] = useState("");
+  const [provRow, setProvRow] = useState<string | null>(null);
 
   return (
     <div className="mt-3 space-y-3">
@@ -1109,6 +1103,7 @@ function DatasetEditor({ doc, ds, update, onRenamed, onRemoved, vocab }: {
               {physicsKeys.map((k) => <th key={`p${k}`}>{k}</th>)}
               {opticsKeys.map((k) => <th key={`o${k}`} className="text-violet-700">{k}</th>)}
               <th className="text-slate-400">native</th>
+              <th className="text-slate-400" title="where each value came from">prov</th>
             </tr>
           </thead>
           <tbody>
@@ -1126,6 +1121,12 @@ function DatasetEditor({ doc, ds, update, onRenamed, onRemoved, vocab }: {
                   {physicsKeys.map((k) => <td key={`p${k}`}><Cell value={cellOf("physics", k)} onCommit={(x) => setCell(r, "physics", k, x)} narrow /></td>)}
                   {opticsKeys.map((k) => <td key={`o${k}`}><Cell value={cellOf("optics", k)} onCommit={(x) => setCell(r, "optics", k, x)} narrow /></td>)}
                   <td className="whitespace-nowrap px-1 text-slate-400">{v.native ? `${v.native.type ?? ""} (${Object.keys(v.native.parameters ?? {}).length})` : ""}</td>
+                  <td className="px-1">
+                    <button type="button" onClick={() => setProvRow(provRow === r ? null : r)}
+                            className={`rounded px-1 ${provRow === r ? "bg-indigo-600 text-white" : Object.keys(v.provenance ?? {}).length ? "bg-indigo-50 text-indigo-700" : "text-slate-300 hover:text-slate-600"}`}>
+                      {Object.keys(v.provenance ?? {}).length || "+"}
+                    </button>
+                  </td>
                 </tr>
               );
             })}
@@ -1140,6 +1141,18 @@ function DatasetEditor({ doc, ds, update, onRenamed, onRemoved, vocab }: {
             {doc.components.filter((c) => !(c.id in values)).map((c) => <option key={c.id} value={c.id}>{c.id}</option>)}
           </select>
           <Small onClick={() => { if (addRow) { edit((x) => { x.values = { ...(x.values ?? {}), [addRow]: { s: null } }; }); setAddRow(""); } }}>add</Small>
+        </div>
+      )}
+      {provRow && (
+        <div className="rounded border border-indigo-200 bg-indigo-50/40 p-2">
+          <ProvenanceGroup prov={values[provRow]?.provenance} hint={`of ${provRow}'s values in ${ds.id}`}
+                           keys={["s", ...physicsKeys, ...opticsKeys, ...(showGeometry ? GEOMETRY_KEYS : [])]}
+                           onChange={(pv) => edit((x) => {
+                             x.values = x.values ?? {};
+                             const v = (x.values[provRow] = x.values[provRow] ?? {});
+                             if (pv) v.provenance = pv; else delete v.provenance;
+                             if (!Object.keys(v).length) delete x.values[provRow];
+                           })} />
         </div>
       )}
       <p className="text-[11px] text-slate-500">
@@ -1202,6 +1215,186 @@ function SamplesArea({ value, onCommit }: { value: string; onCommit: (v: string)
   useEffect(() => setV(value), [value]);
   return <textarea value={v} rows={4} onChange={(e) => setV(e.target.value)} onBlur={() => v !== value && onCommit(v)}
                    className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 font-mono text-xs text-slate-900" />;
+}
+
+// ------------------------------------------------------------------------- states and provenance
+
+const MEANINGS: [string, string][] = [["beam_passes", "beam passes"], ["intercepts", "intercepts"],
+  ["limits_aperture", "limits aperture"], ["acts", "acts on the beam"]];
+
+/** The states a component can be in and what each means for the beam, the one the static model assumes, and
+ *  how a value read from an external signal maps to a state. Never the live state: the control system has it. */
+function StatesGroup({ model, typeStates, onChange }: {
+  model: V2StateModel | undefined; typeStates?: Record<string, Record<string, unknown>>; onChange: (m: V2StateModel | undefined) => void;
+}) {
+  const set = (fn: (m: V2StateModel) => void) => { const m = clone(model!); fn(m); onChange(m); };
+  const names = (model?.states ?? []).map((x) => x.name);
+  return (
+    <Group title="States" hint="what each means for the beam; never the live state"
+           action={!model ? (typeStates
+             ? <button type="button" className="text-indigo-700 hover:underline" onClick={() => onChange({
+               states: Object.entries(typeStates).map(([name, meaning]) => ({ name, meaning })), default: Object.keys(typeStates)[0] })}>use the type's</button>
+             : <button type="button" className="text-indigo-700 hover:underline" onClick={() => onChange({ states: [{ name: "ON" }, { name: "OFF" }], default: "ON" })}>add</button>)
+             : <button type="button" className="text-rose-700 hover:underline" onClick={() => onChange(undefined)}>remove</button>}>
+      {model && (
+        <div className="space-y-2">
+          {model.states.map((st, i) => (
+            <div key={i} className="rounded border border-slate-100 p-1.5 text-[11px]">
+              <div className="flex items-end gap-1">
+                <label className="block w-28 text-[10px] text-slate-400">state
+                  <Cell value={st.name} fill mono onCommit={(v) => set((m) => {
+                    const n = v.trim().toUpperCase();
+                    if (!n || m.states.some((x, j) => j !== i && x.name === n)) return;
+                    const old = m.states[i].name;
+                    m.states[i].name = n;
+                    if (m.default === old) m.default = n;
+                    (m.mappings ?? []).forEach((mp) => { if (mp.state === old) mp.state = n; });
+                  })} />
+                </label>
+                <label className="block min-w-0 flex-1 text-[10px] text-slate-400">description
+                  <Cell value={st.description ?? ""} fill onCommit={(v) => set((m) => { m.states[i].description = v || undefined; })} />
+                </label>
+                <Icon title="remove this state" onClick={() => set((m) => {
+                  const gone = m.states[i].name;
+                  m.states.splice(i, 1);
+                  if (m.default === gone) m.default = m.states[0]?.name;
+                  m.mappings = (m.mappings ?? []).filter((mp) => mp.state !== gone);
+                })}>✕</Icon>
+              </div>
+              <div className="mt-1 grid grid-cols-4 gap-1">
+                {MEANINGS.map(([k, label]) => {
+                  const v = st.meaning?.[k];
+                  return (
+                    <label key={k} className="block text-[10px] text-slate-400">{label}
+                      <select value={v === true ? "yes" : v === false ? "no" : v === null ? "unknown" : ""} onChange={(e) => set((m) => {
+                        const mean = { ...(m.states[i].meaning ?? {}) };
+                        const x = e.target.value;
+                        if (!x) delete mean[k]; else mean[k] = x === "yes" ? true : x === "no" ? false : null;
+                        m.states[i].meaning = mean;
+                      })} className="w-full rounded border border-slate-300 px-0.5 py-0.5 text-[11px] text-slate-900">
+                        <option value="">—</option><option value="yes">yes</option><option value="no">no</option><option value="unknown">unknown</option>
+                      </select>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          <div className="flex flex-wrap items-end gap-2">
+            <button type="button" className="text-indigo-700 hover:underline" onClick={() => set((m) => {
+              let n = m.states.length + 1;
+              while (m.states.some((x) => x.name === `STATE${n}`)) n++;
+              m.states.push({ name: `STATE${n}` });
+            })}>+ state</button>
+            <div className="w-40"><Select label="Assumed (normal operation)" value={model.default ?? ""} options={["", ...names]} onChange={(v) => set((m) => { m.default = v || undefined; })} /></div>
+          </div>
+          <div>
+            <div className="text-[11px] text-slate-500">Signal mappings · a value read from the control system → the state it means (the signal's identity is the Knowledge Hub's)</div>
+            <table className="mt-1 w-full text-[11px]">
+              {(model.mappings ?? []).length > 0 && <thead><tr className="text-left text-slate-400"><th>Signal (role or id)</th><th>Value</th><th>State</th><th /></tr></thead>}
+              <tbody>
+                {(model.mappings ?? []).map((mp, i) => (
+                  <tr key={i} className="border-t border-slate-100">
+                    <td><Cell value={mp.signal ?? ""} placeholder="status" fill onCommit={(v) => set((m) => { m.mappings![i].signal = v || undefined; })} /></td>
+                    <td><Cell value={mp.value === undefined || mp.value === null ? "" : String(mp.value)} fill onCommit={(v) => set((m) => {
+                      m.mappings![i].value = v.trim() !== "" && !Number.isNaN(Number(v)) ? Number(v) : v === "true" ? true : v === "false" ? false : v;
+                    })} /></td>
+                    <td><select value={mp.state} onChange={(e) => set((m) => { m.mappings![i].state = e.target.value; })} className="rounded border border-slate-300 px-0.5 py-0.5">
+                      {names.map((n) => <option key={n} value={n}>{n}</option>)}</select></td>
+                    <td><Icon title="remove" onClick={() => set((m) => { m.mappings!.splice(i, 1); if (!m.mappings!.length) delete m.mappings; })}>✕</Icon></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {names.length > 0 && <button type="button" className="mt-1 text-indigo-700 hover:underline" onClick={() => set((m) => {
+              m.mappings = [...(m.mappings ?? []), { signal: "status", value: m.mappings?.length ?? 0, state: names[0] }];
+            })}>+ mapping</button>}
+          </div>
+        </div>
+      )}
+    </Group>
+  );
+}
+
+const PROV_FIELDS: [keyof V2Provenance, string][] = [["source", "source"], ["file", "file"], ["symbol", "symbol"],
+  ["expression", "expression"], ["line", "line"], ["note", "note"]];
+
+/** Where values came from, one entry per value name: `k1` ← MAD-X, strengths.str, symbol qk1, line 12. */
+function ProvenanceGroup({ prov, keys, hint, onChange }: {
+  prov: Record<string, V2Provenance> | undefined; keys: string[]; hint: string;
+  onChange: (p: Record<string, V2Provenance> | undefined) => void;
+}) {
+  const entries = Object.entries(prov ?? {});
+  const [adding, setAdding] = useState("");
+  const free = [...new Set(keys)].filter((k) => !(k in (prov ?? {})));
+  const put = (key: string, fn: (e: V2Provenance) => void) => {
+    const next = clone(prov ?? {});
+    next[key] = { ...(next[key] ?? {}) };
+    fn(next[key]);
+    Object.keys(next[key]).forEach((k) => { if (next[key][k] === undefined) delete next[key][k]; });
+    onChange(next);
+  };
+  return (
+    <Group title="Provenance" hint={hint}>
+      {entries.length === 0 && <p className="text-[11px] text-slate-400">None recorded.</p>}
+      {entries.map(([key, e]) => (
+        <div key={key} className="mb-1 rounded border border-slate-100 p-1.5">
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-[11px] font-semibold text-slate-700">{key}</span>
+            <button type="button" className="text-[11px] text-rose-700 hover:underline" onClick={() => {
+              const next = clone(prov ?? {});
+              delete next[key];
+              onChange(Object.keys(next).length ? next : undefined);
+            }}>remove</button>
+          </div>
+          <div className="mt-1 grid grid-cols-3 gap-1">
+            {PROV_FIELDS.map(([f, label]) => (
+              <label key={f} className="block text-[10px] text-slate-400">{label}
+                <Cell value={e[f] === undefined ? "" : String(e[f])} fill placeholder={f === "source" ? "madx, survey, person" : ""}
+                      onCommit={(v) => put(key, (x) => { x[f] = v.trim() === "" ? undefined : f === "line" ? Number(v) || undefined : v; })} />
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div className="flex items-center gap-1">
+        <input list={`prov-keys-${hint.length}`} value={adding} onChange={(e) => setAdding(e.target.value)} placeholder="value name, e.g. k1"
+               className="w-40 rounded border border-slate-300 px-1 py-0.5 text-[11px]" />
+        <datalist id={`prov-keys-${hint.length}`}>{free.map((k) => <option key={k} value={k} />)}</datalist>
+        <button type="button" className="text-[11px] text-indigo-700 hover:underline" onClick={() => {
+          const k = adding.trim();
+          if (!k || (prov ?? {})[k]) return;
+          put(k, (x) => { x.source = ""; delete x.source; });
+          setAdding("");
+        }}>+ provenance</button>
+      </div>
+    </Group>
+  );
+}
+
+/** A small JSON object edited as text, refused (and said so) when it does not parse to an object. */
+function JsonField({ label, value, onChange }: { label: string; value: unknown; onChange: (v: Record<string, unknown> | undefined) => void }) {
+  const text = value && Object.keys(value as object).length ? JSON.stringify(value, null, 1) : "";
+  const [v, setV] = useState(text);
+  const [bad, setBad] = useState(false);
+  useEffect(() => { setV(text); setBad(false); }, [text]);
+  return (
+    <label className="mt-2 block text-xs text-slate-500">{label}
+      <textarea value={v} rows={Math.min(8, Math.max(2, v.split("\n").length))} onChange={(e) => setV(e.target.value)}
+                onBlur={() => {
+                  if (v === text) return;
+                  if (!v.trim()) { onChange(undefined); return; }
+                  try {
+                    const parsed = JSON.parse(v);
+                    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+                    setBad(false);
+                    onChange(parsed);
+                  } catch { setBad(true); }
+                }}
+                className={`mt-0.5 w-full rounded border px-2 py-1 font-mono text-xs text-slate-900 ${bad ? "border-rose-400 bg-rose-50" : "border-slate-300"}`} />
+      {bad && <span className="text-rose-700">Not a JSON object: not saved.</span>}
+    </label>
+  );
 }
 
 const SHAPE_FIELDS: Record<string, [keyof V2Profile, string][]> = {

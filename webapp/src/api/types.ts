@@ -1702,6 +1702,9 @@ export interface V2Boundary {
   id?: string; component?: string; path?: string; s_start?: number; s_end?: number; profile: V2Profile;
   when_state?: string; kind?: "physical" | "model"; note?: string; [k: string]: unknown;
 }
+export interface V2Provenance {
+  source?: string; file?: string; symbol?: string; expression?: string; line?: number; note?: string; [k: string]: unknown;
+}
 export interface V2StateModel {
   states: { name: string; meaning?: Record<string, unknown>; description?: string }[];
   default?: string; mappings?: { signal?: string; value: unknown; state: string }[];
@@ -1716,7 +1719,7 @@ export interface V2Component {
   states?: V2StateModel;
   measurement_model?: { type: string; observables?: string[]; [k: string]: unknown };
   observes?: string[]; mounted_on?: string; contained_in?: string; fiducials?: string[];
-  native?: V2Native; description?: string; [k: string]: unknown;
+  native?: V2Native; description?: string; provenance?: Record<string, V2Provenance>; [k: string]: unknown;
 }
 export interface V2Placement { component: string; id?: string; s?: number; length?: number; reversed?: boolean }
 export interface V2Path {
@@ -1735,7 +1738,7 @@ export interface V2Beam {
 export interface V2System { id: string; name?: string; kind?: string; beams?: string[]; [k: string]: unknown }
 export interface V2Values {
   s?: number | null; geometry?: Record<string, number> | null; physics?: Record<string, unknown>;
-  optics?: Record<string, unknown>; native?: V2Native; [k: string]: unknown;
+  optics?: Record<string, unknown>; native?: V2Native; provenance?: Record<string, V2Provenance>; [k: string]: unknown;
 }
 export interface V2Field {
   quantity: string; path: string; unit?: string; samples: number[][]; interpolation?: "linear" | "step" | "none";
@@ -1750,7 +1753,8 @@ export interface V2Dataset {
 export interface V2Definition {
   id: string; type: string; name?: string; capabilities?: string[]; parameters?: Record<string, unknown>;
   geometry?: { length?: number; [k: string]: unknown }; boundaries?: V2Boundary[];
-  material?: V2Component["material"]; states?: V2StateModel; native?: V2Native; [k: string]: unknown;
+  material?: V2Component["material"]; states?: V2StateModel; native?: V2Native;
+  provenance?: Record<string, V2Provenance>; [k: string]: unknown;
 }
 export interface BeamModelV2 {
   schema_version: "argus.beam-model/2";
