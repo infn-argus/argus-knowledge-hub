@@ -1,0 +1,32 @@
+# Argo CD keeps the hub running the version k8s/kustomization.yaml names on main. The release workflow
+# (.github/workflows/release.yml) sets that version when a tag passes its tests, so a tag is a deployment.
+#
+# Apply once:  kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt apply -f k8s/argocd/application.yaml
+# First compare what it would change:  kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt diff -k k8s/
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argus-knowledge-hub
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/infn-argus/argus-knowledge-hub.git
+    targetRevision: main
+    path: k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: assetmanagement
+  syncPolicy:
+    automated:
+      # Never delete what the manifests stop naming (a PVC holds the attachments): removal is by hand.
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

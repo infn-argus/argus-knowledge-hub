@@ -1,0 +1,125 @@
+# A version tag (v1.33.0) is a release: the tests run, the two images are built and pushed to ghcr.io
+# with that version and `latest`, and k8s/kustomization.yaml on main is set to the version, which is what
+# Argo CD (k8s/argocd/application.yaml) rolls out. A failing test stops it before anything is pushed.
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  BACKEND_IMAGE: ghcr.io/infn-argus/argus-knowledge-hub-backend
+  WEB_IMAGE: ghcr.io/infn-argus/argus-knowledge-hub-web
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # As in docker-compose.yml: Ask ARGUS's search needs pgvector.
+        image: pgvector/pgvector:pg16-trixie
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # The tests run in the image that will be shipped, with its system tools (dwg2dxf, fonts, git).
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          load: true
+          tags: argus-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Run the backend tests
+        run: |
+          docker run --rm --network host \
+            -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/app \
+            -e TOKEN_PEPPER=ci-only \
+            -v "$PWD/backend/tests:/app/tests:ro" \
+            -v "$PWD/backend/openapi:/app/openapi:ro" \
+            -v "$PWD/backend/requirements-dev.txt:/app/requirements-dev.txt:ro" \
+            argus-backend:ci sh -c "pip install -q -r requirements-dev.txt && python -m pytest -q -p no:cacheprovider tests \
+              --deselect tests/test_readiness_ops.py::test_a_backup_restores_into_a_scratch_database_and_checks_itself"
+
+  web-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webapp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - run: npm ci
+      # Type-checks and builds, as the image does.
+      - run: npm run build
+
+  publish:
+    needs: [backend-tests, web-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: ${{ env.BACKEND_IMAGE }}:${{ steps.version.outputs.version }},${{ env.BACKEND_IMAGE }}:latest
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - uses: docker/build-push-action@v6
+        with:
+          context: webapp
+          push: true
+          tags: ${{ env.WEB_IMAGE }}:${{ steps.version.outputs.version }},${{ env.WEB_IMAGE }}:latest
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  # The deployment itself: Argo CD follows k8s/kustomization.yaml on main.
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Point the manifests at ${{ needs.publish.outputs.version }}
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          sed -i -E "/argus-knowledge-hub-(backend|web)$/{n;s/newTag: .*/newTag: ${VERSION}/}" k8s/kustomization.yaml
+          git diff --quiet && { echo "already at ${VERSION}"; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Deploy ${VERSION}"
+          for attempt in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && exit 0; sleep 5; done
+          exit 1

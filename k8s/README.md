@@ -1,5 +1,53 @@
 # Deploying the asset-management API
 
+## Releases: a tag is a deployment
+
+Once set up (below), releasing is:
+
+```
+git tag v1.33.0 && git push origin v1.33.0
+```
+
+`.github/workflows/release.yml` then:
+
+1. runs the backend tests inside the backend image, against Postgres with pgvector, and type-checks
+   and builds the web app; a failure stops the release here, before anything is pushed;
+2. builds both images and pushes them to ghcr.io as `1.33.0` and `latest`;
+3. commits `Deploy 1.33.0` to `main`, setting the two `newTag`s in `k8s/kustomization.yaml`.
+
+Argo CD watches `k8s/` on `main` (`k8s/argocd/application.yaml`) and rolls that version out. So
+`main` always says which version runs, and going back is reverting the `Deploy` commit (or setting
+`newTag` by hand). The API applies its database migrations on start.
+
+What Argo CD manages is what `k8s/kustomization.yaml` lists: the namespace, the API and web app with
+their services and ingresses, and the attachments volume. The Postgres manifests are left out,
+because the cluster may run a pgvector build the manifest does not name. The portability CronJobs are
+left out until their Secret exists. Both are still applied by hand. Argo CD never deletes
+(`prune: false`); it puts back hand edits to what it manages (`selfHeal`).
+
+### Setting it up, once
+
+With `KC="kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt"`:
+
+1. **The packages accept the workflow.** On GitHub, for each of `argus-knowledge-hub-backend` and
+   `argus-knowledge-hub-web`: *Package settings → Manage Actions access → Add repository*
+   `infn-argus/argus-knowledge-hub`, role **Write**. Without it the push is refused (403).
+2. **The workflow may push to `main`.** If `main` is protected, allow `github-actions[bot]` to bypass
+   the rule for the `Deploy` commit, or the last step fails (the images are pushed regardless).
+3. **Argo CD is installed** in the cluster (`kubectl get crd applications.argoproj.io`). If it is not:
+   ```
+   $KC create namespace argocd
+   $KC apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+   ```
+4. **Check what it would change**, then hand the namespace over:
+   ```
+   $KC diff -k k8s/        # the live objects against the manifests; set newTag to what runs first
+   $KC apply -f k8s/argocd/application.yaml
+   ```
+   The repository is public, so Argo CD needs no credentials to read it.
+
+## Building and rolling out by hand
+
 Target: the INFN cluster via `kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt`.
 
 ## 1. Build and push the image

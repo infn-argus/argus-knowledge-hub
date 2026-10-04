@@ -1,0 +1,25 @@
+# What Argo CD keeps in sync (k8s/argocd/application.yaml). The image tags below are set by the release
+# workflow (.github/workflows/release.yml) when a version tag is pushed: that commit is the deployment.
+#
+# Left out on purpose, and applied by hand as before (k8s/README.md):
+# - postgres-*.yaml: the database. The cluster may run a pgvector build of Postgres 16 that the manifest does
+#   not say; synced, it would be replaced by plain postgres:16 and Ask ARGUS would lose its search index.
+# - portability-*.yaml: the backup/export CronJobs need their Secret first (portability-secret.example.yaml).
+#   Add them here once the Secret exists.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: assetmanagement
+resources:
+  - namespace.yaml
+  - attachments-pvc.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - api-ingress.yaml
+  - web-deployment.yaml
+  - web-service.yaml
+  - web-ingress.yaml
+images:
+  - name: ghcr.io/infn-argus/argus-knowledge-hub-backend
+    newTag: 1.32.0
+  - name: ghcr.io/infn-argus/argus-knowledge-hub-web
+    newTag: 1.32.0

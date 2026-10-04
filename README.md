@@ -514,8 +514,10 @@ VITE_API_BASE_URL=http://localhost:8080
 
 ## Deployment
 
-See [`k8s/README.md`](k8s/README.md). Images are built and pushed with `backend/deploy.sh
-<version>` and `webapp/deploy.sh <version>`, then rolled out with `kubectl set image`.
+See [`k8s/README.md`](k8s/README.md). A version tag is a release: `git tag v1.33.0 && git push
+origin v1.33.0` runs the tests, pushes both images and sets the version in `k8s/kustomization.yaml`,
+which Argo CD rolls out (`.github/workflows/release.yml`, `k8s/argocd/application.yaml`). By hand, the
+images are still built with `backend/deploy.sh <version>` and `webapp/deploy.sh <version>`.
 
 ## License
 
