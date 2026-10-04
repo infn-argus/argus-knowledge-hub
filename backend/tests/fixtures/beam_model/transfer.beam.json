@@ -1,0 +1,187 @@
+{
+ "schema_version": "argus.beam-model/2",
+ "model": {
+  "id": "test-transfer",
+  "name": "Branched transfer line"
+ },
+ "systems": [
+  {
+   "id": "tl",
+   "kind": "Transfer line",
+   "beams": [
+    "e-"
+   ]
+  }
+ ],
+ "beams": [
+  {
+   "id": "e-",
+   "species": "electron",
+   "charge": -1,
+   "systems": [
+    "tl"
+   ]
+  }
+ ],
+ "paths": [
+  {
+   "id": "injector",
+   "system": "tl",
+   "placements": [
+    "INJ_GUN",
+    "INJ_Q1"
+   ]
+  },
+  {
+   "id": "main",
+   "system": "tl",
+   "placements": [
+    "A_Q1",
+    "B_BPM1",
+    "SEPT1"
+   ]
+  },
+  {
+   "id": "line1",
+   "system": "tl",
+   "placements": [
+    "L1_Q1",
+    "L1_BPM1",
+    "DUMP1"
+   ]
+  },
+  {
+   "id": "line2",
+   "system": "tl",
+   "placements": [
+    "L2_Q1",
+    "L2_SCR1",
+    "EXP1"
+   ]
+  }
+ ],
+ "connections": [
+  {
+   "kind": "continue",
+   "from": {
+    "path": "injector"
+   },
+   "to": {
+    "path": "main"
+   }
+  },
+  {
+   "kind": "branch",
+   "from": {
+    "path": "main",
+    "component": "SEPT1"
+   },
+   "to": {
+    "path": "line1"
+   }
+  },
+  {
+   "kind": "branch",
+   "from": {
+    "path": "main",
+    "component": "SEPT1"
+   },
+   "to": {
+    "path": "line2"
+   }
+  }
+ ],
+ "components": [
+  {
+   "id": "INJ_GUN",
+   "type": "electron_source"
+  },
+  {
+   "id": "INJ_Q1",
+   "type": "quadrupole"
+  },
+  {
+   "id": "A_Q1",
+   "type": "quadrupole"
+  },
+  {
+   "id": "B_BPM1",
+   "type": "bpm"
+  },
+  {
+   "id": "SEPT1",
+   "type": "septum"
+  },
+  {
+   "id": "L1_Q1",
+   "type": "quadrupole"
+  },
+  {
+   "id": "L1_BPM1",
+   "type": "bpm"
+  },
+  {
+   "id": "DUMP1",
+   "type": "beam_dump"
+  },
+  {
+   "id": "L2_Q1",
+   "type": "quadrupole"
+  },
+  {
+   "id": "L2_SCR1",
+   "type": "screen"
+  },
+  {
+   "id": "EXP1",
+   "type": "experimental_target"
+  }
+ ],
+ "datasets": [
+  {
+   "id": "design-main",
+   "path": "main",
+   "values": {
+    "A_Q1": {
+     "s": 0.0
+    },
+    "B_BPM1": {
+     "s": 1.0
+    },
+    "SEPT1": {
+     "s": 2.0
+    }
+   }
+  },
+  {
+   "id": "design-line1",
+   "path": "line1",
+   "values": {
+    "L1_Q1": {
+     "s": 0.0
+    },
+    "L1_BPM1": {
+     "s": 1.0
+    },
+    "DUMP1": {
+     "s": 2.0
+    }
+   }
+  },
+  {
+   "id": "design-line2",
+   "path": "line2",
+   "values": {
+    "L2_Q1": {
+     "s": 0.0
+    },
+    "L2_SCR1": {
+     "s": 1.0
+    },
+    "EXP1": {
+     "s": 2.0
+    }
+   }
+  }
+ ]
+}

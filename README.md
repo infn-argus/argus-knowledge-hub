@@ -202,18 +202,30 @@ currently valid* revision rather than to an arbitrary PDF.
   Build or update the index on *Workspace → AI* (only what changed is embedded again), or
   `python -m app.services.knowledge_index <workspace|all>`, e.g. nightly. Served by `/v1/ai/chat`
   (server-sent events), `/v1/ai/conversations` and `/v1/ai/knowledge`.
-- **Beam model.** A simulator-independent physics model linked to the facility: beam systems, beams
-  (particle or photon), paths (open or closed, joined by real branch and ring-closing relations, with `s`
-  as a coordinate, not the topology), elements with normalised kinds, capabilities and the simulator's own
-  parameters kept whole, diagnostics and the observables they observe, and model datasets holding what
-  depends on the optics (s, geometry, strengths, Twiss). A physics position stays while the hardware
-  installed at it changes (Installations); a name match only proposes a binding; control signals are
-  identities, never values. Imported from the canonical `argus.beam-model/1` JSON
-  ([format](docs/beam-model-format.md)), or from MAD-X, TFS and Elegant files through converters that
-  produce it, as ledger claims with provenance; drawn to scale in the hall and along `s`. See
-  [docs/beam-model.md](docs/beam-model.md); served
-  by `/v1/beam-systems`, `/v1/beam-paths`, `/v1/beam-elements`, `/v1/diagnostics`, `/v1/observables`,
-  `/v1/model-datasets`, `/v1/model-bindings` and `/v1/beam-model/import`.
+- **Beam model.** A simulator-independent, directed beam-transport network linked to the facility:
+  * Structure:
+    * beam systems and any number of beams (particle or photon);
+    * paths of placements (open or closed; a component may be on several), joined by explicit branch,
+      merge and continue connections, with `s` a coordinate, never the topology.
+  * Components:
+    * definitions and instances;
+    * components of every family (magnets, RF, diagnostics, vacuum, interception, material, optics,
+      sources, supports) described by capabilities;
+    * beam boundaries of any shape from any component (limiting-aperture queries);
+    * materials, semantic states, measurement models;
+    * alignment and supports;
+    * the simulator's own data with per-value provenance.
+  * Datasets: optics, survey, fields along a path.
+  * Validity: completeness levels from TOPOLOGY to INTEGRATED.
+  * Sources: the canonical `argus.beam-model/2` JSON ([format](docs/beam-model-format.md); v1 still read), or
+    MAD-X, TFS, Elegant, Bmad, Xsuite and Accelerator Toolbox files through converters.
+  * Asset synchronization matches components to physical assets on names, aliases, conventions, type,
+    beamline, position, geometry, order and neighbours. Proposals carry confidence and evidence; people
+    confirm them; confirmed bindings survive later syncs
+    ([docs/beam-asset-sync.md](docs/beam-asset-sync.md)).
+  * See [docs/beam-model.md](docs/beam-model.md).
+  * Served by `/v1/beam-systems`, `/v1/beam-paths`, `/v1/beam-elements`, `/v1/diagnostics`,
+    `/v1/observables`, `/v1/model-datasets`, `/v1/beam-models/{id}/…` and `/v1/beam-model/import`.
 - **Portable archives (integration-tested slice; not production-approved).** A workspace or the whole
   instance exported at one ledger watermark (a hashed vector) as signed, immutable chunks with a
   manifest and JSON Schemas. People travel under an identity profile, and every attachment and source
@@ -272,8 +284,11 @@ currently valid* revision rather than to an arbitrary PDF.
   hatch: signed `argus-archive/1` checkpoints at a ledger watermark, selective packages with an
   explicit dependency closure, a Git repository of immutable chunks and signed tags, quarantined
   verification, staged idempotent import, and reconciliation; with the status of each part.
-- [The beam model format](docs/beam-model-format.md) — `argus.beam-model/1` field by field, bundles, what the
-  importer refuses, and the converters from simulator files (MAD-X, TFS, Elegant) with how to add one.
+- [The beam model format](docs/beam-model-format.md) — `argus.beam-model/2` (`*.beam.json`): the object model,
+  topology, component and capability vocabularies, boundaries, materials, states, diagnostics, alignment,
+  datasets, bindings, validation levels, the converters (MAD-X, TFS, Elegant, Bmad, Xsuite, AT), v1 compatibility.
+- [Beamline asset synchronization](docs/beam-asset-sync.md) — matching model components to physical assets:
+  evidence, confidence, statuses, incremental sync, the API and the review view.
 - [The knowledge graph for root-cause analysis](docs/knowledge-graph-design.md) — what each
   relation means for a failure (which way it travels, and whether the dependent loses its readout,
   its function, a permit or part of itself), impact and root-cause analysis over it

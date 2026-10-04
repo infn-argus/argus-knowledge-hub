@@ -152,6 +152,48 @@
         "title": "AlarmIn",
         "type": "object"
       },
+      "ApplyIn": {
+        "properties": {
+          "accept": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Decision"
+            },
+            "title": "Accept",
+            "type": "array"
+          },
+          "accept_high_confidence": {
+            "default": false,
+            "title": "Accept High Confidence",
+            "type": "boolean"
+          },
+          "keep_proposals": {
+            "default": true,
+            "title": "Keep Proposals",
+            "type": "boolean"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SyncOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reject": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Decision"
+            },
+            "title": "Reject",
+            "type": "array"
+          }
+        },
+        "title": "ApplyIn",
+        "type": "object"
+      },
       "ApproveAction": {
         "properties": {
           "comment": {
@@ -2194,6 +2236,51 @@
           }
         },
         "title": "DecideReplacementIn",
+        "type": "object"
+      },
+      "Decision": {
+        "properties": {
+          "asset": {
+            "title": "Asset",
+            "type": "string"
+          },
+          "component": {
+            "title": "Component",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "relation": {
+            "default": "implemented_by",
+            "title": "Relation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component",
+          "asset"
+        ],
+        "title": "Decision",
         "type": "object"
       },
       "DecisionBatch": {
@@ -9099,6 +9186,86 @@
         "title": "SwapIn",
         "type": "object"
       },
+      "SyncOptions": {
+        "properties": {
+          "auto_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Threshold"
+          },
+          "dataset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset"
+          },
+          "margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin"
+          },
+          "naming_rules": {
+            "default": [],
+            "items": {
+              "type": "object"
+            },
+            "title": "Naming Rules",
+            "type": "array"
+          },
+          "propose_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Propose Threshold"
+          },
+          "s_tolerance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "S Tolerance"
+          },
+          "xyz_tolerance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xyz Tolerance"
+          }
+        },
+        "title": "SyncOptions",
+        "type": "object"
+      },
       "TransferJobOut": {
         "properties": {
           "completed_at": {
@@ -15871,7 +16038,7 @@
     },
     "/v1/beam-model/export": {
       "get": {
-        "description": "Several models (or all) in one bundle (argus.beam-model-bundle/1).",
+        "description": "Several models (or all) in one bundle: argus.beam-model-bundle/2, or /1 when every model is v1.",
         "operationId": "export_models_v1_beam_model_export_get",
         "parameters": [
           {
@@ -15893,6 +16060,23 @@
               ],
               "description": "Model ids; all when omitted",
               "title": "Model"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(1|2)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           },
           {
@@ -16065,7 +16249,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "description": "A canonical beam model (argus.beam-model/1), a bundle (argus.beam-model-bundle/1) or a list of models",
+                "description": "A canonical beam model (argus.beam-model/2 or /1), a bundle (argus.beam-model-bundle/2 or /1) or a list of models",
                 "title": "Doc"
               }
             }
@@ -16174,7 +16358,7 @@
     },
     "/v1/beam-model/models/{model_id}/export": {
       "get": {
-        "description": "One model as canonical JSON (argus.beam-model/1), from what the hub holds now: importing it again, here\nor in another hub, gives the same model.",
+        "description": "One model as canonical JSON — in the format it was imported in, or `format` 1 or 2. v2 gives back the\ndocument whole with the hub's current bindings; v1 is rebuilt from what the hub holds now. Either imports\nagain, here or in another hub, as the same model.",
         "operationId": "export_model_v1_beam_model_models__model_id__export_get",
         "parameters": [
           {
@@ -16184,6 +16368,23 @@
             "schema": {
               "title": "Model Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(1|2)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
             }
           },
           {
@@ -16252,9 +16453,20 @@
     },
     "/v1/beam-model/schema": {
       "get": {
-        "description": "The JSON Schema of the canonical representation (docs/beam-model-format.md).",
+        "description": "The JSON Schema of the canonical representation (docs/beam-model-format.md): v2 (`*.beam.json`), or v1.",
         "operationId": "schema_v1_beam_model_schema_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "default": "2",
+              "pattern": "^(1|2)$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
@@ -16468,6 +16680,695 @@
           }
         ],
         "summary": "Validate Models",
+        "tags": [
+          "beam-model"
+        ]
+      }
+    },
+    "/v1/beam-models/{model_id}/aperture": {
+      "get": {
+        "description": "The tightest restriction of the beam between two components of a path, whatever produces it (a magnet\nbore, a chamber, a bellows, a valve, a collimator, an iris), in the states the model assumes unless given.",
+        "operationId": "limiting_aperture_v1_beam_models__model_id__aperture_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset"
+            }
+          },
+          {
+            "description": "component:STATE, e.g. SCP1:IN",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": [],
+              "description": "component:STATE, e.g. SCP1:IN",
+              "items": {
+                "type": "string"
+              },
+              "title": "State",
+              "type": "array"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Limiting Aperture",
+        "tags": [
+          "beam-model"
+        ]
+      }
+    },
+    "/v1/beam-models/{model_id}/asset-bindings": {
+      "get": {
+        "description": "Every recorded binding of the model: status, authority, confidence, evidence, matcher and decision.",
+        "operationId": "asset_bindings_v1_beam_models__model_id__asset_bindings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(confirmed|proposed|ambiguous|rejected|superseded)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Asset Bindings",
+        "tags": [
+          "beam-model"
+        ]
+      }
+    },
+    "/v1/beam-models/{model_id}/asset-sync/apply": {
+      "post": {
+        "description": "Record a person's decisions: accept chosen proposals (or every auto-acceptable one), reject others, keep\nthe rest for review. An accepted `implemented_by` binding becomes a confirmed Installation (a swap when\nanother unit is installed there). Confirmed bindings are never changed by a later sync.",
+        "operationId": "asset_sync_apply_v1_beam_models__model_id__asset_sync_apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Asset Sync Apply",
+        "tags": [
+          "beam-model"
+        ]
+      }
+    },
+    "/v1/beam-models/{model_id}/asset-sync/preview": {
+      "post": {
+        "description": "Proposed bindings between the model's components and this workspace's physical assets, with confidence,\nevidence and how each differs from what is bound now. Nothing is written.",
+        "operationId": "asset_sync_preview_v1_beam_models__model_id__asset_sync_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SyncOptions"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Asset Sync Preview",
+        "tags": [
+          "beam-model"
+        ]
+      }
+    },
+    "/v1/beam-models/{model_id}/asset-sync/status": {
+      "get": {
+        "description": "The synchronization summary and the entries, filtered by family or status.",
+        "operationId": "asset_sync_status_v1_beam_models__model_id__asset_sync_status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "magnets, diagnostics, vacuum, rf, optics, mechanical, interception, sources, or a status: confirmed, proposed, ambiguous, unmatched",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "magnets, diagnostics, vacuum, rf, optics, mechanical, interception, sources, or a status: confirmed, proposed, ambiguous, unmatched",
+              "title": "Filter"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Asset Sync Status",
+        "tags": [
+          "beam-model"
+        ]
+      }
+    },
+    "/v1/beam-models/{model_id}/components/{component}/alignment": {
+      "get": {
+        "description": "What a component is mounted on, what moves with it, and which fiducials define its alignment.",
+        "operationId": "alignment_v1_beam_models__model_id__components__component__alignment_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "title": "Component",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Alignment",
+        "tags": [
+          "beam-model"
+        ]
+      }
+    },
+    "/v1/beam-models/{model_id}/document": {
+      "get": {
+        "description": "The model as stored (argus.beam-model/2), with its validation: completeness levels, warnings, gaps.",
+        "operationId": "model_document_v1_beam_models__model_id__document_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Model Document",
         "tags": [
           "beam-model"
         ]

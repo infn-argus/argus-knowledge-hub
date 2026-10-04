@@ -1,0 +1,108 @@
+{
+ "schema_version": "argus.beam-model/2",
+ "model": {
+  "id": "test-collider-ir",
+  "name": "Collider interaction region"
+ },
+ "systems": [
+  {
+   "id": "collider",
+   "kind": "Collider",
+   "beams": [
+    "e+",
+    "e-"
+   ]
+  }
+ ],
+ "beams": [
+  {
+   "id": "e+",
+   "species": "positron",
+   "charge": 1,
+   "reference_energy": 0.51,
+   "systems": [
+    "collider"
+   ]
+  },
+  {
+   "id": "e-",
+   "species": "electron",
+   "charge": -1,
+   "reference_energy": 0.51,
+   "systems": [
+    "collider"
+   ]
+  }
+ ],
+ "paths": [
+  {
+   "id": "positron-ring",
+   "system": "collider",
+   "beams": [
+    "e+"
+   ],
+   "topology": "closed",
+   "placements": [
+    "ARC_P1",
+    "QD0L",
+    "IP1",
+    "QD0R",
+    "ARC_P2"
+   ]
+  },
+  {
+   "id": "electron-ring",
+   "system": "collider",
+   "beams": [
+    "e-"
+   ],
+   "topology": "closed",
+   "placements": [
+    "ARC_E1",
+    {
+     "component": "QD0R",
+     "reversed": true
+    },
+    {
+     "component": "IP1",
+     "reversed": true
+    },
+    {
+     "component": "QD0L",
+     "reversed": true
+    },
+    "ARC_E2"
+   ]
+  }
+ ],
+ "components": [
+  {
+   "id": "QD0L",
+   "type": "quadrupole"
+  },
+  {
+   "id": "QD0R",
+   "type": "quadrupole"
+  },
+  {
+   "id": "IP1",
+   "type": "interaction_point"
+  },
+  {
+   "id": "ARC_P1",
+   "type": "dipole"
+  },
+  {
+   "id": "ARC_P2",
+   "type": "dipole"
+  },
+  {
+   "id": "ARC_E1",
+   "type": "dipole"
+  },
+  {
+   "id": "ARC_E2",
+   "type": "dipole"
+  }
+ ]
+}

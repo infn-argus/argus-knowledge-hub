@@ -91,7 +91,7 @@ import type {
   RootCauseResult,
   BeamSystem,
   BeamPathGraph,
-  BeamElementContext,
+  BeamElementContext, AssetSyncStatus, AssetSyncApply, AssetSyncApplied, AssetBinding,
   BeamRecord,
   BeamModelSummary,
   BeamModelCheck,
@@ -1447,7 +1447,9 @@ export async function streamChat(
 /** The beam model (docs/beam-model.md): read-only views for the viewer page. */
 export const beamModelApi = {
   models: () => request<BeamModelSummary[]>("/v1/beam-model/models"),
-  exportModel: (id: string) => request<CanonicalBeamModel>(`/v1/beam-model/models/${encodeURIComponent(id)}/export`),
+  /** In the format it was imported in, or `format` "1"/"2" (the editor asks for "1"; the hub keeps v2 extras). */
+  exportModel: (id: string, format?: "1" | "2") =>
+    request<CanonicalBeamModel>(`/v1/beam-model/models/${encodeURIComponent(id)}/export${format ? `?format=${format}` : ""}`),
   exportAll: () => request<{ format: string; models: CanonicalBeamModel[] }>("/v1/beam-model/export"),
   validate: (doc: unknown) =>
     request<{ models: BeamModelCheck[] }>("/v1/beam-model/validate", { method: "POST", body: json(doc) }),
@@ -1464,6 +1466,13 @@ export const beamModelApi = {
   datasets: (path: string) => request<BeamRecord[]>(`/v1/model-datasets?path=${encodeURIComponent(path)}`),
   context: (uid: string, dataset?: string | null) =>
     request<BeamElementContext>(`/v1/beam-elements/${encodeURIComponent(uid)}/context${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ""}`),
+  // Beamline asset synchronization (docs/beam-asset-sync.md)
+  syncStatus: (model: string, filter?: string | null) =>
+    request<AssetSyncStatus>(`/v1/beam-models/${encodeURIComponent(model)}/asset-sync/status${filter ? `?filter=${encodeURIComponent(filter)}` : ""}`),
+  syncApply: (model: string, body: AssetSyncApply) =>
+    request<AssetSyncApplied>(`/v1/beam-models/${encodeURIComponent(model)}/asset-sync/apply`, { method: "POST", body: json(body) }),
+  assetBindings: (model: string, status?: string) =>
+    request<AssetBinding[]>(`/v1/beam-models/${encodeURIComponent(model)}/asset-bindings${status ? `?status=${status}` : ""}`),
 };
 
 const P = "/v1/portability";

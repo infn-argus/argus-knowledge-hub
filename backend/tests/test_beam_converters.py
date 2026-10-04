@@ -1,6 +1,8 @@
 """Simulator files to the canonical beam model (app/beam_converters): MAD-X sequences, lines and TFS tables,
-and Elegant lattices. The same ring written three ways must give the same model; the survey from lengths and
-bends must close a ring; what a converter cannot read is said, not guessed; and a converted model imports.
+Elegant and Bmad lattices, Xsuite lines and Accelerator Toolbox lattices. The same ring written six ways must give
+the same model (argus.beam-model/2); the survey from lengths and bends must close a ring; what the simulator said
+survives as native data with per-value provenance; what a converter cannot read is said, not guessed; and a
+converted model imports.
 """
 import math
 from pathlib import Path
@@ -8,31 +10,50 @@ from pathlib import Path
 import pytest
 
 from app import beam_converters as bc
-from app.services import beam_model as bm
+from app.beam_model_core.validation import load
 
 F = Path(__file__).parent / "fixtures" / "beam_model"
-RING = ("dafne_accumulator.madx", "dafne_accumulator.lte", "dafne_accumulator_twiss.tfs")
+RING = ("dafne_accumulator.madx", "dafne_accumulator.lte", "dafne_accumulator_twiss.tfs", "dafne_accumulator.bmad",
+        "dafne_accumulator.xsuite.json", "dafne_accumulator.at.json")
 
 
 def conv(name: str, **opts) -> dict:
     return bc.convert(name, (F / name).read_text(), bc.Options(**opts))
 
 
-def test_the_same_ring_written_three_ways_is_one_model():
+def order(d: dict, i: int = 0) -> list[str]:
+    return [p if isinstance(p, str) else p["component"] for p in d["paths"][i]["placements"]]
+
+
+def comps(d: dict) -> dict:
+    return {c["id"]: c for c in d["components"]}
+
+
+def valid(d: dict):
+    doc, rep = load({k: v for k, v in d.items() if k != "conversion"})
+    assert rep.ok, rep.errors
+    return doc, rep
+
+
+def test_the_same_ring_written_six_ways_is_one_model():
     docs = [conv(n, model_id="acc") for n in RING]
-    orders = [d["paths"][0]["elements"] for d in docs]
-    assert orders[0] == orders[1] == orders[2] and len(orders[0]) == 54
-    counts = {}
-    for e in docs[0]["elements"]:
-        counts[e["type"]] = counts.get(e["type"], 0) + 1
-    # The accumulator's own counts: what the layout of the real machine shows.
-    assert counts == {"bpm": 12, "kicker": 4, "septum": 2, "corrector": 8, "dipole": 8, "quadrupole": 12, "sextupole": 8}
+    orders = [order(d) for d in docs]
+    assert all(o == orders[0] for o in orders) and len(orders[0]) == 54
     for d in docs:
+        counts = {}
+        for e in d["components"]:
+            counts[e["type"]] = counts.get(e["type"], 0) + 1
+        # The accumulator's own counts: what the layout of the real machine shows.
+        assert counts == {"bpm": 12, "kicker": 4, "septum": 2, "corrector": 8, "dipole": 8, "quadrupole": 12,
+                          "sextupole": 8}, d["provenance"]
+        assert d["schema_version"] == "argus.beam-model/2"
         assert d["paths"][0]["topology"] == "closed" and abs(d["paths"][0]["length"] - 32.56) < 1e-6
         v = d["datasets"][0]["values"]["QUAA101"]
         assert v["physics"]["k1"] == pytest.approx(4.30926) and v["physics"]["length"] == 0.3
         assert abs(v["s"] - docs[0]["datasets"][0]["values"]["QUAA101"]["s"]) < 1e-6
-        bm.validate(d)                                                          # each is a valid canonical model
+        assert d["conversion"]["survey_closure_m"] < 1e-6
+        _doc, rep = valid(d)                                                    # each is a valid canonical model
+        assert "LATTICE" in rep.levels
 
 
 def test_the_survey_closes_a_ring_and_places_its_dipoles():
@@ -47,8 +68,9 @@ def test_the_survey_closes_a_ring_and_places_its_dipoles():
 
 def test_madx_keeps_what_the_simulator_says_and_names_what_it_is():
     d = conv("dafne_accumulator.madx")
-    by = {e["id"]: e for e in d["elements"]}
-    assert by["KCKA1001"]["type"] == "kicker" and by["KCKA1001"]["native"] == {"source": "madx", "type": "HKICKER"}
+    by = comps(d)
+    assert by["KCKA1001"]["type"] == "kicker" and by["KCKA1001"]["native"] == {
+        "format": "madx", "type": "HKICKER", "name": "KCKA1001", "file": "dafne_accumulator.madx"}
     assert "pulsed" in by["KCKA1001"]["capabilities"] and "horizontal_steering" in by["KCKA1001"]["capabilities"]
     assert by["SPTA1001"]["type"] == "septum" and by["SPTA1001"]["native"]["type"] == "RBEND"
     assert by["CHV11"]["type"] == "corrector"
@@ -56,8 +78,10 @@ def test_madx_keeps_what_the_simulator_says_and_names_what_it_is():
     assert by["BPSA11"]["observes"] == ["beam.position.x", "beam.position.y"]
     dip = d["datasets"][0]["values"]["DIPA11"]
     assert dip["physics"]["angle"] == pytest.approx(math.pi / 4) and dip["native"]["parameters"]["ANGLE"] == pytest.approx(math.pi / 4)
-    beam = d["systems"][0]["beams"][0]["parameters"]
+    beam = d["beams"][0]
     assert beam["species"] == "electron" and beam["reference_energy"] == 0.51 and beam["charge"] == -1
+    assert d["datasets"][0]["values"]["QUAA101"]["provenance"]["k1"] == {
+        "source": "madx", "file": "dafne_accumulator.madx", "symbol": "K1"}
 
 
 def test_madx_language_variables_inheritance_refer_from_and_lines():
@@ -79,11 +103,14 @@ def test_madx_language_variables_inheritance_refer_from_and_lines():
     """
     seq = bc.convert("tl.madx", text, bc.Options(beamline="tl"))
     vals = seq["datasets"][0]["values"]
-    assert seq["paths"][0]["elements"] == ["Q1", "B1", "Q2", "M1"] and seq["paths"][0]["topology"] == "open"
+    assert order(seq) == ["Q1", "B1", "Q2", "M1"] and seq["paths"][0]["topology"] == "open"
+    # q1 is an instance of the user's qf: qf is its definition and family
+    assert comps(seq)["Q1"]["definition"] == "QF" and comps(seq)["Q2"]["family"] == "QD"
     assert vals["Q1"]["s"] == 1 and vals["Q2"]["s"] == 5                      # refer=entry; at 2 from b1 at 3
     assert vals["Q2"]["physics"] == {"length": 0.4, "k1": -1.5}               # inherited length, deferred lq
     line = bc.convert("tl.madx", text, bc.Options(beamline="arc"))
-    assert line["paths"][0]["elements"] == ["QF", "QD", "QF#2", "QD#2", "BEND", "M1"]   # repeats, then reversed
+    assert order(line) == ["QF", "QD", "QF#2", "QD#2", "BEND", "M1"]           # repeats, then reversed
+    assert comps(line)["QF#2"]["definition"] == "QF" and "QF" in {x["id"] for x in line["definitions"]}
     lv = line["datasets"][0]["values"]
     assert lv["QF#2"]["s"] == pytest.approx(1.8) and lv["BEND"]["s"] == pytest.approx(3.6)
 
@@ -99,12 +126,14 @@ def test_elegant_reads_rpn_and_continuations():
     L1: LINE=(Q1, D1, B1, W1, D1, Q1)
     """
     d = bc.convert("x.lte", text)
-    assert d["paths"][0]["elements"] == ["Q1", "B1", "Q1#2"]                  # drifts and watch points left out
+    assert order(d) == ["Q1", "B1", "Q1#2"]                                    # drifts and watch points left out
     v = d["datasets"][0]["values"]
     assert v["Q1"]["physics"] == {"length": 1.0, "k1": 8.2} and v["B1"]["s"] == pytest.approx(1.25)
     assert v["B1"]["physics"]["angle"] == pytest.approx(math.pi / 18) and v["Q1#2"]["s"] == pytest.approx(2.0)
     with_markers = bc.convert("x.lte", text, bc.Options(keep_markers=True))
-    assert "W1" in with_markers["paths"][0]["elements"]
+    assert "W1" in order(with_markers)
+    v1 = bc.convert("x.lte", text, bc.Options(output="1"))                    # the old form, when asked
+    assert v1["format"] == "argus.beam-model/1" and v1["paths"][0]["elements"] == ["Q1", "B1", "Q1#2"]
 
 
 @pytest.mark.parametrize("name, text, problem", [
@@ -135,7 +164,7 @@ def test_a_converted_file_imports_through_the_api(db_world):
     from tests.test_beam_model import client
     h = db_world
     formats = {f["name"] for f in client.get("/v1/beam-model/formats", headers=h).json()}
-    assert {"argus", "madx", "madx-tfs", "elegant"} <= formats
+    assert {"argus", "madx", "madx-tfs", "elegant", "bmad", "xsuite", "at"} <= formats
     assert client.get("/v1/beam-model/schema", headers=h).json()["title"].startswith("ARGUS canonical beam model")
     out = client.post("/v1/beam-model/convert", headers=h, json={
         "filename": "dafne_accumulator_twiss.tfs", "content": (F / "dafne_accumulator_twiss.tfs").read_text(),
@@ -184,3 +213,74 @@ def db_world():
     db.delete(db.get(Workspace, ws))
     db.commit()
     db.close()
+
+
+def test_bmad_reads_variables_inheritance_parameters_and_limits():
+    text = """
+    parameter[particle] = proton
+    parameter[p0c] = 2.0e9
+    kq = 1.5   ! a variable
+    qf: quadrupole, l = 0.4, k1 = kq
+    qd: qf, k1 = -kq            ! inherits l
+    b1: sbend, l = 2.0, g = 0.05
+    col: rcollimator, l = 0.2, x_limit = 0.02, y_limit = 0.005
+    call, file = more.bmad
+    d: drift, l = 0.5
+    cell: line = (qf, d, b1, d, qd, col)
+    use, cell
+    """
+    d = bc.convert("cell.bmad", text)
+    _doc, rep = valid(d)
+    assert order(d) == ["QF", "B1", "QD", "COL"]
+    v = d["datasets"][0]["values"]
+    assert v["QD"]["physics"] == {"length": 0.4, "k1": -1.5} and v["B1"]["physics"]["angle"] == pytest.approx(0.1)
+    assert v["B1"]["s"] == pytest.approx(0.9)
+    by = comps(d)
+    assert by["QD"]["family"] == "QF" and by["QD"]["native"]["location"] == "cell.bmad:6"
+    assert by["COL"]["boundaries"][0]["profile"] == {"shape": "rectangle", "half_width_x": 0.02, "half_height_y": 0.005}
+    assert d["beams"][0]["species"] == "proton" and d["beams"][0]["reference_energy"] == pytest.approx(2.0)
+    assert any("call" in x for x in d["conversion"]["not_executed"])
+
+
+def test_xsuite_reads_a_line_with_apertures():
+    line = {"element_names": ["ap0", "q1", "d1", "mb", "d2", "mcb1", "ip"],
+            "elements": {"ap0": {"__class__": "LimitEllipse", "a": 0.03, "b": 0.02},
+                         "q1": {"__class__": "Quadrupole", "length": 0.5, "k1": 0.8},
+                         "d1": {"__class__": "Drift", "length": 1.0},
+                         "mb": {"__class__": "Bend", "length": 2.0, "angle": 0.02},
+                         "d2": {"__class__": "Drift", "length": 0.5},
+                         "mcb1": {"__class__": "Multipole", "knl": [1e-4], "ksl": [0.0]},
+                         "ip": {"__class__": "Marker"}},
+            "particle_ref": {"mass0": 938.27208816e6, "q0": 1.0, "p0c": [7e12]}}
+    import json
+    d = bc.convert("lhc.json", json.dumps(line), bc.Options(keep_markers=True))
+    doc, rep = valid(d)
+    assert order(d) == ["Q1", "MB", "MCB1", "IP"]
+    assert comps(d)["MCB1"]["type"] == "corrector" and comps(d)["IP"]["type"] == "marker"
+    assert d["datasets"][0]["values"]["MB"]["s"] == pytest.approx(1.5)
+    assert d["boundaries"][0]["profile"]["shape"] == "ellipse" and d["boundaries"][0]["path"] == d["paths"][0]["id"]
+    assert d["beams"][0]["species"] == "proton" and d["beams"][0]["reference_momentum"] == pytest.approx(7000)
+    from app.beam_model_core.queries import limiting_aperture
+    assert limiting_aperture(doc, d["paths"][0]["id"])["limit_y"]["value"] == 0.02
+
+
+def test_accelerator_toolbox_reads_families_polynomials_and_apertures():
+    import json
+    lattice = {"atjson": 1, "properties": {"name": "ring", "energy": 3e9, "particle": {"name": "electron"}},
+               "elements": [{"Class": "Quadrupole", "FamName": "QF", "Length": 0.3, "PolynomB": [0, 1.2],
+                             "PassMethod": "StrMPoleSymplectic4Pass", "EApertures": [0.03, 0.015]},
+                            {"Class": "Drift", "FamName": "DR", "Length": 1.0, "PassMethod": "DriftPass"},
+                            {"Class": "Sextupole", "FamName": "SF", "Length": 0.2, "PolynomB": [0, 0, 5.0],
+                             "PassMethod": "StrMPoleSymplectic4Pass"},
+                            {"Class": "Quadrupole", "FamName": "QF", "Length": 0.3, "PolynomB": [0, 1.2],
+                             "PassMethod": "StrMPoleSymplectic4Pass"},
+                            {"Class": "RFCavity", "FamName": "RF", "Length": 0, "Voltage": 1e6, "Frequency": 5e8,
+                             "HarmNumber": 400, "PassMethod": "RFCavityPass"}]}
+    d = bc.convert("ring.json", json.dumps(lattice))
+    valid(d)
+    assert order(d) == ["QF", "SF", "QF#2", "RF"]
+    by = comps(d)
+    assert by["QF#2"]["definition"] == "QF" and by["QF"]["boundaries"][0]["profile"]["semi_axis_y"] == 0.015
+    v = d["datasets"][0]["values"]
+    assert v["SF"]["physics"]["k2"] == pytest.approx(10.0)                    # PolynomB[2] is k2/2
+    assert v["RF"]["physics"]["harmonic"] == 400 and d["beams"][0]["reference_energy"] == pytest.approx(3.0)

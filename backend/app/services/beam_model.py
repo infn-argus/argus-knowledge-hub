@@ -73,7 +73,7 @@ DEFAULT_CAPABILITIES = {
     "solenoid": ["beam_transport", "focusing", "powered"], "collimator": ["beam_transport", "interceptive"],
     "undulator": ["beam_transport", "radiation"], "generic": [],
 }
-BEAM_EDGES = ("upstream of", "branches to", "closes to")
+BEAM_EDGES = ("upstream of", "branches to", "closes to", "merges into", "continues to")
 DIAGNOSTIC_KINDS = {"bpm", "screen", "generic_monitor"}
 BASE_OBSERVABLES = {
     "beam.position.x": ("mm", "particle", "x"), "beam.position.y": ("mm", "particle", "y"),
@@ -391,6 +391,44 @@ def awaiting_policy(db: Session, stream_id: str) -> bool:
     return stream_id not in set(vocab.get("streams") or []) or RULE not in set(vocab.get("rules") or [])
 
 
+V1_KIND = {"beam_dump": "dump", "generic_source": "source", "electron_source": "source",
+           "positron_source": "source", "ion_source": "source", "proton_source": "source", "laser_source": "source",
+           "photon_source": "source"}
+
+
+def _v1_kind(t: str) -> str:
+    """A v2 component type as the v1 format can say it (an export in v1 must import again)."""
+    t = V1_KIND.get(t, t)
+    if t in ELEMENT_TYPES:
+        return t
+    from app.beam_model_core import vocabulary as voc
+    return "generic_monitor" if voc.family(t) == "diagnostic" else "generic"
+
+
+def prepare(doc, db: Optional[Session] = None, workspace_id: Optional[str] = None):
+    """Any supported version, as a validated v2 document with its report. A v1 document is held to the v1
+    rules (its closed list of kinds, one path per element), then upgraded; when it updates a model the hub
+    stores as v2, what v1 cannot say is carried over from the stored document."""
+    from app.beam_model_core import validation as core
+    from app.beam_model_core.upgrade import V1, upgrade, version_of
+    from app.services import beam_model_v2 as v2
+    version = version_of(doc)
+    if version == V1:
+        validate(doc)
+        body = upgrade(doc)
+        if db is not None and workspace_id is not None:
+            stored = v2.current(db, workspace_id, (doc.get("model") or {}).get("id"))
+            if stored is not None and (stored.document.get("provenance") or {}).get("native_format") == "2":
+                body = v2.carry_over(body, stored.document)
+        native = "1"
+    else:
+        body, native = doc, "2"
+    parsed, report = core.load(body)
+    if not report.ok:
+        raise BeamModelError(report.errors)
+    return parsed, report, native
+
+
 def import_canonical(db: Session, workspace_id: str, doc: dict, actor: str = "import", *,
                      trusted: bool = False) -> dict:
     """Bring a canonical beam model into a workspace: its records and topology as ledger claims, then the
@@ -400,8 +438,9 @@ def import_canonical(db: Session, workspace_id: str, doc: dict, actor: str = "im
     (the Accelerator Model Toolbox, an API token) is external and waits for the authority policy to cover it;
     a model a signed-in person uploads or writes in ARGUS (`trusted`) is theirs, as a record they create is,
     and takes effect at once. Every revision names who brought it."""
-    m = validate(doc)
-    claims = _claims(workspace_id, m)
+    from app.services import beam_model_v2 as v2
+    m, check, native = prepare(doc, db, workspace_id)
+    claims = v2.claims(workspace_id, m, RULE)
     types = sorted({c["value"]["type"] for c in claims if c["predicate"] == "exists"})
     # The catalogue's types, not bare ones the ledger would make: a workspace seeded before the beam model
     # existed is told what to run.
@@ -419,30 +458,45 @@ def import_canonical(db: Session, workspace_id: str, doc: dict, actor: str = "im
     result = engine.ingest(db, stream.id, revision=digest[:12], content=content, observed_at=engine.now(),
                            parser="resolved", cause=f"beam model {m.model.id} imported by {actor}")
     report = {"model": m.model.id, "state": result.get("state"), "revision": result.get("revision_id"),
-              "systems": len(m.systems), "paths": len(m.paths), "elements": len(m.elements), "datasets": 0,
-              "values": 0, "stream": stream.id, "awaiting_policy": awaiting_policy(db, stream.id)}
+              "format": native, "systems": len(m.systems), "paths": len(m.paths), "elements": len(m.components),
+              "datasets": 0, "values": 0, "stream": stream.id, "awaiting_policy": awaiting_policy(db, stream.id),
+              "levels": check.levels, "warnings": check.warnings}
     if result.get("state") != "published":
         # Held by the ledger's guard (it would retire too much): nothing below is written until a person
         # approves the revision and the import is run again.
         db.flush()
         return report
-    for d in _datasets(m):
-        dataset_uid = engine.resolve_ref(db, _ref(workspace_id, m.model.id, "dataset", d.id))
-        path_uid = engine.resolve_ref(db, _ref(workspace_id, m.model.id, "path", d.path))
+    resolved: dict[tuple, Optional[str]] = {}
+
+    def uid(kind: str, ident: Optional[str]) -> Optional[str]:
+        if ident is None:
+            return None
+        if (kind, ident) not in resolved:
+            resolved[(kind, ident)] = engine.resolve_ref(db, _ref(workspace_id, m.model.id, kind, ident))
+        return resolved[(kind, ident)]
+
+    rows = v2.value_rows(m)
+    for d in m.datasets:
+        dataset_uid = uid("dataset", d.id)
         if dataset_uid is None:
             continue
         db.execute(delete(BeamModelValue).where(BeamModelValue.dataset_uid == dataset_uid))
-        for eid, v in d.values.items():
-            subject = engine.resolve_ref(db, _ref(workspace_id, m.model.id, "element", eid))
-            if subject is None:
-                continue
-            g = v.geometry or _Geometry()
-            db.add(BeamModelValue(workspace_id=workspace_id, dataset_uid=dataset_uid, subject_uid=subject,
-                                  path_uid=path_uid, s=v.s, x=g.x, y=g.y, z=g.z, yaw=g.yaw, pitch=g.pitch,
-                                  roll=g.roll, physics=v.physics or {}, optics=v.optics or {},
-                                  native=v.native.model_dump(exclude_none=True) if v.native else {}))
-            report["values"] += 1
         report["datasets"] += 1
+    for dataset_id, path_id, comp, v in rows:
+        dataset_uid, subject = uid("dataset", dataset_id), uid("element", comp)
+        if dataset_uid is None or subject is None:
+            continue
+        g = v.geometry
+        own_native = v.native.model_dump(mode="json", exclude_none=True) if v.native else {}
+        if own_native.get("format"):
+            own_native["source"] = own_native.pop("format")
+        physics = dict(v.physics or {})          # value provenance stays in the stored document
+        db.add(BeamModelValue(workspace_id=workspace_id, dataset_uid=dataset_uid, subject_uid=subject,
+                              path_uid=uid("path", path_id), s=v.s, x=g.x if g else None, y=g.y if g else None,
+                              z=g.z if g else None, yaw=g.yaw if g else None, pitch=g.pitch if g else None,
+                              roll=g.roll if g else None, physics=physics, optics=v.optics or {}, native=own_native))
+        report["values"] += 1
+    report["document_revision"] = v2.store(db, workspace_id, m, check.to_dict(), actor, native)
     db.flush()
     return report
 
@@ -567,9 +621,10 @@ class _Graph:
         self.out: dict[str, list[tuple[str, str]]] = defaultdict(list)
         self.inn: dict[str, list[tuple[str, str]]] = defaultdict(list)
         self.member: dict[str, str] = {}
+        self.placed: dict[str, set] = defaultdict(set)      # element → every path it is placed on (v2)
         self.start: dict[str, str] = {}
         self.observes: dict[str, list[str]] = defaultdict(list)
-        rels = ("upstream of", "branches to", "closes to", "part of", "starts at", "observes")
+        rels = (*BEAM_EDGES, "part of", "placed on", "starts at", "observes")
         for r in db.scalars(select(Relation).where(Relation.workspace_id == workspace_id,
                                                    Relation.relation_type.in_(rels))):
             if r.relation_type in BEAM_EDGES:
@@ -577,6 +632,8 @@ class _Graph:
                 self.inn[r.to_asset_uid].append((r.relation_type, r.from_asset_uid))
             elif r.relation_type == "part of":
                 self.member[r.from_asset_uid] = r.to_asset_uid
+            elif r.relation_type == "placed on":
+                self.placed[r.from_asset_uid].add(r.to_asset_uid)
             elif r.relation_type == "starts at":
                 self.start[r.from_asset_uid] = r.to_asset_uid
             else:
@@ -589,7 +646,30 @@ class _Graph:
         return self._assets[uid]
 
     def members(self, path_uid: str) -> list[str]:
-        return [e for e, p in self.member.items() if p == path_uid]
+        return sorted({e for e, p in self.member.items() if p == path_uid}
+                      | {e for e, ps in self.placed.items() if path_uid in ps})
+
+    def sequence(self, path_uid: str) -> Optional[list[str]]:
+        """A v2 path's placements in order, as element uids (a component passed twice appears twice)."""
+        path = self.asset(path_uid)
+        seq = (path.attributes or {}).get("sequence") if path is not None else None
+        if not seq:
+            return None
+        if not hasattr(self, "_by_key"):
+            self._by_key = {}
+            for uid in {*self.member, *self.placed}:
+                a = self.asset(uid)
+                if a is not None and a.key:
+                    self._by_key[a.key] = uid
+        prefix = path.key.rsplit("/path/", 1)[0] if path.key and "/path/" in path.key else None
+        if prefix is None:
+            return None
+        out = []
+        for pid in seq:
+            uid = self._by_key.get(f"{prefix}/{pid.split('#', 1)[0]}")
+            if uid is not None:
+                out.append(uid)
+        return out
 
 
 def path_of(db: Session, element_uid: str) -> Optional[str]:
@@ -603,6 +683,10 @@ def ordered_elements(g: _Graph, path_uid: str) -> list[str]:
     members = set(g.members(path_uid))
     if not members:
         return []
+    seq = g.sequence(path_uid)
+    if seq:
+        live = [u for u in dict.fromkeys(seq) if _live(g.asset(u))]
+        return live + sorted(m for m in members - set(live) if _live(g.asset(m)))
     start = g.start.get(path_uid)
     if start not in members:
         heads = [e for e in members if not any(t == "upstream of" and src in members for t, src in g.inn[e])]
@@ -904,10 +988,23 @@ def context(db: Session, workspace_id: str, element_uid: str, dataset_uid: Optio
         "equipment": eq, "power": ctl["power_supplies"], "controls": {k: ctl[k] for k in (
             "control_devices", "iocs", "signals", "connected_electronics")},
         "observables": observables_of(db, workspace_id, element_uid) if _is_diagnostic(el) else [],
-        "documentation": documents, "tickets": tickets,
+        "documentation": documents, "tickets": tickets, "asset_bindings": _asset_bindings(db, element_uid),
         "upstream": neighbours(db, workspace_id, element_uid, "upstream", 1, g),
         "downstream": neighbours(db, workspace_id, element_uid, "downstream", 1, g),
     }
+
+
+def _asset_bindings(db: Session, element_uid: str) -> list[dict]:
+    """The physical assets bound to a position by asset synchronization, with status and authority."""
+    from app.models.beam_model import BeamAssetBinding
+    from app.services.beam_model_v2 import binding_json
+    out = []
+    for b in db.scalars(select(BeamAssetBinding).where(
+            BeamAssetBinding.component_uid == element_uid,
+            BeamAssetBinding.status.in_(("confirmed", "proposed", "ambiguous")))):
+        out.append({**binding_json(b), "asset": _summary(db.get(Asset, b.asset_uid))})
+    order = {"confirmed": 0, "proposed": 1, "ambiguous": 2}
+    return sorted(out, key=lambda x: (order.get(x["status"], 9), -(x.get("confidence") or 0)))
 
 
 def dataset_view(db: Session, workspace_id: str, dataset_uid: str) -> Optional[dict]:
@@ -961,13 +1058,10 @@ BUNDLE_FORMAT = "argus.beam-model-bundle/1"
 
 
 def models_of(doc) -> list[dict]:
-    """The models in what was sent: one model, a bundle ({"format": BUNDLE_FORMAT, "models": [...]}), or a
-    plain list of models."""
-    if isinstance(doc, list):
-        return doc
-    if isinstance(doc, dict) and doc.get("format") == BUNDLE_FORMAT:
-        return list(doc.get("models") or [])
-    return [doc]
+    """The models in what was sent: one model, a bundle (v1 `format` or v2 `schema_version`
+    argus.beam-model-bundle/…, with "models"), or a plain list of models."""
+    from app.beam_model_core.upgrade import models_of as _models_of
+    return _models_of(doc)
 
 
 def check_all(docs: list[dict]) -> list[dict]:
@@ -976,13 +1070,17 @@ def check_all(docs: list[dict]) -> list[dict]:
     for i, d in enumerate(docs):
         mid = ((d or {}).get("model") or {}).get("id") if isinstance(d, dict) else None
         try:
-            m = validate(d)
+            m, rep, native = prepare(d)
             problems = [] if m.model.id not in seen else [f"model {m.model.id} is given twice"]
             seen.add(m.model.id)
             out.append({"index": i, "model": m.model.id, "ok": not problems, "problems": problems,
-                        "summary": {"systems": len(m.systems), "paths": len(m.paths), "elements": len(m.elements),
-                                    "datasets": len(_datasets(m)), "observables": len({q for e in m.elements
-                                                                                          for q in e.observes})}})
+                        "format": native, "levels": rep.levels, "warnings": rep.warnings, "gaps": rep.gaps,
+                        "summary": {"systems": len(m.systems), "paths": len(m.paths), "elements": len(m.components),
+                                    "components": len(m.components), "definitions": len(m.definitions),
+                                    "datasets": len(m.datasets), "observables": len({q for c in m.components
+                                                                                     for q in c.observes}),
+                                    **{k: rep.summary.get(k) for k in ("placements", "connections", "boundaries",
+                                                                       "shared_components") if k in rep.summary}}})
         except BeamModelError as e:
             out.append({"index": i, "model": mid, "ok": False, "problems": e.problems, "summary": None})
     return out
@@ -1027,9 +1125,24 @@ def bm_members(db: Session, path_uid: str) -> list[Asset]:
         Relation.relation_type == "part of", Relation.to_asset_uid == path_uid))) if _live(a)]
 
 
-def export_canonical(db: Session, workspace_id: str, model_id: str) -> Optional[dict]:
-    """A model as canonical JSON, from what the hub holds now (so edits made since the import are in it):
-    importing it again — here or in another hub — gives the same model. Retired elements are left out."""
+def export_canonical(db: Session, workspace_id: str, model_id: str, fmt: Optional[str] = None) -> Optional[dict]:
+    """A model as canonical JSON, in the format it was imported in unless `fmt` says ("1" or "2").
+
+    v2: the stored document with the hub's current bindings — everything it said (definitions, boundaries,
+    states, supports, fields along paths) comes back. v1: rebuilt from what the hub holds now, so edits made
+    since the import are in it; what v1 cannot say is left out. Either imports again, here or in another
+    hub, as the same model. Retired elements are left out."""
+    from app.services import beam_model_v2 as v2
+    fmt = fmt or v2.native_format(db, workspace_id, model_id)
+    if fmt == "2":
+        out = v2.export(db, workspace_id, model_id)
+        if out is not None:
+            return out
+        legacy = export_canonical(db, workspace_id, model_id, "1")
+        if legacy is None:
+            return None
+        from app.beam_model_core.upgrade import upgrade
+        return upgrade(legacy)
     ws, mid = workspace_id, model_id
 
     def of_type(t: str) -> list[Asset]:
@@ -1085,7 +1198,7 @@ def export_canonical(db: Session, workspace_id: str, model_id: str) -> Optional[
                     q = (obs.attributes or {}).get("quantity")
                     observes.append(q)
                     observed[q] = obs
-            el = {"id": ea.get("model_name"), "type": ea.get("element_kind") or "generic"}
+            el = {"id": ea.get("model_name"), "type": _v1_kind(ea.get("element_kind") or "generic")}
             if a.name != ea.get("model_name"):
                 el["name"] = a.name
             if ea.get("capabilities") is not None:
@@ -1135,9 +1248,16 @@ def bm_targets(db: Session, rel: str, source: str) -> list[Asset]:
     return [a for a in _targets(db, rel, [source]) if _live(a)]
 
 
-def export_bundle(db: Session, workspace_id: str, model_ids: Optional[list[str]] = None) -> dict:
+def export_bundle(db: Session, workspace_id: str, model_ids: Optional[list[str]] = None,
+                  fmt: Optional[str] = None) -> dict:
+    """Several models in one bundle: v1 when every model is v1 (and no format is asked for), else v2."""
+    from app.beam_model_core.upgrade import V2_BUNDLE
+    from app.services import beam_model_v2 as v2
     ids = model_ids or [m["model_id"] for m in list_models(db, workspace_id)]
-    models = [m for m in (export_canonical(db, workspace_id, i) for i in ids) if m is not None]
+    fmt = fmt or ("2" if any(v2.native_format(db, workspace_id, i) == "2" for i in ids) else "1")
+    models = [m for m in (export_canonical(db, workspace_id, i, fmt) for i in ids) if m is not None]
+    if fmt == "2":
+        return {"schema_version": V2_BUNDLE, "models": models}
     return {"format": BUNDLE_FORMAT, "models": models}
 
 

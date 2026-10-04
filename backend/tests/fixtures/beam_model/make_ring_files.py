@@ -1,5 +1,5 @@
-"""Writes the DAΦNE-accumulator-like ring as a MAD-X sequence, an Elegant lattice and a MAD-X TFS twiss table,
-from one element order (the real accumulator's naming), so the converters can be checked against each other.
+"""Writes the DAΦNE-accumulator-like ring as a MAD-X sequence, an Elegant lattice, a MAD-X TFS twiss table, a Bmad
+lattice, an Xsuite line (JSON) and an Accelerator Toolbox lattice (pyAT JSON), from one element order (the real accumulator's naming), so the converters can be checked against each other.
 Lengths and strengths are illustrative; the layout closes (eight 45° dipoles). Run it to regenerate."""
 import math
 from pathlib import Path
@@ -111,8 +111,91 @@ def tfs():
     return "\n".join(head + ["* " + " ".join(cols), "$ " + " ".join(["%s", "%s"] + ["%le"] * 12)] + rows) + "\n"
 
 
+def _gaps():
+    """(name, length, entry s, drift before it) in order, and the drift after the last."""
+    out, pos = [], 0.0
+    for n, L, e in zip(ORDER, lengths, entries):
+        out.append((n, L, e, round(e - pos, 9)))
+        pos = e + L
+    return out, round(C - pos, 9)
+
+
+def bmad():
+    out = ["! DAΦNE-accumulator-like ring (illustrative strengths)", "parameter[particle] = electron",
+           "parameter[e_tot] = 0.51e9", "ang = twopi/8", "dip: sbend, l = 1.2, angle = ang",
+           "sxp: sextupole, l = 0.1, k2 = 12.5", "chv: kicker, l = 0.1", "kck: hkicker, l = 0.3",
+           "spt: rbend, l = 0.6, angle = 0", "bpm: monitor"]
+    cls = {"septum": "spt", "dipole": "dip", "bpm": "bpm", "sextupole": "sxp", "corrector": "chv", "kicker": "kck"}
+    names = []
+    rows, tail = _gaps()
+    for i, (n, L, e, gap) in enumerate(rows):
+        if gap > 1e-9:
+            out.append(f"d{i}: drift, l = {gap}")
+            names.append(f"d{i}")
+        out.append(f"{n}: quadrupole, l = 0.3, k1 = {k1[n]}" if kind(n) == "quadrupole" else f"{n}: {cls[kind(n)]}")
+        names.append(n)
+    if tail > 1e-9:
+        out.append(f"dend: drift, l = {tail}")
+        names.append("dend")
+    out.append("acc: line = (" + ", &\n  ".join(", ".join(names[i:i + 8]) for i in range(0, len(names), 8)) + ")")
+    out.append("use, acc")
+    return "\n".join(out) + "\n"
+
+
+def xsuite():
+    import json
+    names, elements = [], {}
+    rows, tail = _gaps()
+    for i, (n, L, e, gap) in enumerate(rows):
+        if gap > 1e-9:
+            names.append(f"drift_{i}")
+            elements[f"drift_{i}"] = {"__class__": "Drift", "length": gap}
+        k = kind(n)
+        elements[n] = {"dipole": {"__class__": "Bend", "length": 1.2, "k0": ANGLE / 1.2, "h": ANGLE / 1.2},
+                       "septum": {"__class__": "Bend", "length": 0.6, "k0": 0.0, "h": 0.0},
+                       "quadrupole": {"__class__": "Quadrupole", "length": 0.3, "k1": k1.get(n)},
+                       "sextupole": {"__class__": "Sextupole", "length": 0.1, "k2": 12.5},
+                       "corrector": {"__class__": "Multipole", "length": 0.1, "knl": [0.0], "ksl": [0.0]},
+                       "kicker": {"__class__": "Multipole", "length": 0.3, "knl": [0.0]},
+                       "bpm": {"__class__": "BeamPositionMonitor", "length": 0.0}}[k]
+        names.append(n)
+    if tail > 1e-9:
+        names.append("drift_end")
+        elements["drift_end"] = {"__class__": "Drift", "length": tail}
+    return json.dumps({"__class__": "Line", "name": "acc", "element_names": names, "elements": elements,
+                       "particle_ref": {"mass0": 510998.95, "q0": -1.0, "p0c": [0.51e9]}}, indent=1) + "\n"
+
+
+def at_json():
+    import json
+    elements = []
+    rows, tail = _gaps()
+    for i, (n, L, e, gap) in enumerate(rows):
+        if gap > 1e-9:
+            elements.append({"Class": "Drift", "FamName": f"DR{i}", "Length": gap, "PassMethod": "DriftPass"})
+        k = kind(n)
+        el = {"dipole": {"Class": "Dipole", "Length": 1.2, "BendingAngle": ANGLE, "PassMethod": "BndMPoleSymplectic4Pass"},
+              "septum": {"Class": "Dipole", "Length": 0.6, "BendingAngle": 0.0, "PassMethod": "BndMPoleSymplectic4Pass"},
+              "quadrupole": {"Class": "Quadrupole", "Length": 0.3, "K": k1.get(n), "PolynomB": [0, k1.get(n)],
+                             "PassMethod": "StrMPoleSymplectic4Pass"},
+              "sextupole": {"Class": "Sextupole", "Length": 0.1, "PolynomB": [0, 0, 6.25],
+                            "PassMethod": "StrMPoleSymplectic4Pass"},
+              "corrector": {"Class": "Corrector", "Length": 0.1, "KickAngle": [0, 0], "PassMethod": "CorrectorPass"},
+              "kicker": {"Class": "Corrector", "Length": 0.3, "KickAngle": [0, 0], "PassMethod": "CorrectorPass"},
+              "bpm": {"Class": "Monitor", "Length": 0.0, "PassMethod": "IdentityPass"}}[k]
+        elements.append({"FamName": n, **el})
+    if tail > 1e-9:
+        elements.append({"Class": "Drift", "FamName": "DREND", "Length": tail, "PassMethod": "DriftPass"})
+    return json.dumps({"atjson": 1, "properties": {"name": "acc", "energy": 0.51e9, "periodicity": 1,
+                                                   "particle": {"name": "electron", "charge": -1}},
+                       "elements": elements}, indent=1) + "\n"
+
+
 if __name__ == "__main__":
     (HERE / "dafne_accumulator.madx").write_text(madx())
     (HERE / "dafne_accumulator.lte").write_text(elegant())
     (HERE / "dafne_accumulator_twiss.tfs").write_text(tfs())
+    (HERE / "dafne_accumulator.bmad").write_text(bmad())
+    (HERE / "dafne_accumulator.xsuite.json").write_text(xsuite())
+    (HERE / "dafne_accumulator.at.json").write_text(at_json())
     print("written")

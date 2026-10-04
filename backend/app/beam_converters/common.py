@@ -142,7 +142,9 @@ OBSERVES = {"bpm": ["beam.position.x", "beam.position.y"], "screen": ["beam.size
 
 @dataclass
 class Placed:
-    """One element where the line puts it: its name in the file, normalised kind, entry `s`, and parameters."""
+    """One element where the line puts it: its name in the file, normalised kind, entry `s`, and parameters.
+    `family` is the definition it was made from when the format says (MAD-X `QF1: QF`); `location` is where
+    the file defines it (file:line), when known."""
     name: str
     kind: str
     s: float
@@ -152,6 +154,9 @@ class Placed:
     physics: dict = field(default_factory=dict)
     optics: dict = field(default_factory=dict)
     capabilities: Optional[list] = None
+    family: Optional[str] = None
+    location: Optional[str] = None
+    component: dict = field(default_factory=dict)      # more v2 component fields: boundaries, aliases…
 
 
 def hint(name: str, kind: str, options: Options) -> str:
@@ -242,7 +247,7 @@ def build(placed: list[Placed], *, source: str, filename: str, options: Options,
                                 "rest_mass": beam.get("rest_mass")}.items() if v is not None}
     length = total_length if total_length is not None else (placed[-1].s + placed[-1].length)
     closure = math.hypot(end["x"], end["y"])
-    return {
+    v1 = {
         "format": "argus.beam-model/1",
         "model": {k: v for k, v in {"id": model_id, "name": options.model_name or f"{line_name.upper()} ({PurePath(filename).name})",
                                     "source": f"{source} file {PurePath(filename).name}", "version": options.version,
@@ -260,3 +265,64 @@ def build(placed: list[Placed], *, source: str, filename: str, options: Options,
                        "total_bend": round(total_bend(placed), 9), "ring": ring,
                        "survey_closure_m": round(closure, 6) if ring else None},
     }
+    return v1 if options.output == "1" else to_v2(v1, placed, source=source, filename=filename)
+
+
+# Normalised physics key → the native parameter it comes from (case-insensitive), for value provenance.
+_NATIVE_OF = {"length": ("L", "LENGTH"), "angle": ("ANGLE",), "k1": ("K1",), "k2": ("K2",), "k3": ("K3",),
+              "kick": ("KICK", "HKICK", "VKICK"), "ks": ("KS",), "e1": ("E1",), "e2": ("E2",),
+              "voltage": ("VOLT", "VOLTAGE"), "frequency": ("FREQ", "FREQUENCY"), "harmonic": ("HARMON",),
+              "phase": ("LAG", "PHASE")}
+
+
+def to_v2(v1: dict, placed: list[Placed], *, source: str, filename: str) -> dict:
+    """The v2 form of a converted model: components with their native name and file, definitions for every
+    element the line uses more than once (and every family the format names), and per-value provenance
+    saying which native parameter each normalised value was read from."""
+    from app.beam_model_core.upgrade import upgrade
+    conversion = v1.pop("conversion", None)
+    doc = upgrade(v1)
+    file = PurePath(filename or "").name or None
+    by_id = {c["id"]: c for c in doc["components"]}
+    values = doc["datasets"][0]["values"] if doc.get("datasets") else {}
+    uses: dict[str, int] = {}
+    for p in placed:
+        uses[p.name.upper()] = uses.get(p.name.upper(), 0) + 1
+    definitions: dict[str, dict] = {}
+    seen: dict[str, int] = {}
+    for p in placed:
+        base = p.name.upper()
+        seen[base] = seen.get(base, 0) + 1
+        ident = base if seen[base] == 1 else f"{base}#{seen[base]}"
+        c = by_id.get(ident)
+        if c is None:
+            continue
+        c["native"] = {k: v for k, v in (("format", source), ("type", p.native_type), ("name", p.name),
+                                         ("file", file), ("location", p.location)) if v}
+        for k, v in p.component.items():
+            c.setdefault(k, v)
+        def_id = p.family.upper() if p.family else (base if uses[base] > 1 else None)
+        if def_id:
+            c["definition"] = def_id
+            definitions.setdefault(def_id, {"id": def_id, "type": p.kind, "parameters": {"length": p.length},
+                                            "native": {"format": source, "type": p.native_type, "name": def_id,
+                                                       **({"file": file} if file else {})}})
+            if p.family:
+                c["family"] = p.family.upper()
+        v = values.get(ident)
+        if v is not None:
+            prov = {}
+            upper = {k.upper(): k for k in p.native}
+            for key in (v.get("physics") or {}):
+                hit = next((upper[n] for n in _NATIVE_OF.get(key, (key.upper(),)) if n in upper), None)
+                if hit is not None:
+                    prov[key] = {k: x for k, x in (("source", source), ("file", file), ("symbol", hit),
+                                                   ("location", p.location)) if x}
+            if prov:
+                v["provenance"] = prov
+    if definitions:
+        doc["definitions"] = list(definitions.values())
+    doc["provenance"] = {"converter": source, "sources": [{"file": file, "format": source}] if file else []}
+    if conversion is not None:
+        doc["conversion"] = conversion
+    return doc

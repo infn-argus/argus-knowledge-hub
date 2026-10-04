@@ -1,0 +1,820 @@
+{
+ "atjson": 1,
+ "properties": {
+  "name": "acc",
+  "energy": 510000000.0,
+  "periodicity": 1,
+  "particle": {
+   "name": "electron",
+   "charge": -1
+  }
+ },
+ "elements": [
+  {
+   "FamName": "SPTA1001",
+   "Class": "Dipole",
+   "Length": 0.6,
+   "BendingAngle": 0.0,
+   "PassMethod": "BndMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR1",
+   "Length": 0.3,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "DIPA11",
+   "Class": "Dipole",
+   "Length": 1.2,
+   "BendingAngle": 0.7853981633974483,
+   "PassMethod": "BndMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR2",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA11",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR3",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "SXPA101",
+   "Class": "Sextupole",
+   "Length": 0.1,
+   "PolynomB": [
+    0,
+    0,
+    6.25
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR4",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA101",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": 4.30926,
+   "PolynomB": [
+    0,
+    4.30926
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR5",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "SXPA102",
+   "Class": "Sextupole",
+   "Length": 0.1,
+   "PolynomB": [
+    0,
+    0,
+    6.25
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR6",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA102",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": 4.0,
+   "PolynomB": [
+    0,
+    4.0
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR7",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA103",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": -4.3,
+   "PolynomB": [
+    0,
+    -4.3
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR8",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA12",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR9",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "CHV11",
+   "Class": "Corrector",
+   "Length": 0.1,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR10",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "DIPA12",
+   "Class": "Dipole",
+   "Length": 1.2,
+   "BendingAngle": 0.7853981633974483,
+   "PassMethod": "BndMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR11",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA13",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR12",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "KCKA1001",
+   "Class": "Corrector",
+   "Length": 0.3,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR13",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "CHV12",
+   "Class": "Corrector",
+   "Length": 0.1,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR14",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "KCKA2001",
+   "Class": "Corrector",
+   "Length": 0.3,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR15",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA21",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR16",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "DIPA21",
+   "Class": "Dipole",
+   "Length": 1.2,
+   "BendingAngle": 0.7853981633974483,
+   "PassMethod": "BndMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR17",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "CHV21",
+   "Class": "Corrector",
+   "Length": 0.1,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR18",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA22",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR19",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA201",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": 3.7,
+   "PolynomB": [
+    0,
+    3.7
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR20",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA202",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": -4.0,
+   "PolynomB": [
+    0,
+    -4.0
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR21",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "SXPA201",
+   "Class": "Sextupole",
+   "Length": 0.1,
+   "PolynomB": [
+    0,
+    0,
+    6.25
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR22",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA203",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": 4.3,
+   "PolynomB": [
+    0,
+    4.3
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR23",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "SXPA202",
+   "Class": "Sextupole",
+   "Length": 0.1,
+   "PolynomB": [
+    0,
+    0,
+    6.25
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR24",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA23",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR25",
+   "Length": 0.2,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "DIPA22",
+   "Class": "Dipole",
+   "Length": 1.2,
+   "BendingAngle": 0.7853981633974483,
+   "PassMethod": "BndMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR26",
+   "Length": 0.51,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "SPTA2001",
+   "Class": "Dipole",
+   "Length": 0.6,
+   "BendingAngle": 0.0,
+   "PassMethod": "BndMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR27",
+   "Length": 0.51,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "CHV31",
+   "Class": "Corrector",
+   "Length": 0.1,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR28",
+   "Length": 0.51,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA31",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR29",
+   "Length": 0.51,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "DIPA31",
+   "Class": "Dipole",
+   "Length": 1.2,
+   "BendingAngle": 0.7853981633974483,
+   "PassMethod": "BndMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR30",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA32",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR31",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "SXPA301",
+   "Class": "Sextupole",
+   "Length": 0.1,
+   "PolynomB": [
+    0,
+    0,
+    6.25
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR32",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA301",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": -3.7,
+   "PolynomB": [
+    0,
+    -3.7
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR33",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "SXPA302",
+   "Class": "Sextupole",
+   "Length": 0.1,
+   "PolynomB": [
+    0,
+    0,
+    6.25
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR34",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA302",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": 4.0,
+   "PolynomB": [
+    0,
+    4.0
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR35",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA303",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": -4.3,
+   "PolynomB": [
+    0,
+    -4.3
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR36",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "CHV32",
+   "Class": "Corrector",
+   "Length": 0.1,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR37",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "DIPA32",
+   "Class": "Dipole",
+   "Length": 1.2,
+   "BendingAngle": 0.7853981633974483,
+   "PassMethod": "BndMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR38",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA33",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR39",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "KCKA3001",
+   "Class": "Corrector",
+   "Length": 0.3,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR40",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "CHV41",
+   "Class": "Corrector",
+   "Length": 0.1,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR41",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "KCKA4001",
+   "Class": "Corrector",
+   "Length": 0.3,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR42",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA41",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR43",
+   "Length": 0.34,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "DIPA41",
+   "Class": "Dipole",
+   "Length": 1.2,
+   "BendingAngle": 0.7853981633974483,
+   "PassMethod": "BndMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR44",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "CHV42",
+   "Class": "Corrector",
+   "Length": 0.1,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR45",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA401",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": 3.7,
+   "PolynomB": [
+    0,
+    3.7
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR46",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA402",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": -4.0,
+   "PolynomB": [
+    0,
+    -4.0
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR47",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "SXPA401",
+   "Class": "Sextupole",
+   "Length": 0.1,
+   "PolynomB": [
+    0,
+    0,
+    6.25
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR48",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "QUAA403",
+   "Class": "Quadrupole",
+   "Length": 0.3,
+   "K": 4.3,
+   "PolynomB": [
+    0,
+    4.3
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR49",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "SXPA402",
+   "Class": "Sextupole",
+   "Length": 0.1,
+   "PolynomB": [
+    0,
+    0,
+    6.25
+   ],
+   "PassMethod": "StrMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR50",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA42",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR51",
+   "Length": 0.225,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "DIPA42",
+   "Class": "Dipole",
+   "Length": 1.2,
+   "BendingAngle": 0.7853981633974483,
+   "PassMethod": "BndMPoleSymplectic4Pass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR52",
+   "Length": 0.58,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "BPSA43",
+   "Class": "Monitor",
+   "Length": 0.0,
+   "PassMethod": "IdentityPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DR53",
+   "Length": 0.58,
+   "PassMethod": "DriftPass"
+  },
+  {
+   "FamName": "CHV43",
+   "Class": "Corrector",
+   "Length": 0.1,
+   "KickAngle": [
+    0,
+    0
+   ],
+   "PassMethod": "CorrectorPass"
+  },
+  {
+   "Class": "Drift",
+   "FamName": "DREND",
+   "Length": 0.58,
+   "PassMethod": "DriftPass"
+  }
+ ]
+}

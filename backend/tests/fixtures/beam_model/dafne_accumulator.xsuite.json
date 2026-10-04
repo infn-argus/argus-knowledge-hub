@@ -1,0 +1,655 @@
+{
+ "__class__": "Line",
+ "name": "acc",
+ "element_names": [
+  "SPTA1001",
+  "drift_1",
+  "DIPA11",
+  "drift_2",
+  "BPSA11",
+  "drift_3",
+  "SXPA101",
+  "drift_4",
+  "QUAA101",
+  "drift_5",
+  "SXPA102",
+  "drift_6",
+  "QUAA102",
+  "drift_7",
+  "QUAA103",
+  "drift_8",
+  "BPSA12",
+  "drift_9",
+  "CHV11",
+  "drift_10",
+  "DIPA12",
+  "drift_11",
+  "BPSA13",
+  "drift_12",
+  "KCKA1001",
+  "drift_13",
+  "CHV12",
+  "drift_14",
+  "KCKA2001",
+  "drift_15",
+  "BPSA21",
+  "drift_16",
+  "DIPA21",
+  "drift_17",
+  "CHV21",
+  "drift_18",
+  "BPSA22",
+  "drift_19",
+  "QUAA201",
+  "drift_20",
+  "QUAA202",
+  "drift_21",
+  "SXPA201",
+  "drift_22",
+  "QUAA203",
+  "drift_23",
+  "SXPA202",
+  "drift_24",
+  "BPSA23",
+  "drift_25",
+  "DIPA22",
+  "drift_26",
+  "SPTA2001",
+  "drift_27",
+  "CHV31",
+  "drift_28",
+  "BPSA31",
+  "drift_29",
+  "DIPA31",
+  "drift_30",
+  "BPSA32",
+  "drift_31",
+  "SXPA301",
+  "drift_32",
+  "QUAA301",
+  "drift_33",
+  "SXPA302",
+  "drift_34",
+  "QUAA302",
+  "drift_35",
+  "QUAA303",
+  "drift_36",
+  "CHV32",
+  "drift_37",
+  "DIPA32",
+  "drift_38",
+  "BPSA33",
+  "drift_39",
+  "KCKA3001",
+  "drift_40",
+  "CHV41",
+  "drift_41",
+  "KCKA4001",
+  "drift_42",
+  "BPSA41",
+  "drift_43",
+  "DIPA41",
+  "drift_44",
+  "CHV42",
+  "drift_45",
+  "QUAA401",
+  "drift_46",
+  "QUAA402",
+  "drift_47",
+  "SXPA401",
+  "drift_48",
+  "QUAA403",
+  "drift_49",
+  "SXPA402",
+  "drift_50",
+  "BPSA42",
+  "drift_51",
+  "DIPA42",
+  "drift_52",
+  "BPSA43",
+  "drift_53",
+  "CHV43",
+  "drift_end"
+ ],
+ "elements": {
+  "SPTA1001": {
+   "__class__": "Bend",
+   "length": 0.6,
+   "k0": 0.0,
+   "h": 0.0
+  },
+  "drift_1": {
+   "__class__": "Drift",
+   "length": 0.3
+  },
+  "DIPA11": {
+   "__class__": "Bend",
+   "length": 1.2,
+   "k0": 0.6544984694978736,
+   "h": 0.6544984694978736
+  },
+  "drift_2": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "BPSA11": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_3": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "SXPA101": {
+   "__class__": "Sextupole",
+   "length": 0.1,
+   "k2": 12.5
+  },
+  "drift_4": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "QUAA101": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": 4.30926
+  },
+  "drift_5": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "SXPA102": {
+   "__class__": "Sextupole",
+   "length": 0.1,
+   "k2": 12.5
+  },
+  "drift_6": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "QUAA102": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": 4.0
+  },
+  "drift_7": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "QUAA103": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": -4.3
+  },
+  "drift_8": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "BPSA12": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_9": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "CHV11": {
+   "__class__": "Multipole",
+   "length": 0.1,
+   "knl": [
+    0.0
+   ],
+   "ksl": [
+    0.0
+   ]
+  },
+  "drift_10": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "DIPA12": {
+   "__class__": "Bend",
+   "length": 1.2,
+   "k0": 0.6544984694978736,
+   "h": 0.6544984694978736
+  },
+  "drift_11": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "BPSA13": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_12": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "KCKA1001": {
+   "__class__": "Multipole",
+   "length": 0.3,
+   "knl": [
+    0.0
+   ]
+  },
+  "drift_13": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "CHV12": {
+   "__class__": "Multipole",
+   "length": 0.1,
+   "knl": [
+    0.0
+   ],
+   "ksl": [
+    0.0
+   ]
+  },
+  "drift_14": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "KCKA2001": {
+   "__class__": "Multipole",
+   "length": 0.3,
+   "knl": [
+    0.0
+   ]
+  },
+  "drift_15": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "BPSA21": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_16": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "DIPA21": {
+   "__class__": "Bend",
+   "length": 1.2,
+   "k0": 0.6544984694978736,
+   "h": 0.6544984694978736
+  },
+  "drift_17": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "CHV21": {
+   "__class__": "Multipole",
+   "length": 0.1,
+   "knl": [
+    0.0
+   ],
+   "ksl": [
+    0.0
+   ]
+  },
+  "drift_18": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "BPSA22": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_19": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "QUAA201": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": 3.7
+  },
+  "drift_20": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "QUAA202": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": -4.0
+  },
+  "drift_21": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "SXPA201": {
+   "__class__": "Sextupole",
+   "length": 0.1,
+   "k2": 12.5
+  },
+  "drift_22": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "QUAA203": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": 4.3
+  },
+  "drift_23": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "SXPA202": {
+   "__class__": "Sextupole",
+   "length": 0.1,
+   "k2": 12.5
+  },
+  "drift_24": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "BPSA23": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_25": {
+   "__class__": "Drift",
+   "length": 0.2
+  },
+  "DIPA22": {
+   "__class__": "Bend",
+   "length": 1.2,
+   "k0": 0.6544984694978736,
+   "h": 0.6544984694978736
+  },
+  "drift_26": {
+   "__class__": "Drift",
+   "length": 0.51
+  },
+  "SPTA2001": {
+   "__class__": "Bend",
+   "length": 0.6,
+   "k0": 0.0,
+   "h": 0.0
+  },
+  "drift_27": {
+   "__class__": "Drift",
+   "length": 0.51
+  },
+  "CHV31": {
+   "__class__": "Multipole",
+   "length": 0.1,
+   "knl": [
+    0.0
+   ],
+   "ksl": [
+    0.0
+   ]
+  },
+  "drift_28": {
+   "__class__": "Drift",
+   "length": 0.51
+  },
+  "BPSA31": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_29": {
+   "__class__": "Drift",
+   "length": 0.51
+  },
+  "DIPA31": {
+   "__class__": "Bend",
+   "length": 1.2,
+   "k0": 0.6544984694978736,
+   "h": 0.6544984694978736
+  },
+  "drift_30": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "BPSA32": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_31": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "SXPA301": {
+   "__class__": "Sextupole",
+   "length": 0.1,
+   "k2": 12.5
+  },
+  "drift_32": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "QUAA301": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": -3.7
+  },
+  "drift_33": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "SXPA302": {
+   "__class__": "Sextupole",
+   "length": 0.1,
+   "k2": 12.5
+  },
+  "drift_34": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "QUAA302": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": 4.0
+  },
+  "drift_35": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "QUAA303": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": -4.3
+  },
+  "drift_36": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "CHV32": {
+   "__class__": "Multipole",
+   "length": 0.1,
+   "knl": [
+    0.0
+   ],
+   "ksl": [
+    0.0
+   ]
+  },
+  "drift_37": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "DIPA32": {
+   "__class__": "Bend",
+   "length": 1.2,
+   "k0": 0.6544984694978736,
+   "h": 0.6544984694978736
+  },
+  "drift_38": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "BPSA33": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_39": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "KCKA3001": {
+   "__class__": "Multipole",
+   "length": 0.3,
+   "knl": [
+    0.0
+   ]
+  },
+  "drift_40": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "CHV41": {
+   "__class__": "Multipole",
+   "length": 0.1,
+   "knl": [
+    0.0
+   ],
+   "ksl": [
+    0.0
+   ]
+  },
+  "drift_41": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "KCKA4001": {
+   "__class__": "Multipole",
+   "length": 0.3,
+   "knl": [
+    0.0
+   ]
+  },
+  "drift_42": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "BPSA41": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_43": {
+   "__class__": "Drift",
+   "length": 0.34
+  },
+  "DIPA41": {
+   "__class__": "Bend",
+   "length": 1.2,
+   "k0": 0.6544984694978736,
+   "h": 0.6544984694978736
+  },
+  "drift_44": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "CHV42": {
+   "__class__": "Multipole",
+   "length": 0.1,
+   "knl": [
+    0.0
+   ],
+   "ksl": [
+    0.0
+   ]
+  },
+  "drift_45": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "QUAA401": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": 3.7
+  },
+  "drift_46": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "QUAA402": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": -4.0
+  },
+  "drift_47": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "SXPA401": {
+   "__class__": "Sextupole",
+   "length": 0.1,
+   "k2": 12.5
+  },
+  "drift_48": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "QUAA403": {
+   "__class__": "Quadrupole",
+   "length": 0.3,
+   "k1": 4.3
+  },
+  "drift_49": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "SXPA402": {
+   "__class__": "Sextupole",
+   "length": 0.1,
+   "k2": 12.5
+  },
+  "drift_50": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "BPSA42": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_51": {
+   "__class__": "Drift",
+   "length": 0.225
+  },
+  "DIPA42": {
+   "__class__": "Bend",
+   "length": 1.2,
+   "k0": 0.6544984694978736,
+   "h": 0.6544984694978736
+  },
+  "drift_52": {
+   "__class__": "Drift",
+   "length": 0.58
+  },
+  "BPSA43": {
+   "__class__": "BeamPositionMonitor",
+   "length": 0.0
+  },
+  "drift_53": {
+   "__class__": "Drift",
+   "length": 0.58
+  },
+  "CHV43": {
+   "__class__": "Multipole",
+   "length": 0.1,
+   "knl": [
+    0.0
+   ],
+   "ksl": [
+    0.0
+   ]
+  },
+  "drift_end": {
+   "__class__": "Drift",
+   "length": 0.58
+  }
+ },
+ "particle_ref": {
+  "mass0": 510998.95,
+  "q0": -1.0,
+  "p0c": [
+   510000000.0
+  ]
+ }
+}

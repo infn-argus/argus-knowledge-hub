@@ -1,8 +1,106 @@
 {
  "$defs": {
-  "_Beam": {
+  "Alignment": {
+   "additionalProperties": true,
+   "description": "Where the physical object is meant to be, where a survey found it, and the difference. All optional.",
+   "properties": {
+    "design": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Pose"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "surveyed": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Pose"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "offset": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Offset"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "surveyed_at": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Surveyed At"
+    },
+    "survey": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Survey"
+    }
+   },
+   "title": "Alignment",
+   "type": "object"
+  },
+  "AssetRef": {
+   "additionalProperties": true,
+   "properties": {
+    "namespace": {
+     "default": "kh",
+     "title": "Namespace",
+     "type": "string"
+    },
+    "id": {
+     "title": "Id",
+     "type": "string"
+    },
+    "name": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Name"
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "title": "AssetRef",
+   "type": "object"
+  },
+  "Beam": {
+   "additionalProperties": true,
    "properties": {
     "id": {
+     "pattern": "^\\S(.*\\S)?$",
      "title": "Id",
      "type": "string"
     },
@@ -19,8 +117,92 @@
      "title": "Name"
     },
     "kind": {
+     "default": "particle",
+     "enum": [
+      "particle",
+      "photon"
+     ],
      "title": "Kind",
      "type": "string"
+    },
+    "species": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Species"
+    },
+    "charge": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Charge"
+    },
+    "rest_mass": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Rest Mass"
+    },
+    "reference_energy": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Reference Energy"
+    },
+    "reference_momentum": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Reference Momentum"
+    },
+    "wavelength": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Wavelength"
+    },
+    "systems": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Systems",
+     "type": "array"
     },
     "parameters": {
      "title": "Parameters",
@@ -28,33 +210,525 @@
     }
    },
    "required": [
-    "id",
-    "kind"
+    "id"
    ],
-   "title": "_Beam",
+   "title": "Beam",
    "type": "object"
   },
-  "_Branch": {
+  "BindingSource": {
+   "additionalProperties": true,
    "properties": {
-    "at": {
-     "title": "At",
+    "method": {
+     "default": "asset_sync",
+     "title": "Method",
      "type": "string"
     },
-    "to_path": {
-     "title": "To Path",
+    "matcher": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Matcher"
+    },
+    "matcher_version": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Matcher Version"
+    }
+   },
+   "title": "BindingSource",
+   "type": "object"
+  },
+  "Boundary": {
+   "additionalProperties": true,
+   "description": "A restriction of the beam's space. On a component, `s_start`/`s_end` are relative to the component's\nentry (default: its whole length); on its own (`path` given) they are along that path. `component` names\nwhat physically produces it; `when_state` limits it to a state (a scraper IN, a valve's open bore).",
+   "properties": {
+    "id": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Id"
+    },
+    "component": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Component"
+    },
+    "path": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Path"
+    },
+    "s_start": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "S Start"
+    },
+    "s_end": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "S End"
+    },
+    "profile": {
+     "$ref": "#/$defs/Profile"
+    },
+    "when_state": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "When State"
+    },
+    "kind": {
+     "default": "physical",
+     "enum": [
+      "physical",
+      "model"
+     ],
+     "title": "Kind",
      "type": "string"
+    },
+    "note": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Note"
     }
    },
    "required": [
-    "at",
-    "to_path"
+    "profile"
    ],
-   "title": "_Branch",
+   "title": "Boundary",
    "type": "object"
   },
-  "_Dataset": {
+  "Component": {
+   "additionalProperties": true,
+   "description": "A beamline component instance: a lattice position, a diagnostic, a valve, a mirror, a girder. Its\nidentity does not depend on the physical device implementing it (that is an external binding).",
    "properties": {
     "id": {
+     "pattern": "^\\S(.*\\S)?$",
+     "title": "Id",
+     "type": "string"
+    },
+    "name": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Name"
+    },
+    "type": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Type"
+    },
+    "definition": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Definition"
+    },
+    "family": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Family"
+    },
+    "aliases": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Aliases",
+     "type": "array"
+    },
+    "capabilities": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Capabilities"
+    },
+    "parameters": {
+     "title": "Parameters",
+     "type": "object"
+    },
+    "geometry": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Geometry"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "boundaries": {
+     "items": {
+      "$ref": "#/$defs/Boundary"
+     },
+     "title": "Boundaries",
+     "type": "array"
+    },
+    "material": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Material"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "states": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/StateModel"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "measurement_model": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/MeasurementModel"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "observes": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Observes",
+     "type": "array"
+    },
+    "mounted_on": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Mounted On"
+    },
+    "contained_in": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Contained In"
+    },
+    "fiducials": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Fiducials",
+     "type": "array"
+    },
+    "native": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Native"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "provenance": {
+     "additionalProperties": {
+      "$ref": "#/$defs/ValueProvenance"
+     },
+     "title": "Provenance",
+     "type": "object"
+    },
+    "tags": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Tags",
+     "type": "array"
+    },
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "title": "Component",
+   "type": "object"
+  },
+  "ComponentDefinition": {
+   "additionalProperties": true,
+   "description": "A reusable definition (a family, a simulator's element class with its parameters). Instances name it\nand may override anything.",
+   "properties": {
+    "id": {
+     "pattern": "^\\S(.*\\S)?$",
+     "title": "Id",
+     "type": "string"
+    },
+    "type": {
+     "title": "Type",
+     "type": "string"
+    },
+    "name": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Name"
+    },
+    "capabilities": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Capabilities"
+    },
+    "parameters": {
+     "title": "Parameters",
+     "type": "object"
+    },
+    "geometry": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Geometry"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "boundaries": {
+     "items": {
+      "$ref": "#/$defs/Boundary"
+     },
+     "title": "Boundaries",
+     "type": "array"
+    },
+    "material": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Material"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "states": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/StateModel"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "native": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Native"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "provenance": {
+     "additionalProperties": {
+      "$ref": "#/$defs/ValueProvenance"
+     },
+     "title": "Provenance",
+     "type": "object"
+    }
+   },
+   "required": [
+    "id",
+    "type"
+   ],
+   "title": "ComponentDefinition",
+   "type": "object"
+  },
+  "Connection": {
+   "additionalProperties": true,
+   "description": "How paths join. `branch`: from a component on one path to the start of another (a septum, a switch, a\nbeam splitter). `merge`: from the end of a path into a component on another (injection). `continue`: one\npath's end leads to another's start (an injector chain).",
+   "properties": {
+    "kind": {
+     "enum": [
+      "branch",
+      "merge",
+      "continue"
+     ],
+     "title": "Kind",
+     "type": "string"
+    },
+    "from": {
+     "$ref": "#/$defs/Endpoint"
+    },
+    "to": {
+     "$ref": "#/$defs/Endpoint"
+    },
+    "note": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Note"
+    }
+   },
+   "required": [
+    "kind",
+    "from",
+    "to"
+   ],
+   "title": "Connection",
+   "type": "object"
+  },
+  "Dataset": {
+   "additionalProperties": true,
+   "properties": {
+    "id": {
+     "pattern": "^\\S(.*\\S)?$",
      "title": "Id",
      "type": "string"
     },
@@ -75,9 +749,29 @@
      "title": "Kind",
      "type": "string"
     },
+    "category": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Category"
+    },
     "path": {
-     "title": "Path",
-     "type": "string"
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Path"
     },
     "source": {
      "anyOf": [
@@ -175,26 +869,113 @@
      "default": null,
      "title": "Valid Until"
     },
+    "configuration": {
+     "title": "Configuration",
+     "type": "object"
+    },
     "values": {
      "additionalProperties": {
-      "$ref": "#/$defs/_Values"
+      "$ref": "#/$defs/Values"
      },
      "title": "Values",
      "type": "object"
+    },
+    "fields": {
+     "items": {
+      "$ref": "#/$defs/FieldAlongPath"
+     },
+     "title": "Fields",
+     "type": "array"
+    },
+    "boundaries": {
+     "items": {
+      "$ref": "#/$defs/Boundary"
+     },
+     "title": "Boundaries",
+     "type": "array"
     }
    },
    "required": [
-    "id",
-    "path"
+    "id"
    ],
-   "title": "_Dataset",
+   "title": "Dataset",
    "type": "object"
   },
-  "_Element": {
+  "Endpoint": {
+   "additionalProperties": true,
    "properties": {
-    "s": {
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "component": {
      "anyOf": [
       {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Component"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "Endpoint",
+   "type": "object"
+  },
+  "ExternalBinding": {
+   "additionalProperties": true,
+   "properties": {
+    "component": {
+     "title": "Component",
+     "type": "string"
+    },
+    "relation": {
+     "default": "implemented_by",
+     "title": "Relation",
+     "type": "string"
+    },
+    "target": {
+     "$ref": "#/$defs/AssetRef"
+    },
+    "status": {
+     "default": "confirmed",
+     "enum": [
+      "proposed",
+      "confirmed",
+      "ambiguous",
+      "rejected"
+     ],
+     "title": "Status",
+     "type": "string"
+    },
+    "authority": {
+     "anyOf": [
+      {
+       "enum": [
+        "authoritative",
+        "human_confirmed",
+        "auto_accepted",
+        "suggestion"
+       ],
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Authority"
+    },
+    "confidence": {
+     "anyOf": [
+      {
+       "maximum": 1.0,
+       "minimum": 0.0,
        "type": "number"
       },
       {
@@ -202,12 +983,17 @@
       }
      ],
      "default": null,
-     "title": "S"
+     "title": "Confidence"
     },
-    "geometry": {
+    "evidence": {
+     "items": {},
+     "title": "Evidence",
+     "type": "array"
+    },
+    "source": {
      "anyOf": [
       {
-       "$ref": "#/$defs/_Geometry"
+       "$ref": "#/$defs/BindingSource"
       },
       {
        "type": "null"
@@ -215,26 +1001,43 @@
      ],
      "default": null
     },
-    "physics": {
-     "title": "Physics",
-     "type": "object"
-    },
-    "optics": {
-     "title": "Optics",
-     "type": "object"
-    },
-    "native": {
+    "confirmed_by": {
      "anyOf": [
       {
-       "$ref": "#/$defs/_Native"
+       "type": "object"
       },
       {
        "type": "null"
       }
      ],
-     "default": null
+     "default": null,
+     "title": "Confirmed By"
     },
+    "timestamp": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Timestamp"
+    }
+   },
+   "required": [
+    "component",
+    "target"
+   ],
+   "title": "ExternalBinding",
+   "type": "object"
+  },
+  "Facility": {
+   "additionalProperties": true,
+   "properties": {
     "id": {
+     "pattern": "^\\S(.*\\S)?$",
      "title": "Id",
      "type": "string"
     },
@@ -250,121 +1053,318 @@
      "default": null,
      "title": "Name"
     },
+    "namespace": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Namespace"
+    },
+    "site": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Site"
+    },
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "title": "Facility",
+   "type": "object"
+  },
+  "FieldAlongPath": {
+   "additionalProperties": true,
+   "description": "A quantity as a function of `s` along a path: pressure, temperature, radiation, loss, field. Model or\nsnapshot data \u2014 never a telemetry stream.",
+   "properties": {
+    "quantity": {
+     "title": "Quantity",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "unit": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Unit"
+    },
+    "samples": {
+     "items": {
+      "items": {
+       "type": "number"
+      },
+      "type": "array"
+     },
+     "title": "Samples",
+     "type": "array"
+    },
+    "interpolation": {
+     "default": "linear",
+     "enum": [
+      "linear",
+      "step",
+      "none"
+     ],
+     "title": "Interpolation",
+     "type": "string"
+    },
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
+    }
+   },
+   "required": [
+    "quantity",
+    "path",
+    "samples"
+   ],
+   "title": "FieldAlongPath",
+   "type": "object"
+  },
+  "Geometry": {
+   "additionalProperties": true,
+   "description": "The physical object's geometry, independent of any simulator. The beam's reference trajectory at the\ncomponent is a dataset value (`values.geometry`); `placement` is where the object itself is.",
+   "properties": {
+    "length": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Length"
+    },
+    "reference_point": {
+     "anyOf": [
+      {
+       "enum": [
+        "entry",
+        "centre",
+        "exit"
+       ],
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Reference Point"
+    },
+    "placement": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Pose"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "alignment": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Alignment"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "shape": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Shape"
+    }
+   },
+   "title": "Geometry",
+   "type": "object"
+  },
+  "Material": {
+   "additionalProperties": true,
+   "description": "What the beam meets, for engines that simulate interactions; the model only describes it.",
+   "properties": {
+    "material": {
+     "title": "Material",
+     "type": "string"
+    },
+    "thickness": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Thickness"
+    },
+    "density": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Density"
+    },
+    "radiation_length": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Radiation Length"
+    },
+    "interaction_length": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Interaction Length"
+    },
+    "orientation": {
+     "anyOf": [
+      {
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Orientation"
+    },
+    "composition": {
+     "anyOf": [
+      {
+       "additionalProperties": {
+        "type": "number"
+       },
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Composition"
+    }
+   },
+   "required": [
+    "material"
+   ],
+   "title": "Material",
+   "type": "object"
+  },
+  "MeasurementModel": {
+   "additionalProperties": true,
+   "description": "How a diagnostic derives its observables: centroid, profile, image, integrated charge\u2026 No channel\nnames and no values: those are external bindings and the control system.",
+   "properties": {
     "type": {
      "title": "Type",
      "type": "string"
     },
-    "capabilities": {
-     "anyOf": [
-      {
-       "items": {
-        "type": "string"
-       },
-       "type": "array"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null,
-     "title": "Capabilities"
-    },
-    "observes": {
+    "observables": {
      "items": {
       "type": "string"
      },
-     "title": "Observes",
+     "title": "Observables",
      "type": "array"
+    },
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
+    },
+    "parameters": {
+     "title": "Parameters",
+     "type": "object"
     }
    },
    "required": [
-    "id",
     "type"
    ],
-   "title": "_Element",
+   "title": "MeasurementModel",
    "type": "object"
   },
-  "_Geometry": {
-   "properties": {
-    "x": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null,
-     "title": "X"
-    },
-    "y": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null,
-     "title": "Y"
-    },
-    "z": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null,
-     "title": "Z"
-    },
-    "yaw": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null,
-     "title": "Yaw"
-    },
-    "pitch": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null,
-     "title": "Pitch"
-    },
-    "roll": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null,
-     "title": "Roll"
-    }
-   },
-   "title": "_Geometry",
-   "type": "object"
-  },
-  "_Model": {
+  "ModelInfo": {
+   "additionalProperties": true,
    "properties": {
     "id": {
+     "pattern": "^[A-Za-z0-9][A-Za-z0-9_.\\-]*$",
      "title": "Id",
      "type": "string"
     },
@@ -439,17 +1439,8 @@
      ],
      "default": null,
      "title": "Dataset"
-    }
-   },
-   "required": [
-    "id"
-   ],
-   "title": "_Model",
-   "type": "object"
-  },
-  "_Native": {
-   "properties": {
-    "source": {
+    },
+    "description": {
      "anyOf": [
       {
        "type": "string"
@@ -459,7 +1450,54 @@
       }
      ],
      "default": null,
-     "title": "Source"
+     "title": "Description"
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "title": "ModelInfo",
+   "type": "object"
+  },
+  "Native": {
+   "additionalProperties": true,
+   "description": "A simulator's own description of an object, kept whole: nothing is lost in normalisation.",
+   "properties": {
+    "format": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Format"
+    },
+    "file": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "File"
+    },
+    "name": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Name"
     },
     "type": {
      "anyOf": [
@@ -476,14 +1514,28 @@
     "parameters": {
      "title": "Parameters",
      "type": "object"
+    },
+    "location": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Location"
     }
    },
-   "title": "_Native",
+   "title": "Native",
    "type": "object"
   },
-  "_Observable": {
+  "Observable": {
+   "additionalProperties": true,
    "properties": {
     "quantity": {
+     "pattern": "^[a-z]+(\\.[a-z_]+)+$",
      "title": "Quantity",
      "type": "string"
     },
@@ -502,6 +1554,11 @@
     "domain": {
      "anyOf": [
       {
+       "enum": [
+        "particle",
+        "optical",
+        "any"
+       ],
        "type": "string"
       },
       {
@@ -514,6 +1571,12 @@
     "plane": {
      "anyOf": [
       {
+       "enum": [
+        "x",
+        "y",
+        "z",
+        "none"
+       ],
        "type": "string"
       },
       {
@@ -522,17 +1585,111 @@
      ],
      "default": null,
      "title": "Plane"
+    },
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
     }
    },
    "required": [
     "quantity"
    ],
-   "title": "_Observable",
+   "title": "Observable",
    "type": "object"
   },
-  "_Path": {
+  "Offset": {
+   "additionalProperties": true,
+   "properties": {
+    "dx": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Dx"
+    },
+    "dy": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Dy"
+    },
+    "dz": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Dz"
+    },
+    "dyaw": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Dyaw"
+    },
+    "dpitch": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Dpitch"
+    },
+    "droll": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Droll"
+    }
+   },
+   "title": "Offset",
+   "type": "object"
+  },
+  "Path": {
+   "additionalProperties": true,
+   "description": "An ordered route through components. `placements` is the order \u2014 the topology inside the path;\n`s` is a coordinate along it, never its identity.",
    "properties": {
     "id": {
+     "pattern": "^\\S(.*\\S)?$",
      "title": "Id",
      "type": "string"
     },
@@ -549,18 +1706,45 @@
      "title": "Name"
     },
     "system": {
-     "title": "System",
-     "type": "string"
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "System"
     },
-    "topology": {
-     "title": "Topology",
-     "type": "string"
-    },
-    "elements": {
+    "beams": {
      "items": {
       "type": "string"
      },
-     "title": "Elements",
+     "title": "Beams",
+     "type": "array"
+    },
+    "topology": {
+     "default": "open",
+     "enum": [
+      "open",
+      "closed"
+     ],
+     "title": "Topology",
+     "type": "string"
+    },
+    "placements": {
+     "items": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "$ref": "#/$defs/Placement"
+       }
+      ]
+     },
+     "title": "Placements",
      "type": "array"
     },
     "reference": {
@@ -599,26 +1783,431 @@
      "default": null,
      "title": "Direction"
     },
-    "branches": {
+    "medium": {
+     "anyOf": [
+      {
+       "enum": [
+        "particle",
+        "photon",
+        "mixed"
+       ],
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Medium"
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "title": "Path",
+   "type": "object"
+  },
+  "Placement": {
+   "additionalProperties": true,
+   "description": "One component's place on one path. `id` is needed only when the component appears on the path more\nthan once; `s` and `length` here are a convenience for a model with one dataset.",
+   "properties": {
+    "component": {
+     "title": "Component",
+     "type": "string"
+    },
+    "id": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Id"
+    },
+    "s": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "S"
+    },
+    "length": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Length"
+    },
+    "reversed": {
+     "default": false,
+     "title": "Reversed",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "component"
+   ],
+   "title": "Placement",
+   "type": "object"
+  },
+  "Pose": {
+   "additionalProperties": true,
+   "description": "A position and orientation in the facility frame: x, y, z (m), yaw, pitch, roll (rad). `yaw` is the\nheading in the horizontal plane, 0 along +x, counter-clockwise positive.",
+   "properties": {
+    "x": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "X"
+    },
+    "y": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Y"
+    },
+    "z": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Z"
+    },
+    "yaw": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Yaw"
+    },
+    "pitch": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Pitch"
+    },
+    "roll": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Roll"
+    },
+    "frame": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Frame"
+    }
+   },
+   "title": "Pose",
+   "type": "object"
+  },
+  "Profile": {
+   "additionalProperties": true,
+   "description": "The transverse shape of the space available to the beam.",
+   "properties": {
+    "shape": {
+     "enum": [
+      "circle",
+      "ellipse",
+      "rectangle",
+      "racetrack",
+      "polygon",
+      "custom"
+     ],
+     "title": "Shape",
+     "type": "string"
+    },
+    "radius": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Radius"
+    },
+    "semi_axis_x": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Semi Axis X"
+    },
+    "semi_axis_y": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Semi Axis Y"
+    },
+    "half_width_x": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Half Width X"
+    },
+    "half_height_y": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Half Height Y"
+    },
+    "corner_radius": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Corner Radius"
+    },
+    "points": {
+     "anyOf": [
+      {
+       "items": {
+        "items": {
+         "type": "number"
+        },
+        "type": "array"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Points"
+    },
+    "offset_x": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Offset X"
+    },
+    "offset_y": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Offset Y"
+    },
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
+    }
+   },
+   "required": [
+    "shape"
+   ],
+   "title": "Profile",
+   "type": "object"
+  },
+  "StateDef": {
+   "additionalProperties": true,
+   "description": "What a state means for the beam (`beam_passes`, `intercepts`, `limits_aperture`, `acts`).",
+   "properties": {
+    "name": {
+     "title": "Name",
+     "type": "string"
+    },
+    "meaning": {
+     "title": "Meaning",
+     "type": "object"
+    },
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "title": "StateDef",
+   "type": "object"
+  },
+  "StateMapping": {
+   "additionalProperties": true,
+   "description": "How a value read from an external signal maps to a state; the signal's identity lives elsewhere\n(Knowledge Hub), named by `signal` (a role such as `status`, or an external id).",
+   "properties": {
+    "signal": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Signal"
+    },
+    "value": {
+     "title": "Value"
+    },
+    "state": {
+     "title": "State",
+     "type": "string"
+    }
+   },
+   "required": [
+    "value",
+    "state"
+   ],
+   "title": "StateMapping",
+   "type": "object"
+  },
+  "StateModel": {
+   "additionalProperties": true,
+   "description": "The states a component can be in. Never the current state: that is read from the control system.",
+   "properties": {
+    "states": {
      "items": {
-      "$ref": "#/$defs/_Branch"
+      "$ref": "#/$defs/StateDef"
      },
-     "title": "Branches",
+     "title": "States",
+     "type": "array"
+    },
+    "default": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Default"
+    },
+    "mappings": {
+     "items": {
+      "$ref": "#/$defs/StateMapping"
+     },
+     "title": "Mappings",
      "type": "array"
     }
    },
    "required": [
-    "id",
-    "system",
-    "topology",
-    "elements"
+    "states"
    ],
-   "title": "_Path",
+   "title": "StateModel",
    "type": "object"
   },
-  "_System": {
+  "System": {
+   "additionalProperties": true,
    "properties": {
     "id": {
+     "pattern": "^\\S(.*\\S)?$",
      "title": "Id",
      "type": "string"
     },
@@ -635,25 +2224,126 @@
      "title": "Name"
     },
     "kind": {
-     "default": "Other",
-     "title": "Kind",
-     "type": "string"
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Kind"
     },
     "beams": {
      "items": {
-      "$ref": "#/$defs/_Beam"
+      "type": "string"
      },
      "title": "Beams",
      "type": "array"
+    },
+    "description": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Description"
     }
    },
    "required": [
     "id"
    ],
-   "title": "_System",
+   "title": "System",
    "type": "object"
   },
-  "_Values": {
+  "ValueProvenance": {
+   "additionalProperties": true,
+   "description": "Where one value came from: `QUAA101.k1` \u2190 MAD-X, strengths.str, symbol `qk1`, line 12.",
+   "properties": {
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    },
+    "file": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "File"
+    },
+    "symbol": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Symbol"
+    },
+    "expression": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Expression"
+    },
+    "line": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Line"
+    },
+    "note": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Note"
+    }
+   },
+   "title": "ValueProvenance",
+   "type": "object"
+  },
+  "Values": {
+   "additionalProperties": true,
+   "description": "The values of one component (or placement) in one dataset.",
    "properties": {
     "s": {
      "anyOf": [
@@ -670,7 +2360,7 @@
     "geometry": {
      "anyOf": [
       {
-       "$ref": "#/$defs/_Geometry"
+       "$ref": "#/$defs/Pose"
       },
       {
        "type": "null"
@@ -689,72 +2379,131 @@
     "native": {
      "anyOf": [
       {
-       "$ref": "#/$defs/_Native"
+       "$ref": "#/$defs/Native"
       },
       {
        "type": "null"
       }
      ],
      "default": null
+    },
+    "provenance": {
+     "additionalProperties": {
+      "$ref": "#/$defs/ValueProvenance"
+     },
+     "title": "Provenance",
+     "type": "object"
     }
    },
-   "title": "_Values",
+   "title": "Values",
    "type": "object"
   }
  },
+ "additionalProperties": true,
  "properties": {
-  "format": {
-   "default": "argus.beam-model/1",
-   "title": "Format",
+  "schema_version": {
+   "const": "argus.beam-model/2",
+   "enum": [
+    "argus.beam-model/2"
+   ],
+   "title": "Schema Version",
    "type": "string"
   },
   "model": {
-   "$ref": "#/$defs/_Model"
+   "$ref": "#/$defs/ModelInfo"
+  },
+  "facility": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/Facility"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "default": null
   },
   "systems": {
    "items": {
-    "$ref": "#/$defs/_System"
+    "$ref": "#/$defs/System"
    },
    "title": "Systems",
    "type": "array"
   },
+  "beams": {
+   "items": {
+    "$ref": "#/$defs/Beam"
+   },
+   "title": "Beams",
+   "type": "array"
+  },
   "paths": {
    "items": {
-    "$ref": "#/$defs/_Path"
+    "$ref": "#/$defs/Path"
    },
    "title": "Paths",
    "type": "array"
   },
-  "elements": {
+  "connections": {
    "items": {
-    "$ref": "#/$defs/_Element"
+    "$ref": "#/$defs/Connection"
    },
-   "title": "Elements",
+   "title": "Connections",
+   "type": "array"
+  },
+  "definitions": {
+   "items": {
+    "$ref": "#/$defs/ComponentDefinition"
+   },
+   "title": "Definitions",
+   "type": "array"
+  },
+  "components": {
+   "items": {
+    "$ref": "#/$defs/Component"
+   },
+   "title": "Components",
+   "type": "array"
+  },
+  "boundaries": {
+   "items": {
+    "$ref": "#/$defs/Boundary"
+   },
+   "title": "Boundaries",
    "type": "array"
   },
   "observables": {
    "items": {
-    "$ref": "#/$defs/_Observable"
+    "$ref": "#/$defs/Observable"
    },
    "title": "Observables",
    "type": "array"
   },
   "datasets": {
    "items": {
-    "$ref": "#/$defs/_Dataset"
+    "$ref": "#/$defs/Dataset"
    },
    "title": "Datasets",
    "type": "array"
+  },
+  "external_bindings": {
+   "items": {
+    "$ref": "#/$defs/ExternalBinding"
+   },
+   "title": "External Bindings",
+   "type": "array"
+  },
+  "provenance": {
+   "title": "Provenance",
+   "type": "object"
   }
  },
  "required": [
-  "model",
-  "systems",
-  "paths",
-  "elements"
+  "schema_version",
+  "model"
  ],
- "title": "ARGUS canonical beam model (argus.beam-model/1)",
+ "title": "ARGUS canonical beam model (argus.beam-model/2)",
  "type": "object",
  "$schema": "https://json-schema.org/draft/2020-12/schema",
- "$id": "https://argus.infn.it/schemas/argus.beam-model-1.json"
+ "$id": "https://argus.infn.it/schemas/argus.beam-model-2.json"
 }

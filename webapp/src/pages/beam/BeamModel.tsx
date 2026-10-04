@@ -76,6 +76,8 @@ export function BeamModelPage() {
               {s.model_id && (
                 <span className="flex gap-1 text-[11px]">
                   <Link to={`/beam-model/edit/${encodeURIComponent(s.model_id)}`} className="text-indigo-700 hover:underline">edit</Link>
+                  <Link to={`/beam-model/${encodeURIComponent(s.model_id)}/assets`} className="text-indigo-700 hover:underline"
+                        title="Match the model's components to physical assets">assets</Link>
                   <button type="button" className="text-indigo-700 hover:underline"
                           onClick={() => void beamModelApi.exportModel(s.model_id!).then((m) => downloadJson(`${s.model_id}.json`, m))}>export</button>
                 </span>
@@ -233,6 +235,17 @@ function ElementPanel({ c, onPick }: { c: BeamElementContext; onPick: (uid: stri
       {p && Object.keys(p.optics ?? {}).length > 0 && <Section title="Optics"><KV data={p.optics} /></Section>}
 
       <Section title="Physical asset">
+        {(c.asset_bindings ?? []).filter((b) => b.status !== "confirmed" || b.relation !== "implemented_by").map((b, n) => (
+          <div key={n}>
+            {b.relation.replace(/_/g, " ")}: {b.asset && "uid" in b.asset ? <AssetLink a={b.asset as BeamRecord} /> : b.target.name}
+            <span className={`ml-1 rounded px-1 text-[10px] ${b.status === "confirmed" ? "bg-emerald-100 text-emerald-800" : "bg-sky-100 text-sky-800"}`}>
+              {b.status}{b.confidence != null ? ` ${Math.round(b.confidence * 100)}%` : ""}</span>
+          </div>
+        ))}
+        {(c.asset_bindings ?? []).filter((b) => b.status === "confirmed" && b.relation === "implemented_by").map((b, n) => (
+          <div key={`c${n}`} className="text-[11px] text-slate-500">binding: CONFIRMED · {b.authority?.replace(/_/g, " ")}
+            {b.source?.matcher ? ` · ${b.source.matcher} ${b.source.matcher_version ?? ""}` : ""}</div>
+        ))}
         {c.equipment.installed.length === 0 && <div className="text-slate-400">nothing confirmed installed</div>}
         {c.equipment.installed.map((i, n) => <div key={n}>installed: <AssetLink a={i.asset} /> since {when(i.valid_from)}</div>)}
         {c.equipment.history.length > 1 && (

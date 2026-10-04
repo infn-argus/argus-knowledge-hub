@@ -1,0 +1,215 @@
+{
+ "schema_version": "argus.beam-model/2",
+ "model": {
+  "id": "test-linac",
+  "name": "Test electron linac",
+  "version": "1"
+ },
+ "facility": {
+  "id": "lab",
+  "name": "Test lab"
+ },
+ "systems": [
+  {
+   "id": "linac",
+   "name": "Linac",
+   "kind": "Linac",
+   "beams": [
+    "e-"
+   ]
+  }
+ ],
+ "beams": [
+  {
+   "id": "e-",
+   "kind": "particle",
+   "species": "electron",
+   "charge": -1,
+   "reference_energy": 0.12,
+   "systems": [
+    "linac"
+   ]
+  }
+ ],
+ "paths": [
+  {
+   "id": "linac-line",
+   "system": "linac",
+   "beams": [
+    "e-"
+   ],
+   "topology": "open",
+   "placements": [
+    "GUN01",
+    "BUN01",
+    "ACC01",
+    "QUAL01",
+    "BPML01",
+    "ACC02",
+    "DIPL01",
+    "SCRL01",
+    "DMPL01"
+   ]
+  }
+ ],
+ "components": [
+  {
+   "id": "GUN01",
+   "type": "electron_source",
+   "geometry": {
+    "length": 0.2
+   }
+  },
+  {
+   "id": "BUN01",
+   "type": "buncher",
+   "geometry": {
+    "length": 0.3
+   }
+  },
+  {
+   "id": "ACC01",
+   "type": "accelerating_structure",
+   "geometry": {
+    "length": 3.0
+   }
+  },
+  {
+   "id": "QUAL01",
+   "type": "quadrupole",
+   "geometry": {
+    "length": 0.1
+   }
+  },
+  {
+   "id": "ACC02",
+   "type": "accelerating_structure",
+   "geometry": {
+    "length": 3.0
+   }
+  },
+  {
+   "id": "DIPL01",
+   "type": "dipole",
+   "geometry": {
+    "length": 0.5
+   }
+  },
+  {
+   "id": "DMPL01",
+   "type": "beam_dump",
+   "geometry": {
+    "length": 0.5
+   }
+  },
+  {
+   "id": "BPML01",
+   "type": "bpm",
+   "observes": [
+    "beam.position.x",
+    "beam.position.y",
+    "beam.charge"
+   ],
+   "measurement_model": {
+    "type": "centroid",
+    "observables": [
+     "beam.position.x",
+     "beam.position.y"
+    ]
+   }
+  },
+  {
+   "id": "SCRL01",
+   "type": "screen",
+   "observes": [
+    "beam.profile.x",
+    "beam.profile.y",
+    "beam.size.x"
+   ],
+   "material": {
+    "material": "YAG:Ce",
+    "thickness": 0.0001,
+    "density": 4.57
+   },
+   "measurement_model": {
+    "type": "image",
+    "observables": [
+     "beam.profile.x",
+     "beam.profile.y"
+    ]
+   }
+  }
+ ],
+ "datasets": [
+  {
+   "id": "design",
+   "kind": "design",
+   "category": "lattice",
+   "path": "linac-line",
+   "values": {
+    "GUN01": {
+     "s": 0.0,
+     "physics": {
+      "length": 0.2
+     }
+    },
+    "BUN01": {
+     "s": 0.4,
+     "physics": {
+      "length": 0.3,
+      "voltage": 0.5,
+      "frequency": 2856000000.0
+     }
+    },
+    "ACC01": {
+     "s": 1.0,
+     "physics": {
+      "length": 3.0,
+      "voltage": 60.0,
+      "frequency": 2856000000.0
+     }
+    },
+    "QUAL01": {
+     "s": 4.3,
+     "physics": {
+      "length": 0.1,
+      "k1": 8.2
+     }
+    },
+    "BPML01": {
+     "s": 4.6,
+     "physics": {
+      "length": 0.05
+     }
+    },
+    "ACC02": {
+     "s": 5.0,
+     "physics": {
+      "length": 3.0,
+      "voltage": 60.0,
+      "frequency": 2856000000.0
+     }
+    },
+    "DIPL01": {
+     "s": 8.5,
+     "physics": {
+      "length": 0.5,
+      "angle": 0.0
+     }
+    },
+    "SCRL01": {
+     "s": 9.3,
+     "physics": {
+      "length": 0.02
+     }
+    },
+    "DMPL01": {
+     "s": 10.0,
+     "physics": {
+      "length": 0.5
+     }
+    }
+   }
+  }
+ ]
+}

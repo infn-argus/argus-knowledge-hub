@@ -1,4 +1,4 @@
-"""Converters from simulator files to the canonical beam model (argus.beam-model/1, docs/beam-model-format.md).
+"""Converters from simulator files to the canonical beam model (argus.beam-model/2, docs/beam-model-format.md).
 
 They sit outside the hub's core on purpose: the hub reads only the canonical representation, and a converter
 is a pure function from a file's text to a canonical document — no database, no ledger. The same code can
@@ -12,7 +12,8 @@ canonical dict. Add one by writing a module in this package that calls `register
     register(Converter(name="bmad", label="Bmad lattice", extensions=(".bmad",),
                        detect=lambda text: "parameter[" in text.lower(), convert=my_convert))
 
-MAD-X (sequence or LINE files, and TFS twiss tables) and Elegant (.lte) are provided.
+MAD-X (sequence or LINE files, and TFS twiss tables), Elegant (.lte), Xsuite (line JSON), Accelerator Toolbox
+(pyAT JSON) and Bmad (.bmad) are provided. Output is argus.beam-model/2 (`output="1"` for the old form).
 """
 from __future__ import annotations
 
@@ -43,6 +44,7 @@ class Options:
     keep_markers: bool = False
     keep_drifts: bool = False
     name_hints: bool = True
+    output: str = "2"                   # "2": argus.beam-model/2; "1": the v1 form
     extra: dict = field(default_factory=dict)
 
 

@@ -193,8 +193,13 @@ def _placed(lat: _Lattice, name: str, attrs: dict, s: float, length: float, opti
     caps = _capabilities(cls, base)
     if caps is not None and kind == "kicker":
         caps = caps + ["pulsed"]
-    return Placed(name=name, kind=kind, s=s, length=length, native_type=cls.upper(),
-                  native=_native(lat, attrs), physics=_physics(lat, base, attrs, length), capabilities=caps)
+    # The family it was made from: `q1: qf` places q1, an instance of the user's qf (not a bare class).
+    parent = lat.defs.get(name.lower(), (None,))[0]
+    family = parent if parent and parent.lower() in lat.defs else None
+    # MAD-X names are case-insensitive and MAD-X writes them in capitals: so does the native name.
+    return Placed(name=name.upper(), kind=kind, s=s, length=length, native_type=cls.upper(),
+                  native=_native(lat, attrs), physics=_physics(lat, base, attrs, length), capabilities=caps,
+                  family=family)
 
 
 def _from_sequence(lat: _Lattice, seq_name: str, options: Options) -> tuple[list[Placed], float]:

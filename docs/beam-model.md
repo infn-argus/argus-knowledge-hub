@@ -4,9 +4,21 @@ ARGUS links the real facility it knows — equipment, controls, documentation, m
 **simulator-independent physics model** of its accelerators, beamlines, rings, linacs, transfer lines and
 laser transport. It does not become a simulator, and a lattice file never becomes the authority on equipment.
 
-Code: `backend/app/services/beam_model.py`, `backend/app/routers/beam_model.py`,
-`backend/app/models/beam_model.py`. Fixtures: `backend/tests/fixtures/beam_model/`. Tests:
-`backend/tests/test_beam_model.py`.
+* **The canonical format** is `argus.beam-model/2` ([beam-model-format.md](beam-model-format.md)). Its pure
+  library is `backend/app/beam_model_core/`, which the Accelerator Model Toolbox runs too.
+* **Matching** model components to physical assets: [beam-asset-sync.md](beam-asset-sync.md).
+* **Hub code:**
+  * `backend/app/services/beam_model.py` (queries, v1 rules);
+  * `backend/app/services/beam_model_v2.py` (import, storage, export);
+  * `backend/app/services/beam_asset_sync.py`;
+  * `backend/app/routers/beam_model.py`;
+  * `backend/app/models/beam_model.py`.
+* **Fixtures:** `backend/tests/fixtures/beam_model/`.
+* **Tests:**
+  * `test_beam_model.py` (the hub, v1 documents);
+  * `test_beam_model_core.py` (the library: ring, linac, branches, laser, apertures, collider);
+  * `test_beam_asset_sync.py` (sync and v2 in the hub);
+  * `test_beam_converters.py`.
 
 ## 1. Five layers, kept apart
 
@@ -47,7 +59,10 @@ Every concept reuses an existing mechanism where one fits:
 | ModelDataset | record of type **Model Dataset** (provenance attributes) + rows of `beam_model_values` | §3. |
 | ModelElementBinding | an **Installation** (`installed at` the position, `installation of` the asset, valid from/until) and the derived `realized by` | §5. |
 | Control signal identity | record of type **Control Signal** (`address`, `role`, `signal_system`, `unit`) | Identities only. |
-| Provenance, history, review | the fact ledger: claims with rule ids, decisions, the review queue, the guard | §6. |
+| Provenance, history, review | the fact ledger: claims with rule ids, decisions, the review queue, the guard |
+| Vacuum, material, optical and support components (v2) | **Vacuum Element**, **Material Element**, **Optical Element**, **Support Element** (functional plane, installable); the fine type is `element_kind` (`gate_valve`, `foil`, `iris`, `girder`…), the family `component_family` | Four generic positions instead of a catalogue type per kind; the vocabulary is the model's |
+| The whole document | a row of `beam_model_documents` per revision (the newest `current`) | What the ledger does not hold — definitions, boundaries, materials, states, measurement models, alignment, fields along paths, bindings — comes back whole in an export, and the model's own queries run on it |
+| Asset bindings with confidence and provenance | rows of `beam_asset_bindings` (status, authority, confidence, evidence, matcher, decision); a confirmed `implemented_by` is also an Installation | [beam-asset-sync.md](beam-asset-sync.md) | §6. |
 
 ## 3. Datasets: what depends on the optics
 
@@ -73,7 +88,14 @@ carries the provenance (`source`, `version`, `git_commit`, `simulator`, `simulat
 
 | Relation (stored as) | Layer · failure | Meaning |
 |---|---|---|
-| `upstream of` (element → next element) | beam · forward, degradation | *existing*. Consecutive elements of a path. |
+| `upstream of` (element → next element) | beam · forward, degradation | *existing*. Consecutive elements of a path. With v2 these edges are the network of every path together; a path's own order is its `sequence` attribute (placement ids). |
+| `merges into` (end of a path → where it joins) | beam · forward, degradation | **v2**. Injection. |
+| `continues to` (end of a path → next path's start) | beam · forward, degradation | **v2**. An injector chain. |
+| `placed on` (component → every path it is on) | provenance · none | **v2**. A component may be on several paths (a shared interaction region); `part of` still names its first. |
+| `mounted on` (component → support component or physical support) | mechanical · reverse, degradation | **v2**. At most one; acyclic. The support moving misaligns what it carries. |
+| `contained in` (component → assembly or chamber) | mechanical · reverse, degradation (weak) | **v2**. At most one; acyclic. |
+| `fiducial of` (fiducial → component or support) | provenance · none | **v2**. |
+| `measured by`, `associated with` (component → physical asset) | provenance · none | **v2**. Bindings other than `implemented_by`. |
 | `branches to` (branch point → first element of a branch path) | beam · forward, degradation | **new**. A septum, a switchyard, a beam splitter. |
 | `closes to` (last element of a closed path → its first) | beam · forward, degradation | **new**. A ring has no end; at most one per element each way. |
 | `part of` (element → path, path → system) | membership · forward, degradation (weak) | *existing*. One container each: a branch is its own path. |
@@ -167,11 +189,19 @@ All under the usual workspace header and permissions (`read`, `create`, `approve
 | `POST /v1/model-bindings/propose` | propose bindings by name (review queue) |
 | `POST /v1/model-bindings` | a person binds a position to hardware from a date (confirmed) |
 | `POST /v1/beam-model/signals` | a control signal’s identity: PV, role, device, element, observable |
+| `GET /v1/beam-model/schema?version=2` | the JSON Schema of `argus.beam-model/2` (`?version=1`: the old one) |
+| `GET /v1/beam-model/models/{id}/export?format=` | the model in its own format, or `1` / `2` (v2: the stored document with the hub's confirmed bindings) |
+| `GET /v1/beam-models/{id}/document` | the stored v2 document, its revision and its validation (completeness levels, warnings, gaps) |
+| `GET /v1/beam-models/{id}/aperture?path=&from=&to=&dataset=&state=C:S` | the limiting aperture between two components and what produces it |
+| `GET /v1/beam-models/{id}/components/{c}/alignment` | what it is mounted on, what moves with it, its fiducials, design/surveyed/offset |
+| `POST /v1/beam-models/{id}/asset-sync/preview`, `/apply`; `GET …/asset-sync/status`, `…/asset-bindings` | asset synchronization ([beam-asset-sync.md](beam-asset-sync.md)) |
 
-## 8. The canonical representation (`argus.beam-model/1`)
+## 8. The canonical representation
 
-**The full reference is [beam-model-format.md](beam-model-format.md)**, with the JSON Schema
-[beam-model.schema.json](beam-model.schema.json). The hub's core reads only this; simulator files are turned
+**The current format is `argus.beam-model/2`: the full reference is [beam-model-format.md](beam-model-format.md)**,
+with the JSON Schema [beam-model.schema.json](beam-model.schema.json). What follows is the v1 form, still
+imported (held to the v1 rules, then upgraded) and exported on request (`?format=1`; the web editor uses it,
+and an edit keeps what v1 cannot say). Its schema is [beam-model-1.schema.json](beam-model-1.schema.json). The hub's core reads only this; simulator files are turned
 into it by converters — the ones in `app/beam_converters/` (MAD-X, TFS, Elegant, extensible) or the
 Accelerator Model Toolbox for the rest (Xsuite, Bmad, AT, laser optics tools…). Normalised kinds: `drift dipole quadrupole sextupole corrector kicker septum rf_cavity bpm screen
 source dump mirror lens beam_splitter generic_monitor generic` (plus `solenoid collimator undulator`). A
@@ -283,8 +313,16 @@ by `branches to` from the beam splitter `BSP01`, observes `optical.profile` and 
 
 ## 13. Known limits
 
-* **One path per element.** A section shared by two lines (common upstream of a switchyard) is modelled as
-  its own path that branches to both; this keeps `s` unambiguous.
+* **One path per element — v1 only.** A v1 section shared by two lines is its own path that branches to both.
+  v2 places a component on several paths (`placed on`), each with its own `s`; the hub's per-path queries use
+  the path's `sequence`.
+* **The ledger holds what the hub reasons on.** Records, topology, observables and bindings are claims. The
+  rest of a v2 document — boundaries, materials, states, definitions, alignment, fields along paths — lives
+  in the stored document. It is served whole (`/document`, `/export?format=2`) and queried there (aperture,
+  alignment), but not as ledger facts with their own history: a new import replaces it, and earlier
+  revisions are kept as rows.
+* **Hand edits of hub records** (renaming a position in the catalogue) appear in a v1 export, which is rebuilt
+  from the ledger, but not in the stored v2 document until the model is imported again.
 * **Corrector planes** come from capabilities (`horizontal_steering`, `vertical_steering`) or the
   catalogue `plane`; a steering element saying neither is listed with `plane_known: false`, never guessed
   from its name.
@@ -295,4 +333,8 @@ by `branches to` from the beam splitter `BSP01`, observes `optical.profile` and 
 * **Converters read lattice files, not programs**: MAD-X macros, loops and conditionals are not executed
   (they are reported); Elegant's SDDS outputs (twiss) are left to the Toolbox.
 * **The editor writes canonical values only**: simulator-specific types and parameters come with an uploaded
-  file, and are kept through edits.
+  file, and are kept through edits. It edits the v1 form; v2-only content (supports, boundaries, states,
+  definitions) is carried over on save, but is not editable there — it comes from the Toolbox or a file.
+* **Not modelled here, on purpose**: vacuum pumping, electrical distribution, cooling, PLC logic, networks,
+  maintenance, documents and inventory. The beam model identifies a component and its relevance to the beam;
+  the Knowledge Hub holds the engineering detail, linked by the binding.

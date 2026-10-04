@@ -1,0 +1,133 @@
+! DAΦNE-accumulator-like ring (illustrative strengths)
+parameter[particle] = electron
+parameter[e_tot] = 0.51e9
+ang = twopi/8
+dip: sbend, l = 1.2, angle = ang
+sxp: sextupole, l = 0.1, k2 = 12.5
+chv: kicker, l = 0.1
+kck: hkicker, l = 0.3
+spt: rbend, l = 0.6, angle = 0
+bpm: monitor
+SPTA1001: spt
+d1: drift, l = 0.3
+DIPA11: dip
+d2: drift, l = 0.2
+BPSA11: bpm
+d3: drift, l = 0.2
+SXPA101: sxp
+d4: drift, l = 0.2
+QUAA101: quadrupole, l = 0.3, k1 = 4.30926
+d5: drift, l = 0.2
+SXPA102: sxp
+d6: drift, l = 0.2
+QUAA102: quadrupole, l = 0.3, k1 = 4.0
+d7: drift, l = 0.2
+QUAA103: quadrupole, l = 0.3, k1 = -4.3
+d8: drift, l = 0.2
+BPSA12: bpm
+d9: drift, l = 0.2
+CHV11: chv
+d10: drift, l = 0.2
+DIPA12: dip
+d11: drift, l = 0.34
+BPSA13: bpm
+d12: drift, l = 0.34
+KCKA1001: kck
+d13: drift, l = 0.34
+CHV12: chv
+d14: drift, l = 0.34
+KCKA2001: kck
+d15: drift, l = 0.34
+BPSA21: bpm
+d16: drift, l = 0.34
+DIPA21: dip
+d17: drift, l = 0.2
+CHV21: chv
+d18: drift, l = 0.2
+BPSA22: bpm
+d19: drift, l = 0.2
+QUAA201: quadrupole, l = 0.3, k1 = 3.7
+d20: drift, l = 0.2
+QUAA202: quadrupole, l = 0.3, k1 = -4.0
+d21: drift, l = 0.2
+SXPA201: sxp
+d22: drift, l = 0.2
+QUAA203: quadrupole, l = 0.3, k1 = 4.3
+d23: drift, l = 0.2
+SXPA202: sxp
+d24: drift, l = 0.2
+BPSA23: bpm
+d25: drift, l = 0.2
+DIPA22: dip
+d26: drift, l = 0.51
+SPTA2001: spt
+d27: drift, l = 0.51
+CHV31: chv
+d28: drift, l = 0.51
+BPSA31: bpm
+d29: drift, l = 0.51
+DIPA31: dip
+d30: drift, l = 0.225
+BPSA32: bpm
+d31: drift, l = 0.225
+SXPA301: sxp
+d32: drift, l = 0.225
+QUAA301: quadrupole, l = 0.3, k1 = -3.7
+d33: drift, l = 0.225
+SXPA302: sxp
+d34: drift, l = 0.225
+QUAA302: quadrupole, l = 0.3, k1 = 4.0
+d35: drift, l = 0.225
+QUAA303: quadrupole, l = 0.3, k1 = -4.3
+d36: drift, l = 0.225
+CHV32: chv
+d37: drift, l = 0.225
+DIPA32: dip
+d38: drift, l = 0.34
+BPSA33: bpm
+d39: drift, l = 0.34
+KCKA3001: kck
+d40: drift, l = 0.34
+CHV41: chv
+d41: drift, l = 0.34
+KCKA4001: kck
+d42: drift, l = 0.34
+BPSA41: bpm
+d43: drift, l = 0.34
+DIPA41: dip
+d44: drift, l = 0.225
+CHV42: chv
+d45: drift, l = 0.225
+QUAA401: quadrupole, l = 0.3, k1 = 3.7
+d46: drift, l = 0.225
+QUAA402: quadrupole, l = 0.3, k1 = -4.0
+d47: drift, l = 0.225
+SXPA401: sxp
+d48: drift, l = 0.225
+QUAA403: quadrupole, l = 0.3, k1 = 4.3
+d49: drift, l = 0.225
+SXPA402: sxp
+d50: drift, l = 0.225
+BPSA42: bpm
+d51: drift, l = 0.225
+DIPA42: dip
+d52: drift, l = 0.58
+BPSA43: bpm
+d53: drift, l = 0.58
+CHV43: chv
+dend: drift, l = 0.58
+acc: line = (SPTA1001, d1, DIPA11, d2, BPSA11, d3, SXPA101, d4, &
+  QUAA101, d5, SXPA102, d6, QUAA102, d7, QUAA103, d8, &
+  BPSA12, d9, CHV11, d10, DIPA12, d11, BPSA13, d12, &
+  KCKA1001, d13, CHV12, d14, KCKA2001, d15, BPSA21, d16, &
+  DIPA21, d17, CHV21, d18, BPSA22, d19, QUAA201, d20, &
+  QUAA202, d21, SXPA201, d22, QUAA203, d23, SXPA202, d24, &
+  BPSA23, d25, DIPA22, d26, SPTA2001, d27, CHV31, d28, &
+  BPSA31, d29, DIPA31, d30, BPSA32, d31, SXPA301, d32, &
+  QUAA301, d33, SXPA302, d34, QUAA302, d35, QUAA303, d36, &
+  CHV32, d37, DIPA32, d38, BPSA33, d39, KCKA3001, d40, &
+  CHV41, d41, KCKA4001, d42, BPSA41, d43, DIPA41, d44, &
+  CHV42, d45, QUAA401, d46, QUAA402, d47, SXPA401, d48, &
+  QUAA403, d49, SXPA402, d50, BPSA42, d51, DIPA42, d52, &
+  BPSA43, d53, CHV43, dend)
+use, acc

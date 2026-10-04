@@ -1,0 +1,187 @@
+{
+ "schema_version": "argus.beam-model/2",
+ "model": {
+  "id": "test-aperture",
+  "name": "Aperture example"
+ },
+ "systems": [
+  {
+   "id": "line",
+   "kind": "Transfer line"
+  }
+ ],
+ "paths": [
+  {
+   "id": "line",
+   "system": "line",
+   "placements": [
+    "Q1",
+    "CH1",
+    "BL1",
+    "VLV1",
+    "COL1",
+    "SCP1",
+    "Q2"
+   ]
+  }
+ ],
+ "components": [
+  {
+   "id": "Q1",
+   "type": "quadrupole",
+   "geometry": {
+    "length": 0.3
+   },
+   "boundaries": [
+    {
+     "id": "Q1-bore",
+     "profile": {
+      "shape": "circle",
+      "radius": 0.025
+     }
+    }
+   ]
+  },
+  {
+   "id": "CH1",
+   "type": "vacuum_chamber",
+   "geometry": {
+    "length": 1.0
+   },
+   "boundaries": [
+    {
+     "id": "CH1-section",
+     "profile": {
+      "shape": "ellipse",
+      "semi_axis_x": 0.035,
+      "semi_axis_y": 0.02
+     }
+    }
+   ]
+  },
+  {
+   "id": "BL1",
+   "type": "bellows",
+   "geometry": {
+    "length": 0.1
+   },
+   "boundaries": [
+    {
+     "id": "BL1-bore",
+     "profile": {
+      "shape": "circle",
+      "radius": 0.03
+     }
+    }
+   ]
+  },
+  {
+   "id": "VLV1",
+   "type": "gate_valve",
+   "geometry": {
+    "length": 0.07
+   },
+   "boundaries": [
+    {
+     "id": "VLV1-open",
+     "when_state": "OPEN",
+     "profile": {
+      "shape": "circle",
+      "radius": 0.018
+     }
+    }
+   ]
+  },
+  {
+   "id": "COL1",
+   "type": "collimator",
+   "geometry": {
+    "length": 0.2
+   },
+   "material": {
+    "material": "tungsten",
+    "density": 19.3,
+    "radiation_length": 0.0035
+   },
+   "boundaries": [
+    {
+     "id": "COL1-jaws",
+     "profile": {
+      "shape": "rectangle",
+      "half_width_x": 0.04,
+      "half_height_y": 0.006
+     }
+    }
+   ]
+  },
+  {
+   "id": "SCP1",
+   "type": "scraper",
+   "geometry": {
+    "length": 0.05
+   },
+   "boundaries": [
+    {
+     "id": "SCP1-in",
+     "when_state": "IN",
+     "profile": {
+      "shape": "rectangle",
+      "half_width_x": 0.003,
+      "half_height_y": 0.05,
+      "offset_x": 0.0
+     }
+    }
+   ]
+  },
+  {
+   "id": "Q2",
+   "type": "quadrupole",
+   "geometry": {
+    "length": 0.3
+   }
+  }
+ ],
+ "boundaries": [
+  {
+   "id": "model-aperture",
+   "path": "line",
+   "s_start": 0.4,
+   "s_end": 0.6,
+   "kind": "model",
+   "profile": {
+    "shape": "ellipse",
+    "semi_axis_x": 0.03,
+    "semi_axis_y": 0.019
+   }
+  }
+ ],
+ "datasets": [
+  {
+   "id": "design",
+   "path": "line",
+   "values": {
+    "Q1": {
+     "s": 0.0
+    },
+    "CH1": {
+     "s": 0.35
+    },
+    "BL1": {
+     "s": 1.4
+    },
+    "VLV1": {
+     "s": 1.55
+    },
+    "COL1": {
+     "s": 1.67
+    },
+    "SCP1": {
+     "s": 1.92
+    },
+    "Q2": {
+     "s": 2.02
+    }
+   }
+  }
+ ]
+}

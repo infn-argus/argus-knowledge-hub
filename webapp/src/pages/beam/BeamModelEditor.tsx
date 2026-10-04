@@ -66,7 +66,7 @@ export function BeamModelEditorPage() {
   const [tab, setTab] = useState<"upload" | "edit">(modelId ? "edit" : "upload");
   const existing = useQuery({
     queryKey: ["beam-model-export", modelId],
-    queryFn: () => beamModelApi.exportModel(modelId!),
+    queryFn: () => beamModelApi.exportModel(modelId!, "1"),
     enabled: !!modelId,
   });
   const [seed, setSeed] = useState<CanonicalBeamModel | null>(null);

@@ -1,0 +1,201 @@
+{
+ "schema_version": "argus.beam-model/2",
+ "model": {
+  "id": "test-laser",
+  "name": "Laser transport",
+  "simulator": "zemax"
+ },
+ "systems": [
+  {
+   "id": "laser",
+   "kind": "Laser transport",
+   "beams": [
+    "ti-sa"
+   ]
+  }
+ ],
+ "beams": [
+  {
+   "id": "ti-sa",
+   "kind": "photon",
+   "species": "photon",
+   "wavelength": 800.0,
+   "parameters": {
+    "pulse_duration_fs": 30,
+    "repetition_rate_hz": 10
+   },
+   "systems": [
+    "laser"
+   ]
+  }
+ ],
+ "paths": [
+  {
+   "id": "laser-main",
+   "system": "laser",
+   "medium": "photon",
+   "placements": [
+    "LSR01",
+    "MIR01",
+    "LNS01",
+    "IRS01",
+    "BSP01",
+    "IP01"
+   ]
+  },
+  {
+   "id": "diagnostic-leg",
+   "system": "laser",
+   "medium": "photon",
+   "placements": [
+    "CAM01"
+   ]
+  }
+ ],
+ "connections": [
+  {
+   "kind": "branch",
+   "from": {
+    "path": "laser-main",
+    "component": "BSP01"
+   },
+   "to": {
+    "path": "diagnostic-leg"
+   }
+  }
+ ],
+ "components": [
+  {
+   "id": "LSR01",
+   "type": "laser_source"
+  },
+  {
+   "id": "MIR01",
+   "type": "mirror",
+   "parameters": {
+    "incidence_angle": 0.785
+   }
+  },
+  {
+   "id": "LNS01",
+   "type": "lens",
+   "parameters": {
+    "focal_length": 2.0
+   }
+  },
+  {
+   "id": "IRS01",
+   "type": "iris",
+   "boundaries": [
+    {
+     "profile": {
+      "shape": "circle",
+      "radius": 0.004
+     }
+    }
+   ],
+   "states": {
+    "states": [
+     {
+      "name": "OPEN"
+     },
+     {
+      "name": "CLOSED",
+      "meaning": {
+       "beam_passes": false
+      }
+     }
+    ],
+    "default": "OPEN"
+   }
+  },
+  {
+   "id": "BSP01",
+   "type": "beam_splitter",
+   "parameters": {
+    "split_ratio": 0.99
+   }
+  },
+  {
+   "id": "IP01",
+   "type": "interaction_point"
+  },
+  {
+   "id": "CAM01",
+   "type": "camera",
+   "observes": [
+    "optical.profile",
+    "optical.power"
+   ],
+   "measurement_model": {
+    "type": "image",
+    "observables": [
+     "optical.profile"
+    ]
+   },
+   "native": {
+    "format": "zemax",
+    "type": "DETECTOR",
+    "name": "CAM01"
+   }
+  }
+ ],
+ "datasets": [
+  {
+   "id": "layout",
+   "kind": "design",
+   "category": "survey",
+   "path": "laser-main",
+   "values": {
+    "LSR01": {
+     "s": 0.0,
+     "geometry": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 1.2
+     }
+    },
+    "MIR01": {
+     "s": 1.0,
+     "geometry": {
+      "x": 1.0,
+      "y": 0.0,
+      "z": 1.2
+     }
+    },
+    "LNS01": {
+     "s": 2.0,
+     "geometry": {
+      "x": 1.0,
+      "y": 1.0,
+      "z": 1.2
+     }
+    },
+    "IRS01": {
+     "s": 2.5,
+     "geometry": {
+      "x": 1.0,
+      "y": 1.5,
+      "z": 1.2
+     }
+    },
+    "BSP01": {
+     "s": 3.0,
+     "geometry": {
+      "x": 1.0,
+      "y": 2.0,
+      "z": 1.2
+     }
+    },
+    "IP01": {
+     "s": 4.0,
+     "geometry": {
+      "x": 1.0,
+      "y": 3.0,
+      "z": 1.2
+     }
+    }
+   }
+  }
+ ]
+}

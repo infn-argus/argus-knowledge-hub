@@ -1,0 +1,268 @@
+{
+ "assets": [
+  {
+   "id": "a-qf01",
+   "name": "MAG-ACC-QF01",
+   "type": "Magnet Assembly",
+   "aliases": [
+    "QUAA101"
+   ],
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "s": 1.5833,
+    "component_type": "quadrupole"
+   }
+  },
+  {
+   "id": "a-quaa102",
+   "name": "QUAA102",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Accumulator"
+   }
+  },
+  {
+   "id": "a-qf03",
+   "name": "ACC-QF-03",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "s": 13.2569
+   }
+  },
+  {
+   "id": "a-qf04",
+   "name": "MAG-ACC-QF04",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Accumulator"
+   }
+  },
+  {
+   "id": "a-quaa105",
+   "name": "quaa-0105",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Accumulator"
+   }
+  },
+  {
+   "id": "a-main-quaa101",
+   "name": "QUAA101",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Main Ring",
+    "s": 52.1
+   }
+  },
+  {
+   "id": "a-dhra101",
+   "name": "DIP-DHRA101",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "DHRA101"
+   }
+  },
+  {
+   "id": "a-dhra102",
+   "name": "DIP-DHRA102",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "DHRA102"
+   }
+  },
+  {
+   "id": "a-dhra103",
+   "name": "DIP-DHRA103",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "DHRA103"
+   }
+  },
+  {
+   "id": "a-dhra104",
+   "name": "DIP-DHRA104",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "DHRA104"
+   }
+  },
+  {
+   "id": "a-pu-bpsa101",
+   "name": "BPM-BPSA101",
+   "type": "Instrument",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "BPSA101",
+    "component_type": "bpm"
+   }
+  },
+  {
+   "id": "a-pu-bpsa102",
+   "name": "BPM-BPSA102",
+   "type": "Instrument",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "BPSA102",
+    "component_type": "bpm"
+   }
+  },
+  {
+   "id": "a-pu-bpsa104",
+   "name": "BPM-BPSA104",
+   "type": "Instrument",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "BPSA104",
+    "component_type": "bpm"
+   }
+  },
+  {
+   "id": "a-pu-bpsa105",
+   "name": "BPM-BPSA105",
+   "type": "Instrument",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "BPSA105",
+    "component_type": "bpm"
+   }
+  },
+  {
+   "id": "a-el-bpsa101",
+   "name": "LIBERA-BPSA101",
+   "type": "Digitizer",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "BPSA101"
+   }
+  },
+  {
+   "id": "a-el-bpsa102",
+   "name": "LIBERA-BPSA102",
+   "type": "Digitizer",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "BPSA102"
+   }
+  },
+  {
+   "id": "a-pu-bpsa103-a",
+   "name": "BPM-BPSA103-A",
+   "type": "Instrument",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "BPSA103"
+   }
+  },
+  {
+   "id": "a-pu-bpsa103-b",
+   "name": "BPM-BPSA103-B",
+   "type": "Instrument",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "BPSA103"
+   }
+  },
+  {
+   "id": "a-cor-h-01",
+   "name": "COR-H-01",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Accumulator"
+   }
+  },
+  {
+   "id": "a-kck-old",
+   "name": "KCK-OLD",
+   "type": "Magnet Assembly",
+   "retired": true,
+   "attributes": {
+    "beamline": "DAFNE Accumulator"
+   }
+  },
+  {
+   "id": "a-kck-new",
+   "name": "KCK-NEW",
+   "type": "Magnet Assembly",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "KCKA101"
+   }
+  },
+  {
+   "id": "a-vv01",
+   "name": "VV-ACC-01",
+   "type": "Vacuum Valve",
+   "attributes": {
+    "beamline": "DAFNE Accumulator"
+   }
+  },
+  {
+   "id": "a-bellows-a1",
+   "name": "BELLOWS-A1",
+   "type": "Vacuum Component",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "x": 1.7633,
+    "y": 0.0
+   }
+  },
+  {
+   "id": "a-ip07",
+   "name": "ION-PUMP-07",
+   "type": "Ion Pump",
+   "attributes": {
+    "beamline": "DAFNE Accumulator"
+   }
+  },
+  {
+   "id": "a-gir01",
+   "name": "GIR-ACC-01",
+   "type": "Mechanical Support",
+   "attributes": {
+    "beamline": "DAFNE Accumulator",
+    "lattice_name": "GIRDER_01"
+   }
+  },
+  {
+   "id": "a-ps-qf",
+   "name": "PS-QF",
+   "type": "Power Supply",
+   "attributes": {
+    "beamline": "DAFNE Accumulator"
+   }
+  }
+ ],
+ "existing": [
+  {
+   "component": "CHHA101",
+   "asset": "a-cor-h-01",
+   "relation": "implemented_by",
+   "status": "confirmed",
+   "authority": "human_confirmed",
+   "snapshot": {
+    "name": "COR-H-01"
+   }
+  },
+  {
+   "component": "KCKA101",
+   "asset": "a-kck-old",
+   "relation": "implemented_by",
+   "status": "confirmed",
+   "authority": "human_confirmed",
+   "snapshot": {
+    "name": "KCK-OLD"
+   }
+  }
+ ],
+ "naming_rules": [
+  {
+   "component": "^QUAA1(?P<n>\\d{2})$",
+   "asset": "MAG-ACC-QF{n:02d}"
+  }
+ ]
+}

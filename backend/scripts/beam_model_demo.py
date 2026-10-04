@@ -9,6 +9,10 @@ illustrative hardware behind a few positions so the element panel has something 
 * BPM01: a stripline pickup connected to its electronics, the device and IOC, X and Y signals;
 * CAM01: the camera installed at the laser line's diagnostic leg, and its profile signal.
 
+It also imports the argus.beam-model/2 fixtures (a ring with vacuum components, a girder and apertures, a
+branched transfer line, an aperture example, a collider interaction region) and adds the ring's mock
+physical assets (`ring_assets.json`), so Beam model → *assets* has something to synchronise.
+
 The hardware is made up for the demo (names say so); the fixtures are not any machine's real lattice.
 
     python backend/scripts/beam_model_demo.py <workspace> [--activate-policy]
@@ -50,7 +54,8 @@ def main(argv: list[str]) -> None:
     db.commit()
     print(f"types: {len(seeded.created)} created")
     awaiting = False
-    for name in ("dafne_accumulator.json", "linac.json", "laser_transport.json"):
+    for name in ("dafne_accumulator.json", "linac.json", "laser_transport.json", "ring.beam.json",
+                 "transfer.beam.json", "aperture.beam.json", "collider_ir.beam.json"):
         r = bm.import_canonical(db, ws, json.loads((FIXTURES / name).read_text()), ACTOR)
         db.commit()
         awaiting |= r["awaiting_policy"]
@@ -67,8 +72,9 @@ def main(argv: list[str]) -> None:
     types = {s.name: s.uid for s in db.scalars(select(Schema).where(Schema.workspace_id == ws))}
 
     def position(model_name: str) -> Asset:
-        return next(a for a in db.scalars(select(Asset).where(Asset.workspace_id == ws))
-                    if (a.attributes or {}).get("model_name") == model_name)
+        """A position of the original three models (the v2 ring has names of its own model)."""
+        keys = [f"{ws}:{m}/{model_name}" for m in ("dafne-accumulator", "linac-demo", "laser-transport")]
+        return db.scalar(select(Asset).where(Asset.key.in_(keys)))
 
     def record(type_name: str, key: str, name: str, **attrs) -> str:
         existing = db.scalar(select(Asset).where(Asset.key == f"{ws}:demo/{key}"))
@@ -138,6 +144,20 @@ def main(argv: list[str]) -> None:
                      device_uid=cdev, for_uid=cam.uid, measures="optical.profile")
     db.commit()
     print("demo hardware: QUAA101 (magnet swapped 2026-03-01), BPM01 (pickup, electronics, X/Y), CAM01 (camera)")
+
+    # The v2 ring's physical assets, as a facility's asset register might name them.
+    fx = json.loads((FIXTURES / "ring_assets.json").read_text())
+    made = {}
+    for a in fx["assets"]:
+        attrs = {**a.get("attributes", {}), **({"aliases": a["aliases"]} if a.get("aliases") else {})}
+        made[a["id"]] = record(a["type"], f"v2-{a['id']}", f"{a['name']}", **attrs)
+    relate(made["a-pu-bpsa101"], "connected to", made["a-el-bpsa101"])
+    for comp, asset in (("CHHA101", "a-cor-h-01"), ("KCKA101", "a-kck-old")):
+        pos = db.scalar(select(Asset).where(Asset.key == f"{ws}:dafne-accumulator-v2/{comp}"))
+        if pos is not None:
+            install(pos, made[asset], "2025-01-01T00:00:00+00:00")
+    db.commit()
+    print(f"v2 ring assets: {len(made)} (open Beam model → dafne-accumulator-v2 → assets)")
 
 
 if __name__ == "__main__":

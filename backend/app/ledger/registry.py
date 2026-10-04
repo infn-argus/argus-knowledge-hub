@@ -63,6 +63,17 @@ ENDPOINTS = {
     "starts at": (("in", {"Beam Path"}), ("in", BEAM_ELEMENTS)),
     "beam of": (("in", {"Particle Beam", "Photon Beam"}), ("in", {"Beam System"})),
     "models": (("in", {"Model Dataset"}), ("in", {"Beam Path", "Beam System"})),
+    # argus.beam-model/2: a component on several paths, paths joined by merges and continuations, and the
+    # mechanical relations between components (or from a component to the physical support it sits on).
+    "placed on": (("in", BEAM_ELEMENTS), ("in", {"Beam Path"})),
+    "merges into": (("in", BEAM_ELEMENTS), ("in", BEAM_ELEMENTS)),
+    "continues to": (("in", BEAM_ELEMENTS), ("in", BEAM_ELEMENTS)),
+    "mounted on": (("in", BEAM_ELEMENTS), ("not in", {INSTALLATION, ACCESS_POINT, "Beam Path", "Beam System"})),
+    "contained in": (("in", BEAM_ELEMENTS), ("not in", {INSTALLATION, ACCESS_POINT, "Beam Path", "Beam System"})),
+    "fiducial of": (("in", BEAM_ELEMENTS), ("in", BEAM_ELEMENTS)),
+    # A model component and a physical asset that is not what implements it (docs/beam-asset-sync.md).
+    "measured by": (("in", BEAM_ELEMENTS), ("not in", {INSTALLATION, ACCESS_POINT, "Beam Path", "Beam System"})),
+    "associated with": (("in", BEAM_ELEMENTS), ("not in", {INSTALLATION, ACCESS_POINT})),
 }
 # name: (at most per source, at most per target); None is unbounded.
 CARDINALITY = {
@@ -77,8 +88,10 @@ CARDINALITY = {
     "starts at": (1, None),
     "signal of": (1, None),
     "models": (1, None),
+    "mounted on": (1, None),
+    "contained in": (1, None),
 }
-ACYCLIC = {"part of", "composed of"}
+ACYCLIC = {"part of", "composed of", "mounted on", "contained in"}
 # Edges that may keep pointing at a retired record (history of the retired thing itself).
 RETIRE_EXEMPT_SOURCES = {INSTALLATION}
 

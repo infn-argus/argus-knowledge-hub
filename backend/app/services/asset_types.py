@@ -233,6 +233,10 @@ _t("Beam Element", "Functional Element", "Something the beam passes through or i
     S("model_name", "Model name", indexed=True), S("element_kind", "Element kind", indexed=True),
     S("capabilities", "Capabilities", indexed=True, multi=True),
     S("native_type", "Native type", indexed=True), S("native_source", "Native source", indexed=True),
+    # argus.beam-model/2 (docs/beam-model-format.md): the vocabulary family (magnet, diagnostic, vacuum…),
+    # the definition it instantiates, other names it is known by, and the paths it is placed on.
+    S("component_family", "Component family", indexed=True), S("definition", "Definition", indexed=True),
+    S("aliases", "Aliases", indexed=True, multi=True), B("virtual", "Virtual (no physical object)"),
 ])
 _t("Dipole", "Beam Element", "A bending magnet.", [
     F("bend_angle", "Bend angle (rad)"), F("bend_radius", "Bend radius (m)"), F("field", "Field (T)")])
@@ -330,6 +334,17 @@ _t("Lens", "Beam Element", "Focuses a photon beam.", [F("focal_length", "Focal l
 _t("Beam Splitter", "Beam Element", "Divides a photon beam between two paths.", [F("split_ratio", "Split ratio")])
 _t("Generic Beam Element", "Beam Element", "An element a model has and this catalogue has no kind for; "
    "its native type says what it is.")
+# Beamline components a lattice usually omits, described by the canonical model (argus.beam-model/2) because
+# they occupy or constrain the beam path. Positions, like every Beam Element: the physical unit is bound to
+# them; its engineering detail stays on the physical asset.
+_t("Vacuum Element", "Beam Element", "A vacuum component in the beam path: beam pipe, chamber, bellows, "
+   "flange, transition, valve, window, pumping or gauge port. Its kind is the element kind.")
+_t("Material Element", "Beam Element", "Material the beam meets: a foil, window, wire, target, converter, "
+   "gas target or crystal.", [S("material", "Material", indexed=True), F("thickness", "Thickness (m)")])
+_t("Optical Element", "Beam Element", "An optical component of a photon line other than a mirror, lens or "
+   "beam splitter: polariser, waveplate, grating, prism, iris, filter, amplifier.")
+_t("Support Element", "Beam Element", "A girder, support, mover, stage, fiducial or alignment reference: "
+   "it carries or locates beamline components, without necessarily being in the beam.")
 
 _t("Beam System", "Functional Element", "A system that produces or transports a beam: a storage ring, an "
    "accumulator, a linac, a transfer line, a laser transport, an FEL line.", [
@@ -355,7 +370,9 @@ _t("Beam Path", "Functional Element", "The route a beam takes: open (a linac, a 
    "path's last element by `closes to` its first; `s` is a coordinate along it, not its topology.", [
     E("topology", "Topology", ["open", "closed"]),
     F("length", "Length or circumference (m)"), E("direction", "Direction", ["forward", "backward"]),
-    S("model_id", "Model id", indexed=True)])
+    S("model_id", "Model id", indexed=True),
+    # The order of its placements (component ids; `ID#2` for a second pass): the topology inside the path.
+    S("sequence", "Placement order", multi=True)])
 
 # Plane B: physical -------------------------------------------------------------
 _t("Asset", "Engineered Item", "The serialised box, with a purchase order.",

@@ -25,8 +25,9 @@ observables_router = APIRouter(prefix="/v1/observables", tags=["beam-model"])
 datasets_router = APIRouter(prefix="/v1/model-datasets", tags=["beam-model"])
 bindings_router = APIRouter(prefix="/v1/model-bindings", tags=["beam-model"])
 model_router = APIRouter(prefix="/v1/beam-model", tags=["beam-model"])
+models_router = APIRouter(prefix="/v1/beam-models", tags=["beam-model"])
 ROUTERS = [systems_router, paths_router, elements_router, diagnostics_router, observables_router,
-           datasets_router, bindings_router, model_router]
+           datasets_router, bindings_router, model_router, models_router]
 
 
 def _actor(identity) -> str:
@@ -312,14 +313,18 @@ def create_binding(body: BindingIn, identity=Depends(get_identity),
 def formats():
     """What can be read: the canonical JSON, and every simulator converter installed (app/beam_converters)."""
     from app import beam_converters as bc
-    return [{"name": "argus", "label": "ARGUS canonical JSON (argus.beam-model/1)", "extensions": [".json"]}] + [
+    return [{"name": "argus", "label": "ARGUS canonical JSON (argus.beam-model/2, /1)",
+             "extensions": [".beam.json", ".json"]}] + [
         {"name": c.name, "label": c.label, "extensions": list(c.extensions)} for c in bc.converters()]
 
 
 @model_router.get("/schema")
-def schema():
-    """The JSON Schema of the canonical representation (docs/beam-model-format.md)."""
-    return bm.json_schema()
+def schema(version: str = Query("2", pattern="^(1|2)$")):
+    """The JSON Schema of the canonical representation (docs/beam-model-format.md): v2 (`*.beam.json`), or v1."""
+    if version == "1":
+        return bm.json_schema()
+    from app.beam_model_core.schema import json_schema
+    return json_schema()
 
 
 class ConvertIn(BaseModel):
@@ -350,10 +355,12 @@ def list_models(workspace_id: str = Depends(require_permission("read")), db: Ses
 
 
 @model_router.get("/models/{model_id}/export")
-def export_model(model_id: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
-    """One model as canonical JSON (argus.beam-model/1), from what the hub holds now: importing it again, here
-    or in another hub, gives the same model."""
-    doc = bm.export_canonical(db, workspace_id, model_id)
+def export_model(model_id: str, format: Optional[str] = Query(None, pattern="^(1|2)$"),
+                 workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """One model as canonical JSON — in the format it was imported in, or `format` 1 or 2. v2 gives back the
+    document whole with the hub's current bindings; v1 is rebuilt from what the hub holds now. Either imports
+    again, here or in another hub, as the same model."""
+    doc = bm.export_canonical(db, workspace_id, model_id, format)
     if doc is None:
         raise HTTPException(status_code=404, detail="No such beam model in this workspace")
     return doc
@@ -361,9 +368,10 @@ def export_model(model_id: str, workspace_id: str = Depends(require_permission("
 
 @model_router.get("/export")
 def export_models(model: Optional[list[str]] = Query(None, description="Model ids; all when omitted"),
+                  format: Optional[str] = Query(None, pattern="^(1|2)$"),
                   workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
-    """Several models (or all) in one bundle (argus.beam-model-bundle/1)."""
-    return bm.export_bundle(db, workspace_id, model)
+    """Several models (or all) in one bundle: argus.beam-model-bundle/2, or /1 when every model is v1."""
+    return bm.export_bundle(db, workspace_id, model, format)
 
 
 @model_router.post("/validate")
@@ -374,8 +382,8 @@ def validate_models(doc=Body(..., description="A model, a bundle, or a list of m
 
 
 @model_router.post("/import")
-def import_model(doc=Body(..., description="A canonical beam model (argus.beam-model/1), a bundle "
-                                           "(argus.beam-model-bundle/1) or a list of models"),
+def import_model(doc=Body(..., description="A canonical beam model (argus.beam-model/2 or /1), a bundle "
+                                           "(argus.beam-model-bundle/2 or /1) or a list of models"),
                  identity=Depends(get_identity), workspace_id: str = Depends(require_permission("create")),
                  db: Session = Depends(get_db)):
     """Import (or update) one or several canonical beam models, all or none: if any is invalid nothing is written.
@@ -393,8 +401,15 @@ def import_model(doc=Body(..., description="A canonical beam model (argus.beam-m
     trusted = not isinstance(identity, PatIdentity)
     reports = []
     try:
+        from app.services import beam_asset_sync as sync
         for d in docs:
-            reports.append(bm.import_canonical(db, workspace_id, d, _actor(identity), trusted=trusted))
+            report = bm.import_canonical(db, workspace_id, d, _actor(identity), trusted=trusted)
+            if report.get("state") == "published":
+                auto = sync.auto_after_import(db, workspace_id, report["model"])
+                if auto is not None:
+                    report["asset_sync"] = {k: auto[k] for k in ("summary", "kept", "problems")} | {
+                        "confirmed": len(auto["confirmed"])}
+            reports.append(report)
     except bm.BeamModelError as e:
         db.rollback()
         raise HTTPException(status_code=422, detail={"problems": e.problems}) from e
@@ -402,8 +417,9 @@ def import_model(doc=Body(..., description="A canonical beam model (argus.beam-m
         db.rollback()
         raise HTTPException(status_code=409, detail=str(e)) from e
     db.commit()
-    return reports[0] if len(docs) == 1 and not isinstance(doc, list) and \
-        not (isinstance(doc, dict) and doc.get("format") == bm.BUNDLE_FORMAT) else {"models": reports}
+    from app.beam_model_core.upgrade import V1_BUNDLE, V2_BUNDLE, version_of
+    bundle = isinstance(doc, list) or version_of(doc) in (V1_BUNDLE, V2_BUNDLE)
+    return reports[0] if len(docs) == 1 and not bundle else {"models": reports}
 
 
 class SignalIn(BaseModel):
@@ -433,3 +449,135 @@ def create_signal(body: SignalIn, identity=Depends(get_identity),
 
 def _attrs(a: Asset) -> dict:
     return {k: v for k, v in (a.attributes or {}).items() if not k.startswith("argus_")}
+
+
+# --------------------------------------------------------------------------- argus.beam-model/2: one model
+
+def _document(db: Session, workspace_id: str, model_id: str):
+    from app.services import beam_model_v2 as v2
+    doc = v2.document(db, workspace_id, model_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="No such beam model in this workspace")
+    return doc
+
+
+@models_router.get("/{model_id}/document")
+def model_document(model_id: str, workspace_id: str = Depends(require_permission("read")),
+                   db: Session = Depends(get_db)):
+    """The model as stored (argus.beam-model/2), with its validation: completeness levels, warnings, gaps."""
+    from app.services import beam_model_v2 as v2
+    row = v2.current(db, workspace_id, model_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such beam model in this workspace")
+    return {"model": model_id, "revision": row.revision, "imported_by": row.imported_by,
+            "imported_at": row.imported_at.isoformat() if row.imported_at else None, "validation": row.report,
+            "document": v2.export(db, workspace_id, model_id)}
+
+
+@models_router.get("/{model_id}/aperture")
+def limiting_aperture(model_id: str, path: str, start: Optional[str] = Query(None, alias="from"),
+                      end: Optional[str] = Query(None, alias="to"), dataset: Optional[str] = None,
+                      state: list[str] = Query([], description="component:STATE, e.g. SCP1:IN"),
+                      workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """The tightest restriction of the beam between two components of a path, whatever produces it (a magnet
+    bore, a chamber, a bellows, a valve, a collimator, an iris), in the states the model assumes unless given."""
+    from app.beam_model_core import queries
+    doc = _document(db, workspace_id, model_id)
+    try:
+        return queries.limiting_aperture(doc, path, start, end, dataset,
+                                         dict(s.split(":", 1) for s in state if ":" in s))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@models_router.get("/{model_id}/components/{component}/alignment")
+def alignment(model_id: str, component: str, workspace_id: str = Depends(require_permission("read")),
+              db: Session = Depends(get_db)):
+    """What a component is mounted on, what moves with it, and which fiducials define its alignment."""
+    from app.beam_model_core import queries
+    doc = _document(db, workspace_id, model_id)
+    c = next((x for x in doc.components if x.id == component), None)
+    if c is None:
+        raise HTTPException(status_code=404, detail="No such component in this model")
+    return {"component": component, "mounted_on": queries.support_chain(doc, component),
+            "moves_with_it": queries.moves_with(doc, component), "fiducials": queries.fiducials_of(doc, component),
+            "alignment": c.geometry.alignment.model_dump(exclude_none=True) if c.geometry and c.geometry.alignment
+            else None}
+
+
+class SyncOptions(BaseModel):
+    dataset: Optional[str] = None
+    propose_threshold: Optional[float] = None
+    auto_threshold: Optional[float] = None
+    margin: Optional[float] = None
+    s_tolerance: Optional[float] = None
+    xyz_tolerance: Optional[float] = None
+    naming_rules: list[dict] = []
+
+
+@models_router.post("/{model_id}/asset-sync/preview")
+def asset_sync_preview(model_id: str, body: Optional[SyncOptions] = None,
+                       workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """Proposed bindings between the model's components and this workspace's physical assets, with confidence,
+    evidence and how each differs from what is bound now. Nothing is written."""
+    from app.services import beam_asset_sync as sync
+    try:
+        return sync.preview(db, workspace_id, model_id, body.model_dump() if body else None)
+    except sync.SyncError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+class Decision(BaseModel):
+    component: str
+    asset: str
+    relation: str = "implemented_by"
+    note: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class ApplyIn(BaseModel):
+    accept: list[Decision] = []
+    reject: list[Decision] = []
+    accept_high_confidence: bool = False
+    keep_proposals: bool = True
+    options: Optional[SyncOptions] = None
+
+
+@models_router.post("/{model_id}/asset-sync/apply")
+def asset_sync_apply(model_id: str, body: ApplyIn, identity=Depends(get_identity),
+                     workspace_id: str = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    """Record a person's decisions: accept chosen proposals (or every auto-acceptable one), reject others, keep
+    the rest for review. An accepted `implemented_by` binding becomes a confirmed Installation (a swap when
+    another unit is installed there). Confirmed bindings are never changed by a later sync."""
+    from app.services import beam_asset_sync as sync
+    try:
+        out = sync.apply(db, workspace_id, model_id, _actor(identity), {
+            "accept": [d.model_dump() for d in body.accept], "reject": [d.model_dump() for d in body.reject],
+            "accept_high_confidence": body.accept_high_confidence, "keep_proposals": body.keep_proposals,
+            "options": body.options.model_dump() if body.options else None})
+    except sync.SyncError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    db.commit()
+    return out
+
+
+@models_router.get("/{model_id}/asset-sync/status")
+def asset_sync_status(model_id: str, filter: Optional[str] = Query(
+        None, description="magnets, diagnostics, vacuum, rf, optics, mechanical, interception, sources, or a status: "
+                          "confirmed, proposed, ambiguous, unmatched"),
+                      workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """The synchronization summary and the entries, filtered by family or status."""
+    from app.services import beam_asset_sync as sync
+    try:
+        return sync.status(db, workspace_id, model_id, filter)
+    except sync.SyncError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@models_router.get("/{model_id}/asset-bindings")
+def asset_bindings(model_id: str, status: Optional[str] = Query(
+        None, pattern="^(confirmed|proposed|ambiguous|rejected|superseded)$"),
+                   workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """Every recorded binding of the model: status, authority, confidence, evidence, matcher and decision."""
+    from app.services import beam_asset_sync as sync
+    return sync.bindings(db, workspace_id, model_id, status)

@@ -1498,6 +1498,99 @@ export interface BeamElementContext {
   tickets: { uid: string; title: string; state: string; for: string }[];
   upstream: (BeamRecord & { via: string; distance: number })[];
   downstream: (BeamRecord & { via: string; distance: number })[];
+  asset_bindings?: AssetBinding[];
+}
+
+// ------------------------------------------------------------------- beamline asset synchronization
+
+export type BindingStatus = "unmatched" | "proposed" | "confirmed" | "ambiguous" | "rejected";
+export type BindingAuthority = "authoritative" | "human_confirmed" | "auto_accepted" | "suggestion";
+
+export interface AssetRefView { id: string; name?: string; type?: string }
+
+export interface SyncCandidate {
+  asset: AssetRefView;
+  confidence: number;
+  evidence: { kind: string; weight: number | null; detail?: string }[];
+}
+
+export interface SyncProposal {
+  component: string;
+  component_uid?: string;
+  name: string;
+  type: string;
+  family: string;
+  relation: string;
+  paths: string[];
+  s: number | null;
+  status: BindingStatus;
+  expects_asset: boolean;
+  asset: AssetRefView | null;
+  confidence: number | null;
+  evidence: string[];
+  delta_s: number | null;
+  candidates: SyncCandidate[];
+  auto_acceptable: boolean;
+  authority: BindingAuthority | null;
+  diff: string;
+  notes: string[];
+}
+
+export interface AssetSyncSummary {
+  model_components: number;
+  virtual_components: number;
+  physical_candidates: number;
+  confirmed: number;
+  proposed: number;
+  auto_acceptable: number;
+  ambiguous: number;
+  unmatched: number;
+  rejected: number;
+  diff: Record<string, number>;
+}
+
+export interface AssetSyncStatus {
+  model: string;
+  summary: AssetSyncSummary;
+  groups: Record<string, number>;
+  proposals: SyncProposal[];
+  unmodelled_assets: AssetRefView[];
+  stale_bindings: { component: string; asset: string; relation: string; note: string }[];
+  matcher: string;
+  matcher_version: string;
+  generated_at: string;
+}
+
+export interface AssetSyncDecision { component: string; asset: string; relation?: string; reason?: string }
+
+export interface AssetSyncApply {
+  accept?: AssetSyncDecision[];
+  reject?: AssetSyncDecision[];
+  accept_high_confidence?: boolean;
+  keep_proposals?: boolean;
+}
+
+export interface AssetSyncApplied {
+  confirmed: { component: string; asset: string; relation: string; authority: string }[];
+  rejected: { component: string; asset: string }[];
+  kept: number;
+  problems: string[];
+  summary: AssetSyncSummary;
+}
+
+export interface AssetBinding {
+  component: string;
+  relation: string;
+  target: { namespace: string; id: string; name?: string };
+  status: string;
+  authority?: BindingAuthority;
+  confidence?: number;
+  evidence?: string[];
+  source?: { method: string; matcher?: string; matcher_version?: string };
+  confirmed_by?: { type: string; id: string };
+  timestamp?: string;
+  asset?: BeamRecord | { uid: string; name: string | null; type: string | null } | null;
+  note?: string | null;
 }
 
 export interface BeamModelSummary {

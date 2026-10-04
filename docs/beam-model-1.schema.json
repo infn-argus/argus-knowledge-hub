@@ -1,0 +1,760 @@
+{
+ "$defs": {
+  "_Beam": {
+   "properties": {
+    "id": {
+     "title": "Id",
+     "type": "string"
+    },
+    "name": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Name"
+    },
+    "kind": {
+     "title": "Kind",
+     "type": "string"
+    },
+    "parameters": {
+     "title": "Parameters",
+     "type": "object"
+    }
+   },
+   "required": [
+    "id",
+    "kind"
+   ],
+   "title": "_Beam",
+   "type": "object"
+  },
+  "_Branch": {
+   "properties": {
+    "at": {
+     "title": "At",
+     "type": "string"
+    },
+    "to_path": {
+     "title": "To Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "at",
+    "to_path"
+   ],
+   "title": "_Branch",
+   "type": "object"
+  },
+  "_Dataset": {
+   "properties": {
+    "id": {
+     "title": "Id",
+     "type": "string"
+    },
+    "name": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Name"
+    },
+    "kind": {
+     "default": "design",
+     "title": "Kind",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    },
+    "version": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Version"
+    },
+    "git_commit": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Git Commit"
+    },
+    "simulator": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Simulator"
+    },
+    "simulator_version": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Simulator Version"
+    },
+    "generated_at": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Generated At"
+    },
+    "valid_from": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Valid From"
+    },
+    "valid_until": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Valid Until"
+    },
+    "values": {
+     "additionalProperties": {
+      "$ref": "#/$defs/_Values"
+     },
+     "title": "Values",
+     "type": "object"
+    }
+   },
+   "required": [
+    "id",
+    "path"
+   ],
+   "title": "_Dataset",
+   "type": "object"
+  },
+  "_Element": {
+   "properties": {
+    "s": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "S"
+    },
+    "geometry": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/_Geometry"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "physics": {
+     "title": "Physics",
+     "type": "object"
+    },
+    "optics": {
+     "title": "Optics",
+     "type": "object"
+    },
+    "native": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/_Native"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "id": {
+     "title": "Id",
+     "type": "string"
+    },
+    "name": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Name"
+    },
+    "type": {
+     "title": "Type",
+     "type": "string"
+    },
+    "capabilities": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Capabilities"
+    },
+    "observes": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Observes",
+     "type": "array"
+    }
+   },
+   "required": [
+    "id",
+    "type"
+   ],
+   "title": "_Element",
+   "type": "object"
+  },
+  "_Geometry": {
+   "properties": {
+    "x": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "X"
+    },
+    "y": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Y"
+    },
+    "z": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Z"
+    },
+    "yaw": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Yaw"
+    },
+    "pitch": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Pitch"
+    },
+    "roll": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Roll"
+    }
+   },
+   "title": "_Geometry",
+   "type": "object"
+  },
+  "_Model": {
+   "properties": {
+    "id": {
+     "title": "Id",
+     "type": "string"
+    },
+    "name": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Name"
+    },
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    },
+    "version": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Version"
+    },
+    "git_commit": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Git Commit"
+    },
+    "simulator": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Simulator"
+    },
+    "dataset": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Dataset"
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "title": "_Model",
+   "type": "object"
+  },
+  "_Native": {
+   "properties": {
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    },
+    "type": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Type"
+    },
+    "parameters": {
+     "title": "Parameters",
+     "type": "object"
+    }
+   },
+   "title": "_Native",
+   "type": "object"
+  },
+  "_Observable": {
+   "properties": {
+    "quantity": {
+     "title": "Quantity",
+     "type": "string"
+    },
+    "unit": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Unit"
+    },
+    "domain": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Domain"
+    },
+    "plane": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Plane"
+    }
+   },
+   "required": [
+    "quantity"
+   ],
+   "title": "_Observable",
+   "type": "object"
+  },
+  "_Path": {
+   "properties": {
+    "id": {
+     "title": "Id",
+     "type": "string"
+    },
+    "name": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Name"
+    },
+    "system": {
+     "title": "System",
+     "type": "string"
+    },
+    "topology": {
+     "title": "Topology",
+     "type": "string"
+    },
+    "elements": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Elements",
+     "type": "array"
+    },
+    "reference": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Reference"
+    },
+    "length": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Length"
+    },
+    "direction": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Direction"
+    },
+    "branches": {
+     "items": {
+      "$ref": "#/$defs/_Branch"
+     },
+     "title": "Branches",
+     "type": "array"
+    }
+   },
+   "required": [
+    "id",
+    "system",
+    "topology",
+    "elements"
+   ],
+   "title": "_Path",
+   "type": "object"
+  },
+  "_System": {
+   "properties": {
+    "id": {
+     "title": "Id",
+     "type": "string"
+    },
+    "name": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Name"
+    },
+    "kind": {
+     "default": "Other",
+     "title": "Kind",
+     "type": "string"
+    },
+    "beams": {
+     "items": {
+      "$ref": "#/$defs/_Beam"
+     },
+     "title": "Beams",
+     "type": "array"
+    }
+   },
+   "required": [
+    "id"
+   ],
+   "title": "_System",
+   "type": "object"
+  },
+  "_Values": {
+   "properties": {
+    "s": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "S"
+    },
+    "geometry": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/_Geometry"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "physics": {
+     "title": "Physics",
+     "type": "object"
+    },
+    "optics": {
+     "title": "Optics",
+     "type": "object"
+    },
+    "native": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/_Native"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    }
+   },
+   "title": "_Values",
+   "type": "object"
+  }
+ },
+ "properties": {
+  "format": {
+   "default": "argus.beam-model/1",
+   "title": "Format",
+   "type": "string"
+  },
+  "model": {
+   "$ref": "#/$defs/_Model"
+  },
+  "systems": {
+   "items": {
+    "$ref": "#/$defs/_System"
+   },
+   "title": "Systems",
+   "type": "array"
+  },
+  "paths": {
+   "items": {
+    "$ref": "#/$defs/_Path"
+   },
+   "title": "Paths",
+   "type": "array"
+  },
+  "elements": {
+   "items": {
+    "$ref": "#/$defs/_Element"
+   },
+   "title": "Elements",
+   "type": "array"
+  },
+  "observables": {
+   "items": {
+    "$ref": "#/$defs/_Observable"
+   },
+   "title": "Observables",
+   "type": "array"
+  },
+  "datasets": {
+   "items": {
+    "$ref": "#/$defs/_Dataset"
+   },
+   "title": "Datasets",
+   "type": "array"
+  }
+ },
+ "required": [
+  "model",
+  "systems",
+  "paths",
+  "elements"
+ ],
+ "title": "ARGUS canonical beam model (argus.beam-model/1)",
+ "type": "object",
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://argus.infn.it/schemas/argus.beam-model-1.json"
+}

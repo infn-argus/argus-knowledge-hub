@@ -60,7 +60,10 @@ INSTALLABLE = {"Equipment Position", "Motion Axis", "Mirror", "Dipole", "Quadrup
                # unit installed at it changes. A drift has nothing installed at it.
                "Kicker", "Septum", "RF Cavity", "Beam Source", "Beam Dump", "Lens", "Beam Splitter",
                "Generic Beam Element", "Screen Station", "Generic Monitor", "Collimator", "Beam Stopper",
-               "Undulator", "Beam Charge Monitor", "Beam Loss Monitor", "Faraday Cup", "Wire Scanner"}
+               "Undulator", "Beam Charge Monitor", "Beam Loss Monitor", "Faraday Cup", "Wire Scanner",
+               # argus.beam-model/2: vacuum, material, optical and support components are positions too.
+               "Vacuum Element", "Material Element", "Optical Element", "Support Element", "RF Deflector",
+               "Spectrometer Station", "Beam Arrival Monitor", "Bunch Length Monitor", "Emittance Meter"}
 
 
 class LedgerError(ValueError):

@@ -143,7 +143,7 @@ Verified against the code, because the catalogue must fit the machinery that wil
 
 ## 4. The type catalogue
 
-**146 types, 18 of them abstract, maximum depth 6.** (The beam model added 18: see `docs/beam-model.md`.) (The IT model added 11 to the 104 before it: `IT Equipment` and its tree, `IT Record`, `Serial Line`. Six came after the tree below was drawn: `Equipment Port` under `Engineered Item`, one physical port of a unit that it is `port of`; `Communication Path` and `Bus Segment` under `Control Item`, see `docs/it-model-design.md`; `Address Record` under `IT Record`; and under `Asset`, `Vacuum Component`, a passive part of the vacuum line such as a pipe, bellows, cross or tee, and `Vacuum Controller`, the box between a control line and the pumps or gauges it runs.) Abstract types are marked *(abstract)*.
+**150 types, 18 of them abstract, maximum depth 6.** (The beam model added 22: see `docs/beam-model.md`; the last four — `Vacuum Element`, `Material Element`, `Optical Element`, `Support Element` — came with `argus.beam-model/2`.) (The IT model added 11 to the 104 before it: `IT Equipment` and its tree, `IT Record`, `Serial Line`. Six came after the tree below was drawn: `Equipment Port` under `Engineered Item`, one physical port of a unit that it is `port of`; `Communication Path` and `Bus Segment` under `Control Item`, see `docs/it-model-design.md`; `Address Record` under `IT Record`; and under `Asset`, `Vacuum Component`, a passive part of the vacuum line such as a pipe, bellows, cross or tee, and `Vacuum Controller`, the box between a control line and the pumps or gauges it runs.) Abstract types are marked *(abstract)*.
 
 ```
 Item (abstract)
@@ -1627,7 +1627,7 @@ Ordered by what blocks what. Items 1, 3, 4, 9, 10, 11 and 12–15 are done; the 
    fix to 1 does not "tidy" it in the wrong direction.
 
 3. **DONE — the catalogue is seeded, in two sets.** `backend/app/services/asset_types.py` holds
-   all 146 types as data (`CATALOGUE`), of which 81 are global and 65 are a beamline's own
+   all 150 types as data (`CATALOGUE`), of which 81 are global and 69 are a beamline's own
    (§8), with `ensure_asset_types(db, workspace_id, scope, catalogue_workspace_id)`,
    `resolve_type_uids()` and `catalogue_of()`. Run with `scripts/seed_asset_types.py` in three
    modes: `global`, `beamline --catalogue`, and `all` for a hub with one workspace.
@@ -1863,7 +1863,7 @@ specified by [`asset-model-revision.md`](asset-model-revision.md).
 
 | | |
 |---|---|
-| Types | 146 (18 abstract), maximum depth 6: 81 shared (global), 65 a beamline's own (§8) |
+| Types | 150 (18 abstract), maximum depth 6: 81 shared (global), 69 a beamline's own (§8) |
 | Roots | `Item` → Functional, Physical, Catalogue, Control, Engineering, Location |
 | Relations | 5 existing, kept verbatim; 23 added |
 | Composites | `Screen Station`, `Spectrometer Station`, `Emittance Meter`, `RF Station`, `Machine Module`, via `composed of` |
