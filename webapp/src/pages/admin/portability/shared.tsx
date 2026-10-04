@@ -24,7 +24,7 @@ export function StateBadge({ state }: { state: string }) {
 }
 
 const LABELS: [keyof ArchiveLabels, string, string][] = [
-  ["complete", "complete", "selective or partial"],
+  ["complete", "complete", "partial"],
   ["incremental", "incremental", "checkpoint"],
   ["signed", "signed", "unsigned"],
   ["encrypted", "encrypted", "not encrypted"],
@@ -43,6 +43,7 @@ export function Labels({ labels, compact }: { labels: ArchiveLabels; compact?: b
         const on = labels[key];
         if (compact && !on) return null;
         if (!on && !no) return null;
+        if (key === "complete" && !on && labels.selective) return null;   // "selective" says it, once
         const good = on && key !== "evidence_only" && key !== "incremental";
         return (
           <span key={key} className={`rounded border px-1.5 py-0.5 text-[11px] ${on ? good
