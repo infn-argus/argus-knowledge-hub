@@ -169,6 +169,17 @@
         "title": "ApproveAction",
         "type": "object"
       },
+      "ApproveImportIn": {
+        "properties": {
+          "acknowledge_uninspected": {
+            "default": false,
+            "title": "Acknowledge Uninspected",
+            "type": "boolean"
+          }
+        },
+        "title": "ApproveImportIn",
+        "type": "object"
+      },
       "AskConversationDetail": {
         "properties": {
           "created_at": {
@@ -1946,23 +1957,6 @@
           "outcome"
         ],
         "title": "CloseReviewIn",
-        "type": "object"
-      },
-      "ConfirmIn": {
-        "properties": {
-          "valid_from": {
-            "anyOf": [
-              {
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Valid From"
-          }
-        },
-        "title": "ConfirmIn",
         "type": "object"
       },
       "ConfluenceImportConfigParams": {
@@ -3797,6 +3791,24 @@
             "title": "Mode",
             "type": "string"
           },
+          "purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "recipients": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recipients",
+            "type": "array"
+          },
           "repository": {
             "anyOf": [
               {
@@ -4902,6 +4914,22 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HoldIn": {
+        "properties": {
+          "on": {
+            "default": true,
+            "title": "On",
+            "type": "boolean"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "HoldIn",
         "type": "object"
       },
       "IconOut": {
@@ -9771,6 +9799,34 @@
           "retention_class"
         ],
         "title": "RetentionIn",
+        "type": "object"
+      },
+      "app__routers__ledger__ConfirmIn": {
+        "properties": {
+          "valid_from": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          }
+        },
+        "title": "ConfirmIn",
+        "type": "object"
+      },
+      "app__routers__portability__ConfirmIn": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          }
+        },
+        "title": "ConfirmIn",
         "type": "object"
       },
       "app__routers__retirement__RetentionIn": {
@@ -26839,7 +26895,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ConfirmIn"
+                "$ref": "#/components/schemas/app__routers__ledger__ConfirmIn"
               }
             }
           },
@@ -36322,7 +36378,7 @@
     },
     "/v1/portability/config": {
       "get": {
-        "description": "What a person can choose from: registered repositories and artifact stores (names only, never\nURLs or paths), whether signing and verification are set up, restricted classes, modes, outcomes.",
+        "description": "What a person can choose from, and the policy in force: registered repositories and artifact\nstores (names only, never URLs or paths), signing and verification set-up, restricted classes,\nmodes, outcomes — and every relaxed choice of the policy.",
         "operationId": "portability_config_v1_portability_config_get",
         "parameters": [
           {
@@ -36656,6 +36712,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/app__routers__portability__ConfirmIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -36689,7 +36762,7 @@
     },
     "/v1/portability/exports/{export_id}/archive": {
       "get": {
-        "description": "The checkpoint's files as a tar, for the signed-in administrator: no capability in a URL.",
+        "description": "The checkpoint's files as a tar, with the caller's own credentials: no capability in a URL.",
         "operationId": "archive_v1_portability_exports__export_id__archive_get",
         "parameters": [
           {
@@ -36854,7 +36927,7 @@
     },
     "/v1/portability/exports/{export_id}/download": {
       "get": {
-        "description": "The checkpoint as a tar, for a single-use token — preferably in the `X-Download-Token` header;\nin the query it is redacted from access logs. Used once, then refused.",
+        "description": "The checkpoint as a tar, for a single-use token in the `X-Download-Token` header. A token in the\nquery string is refused unless the policy enables it and the operator confirmed proxy redaction.",
         "operationId": "download_v1_portability_exports__export_id__download_get",
         "parameters": [
           {
@@ -36959,7 +37032,7 @@
     },
     "/v1/portability/exports/{export_id}/download-token": {
       "post": {
-        "description": "A single-use, five-minute token for an out-of-band download (an operator's tool). Prefer\n`GET /archive` with your own credentials.",
+        "description": "A single-use, five-minute token for an out-of-band download (an operator's tool), sent as the\n`X-Download-Token` header. Prefer `GET /archive` with your own credentials.",
         "operationId": "download_token_v1_portability_exports__export_id__download_token_post",
         "parameters": [
           {
@@ -37126,6 +37199,16 @@
             }
           },
           {
+            "in": "query",
+            "name": "background",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Background",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -37158,6 +37241,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/app__routers__portability__ConfirmIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -37184,6 +37284,93 @@
           }
         ],
         "summary": "Generate Export",
+        "tags": [
+          "portability"
+        ]
+      }
+    },
+    "/v1/portability/exports/{export_id}/legal-hold": {
+      "post": {
+        "operationId": "export_legal_hold_v1_portability_exports__export_id__legal_hold_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_id",
+            "required": true,
+            "schema": {
+              "title": "Export Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Legal Hold",
         "tags": [
           "portability"
         ]
@@ -37277,6 +37464,16 @@
             "schema": {
               "title": "Export Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "background",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Background",
+              "type": "boolean"
             }
           },
           {
@@ -37653,7 +37850,7 @@
     },
     "/v1/portability/imports/{import_id}/approve": {
       "post": {
-        "operationId": "import_approve_v1_portability_imports__import_id__approve_post",
+        "operationId": "approve_import_v1_portability_imports__import_id__approve_post",
         "parameters": [
           {
             "in": "path",
@@ -37697,6 +37894,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ApproveImportIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -37722,7 +37936,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Import Approve",
+        "summary": "Approve Import",
         "tags": [
           "portability"
         ]
@@ -38115,6 +38329,16 @@
             }
           },
           {
+            "in": "query",
+            "name": "background",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Background",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -38189,6 +38413,16 @@
             "schema": {
               "title": "Import Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "background",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Background",
+              "type": "boolean"
             }
           },
           {
@@ -38269,6 +38503,16 @@
             }
           },
           {
+            "in": "query",
+            "name": "background",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Background",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -38327,6 +38571,93 @@
           }
         ],
         "summary": "Import Finalize",
+        "tags": [
+          "portability"
+        ]
+      }
+    },
+    "/v1/portability/imports/{import_id}/legal-hold": {
+      "post": {
+        "operationId": "import_legal_hold_v1_portability_imports__import_id__legal_hold_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "title": "Import Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Legal Hold",
         "tags": [
           "portability"
         ]
@@ -38578,6 +38909,16 @@
             }
           },
           {
+            "in": "query",
+            "name": "background",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Background",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -38742,6 +39083,16 @@
             }
           },
           {
+            "in": "query",
+            "name": "background",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Background",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -38800,6 +39151,160 @@
           }
         ],
         "summary": "Import Verify",
+        "tags": [
+          "portability"
+        ]
+      }
+    },
+    "/v1/portability/jobs": {
+      "get": {
+        "operationId": "list_jobs_v1_portability_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "subject",
+            "required": true,
+            "schema": {
+              "title": "Subject",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Jobs",
+        "tags": [
+          "portability"
+        ]
+      }
+    },
+    "/v1/portability/jobs/{job_id}": {
+      "get": {
+        "operationId": "get_job_v1_portability_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Job",
         "tags": [
           "portability"
         ]

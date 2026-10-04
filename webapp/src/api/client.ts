@@ -4,7 +4,7 @@ import type {
   ExportView,
   ImportView,
   OriginChainCheck,
-  PortabilityConfig,
+  PortabilityConfig, PortabilityJob,
   ProvenanceView,
   ReconciliationReport,
 } from "./portabilityTypes";
@@ -1476,12 +1476,22 @@ export const portabilityApi = {
   createExport: (body: {
     mode: string; workspaces: string[]; classifications: string[]; repository: string | null;
     artifact_store: string | null; decisions?: Record<string, string>; base_export_id?: string | null;
-    identity_profile?: string | null;
+    identity_profile?: string | null; purpose?: string | null; recipients?: string[];
   }) => request<ExportView>(`${P}/exports`, { method: "POST", body: json(body) }),
   decideExport: (id: string, decisions: Record<string, string>) =>
     request<ExportView>(`${P}/exports/${encodeURIComponent(id)}/decisions`, { method: "POST", body: json({ decisions }) }),
-  exportStep: (id: string, step: "approve" | "generate" | "publish-git") =>
-    request<ExportView>(`${P}/exports/${encodeURIComponent(id)}/${step}`, { method: "POST" }),
+  exportStep: (id: string, step: "approve" | "generate" | "publish-git", opts: { confirm?: boolean } = {}) =>
+    request<ExportView>(`${P}/exports/${encodeURIComponent(id)}/${step}`, {
+      method: "POST", body: json({ confirm: !!opts.confirm }) }),
+  /** A long step as a background job: returns the job to poll. */
+  exportJob: (id: string, step: "generate" | "publish-git", opts: { confirm?: boolean } = {}) =>
+    request<{ job: PortabilityJob }>(`${P}/exports/${encodeURIComponent(id)}/${step}?background=true`, {
+      method: "POST", body: json({ confirm: !!opts.confirm }) }),
+  legalHold: (kind: "exports" | "imports", id: string, on: boolean, reason: string) =>
+    request<ExportView & ImportView>(`${P}/${kind}/${encodeURIComponent(id)}/legal-hold`, {
+      method: "POST", body: json({ on, reason }) }),
+  job: (id: string) => request<PortabilityJob>(`${P}/jobs/${encodeURIComponent(id)}`),
+  jobs: (subject: string) => request<PortabilityJob[]>(`${P}/jobs?subject=${encodeURIComponent(subject)}`),
   revokeExport: (id: string, reason: string) =>
     request<ExportView>(`${P}/exports/${encodeURIComponent(id)}/revoke`, { method: "POST", body: json({ reason }) }),
   manifest: (id: string) =>
@@ -1500,8 +1510,12 @@ export const portabilityApi = {
   createImport: (body: { mode: string; repository: string | null; ref: string | null; expected_commit?: string | null;
                          decisions?: Record<string, unknown> }) =>
     request<ImportView>(`${P}/imports`, { method: "POST", body: json(body) }),
-  importStep: (id: string, step: "fetch-git" | "verify" | "approve" | "execute" | "resume" | "finalize") =>
-    request<ImportView>(`${P}/imports/${encodeURIComponent(id)}/${step}`, { method: "POST" }),
+  importStep: (id: string, step: "fetch-git" | "verify" | "approve" | "execute" | "resume" | "finalize",
+               opts: { acknowledge_uninspected?: boolean } = {}) =>
+    request<ImportView>(`${P}/imports/${encodeURIComponent(id)}/${step}`, {
+      method: "POST", ...(step === "approve" ? { body: json({ acknowledge_uninspected: !!opts.acknowledge_uninspected }) } : {}) }),
+  importJob: (id: string, step: "fetch-git" | "verify" | "execute" | "resume" | "finalize") =>
+    request<{ job: PortabilityJob }>(`${P}/imports/${encodeURIComponent(id)}/${step}?background=true`, { method: "POST" }),
   discardImport: (id: string, reason: string) =>
     request<ImportView>(`${P}/imports/${encodeURIComponent(id)}/discard`, { method: "POST", body: json({ reason }) }),
   originChain: (id: string) => request<OriginChainCheck>(`${P}/imports/${encodeURIComponent(id)}/origin-chain`),

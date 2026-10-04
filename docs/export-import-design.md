@@ -24,7 +24,9 @@ Each capability has one of these levels:
 * **Production-approved** — the institution has approved it for production use.
 
 **Nothing below is tested at production scale or production-approved.** §19 lists what must happen
-first.
+first. The policy that governs approvals, step-up, content inspection, permissions and retention is
+§20: the initial deployment runs the `trusted` policy, and each of its relaxations can be withdrawn
+by configuration without changing the archive format.
 
 | Capability | Status |
 |---|---|
@@ -35,13 +37,19 @@ first.
 | Dependency closure with explicit outcomes | Integration-tested (A25) |
 | Restricted classes and fields left out, leak-free manifest | Integration-tested (A18) |
 | Secret scanning of rows and of committed files | Integration-tested (A19, A20) |
-| Content inspection of every blob before it is stored (§5.2) | Integration-tested (R1–R4): text, YAML, opaque images. PDF, Office, e-mail and archive readers are implemented, without fixtures of their own |
+| Content inspection of every blob before it is stored (§5.2) | Integration-tested (R1–R4) |
+| Document readers: text, PDF, Office (docx, xlsx), e-mail, zip and tar | Tested with fixtures (`test_portability_policy.py`): each finds a planted secret and a classification marker; a reader not enabled keeps the file opaque |
+| Uninspected content labelled in the manifest and accepted at import (§20) | Integration-tested (`test_portability_policy.py`) |
 | Identity profiles (§5.1) | Integration-tested (R12, R13) |
 | Data chunks as content-addressed artifacts; small review chunks in Git (§4, §9) | Integration-tested (R14–R16) |
 | Envelope encryption of restricted exports (§7.1) | Integration-tested (R19, R20: one recipient, X25519 + AES-256-GCM) |
 | Destinations approved per restricted class; unencrypted restricted export unavailable | Integration-tested (R19) |
-| Step-up authentication (recent `auth_time`) for high-risk approval and restricted generation | Integration-tested through the API (R19); depends on the identity provider sending `auth_time` |
-| Directory artifact store, read-only content-addressed files | Integration-tested |
+| Step-up authentication: recent `auth_time`, or (trusted policy) a recent session and explicit confirmation | Integration-tested (R19 through the API; the confirmation path in `test_portability_policy.py`) |
+| Portability policy: `trusted` and `strict` profiles, per-setting overrides, relaxations in the manifest and the audit (§20) | Integration-tested (`test_portability_policy.py`; the rest of the suite runs under `strict`) |
+| Approved recipients chosen per restricted export | Integration-tested |
+| Purpose → identity profile | Integration-tested |
+| Per-repository deploy credentials (SSH key or token file from a secret) | Implemented |
+| Directory artifact store (a mounted volume), read-only content-addressed files, behind the `ArtifactStore` interface | Integration-tested |
 | S3 (Object Lock) and OCI artifact stores | Proposed |
 | Git publication: signed commit and annotated tag, no force push; repository size measured | Integration-tested |
 | Quarantine fetch: signed tag or commit only; hostile-tree checks; no checkout | Integration-tested (A5, A7, A21) |
@@ -58,12 +66,14 @@ first.
 | Increments: chain by vector and manifest hash; equality with a checkpoint | Integration-tested (A10, A11, R18) |
 | Evidence browsing by classification, counts of visible rows, audited reads | Integration-tested (R20) |
 | Single-use, hashed, actor- and version-bound download tokens; no-store; log redaction | Integration-tested (R21) |
-| Restore drill | Integration-tested (A30); its schedule is operations' |
-| Web pages (Administration → Portability) | Implemented; checked by hand in a browser; no automated UI test |
+| Restore drill; drill results recorded in the audit and signed off | Integration-tested (A30); recording and sign-off implemented; schedule in operations |
+| Measured full cycle (`python -m app.portability cycle`): duration, peak memory, promotion time | Implemented; not yet run at production size |
+| Background jobs for long steps: queued, running, completed, failed; recovered after a restart | Integration-tested (`test_portability_policy.py`); no live progress or cancellation |
+| Web pages (Administration → Portability), including jobs, policy, purpose, recipients and legal holds | Implemented; type-checked; no automated UI test |
 | Committing reconciliation reports to the repository | Proposed |
 | Foreign and legacy schemas through AI-assisted mapping | Proposed (§16) |
 | Catalogue and policy changes reviewed in Git, then activated | Proposed |
-| Legal holds | Proposed (not modelled in ARGUS) |
+| Retention (default 90 days) and legal holds on exports and imports | Integration-tested (`test_portability_policy.py`) |
 
 ## 1. Principles
 
@@ -657,29 +667,108 @@ the additional requirements of the second revision.
 * Promotion re-runs the load in one transaction. For very large imports that transaction is long,
   and its size and lock duration must be measured.
 
-**Decisions for stakeholders.**
+**Decisions for stakeholders.** Decided (2026-10); recorded with their implementation in §20.
 
-1. Retention and legal holds for archives, Git history, artifacts and the evidence store.
-2. Custody of the signing key and of recipient keys; who approves.
-3. Which Git server and which object storage (with Object Lock) hold escrow.
-4. Which classes may go to which approved destination; who the recipients are; who the evidence
-   readers are.
-5. The default identity profile per purpose (escrow may need `full_identity`), and whether
-   pseudonymization's institutional salt is permitted.
-6. Policy on opaque and classified content: which may be approved, and by whom.
-7. The restore-drill cadence and who signs off its evidence.
+**Blockers before production activation**, and how each is resolved under the initial policy (§20.2).
+"Open" means work an operator still has to do in the target environment.
 
-**Blockers before production activation.**
+1. Step-up: `auth_time` is preferred; without it a recent session plus explicit confirmation is
+   accepted (configurable to strict). *Resolved in code.*
+2. Artifacts on a mounted volume, accepted if the volume is backed up; archives are checksum-protected;
+   the `ArtifactStore` interface is in place for S3, OCI and immutable storage later. *Resolved in code;
+   the volume's backup is open.*
+3. Branch protection against deletion and force-push on the portability repository; one maintainer
+   approves. *Open (Git-server settings, operations.md).*
+4. Keys in a Kubernetes Secret, replaced by hand, rotated yearly. *Procedure in operations.md; open.*
+5. A narrowly scoped deploy credential per repository, from a secret, rotated periodically.
+   *Resolved in code (`ARGUS_PORTABILITY_REPOSITORY_KEYS` / `_TOKENS`); provisioning open.*
+6. A dedicated importer role that can create and drop only `argus_stage_*` databases; staging
+   databases excluded from backups. *SQL in operations.md; open.*
+7. One full cycle on production data or an equivalent generated set, with duration, peak memory and
+   promotion time recorded; that sets the initial supported size. *Command implemented
+   (`cycle`); the run is open.*
+8. Only readers with tested fixtures are enabled; other formats stay opaque with a warning.
+   *Resolved.*
+9. Downloads with the person's own credentials or the `X-Download-Token` header; query-string tokens
+   off unless enabled together with the operator's confirmation that proxies redact them.
+   *Resolved.*
+10. A job page with queued, running, completed and failed states, refreshed by polling. *Resolved;
+   live progress and cancellation later.*
 
-1. The identity provider sends `auth_time`, and step-up is tested with it.
-2. An S3/OCI artifact backend with immutability, unless a mounted volume is accepted.
-3. Git-server protections in place and tested.
-4. Signing and recipient keys in the secret store, with a rotation procedure.
-5. Short-lived repository credentials.
-6. `CREATEDB` on the staging server, or a dedicated staging server, and the staging database's own
-   backup exclusion.
-7. A full export, import and promotion at production size: memory, time and the length of the
-   promotion transaction.
-8. Fixtures for the PDF, Office, e-mail and archive readers, and a review of their limits.
-9. Proxy log redaction confirmed for `token=`.
-10. The web pages: an automated test, and progress reporting for long steps.
+## 20. Policy
+
+ARGUS begins with a simple, permissive policy for an internal, authenticated, trusted environment.
+Every control that an institution may want stricter is a setting of `app.portability.policy`, so
+stricter rules can be introduced **without changing the archive format or the import workflow**:
+policy decides gates, warnings and labels, never what an archive contains or how it is read. An
+archive made under one policy verifies and imports under any other.
+
+Rules that do not depend on policy: secrets are never exported; restricted classes leave only
+encrypted, for approved recipients at an approved destination; nothing that did not reconcile is
+promoted; every step is audited.
+
+### 20.1 The two profiles
+
+`ARGUS_PORTABILITY_POLICY` picks `trusted` (the default) or `strict`. Any single setting can be
+overridden with `ARGUS_PORTABILITY_POLICY_<SETTING>`, for example
+`ARGUS_PORTABILITY_POLICY_SEPARATION_OF_DUTIES=1`. `python -m app.portability policy` and
+`GET /v1/portability/config` show the policy in force and its **relaxations**: every setting that
+differs from `strict`.
+
+| Setting | `trusted` (initial) | `strict` |
+|---|---|---|
+| `separation_of_duties`: a second person approves high-risk work | no — one administrator suffices | yes |
+| `step_up` | `session_confirmation`: `auth_time` if sent; otherwise a session issued within `session_seconds` (30 min) plus an explicit confirmation | `strict`: `auth_time` within `step_up_seconds` only |
+| `full_identity_high_risk` | no — the profile for backup, restore and migration | yes |
+| `opaque_blobs`, `uninspectable_blobs` | `allow_with_warning`: travel, labelled uninspected | `require_decision` |
+| `classified_blobs` | `require_decision` | `require_decision` |
+| `blob_readers` | readers with tested fixtures: text, email, pdf, office, archive | same |
+| `export_permission`: the right needed on each workspace | `read` | `approve` |
+| `import_permission` | `workspace_admin`: administrators of every existing target workspace; new workspaces and `restore` need an instance administrator | `instance_admin` |
+| `evidence_workspace_admins`: workspace administrators read their workspace's restricted evidence rows | yes | no — named evidence readers only |
+| `query_tokens` | off; enabling also needs `proxy_redacts_tokens` | off |
+| `retention_days` | 90 | 90 |
+
+**Visibility.** Each archive's manifest records the policy it was made under (`policy`, with its
+relaxations) and the export's `purpose`; the request, approval and import approval events record the
+policy profile, its relaxations and whether the approver was the requester (`self_approved`). The web
+pages show the policy in force and the policy an archive was made under.
+
+### 20.2 Stakeholder decisions (2026-10) and their implementation
+
+1. **Retention.** Archive files, quarantine, staging databases and evidence copies are deleted after
+   90 days (`retention_days`) by `python -m app.portability cleanup` (a daily job); the export or
+   import record, its audit, Git history and published artifacts are kept. A **legal hold**
+   (`POST …/legal-hold`, or the CLI) suspends deletion; placing and releasing it are audited, and a
+   hold needs a reason.
+2. **Keys and approval.** ARGUS administrators manage the keys. One authorized administrator approves
+   an export or an import (`separation_of_duties=false`); requiring a second approver is one setting.
+3. **Storage.** The institution's existing Git service holds the portability repository; large
+   artifacts go to a mounted volume (`dir:` store). S3, OCI, replication and Object Lock are later
+   `ArtifactStore` backends; the locator scheme keeps old archives readable.
+4. **Who.** Authenticated people export what they can read (`export_permission=read`); a full export,
+   restricted classes or `full_identity` still need an instance administrator. People import into
+   workspaces they administer. A restricted export names its **approved recipients**, chosen by an
+   administrator from those configured for the destination. Workspace administrators read the
+   evidence records of their own workspace; the named evidence readers read all of them.
+5. **People.** A `purpose` sets the default identity profile: `backup`, `restore` and `migration` →
+   `full_identity`; `analysis` and `external_sharing` → `pseudonymized`; `evidence` →
+   `institutional_reference`. The institutional pseudonymization salt is permitted and comes from a
+   secret (`ARGUS_PORTABILITY_PSEUDONYM_SALT`).
+6. **Opaque files** travel, listed in `manifest.blobs.uninspected` with the reason and whether policy
+   or a decision let them through, and the archive carries the `uninspected_content` label. Importing
+   them needs an administrator to accept the warning (`acknowledge_uninspected`). Under a stricter
+   policy they are held for a decision, as before.
+7. **Restore drills** every six months and after a substantial archive-format change:
+   `python -m app.portability drill` records its result in the audit; one ARGUS administrator signs it
+   off with `drill-signoff`.
+
+### 20.3 Long steps as jobs
+
+Generating, publishing, fetching, verifying, executing and finalizing accept `?background=true` and
+return a job (`queued → running → completed | failed`) that the web pages poll at
+`GET /v1/portability/jobs/{id}`. A subject runs one job at a time. Jobs left running by a restart are
+marked failed (`interrupted`); every step is idempotent and an import resumes from its staging
+checkpoints. The API and CLI still run steps synchronously. Not provided yet: live progress within a
+step, cancellation, a separate worker pool.
+

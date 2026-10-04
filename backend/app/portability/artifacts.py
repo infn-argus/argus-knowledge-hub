@@ -7,9 +7,9 @@ The Git repository holds only `blobs.manifest.ndjson`: digest, size, MIME type, 
 encryption, retention class, locator and the recipients a decryption needs. Cloning the repository
 and fetching every locator it names is enough to verify and rebuild the checkpoint.
 
-Implemented: a directory store (a mounted institutional volume, or the staging area an operator
-syncs to S3 or an OCI registry). Designed, not built: S3-compatible and OCI-artifact stores, and
-per-recipient encryption (docs/export-import-design.md §7).
+Implemented: a directory store (a mounted institutional volume, backed up, or the staging area an
+operator syncs to S3 or an OCI registry) behind the `ArtifactStore` interface. Designed, not built:
+S3-compatible (Object Lock) and OCI-artifact backends (docs/export-import-design.md §7).
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Protocol
 
 from app.portability.chunks import LIMITS
 
@@ -27,7 +27,22 @@ class ArtifactError(ValueError):
     pass
 
 
+class ArtifactStore(Protocol):
+    """What the archive needs from any artifact backend. The archive names an artifact only by its
+    locator and SHA-256, so a backend can be added (S3 with Object Lock, an OCI registry) without
+    changing the format: implement this, register its scheme, configure a store with it."""
+    name: str
+    scheme: str
+
+    def locator(self, digest: str) -> str: ...
+    def has(self, digest: str) -> bool: ...
+    def put_file(self, src: Path) -> tuple[str, int]: ...
+    def put_bytes(self, data: bytes) -> tuple[str, int]: ...
+    def fetch(self, digest: str, size: Optional[int], dest: Path) -> None: ...
+
+
 class DirectoryStore:
+    """A mounted volume: the initial deployment's backend (accepted when the volume is backed up)."""
     scheme = "argus-artifacts"
 
     def __init__(self, name: str, root: Path):
@@ -116,10 +131,18 @@ def resolve(locator: str, stores: dict[str, DirectoryStore]) -> tuple[DirectoryS
     return stores[name], rest[len("sha256/"):]
 
 
-def configured_stores() -> dict[str, DirectoryStore]:
-    """`ARGUS_PORTABILITY_ARTIFACT_STORES=name=/path,other=/path`."""
+# Backends by configuration prefix. `dir:` (or a bare path) is built in; others register here.
+BACKENDS: dict = {"dir": lambda name, where: DirectoryStore(name, Path(where))}
+
+
+def configured_stores() -> dict[str, "ArtifactStore"]:
+    """`ARGUS_PORTABILITY_ARTIFACT_STORES=name=/path,other=dir:/path` — `<backend>:<location>`, the
+    backend defaulting to a directory."""
     out = {}
     for item in filter(None, (os.environ.get("ARGUS_PORTABILITY_ARTIFACT_STORES") or "").split(",")):
-        name, _, path = item.partition("=")
-        out[name.strip()] = DirectoryStore(name.strip(), Path(path.strip()))
+        name, _, where = item.partition("=")
+        backend, sep, location = where.strip().partition(":")
+        if not sep or backend not in BACKENDS or where.strip().startswith("/"):
+            backend, location = "dir", where.strip()
+        out[name.strip()] = BACKENDS[backend](name.strip(), location)
     return out

@@ -216,16 +216,37 @@ def views(checkpoint: Path) -> dict[str, str]:
     }
 
 
+def credentials_env(ssh_key: Optional[Path] = None, token_file: Optional[Path] = None,
+                    askpass_dir: Optional[Path] = None) -> dict:
+    """Git environment for one repository's deploy credential, read from a mounted secret: an SSH
+    deploy key, or a token file answered through GIT_ASKPASS. Never written into a manifest, a
+    repository or a log."""
+    env: dict = {}
+    if ssh_key is not None:
+        env["GIT_SSH_COMMAND"] = (f"ssh -i {ssh_key} -o IdentitiesOnly=yes -o BatchMode=yes "
+                                  "-o StrictHostKeyChecking=yes")
+    if token_file is not None:
+        d = askpass_dir or token_file.parent
+        script = d / "argus-git-askpass.sh"
+        if not script.exists():
+            d.mkdir(parents=True, exist_ok=True)
+            script.write_text('#!/bin/sh\ncat "$ARGUS_GIT_TOKEN_FILE"\n')
+            os.chmod(script, 0o700)
+        env.update({"GIT_ASKPASS": str(script), "ARGUS_GIT_TOKEN_FILE": str(token_file)})
+    return env
+
+
 def publish(checkpoint: Path, manifest: dict, *, remote: str, work: Path, signer: Signer,
-            schemas: dict, previous_tag: Optional[str] = None) -> Published:
+            schemas: dict, previous_tag: Optional[str] = None, credentials: Optional[dict] = None) -> Published:
     """Commit and tag a checkpoint in the portability repository and push both."""
     work.parent.mkdir(parents=True, exist_ok=True)
     if not (work / ".git").exists():
-        r = git(["clone", "--no-checkout", "--no-recurse-submodules", remote, str(work)], cwd=work.parent, check=False)
+        r = git(["clone", "--no-checkout", "--no-recurse-submodules", remote, str(work)], cwd=work.parent, check=False,
+                env=credentials)
         if r.returncode != 0:
             raise GitError(f"cannot clone the portability repository: {r.stderr.strip()[:300]}", code="git_failed")
-    git(["fetch", "--no-recurse-submodules", "--tags", "origin"], cwd=work, check=False)
-    heads = git(["ls-remote", "--heads", "origin", "main"], cwd=work).stdout.strip()
+    git(["fetch", "--no-recurse-submodules", "--tags", "origin"], cwd=work, check=False, env=credentials)
+    heads = git(["ls-remote", "--heads", "origin", "main"], cwd=work, env=credentials).stdout.strip()
     if heads:
         git(["checkout", "-B", "main", "origin/main"], cwd=work)
     else:
@@ -272,7 +293,7 @@ def publish(checkpoint: Path, manifest: dict, *, remote: str, work: Path, signer
     git(["tag", "-s", tag, "-m", msg + f"export-id: {manifest['export_id']}\n"
          + (f"previous-tag: {previous_tag}\n" if previous_tag else ""), commit], cwd=work, signer=signer)
     r = git(["push", "--no-recurse-submodules", "origin", "HEAD:refs/heads/main", f"refs/tags/{tag}"], cwd=work,
-            check=False)
+            check=False, env=credentials)
     if r.returncode != 0:
         raise GitError(f"push refused: {r.stderr.strip()[:300]}", code="push_refused")
     root = git(["rev-list", "--max-parents=0", "HEAD"], cwd=work).stdout.split()[0]

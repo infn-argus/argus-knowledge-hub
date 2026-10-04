@@ -16,6 +16,51 @@ export interface PortabilityConfig {
   default_identity_profile: string;
   blob_outcomes: string[];
   step_up_seconds: number;
+  /** Approved recipients per restricted repository (administrators only). */
+  recipients: Record<string, string[]>;
+  purposes: string[];
+  purpose_profiles: Record<string, string>;
+  policy: PortabilityPolicy;
+}
+
+/** The policy in force (docs/export-import-design.md §20): every relaxed choice is named. */
+export interface PortabilityPolicy {
+  profile: "trusted" | "strict";
+  separation_of_duties: boolean;
+  step_up: "strict" | "session_confirmation";
+  step_up_seconds: number;
+  session_seconds: number;
+  full_identity_high_risk: boolean;
+  opaque_blobs: string;
+  uninspectable_blobs: string;
+  classified_blobs: string;
+  blob_readers: string[];
+  export_permission: string;
+  import_permission: string;
+  evidence_workspace_admins: boolean;
+  query_tokens: boolean;
+  retention_days: number;
+  relaxations: string[];
+}
+
+export interface PortabilityJob {
+  id: string;
+  subject_kind: "export" | "import";
+  subject_id: string;
+  action: string;
+  state: "queued" | "running" | "completed" | "failed";
+  requested_by: string;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error: { error: string; code: string } | null;
+  metrics: { seconds?: number; process_peak_memory_mb?: number };
+}
+
+export interface LegalHold {
+  legal_hold: boolean;
+  legal_hold_reason: string | null;
+  purged_at: string | null;
 }
 
 export interface BlobDecision {
@@ -40,6 +85,16 @@ export interface ArchiveLabels {
   git_published: boolean;
   verified: boolean;
   restorable: boolean;
+  /** Files that travelled without content inspection (opaque or unreadable), under policy or decision. */
+  uninspected_content?: boolean;
+}
+
+export interface UninspectedBlob {
+  where: string;
+  sha256: string;
+  status: "opaque" | "uninspectable";
+  reason: string | null;
+  by: "policy" | "decision";
 }
 
 export interface Dependency {
@@ -64,8 +119,11 @@ export interface ExportAnalysis {
   restriction?: { included: string[]; excluded_classes: string[]; fields_hidden: boolean };
   estimate?: { records: number; tickets: number; claim_events: number; attachments: number; attachment_bytes: number };
   blobs?: { inspected: number; secrets: { where: string; kind: string }[]; needs_decision: BlobDecision[];
-            excluded: { where: string; sha256: string; status: string }[]; missing: unknown[]; ready: boolean };
+            excluded: { where: string; sha256: string; status: string }[]; missing: unknown[]; ready: boolean;
+            uninspected?: UninspectedBlob[] };
   identity_profile?: string;
+  policy?: PortabilityPolicy;
+  metrics?: { seconds: number; peak_memory_mb: number; rows: number; artifact_bytes: number };
   ready?: boolean;
   warnings?: string[];
 }
@@ -104,6 +162,9 @@ export interface ExportView {
   error: PortabilityError | null;
   labels: ArchiveLabels;
   created_at: string | null;
+  legal_hold: boolean;
+  legal_hold_reason: string | null;
+  purged_at: string | null;
 }
 
 export interface FamilyManifest {
@@ -119,6 +180,9 @@ export interface ArchiveManifest {
   format: string;
   export_id: string;
   mode: string;
+  /** The portability policy the archive was made under (informative: never needed to read it). */
+  policy?: PortabilityPolicy;
+  purpose?: string | null;
   labels: Record<string, boolean>;
   argus: { application_version: string; database_schema: string | null; instance_id: string; instance_name?: string };
   workspaces: string[];
@@ -127,7 +191,8 @@ export interface ArchiveManifest {
   versions: Record<string, string | null>;
   families: Record<string, FamilyManifest>;
   blobs: { count: number; bytes: number; manifest: string; stores: string[]; excluded?: number;
-           inspection?: { ok: number; by_decision: number } };
+           inspection?: { ok: number; by_decision: number; uninspected?: number; readers?: string[] };
+           uninspected?: UninspectedBlob[] };
   identity?: { profile: string; identity_columns: string[]; actors_transformed: boolean; salt_key_id?: string };
   encryption?: { algorithm: string; key_wrapping: string; recipients: { recipient: string; key_id: string }[] } | null;
   classifications: { included: string[]; excluded_classes: string[]; fields_hidden: boolean };
@@ -157,6 +222,7 @@ export interface DryRunReport {
   identities?: { user: string; note: string }[];
   governance_not_loaded?: string[];
   chain?: { status: string; problem?: string; applied?: number };
+  uninspected_content?: { count: number; warning: string; items: UninspectedBlob[] };
 }
 
 export interface ImportView {
@@ -168,8 +234,8 @@ export interface ImportView {
   requested_by: string;
   approved_by: string | null;
   decisions: Record<string, unknown>;
-  manifest: Pick<ArchiveManifest, "export_id" | "mode" | "workspaces" | "watermark" | "argus" | "labels" |
-    "classifications" | "base" | "blobs" | "identity"> | null;
+  manifest: (Pick<ArchiveManifest, "export_id" | "mode" | "workspaces" | "watermark" | "argus" | "labels" |
+    "classifications" | "base" | "blobs" | "identity"> & { policy?: PortabilityPolicy; purpose?: string | null }) | null;
   staging?: { database?: string; created_at?: string };
   verification: {
     git?: { repository_id: string; root_commit: string; commit: string; tag: string | null; tag_object: string | null;
@@ -186,6 +252,9 @@ export interface ImportView {
   error: PortabilityError | null;
   labels: ArchiveLabels;
   created_at: string | null;
+  legal_hold: boolean;
+  legal_hold_reason: string | null;
+  purged_at: string | null;
 }
 
 export interface FamilyReconciliation {

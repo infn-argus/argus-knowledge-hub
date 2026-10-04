@@ -184,6 +184,17 @@ for _r in beam_model.ROUTERS:
 from app.routers import portability as portability_router  # noqa: E402
 for _r in portability_router.ROUTERS:
     app.include_router(_r)
+
+
+@app.on_event("startup")
+def _recover_portability_jobs() -> None:
+    """Portability jobs left running by a previous process were interrupted: say so."""
+    from app.db import SessionLocal
+    from app.portability import jobs as portability_jobs
+    try:
+        portability_jobs.recover(SessionLocal)
+    except Exception:  # noqa: BLE001 — a database not yet migrated must not stop the API
+        logging.getLogger(__name__).warning("portability job recovery skipped", exc_info=True)
 app.include_router(uploads.router)
 app.include_router(workspaces.router)
 

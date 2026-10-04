@@ -41,6 +41,7 @@ from app.portability.artifacts import DirectoryStore
 from app.portability.envelope import Envelope
 from app.portability.families import FAMILIES, GROUP_ORDER, SEQUENCED_TABLES, Family, Scope, to_json
 from app.portability.identity_policy import IdentityPolicy
+from app.portability.policy import Policy
 from app.portability.signing import Signer, sign_checkpoint
 
 MODES = ("full", "incremental", "workspace", "evidence-only", "backup-reference")
@@ -233,7 +234,9 @@ class Blobs:
     destination until the whole export has passed (`publish_to`)."""
 
     def __init__(self, staging: Optional[Path], decisions: dict, encrypted: bool,
-                 limits: blob_scan.ScanLimits = blob_scan.LIMITS):
+                 limits: blob_scan.ScanLimits = blob_scan.LIMITS, policy: Optional[Policy] = None):
+        self.policy = policy or Policy.strict()
+        self.uninspected: list = []
         self.staging = DirectoryStore("staging", staging) if staging is not None else None
         self.decisions = decisions
         self.encrypted = encrypted
@@ -246,9 +249,21 @@ class Blobs:
         self.excluded: list = []
 
     def decision(self, digest: str, status: str) -> Optional[str]:
-        return self.decisions.get(f"blob:{digest}") or (
+        explicit = self.decisions.get(f"blob:{digest}") or (
             self.decisions.get("opaque_blobs") if status in ("opaque", "uninspectable") else
             self.decisions.get("classified_blobs") if status == "finding" else None)
+        return explicit or self.by_policy(status)
+
+    def by_policy(self, status: str) -> Optional[str]:
+        """The policy's default outcome, when nobody decided: shown as such in the manifest."""
+        p = self.policy
+        if status == "opaque" and p.opaque_blobs == "allow_with_warning":
+            return "approve_opaque"
+        if status == "uninspectable" and p.uninspectable_blobs == "allow_with_warning":
+            return "approve_opaque"
+        if status == "finding" and p.classified_blobs == "allow_with_warning":
+            return "accept_classified"
+        return None
 
     def add(self, obj, fam: Family, col: str, kind: str, row: dict) -> Optional[str]:
         value = getattr(obj, _attr(fam, col))
@@ -272,7 +287,8 @@ class Blobs:
             report = self.reports.get(digest) and blob_scan.BlobReport(digest, self.reports[digest]["status"],
                                                                        findings=self.reports[digest]["findings"])
             if report is None:
-                report = blob_scan.scan(digest, data, mime, name, where, self.limits)
+                report = blob_scan.scan(digest, data, mime, name, where, self.limits,
+                                        readers=tuple(self.policy.blob_readers))
         self.reports[digest] = report.summary()
         secrets = [f for f in report.findings if f.get("category") == "secret"]
         if secrets:
@@ -292,6 +308,11 @@ class Blobs:
             if outcome == "exclude":
                 self.excluded.append({"where": where, "sha256": digest, "status": report.status})
                 return None
+            if report.status in ("opaque", "uninspectable") and digest not in {u["sha256"] for u in self.uninspected}:
+                self.uninspected.append({"where": where, "sha256": digest, "status": report.status,
+                                         "reason": report.reason,
+                                         "by": "policy" if outcome == self.by_policy(report.status) and not
+                                         self.decisions.get(f"blob:{digest}") else "decision"})
         cls = (getattr(obj, "attributes", None) or {}).get("classification") if hasattr(obj, "attributes") else None
         if self.staging is not None and digest not in self.entries:
             if data is None:
@@ -302,7 +323,8 @@ class Blobs:
             "sha256": digest, "size": len(data) if data is not None else Path(value).stat().st_size,
             "mime_type": mime or "application/octet-stream", "classification": cls or "unrestricted",
             "content_inspection": report.status if report.status == "ok" else
-            f"{report.status}: {self.decision(digest, report.status)}",
+            f"{report.status}: {self.decision(digest, report.status)}"
+            + (" (uninspected)" if report.status in ("opaque", "uninspectable") else ""),
             "retention_class": row.get("retention_class") or "archive", "referenced_by": []})
         e["referenced_by"].append(f"{fam.name}:{fam.key_of(row)}:{col}")
         return f"sha256:{digest}"
@@ -325,10 +347,11 @@ def _file_sha(p: Path) -> str:
     return h.hexdigest()
 
 
-def prescan(db: Session, sc: Scope, classifications: list[str], decisions: dict, encrypted: bool) -> dict:
-    """The blob inspection an approver sees before approving: what is blocked, what needs a decision.
-    Nothing is stored."""
-    blobs = Blobs(None, decisions, encrypted)
+def prescan(db: Session, sc: Scope, classifications: list[str], decisions: dict, encrypted: bool,
+            policy: Optional[Policy] = None) -> dict:
+    """The blob inspection an approver sees before approving: what is blocked, what needs a decision,
+    what will travel uninspected. Nothing is stored."""
+    blobs = Blobs(None, decisions, encrypted, policy=policy)
     sc = Scope(workspaces=sc.workspaces, watermark={t: 2 ** 62 for t in SEQUENCED_TABLES},
                excluded_uids=sc.excluded_uids, hidden=sc.hidden, excluded_claims=sc.excluded_claims)
     for fam in FAMILIES:
@@ -336,7 +359,7 @@ def prescan(db: Session, sc: Scope, classifications: list[str], decisions: dict,
             for _ in rows_of(db, fam, sc, blobs, classifications):
                 pass
     return {"inspected": len(blobs.reports), "secrets": blobs.secrets[:50], "needs_decision": blobs.needs_decision,
-            "excluded": blobs.excluded, "missing": blobs.missing[:50],
+            "excluded": blobs.excluded, "missing": blobs.missing[:50], "uninspected": blobs.uninspected[:200],
             "ready": not blobs.secrets and not blobs.needs_decision and not blobs.missing}
 
 
@@ -347,7 +370,8 @@ def generate(engine: Engine, *, export_id: str, mode: str, workspaces: list[str]
              approved_by: Optional[str] = None, classifications: Optional[list[str]] = None,
              decisions: Optional[dict] = None, base_manifest: Optional[dict] = None,
              repository: Optional[dict] = None, include_projections: bool = True,
-             identity_profile: Optional[str] = None, envelope: Optional[Envelope] = None) -> dict:
+             identity_profile: Optional[str] = None, envelope: Optional[Envelope] = None,
+             policy: Optional[Policy] = None, purpose: Optional[str] = None) -> dict:
     """Write a checkpoint into `out_dir`, copy its artifacts to `store`, and return its manifest.
     Nothing is published to Git here. On any failure nothing is left at the destination."""
     if mode not in MODES:
@@ -369,7 +393,7 @@ def generate(engine: Engine, *, export_id: str, mode: str, workspaces: list[str]
     try:
         return _generate(engine, export_id, mode, workspaces, out_dir, staging, store, signer, requested_by,
                          approved_by, classifications, decisions, base_manifest, repository, include_projections,
-                         identity_profile, envelope)
+                         identity_profile, envelope, policy or Policy.strict(), purpose)
     except BaseException:
         secure_delete(out_dir)
         raise
@@ -379,7 +403,7 @@ def generate(engine: Engine, *, export_id: str, mode: str, workspaces: list[str]
 
 def _generate(engine, export_id, mode, workspaces, out_dir, staging, store, signer, requested_by, approved_by,
               classifications, decisions, base_manifest, repository, include_projections, identity_profile,
-              envelope) -> dict:
+              envelope, policy, purpose) -> dict:
     from app.models.user import User
     with Session(engine) as w:
         inst = instance(w)
@@ -413,7 +437,7 @@ def _generate(engine, export_id, mode, workspaces, out_dir, staging, store, sign
         ident = IdentityPolicy.make(identity_profile, [(u.id, u.email, u.username if u.username and
                                                         len(u.username) >= 3 else None)
                                                        for u in db.scalars(select(User))])
-        blobs = Blobs(staging, decisions, envelope is not None)
+        blobs = Blobs(staging, decisions, envelope is not None, policy=policy)
         findings: list = []
         families: dict = {}
         for group in GROUP_ORDER:
@@ -469,7 +493,10 @@ def _generate(engine, export_id, mode, workspaces, out_dir, staging, store, sign
         "format": FORMAT, "format_major": FORMAT_MAJOR, "export_id": export_id, "mode": mode,
         "labels": {"complete": complete and not selective, "selective": bool(selective),
                    "incremental": mode == "incremental", "evidence_only": mode == "evidence-only",
-                   "signed": signer is not None, "encrypted": envelope is not None, "artifact_complete": True},
+                   "signed": signer is not None, "encrypted": envelope is not None, "artifact_complete": True,
+                   "uninspected_content": bool(blobs.uninspected)},
+        "purpose": purpose,
+        "policy": policy.describe(),
         "selective": bool(selective),
         "argus": {"application_version": os.environ.get("ARGUS_VERSION", "1.0.0"), "database_schema": head,
                   "instance_id": inst["id"], "instance_name": inst.get("name")},
@@ -489,7 +516,11 @@ def _generate(engine, export_id, mode, workspaces, out_dir, staging, store, sign
                              for b in stored],
                   "excluded": len(blobs.excluded),
                   "inspection": {"ok": sum(1 for b in stored if b["content_inspection"] == "ok"),
-                                 "by_decision": sum(1 for b in stored if b["content_inspection"] != "ok")}},
+                                 "by_decision": sum(1 for b in stored if b["content_inspection"] != "ok"),
+                                 "uninspected": len(blobs.uninspected),
+                                 "readers": list(policy.blob_readers)},
+                  "uninspected": [{k: u[k] for k in ("sha256", "status", "reason", "by")}
+                                  for u in blobs.uninspected[:1000]]},
         "classifications": restriction,
         "closure": {"dependencies": [_public(d) for d in analysis["dependencies"]],
                     "automatic": analysis["automatic"],

@@ -90,6 +90,7 @@ def labels(manifest: Optional[dict], extra: Optional[dict] = None) -> dict:
            "full": (manifest or {}).get("mode") == "full", "incremental": l.get("incremental", False),
            "signed": l.get("signed", False), "encrypted": l.get("encrypted", False),
            "artifact_complete": l.get("artifact_complete", False), "evidence_only": l.get("evidence_only", False),
+           "uninspected_content": l.get("uninspected_content", False),
            "git_published": False, "verified": False, "restorable": False}
     out.update(extra or {})
     out["restorable"] = bool(out["verified"] and out["artifact_complete"] and out["signed"]

@@ -32,6 +32,7 @@ from app.models.user import User
 from app.models.workspace import Workspace
 from app.portability import chunks, envelope, exporter, gitrepo, importer, service, signing, staging
 from app.portability.artifacts import DirectoryStore
+from app.portability.policy import Policy
 from tests.test_ledger_slice import T0, insight_json, values_yaml
 
 pytestmark = pytest.mark.skipif(not DATABASE_URL.startswith("postgresql"), reason="needs Postgres")
@@ -94,7 +95,8 @@ def env(tmp_path):
                               repositories={"escrow": repo, "escrow-restricted": restricted_repo},
                               restricted_destinations={"escrow-restricted": {"costs", "personnel"}},
                               recipients={"escrow-restricted": recipients},
-                              decryption_keys=keys if decrypt else None, evidence_readers={"reader@example.org"})
+                              decryption_keys=keys if decrypt else None, evidence_readers={"reader@example.org"},
+                              policy=Policy.strict())   # these tests prove the strict rules; see test_portability_policy
     return SimpleNamespace(signer=signer, allowed=allowed, repo=repo, restricted_repo=restricted_repo, store=store,
                            cfg=cfg, tmp=tmp_path, keys=keys)
 
@@ -180,10 +182,11 @@ def run_export(eng, env, s, *, mode="workspace", workspaces=None, decisions=None
     with Session(eng) as db:
         exp = service.create_export(db, requester, mode=mode, workspaces=workspaces or [s.ws, s.inv],
                                     classifications=list(classifications),
-                                    destination={"repository": repository, "artifact_store": "vault"},
+                                    destination={"repository": repository, "artifact_store": "vault",
+                                                 **({"recipients": ["escrow-officer"]} if classifications else {})},
                                     decisions={"opaque_blobs": "approve_opaque", **(decisions or {})},
                                     base_export_id=base, cfg=cfg, identity_profile=identity_profile)
-        service.analyse_export(db, exp, requester)
+        service.analyse_export(db, exp, requester, cfg)
         db.commit()
         assert exp.analysis["ready"], (exp.analysis["closure"], exp.analysis["blobs"])
         service.approve_export(db, exp, approver, admin=True, fresh_auth=True, cfg=cfg)
@@ -209,7 +212,7 @@ def run_import(eng, env, ref, *, mode="clone", decisions=None, root="dst", final
         if not expect_ready:
             return imp.id, imp.dry_run
         assert imp.state == "awaiting_approval", imp.dry_run
-        service.approve_import(db, imp, approver)
+        service.approve_import(db, imp, approver, acknowledge_uninspected=True, cfg=cfg)
         db.commit()
         if stop_after is not None:
             with pytest.raises(service.ServiceError):
@@ -668,7 +671,7 @@ def test_A12_A13_A14_merge_blocks_divergent_uids_proposes_candidates_and_never_o
         imp = db.scalar(select(PortabilityImport).order_by(PortabilityImport.created_at.desc()).limit(1))
         from app.portability.lifecycle import TransitionError
         with pytest.raises((service.ServiceError, TransitionError)):
-            service.approve_import(db, imp, "dave@example.org")        # not ready: nothing to approve
+            service.approve_import(db, imp, "dave@example.org", cfg=env.cfg("dst"))        # not ready: nothing to approve
 
 
 def test_A13_a_candidate_is_opened_never_merged(dbs, env):
@@ -710,16 +713,16 @@ def test_A18_A19_A20_restricted_records_and_secrets_never_reach_git_or_the_archi
         exp = service.create_export(db, "alice", mode="workspace", workspaces=[s.ws, s.inv], classifications=[],
                                     destination={"repository": "escrow", "artifact_store": "vault"},
                                     decisions={"opaque_blobs": "approve_opaque"}, cfg=cfg)
-        service.analyse_export(db, exp, "alice")
+        service.analyse_export(db, exp, "alice", cfg)
         db.commit()
         dep = {d["id"]: d for d in exp.analysis["closure"]["dependencies"]}
         store_before = sorted(p.name for p in env.store.root.rglob("*") if p.is_file())
         assert "restricted_reference" in dep and not exp.analysis["ready"]
         assert all(ex["to"] == "(restricted)" for ex in dep["restricted_reference"]["examples"])
         with pytest.raises(service.ServiceError):
-            service.approve_export(db, exp, "bob", admin=True)          # never chosen silently
-        service.set_export_decisions(db, exp, {"restricted_reference": "exclude_referrers"}, "alice")
-        service.approve_export(db, exp, "bob", admin=True)
+            service.approve_export(db, exp, "bob", admin=True, cfg=cfg)          # never chosen silently
+        service.set_export_decisions(db, exp, {"restricted_reference": "exclude_referrers"}, "alice", cfg)
+        service.approve_export(db, exp, "bob", admin=True, cfg=cfg)
         assert sorted(p.name for p in env.store.root.rglob("*") if p.is_file()) == store_before   # nothing yet
         service.generate_export(src, db, exp, "bob", cfg)
         service.publish_export(db, exp, "bob", cfg)
@@ -763,8 +766,8 @@ def test_A18_A19_A20_restricted_records_and_secrets_never_reach_git_or_the_archi
                                     destination={"repository": "escrow", "artifact_store": "vault"},
                                     decisions={"restricted_reference": "exclude_referrers",
                                                "opaque_blobs": "approve_opaque"}, cfg=cfg)
-        service.analyse_export(db, exp, "alice")
-        service.approve_export(db, exp, "bob", admin=True)
+        service.analyse_export(db, exp, "alice", cfg)
+        service.approve_export(db, exp, "bob", admin=True, cfg=cfg)
         db.commit()
         stored = sorted(p.name for p in env.store.root.rglob("*") if p.is_file())
         with pytest.raises(service.ServiceError) as e:
@@ -801,19 +804,19 @@ def test_A25_a_selective_export_includes_or_explicitly_resolves_every_dependency
         exp = service.create_export(db, "alice", mode="workspace", workspaces=[s.ws], classifications=[],
                                     destination={"repository": "escrow", "artifact_store": "vault"},
                                     decisions={"opaque_blobs": "approve_opaque"}, cfg=cfg)
-        service.analyse_export(db, exp, "alice")
+        service.analyse_export(db, exp, "alice", cfg)
         db.commit()
         deps = {d["id"]: d for d in exp.analysis["closure"]["dependencies"]}
         assert f"derived_endpoint:{s.inv}" in deps or f"claim_subject:{s.inv}" in deps
         assert not exp.analysis["ready"] and set(exp.analysis["closure"]["unresolved"]) == set(deps)
         with pytest.raises(service.ServiceError):
-            service.approve_export(db, exp, "bob", admin=True)
+            service.approve_export(db, exp, "bob", admin=True, cfg=cfg)
         # Including the inventory's workspace closes the dependency.
         service.set_export_decisions(db, exp, {d: "include_workspace" for d in deps
-                                               if "include_workspace" in deps[d]["options"]}, "alice")
+                                               if "include_workspace" in deps[d]["options"]}, "alice", cfg)
         assert exp.analysis["ready"] and s.inv in exp.analysis["closure"]["workspaces"]
         # A blocked dependency stops the export.
-        service.set_export_decisions(db, exp, {next(iter(deps)): "block"}, "alice")
+        service.set_export_decisions(db, exp, {next(iter(deps)): "block"}, "alice", cfg)
         assert not exp.analysis["ready"] and exp.analysis["closure"]["blocked"]
 
 
@@ -841,8 +844,8 @@ def test_A30_the_restore_drill_verifies_the_latest_signed_full_checkpoint(dbs, e
         exp = service.create_export(db, "alice", mode="full", workspaces=[], classifications=[],
                                     destination={"repository": "escrow", "artifact_store": "vault"},
                                     decisions={"opaque_blobs": "approve_opaque"}, cfg=env.cfg("src"))
-        service.analyse_export(db, exp, "alice")
-        service.approve_export(db, exp, "bob", admin=True, fresh_auth=True)
+        service.analyse_export(db, exp, "alice", env.cfg("src"))
+        service.approve_export(db, exp, "bob", admin=True, fresh_auth=True, cfg=env.cfg("src"))
         db.commit()
         service.generate_export(src, db, exp, "bob", env.cfg("src"))
         service.publish_export(db, exp, "bob", env.cfg("src"))
@@ -867,6 +870,7 @@ def test_R19_R21_the_api_enforces_people_step_up_separation_destinations_and_sin
     from app.log_redaction import RedactTokens
     from app.main import app
     monkeypatch.setenv("ARGUS_PORTABILITY_ROOT", str(env.tmp / "api"))
+    monkeypatch.setenv("ARGUS_PORTABILITY_POLICY", "strict")
     monkeypatch.setenv("ARGUS_PORTABILITY_REPOSITORIES", f"escrow={env.repo},escrow-restricted={env.restricted_repo}")
     monkeypatch.setenv("ARGUS_PORTABILITY_ARTIFACT_STORES", f"vault={env.store.root}")
     monkeypatch.setenv("ARGUS_PORTABILITY_SIGNING_KEY", str(env.signer.key_path))
@@ -912,7 +916,7 @@ def test_R19_R21_the_api_enforces_people_step_up_separation_destinations_and_sin
         assert r.status_code == 422 and r.json()["problem"]["code"] == "restricted_destination_required"
         r = client.post("/v1/portability/exports", json={"mode": "workspace", "workspaces": [ws],
                                                          "repository": "escrow-restricted", "artifact_store": "vault",
-                                                         "classifications": ["costs"],
+                                                         "classifications": ["costs"], "recipients": ["escrow-officer"],
                                                          # icons other tests gave the shared type are opaque images
                                                          "decisions": {"opaque_blobs": "approve_opaque"}})
         assert r.status_code == 201, r.text
@@ -948,7 +952,10 @@ def test_R19_R21_the_api_enforces_people_step_up_separation_destinations_and_sin
         assert r.headers["referrer-policy"] == "no-referrer"
         r = client.get(f"/v1/portability/exports/{exp['id']}/download", headers={"X-Download-Token": tok})
         assert r.status_code == 403 and "already used" in r.json()["problem"]["error"]
-        assert client.get(f"/v1/portability/exports/{exp['id']}/download", params={"token": "made-up"}).status_code == 403
+        r = client.get(f"/v1/portability/exports/{exp['id']}/download", params={"token": "made-up"})
+        assert r.status_code == 400 and r.json()["problem"]["code"] == "query_token_disabled"   # header only
+        assert client.get(f"/v1/portability/exports/{exp['id']}/download",
+                          headers={"X-Download-Token": "made-up"}).status_code == 403
         with SessionLocal() as sdb:
             from app.models.portability import PortabilityDownloadToken
             old = client.post(f"/v1/portability/exports/{exp['id']}/download-token").json()["token"]
@@ -971,10 +978,15 @@ def test_R19_R21_the_api_enforces_people_step_up_separation_destinations_and_sin
         for step, state in (("fetch-git", "quarantined"), ("verify", "dry_run_ready"), ("dry-run", "awaiting_approval"),
                             ("approve", "approved"), ("execute", "ready_to_finalize"), ("finalize", "finalized")):
             if step == "approve":           # restricted classes inside: the requester may not approve
-                r = client.post(f"/v1/portability/imports/{imp['id']}/approve")
+                r = client.post(f"/v1/portability/imports/{imp['id']}/approve", json={"acknowledge_uninspected": True})
                 assert r.status_code == 403 and r.json()["problem"]["code"] == "separation"
                 app.dependency_overrides[get_identity] = person(alice)
-            r = client.post(f"/v1/portability/imports/{imp['id']}/{step}")
+                view = client.get(f"/v1/portability/imports/{imp['id']}").json()
+                if view["manifest"]["blobs"]["inspection"].get("uninspected"):     # opaque icons of other tests
+                    r = client.post(f"/v1/portability/imports/{imp['id']}/approve")
+                    assert r.status_code == 409 and r.json()["problem"]["code"] == "acknowledgement_required"
+            r = client.post(f"/v1/portability/imports/{imp['id']}/{step}",
+                            json={"acknowledge_uninspected": True} if step == "approve" else None)
             assert r.status_code == 200 and r.json()["state"] == state, (step, r.text)
         prov = client.get(f"/v1/portability/imports/{imp['id']}/provenance").json()
         assert prov["git"]["tag"] == tag and [e["kind"] for e in prov["events"]][-1] == "finalize"
@@ -1024,7 +1036,7 @@ def _request(eng, env, s, decisions=None, root="src"):
         exp = service.create_export(db, "alice", mode="workspace", workspaces=[s.ws, s.inv], classifications=[],
                                     destination={"repository": "escrow", "artifact_store": "vault"},
                                     decisions={"opaque_blobs": "approve_opaque", **(decisions or {})}, cfg=cfg)
-        service.analyse_export(db, exp, "alice")
+        service.analyse_export(db, exp, "alice", cfg)
         db.commit()
         return exp.id, exp.analysis
 
@@ -1084,7 +1096,7 @@ def test_R2_R3_attachments_are_inspected_classified_or_held_for_a_decision(dbs, 
     with Session(src) as db:
         exp = db.get(PortabilityExport, exp_id)
         assert exp.analysis["ready"], exp.analysis
-        service.approve_export(db, exp, "bob", admin=True)
+        service.approve_export(db, exp, "bob", admin=True, cfg=cfg)
         service.generate_export(src, db, exp, "bob", cfg)
         db.commit()
         manifest = exp.manifest
@@ -1345,8 +1357,8 @@ def test_R24_restore_merge_and_selective_run_end_to_end(dbs, env):
                                     destination={"repository": "escrow", "artifact_store": "vault"},
                                     decisions={"opaque_blobs": "approve_opaque"}, cfg=env.cfg("src"),
                                     identity_profile="full_identity")
-        service.analyse_export(db, exp, "alice")
-        service.approve_export(db, exp, "bob", admin=True, fresh_auth=True)
+        service.analyse_export(db, exp, "alice", env.cfg("src"))
+        service.approve_export(db, exp, "bob", admin=True, fresh_auth=True, cfg=env.cfg("src"))
         db.commit()
         service.generate_export(src, db, exp, "bob", env.cfg("src"))
         service.publish_export(db, exp, "bob", env.cfg("src"))

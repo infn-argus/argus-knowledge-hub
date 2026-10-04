@@ -1,5 +1,7 @@
-import { useState } from "react";
-import type { ArchiveLabels, PortabilityError } from "../../../api/portabilityTypes";
+import { useEffect, useState } from "react";
+import { portabilityApi, problemText } from "../../../api/client";
+import type { ArchiveLabels, PortabilityError, PortabilityJob, PortabilityPolicy, UninspectedBlob }
+  from "../../../api/portabilityTypes";
 
 /** Pieces shared by the export and import pages (docs/export-import-design.md §17). */
 
@@ -52,6 +54,10 @@ export function Labels({ labels, compact }: { labels: ArchiveLabels; compact?: b
       })}
       {labels.full && <span className="rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-800">full</span>}
       {labels.selective && <span className="rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-800">selective</span>}
+      {labels.uninspected_content && (
+        <span className="rounded border border-amber-400 bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-900"
+              title="Some files travelled without content inspection (opaque or unreadable)">uninspected content</span>
+      )}
     </span>
   );
 }
@@ -158,4 +164,141 @@ export function when(iso: string | null | undefined): string {
 
 export function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-sm text-slate-500">{children}</p>;
+}
+
+
+/** Files that travel, or travelled, without content inspection: always listed, never hidden. */
+export function UninspectedList({ items, total }: { items: UninspectedBlob[]; total?: number }) {
+  if (!items.length) return null;
+  return (
+    <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+      <div className="font-medium">
+        {total ?? items.length} file(s) not inspected: their content could not be read, so secrets or classified
+        material in them would not have been detected.
+      </div>
+      <ul className="mt-2 max-h-48 space-y-0.5 overflow-auto text-xs">
+        {items.map((u) => (
+          <li key={`${u.where}-${u.sha256}`} className="flex flex-wrap gap-2">
+            <span className="font-mono">{u.where}</span>
+            <span>{u.status}{u.reason ? ` — ${u.reason}` : ""}</span>
+            <span className="text-amber-700">{u.by === "policy" ? "allowed by policy" : "approved by decision"}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const JOB_TONE: Record<PortabilityJob["state"], string> = {
+  queued: "bg-slate-100 text-slate-700", running: "bg-sky-100 text-sky-800",
+  completed: "bg-emerald-100 text-emerald-800", failed: "bg-rose-100 text-rose-800",
+};
+
+/** Polls a background job until it ends, then tells the page to reload. */
+export function useJob(onDone: () => void) {
+  const [job, setJob] = useState<PortabilityJob | null>(null);
+  useEffect(() => {
+    if (!job || job.state === "completed" || job.state === "failed") return;
+    const t = window.setTimeout(async () => {
+      try {
+        const next = await portabilityApi.job(job.id);
+        setJob(next);
+        if (next.state === "completed" || next.state === "failed") onDone();
+      } catch { /* keep polling */ }
+    }, 2000);
+    return () => window.clearTimeout(t);
+  }, [job, onDone]);
+  return { job, setJob, running: !!job && (job.state === "queued" || job.state === "running") };
+}
+
+/** The jobs of an export or import: queued, running, completed or failed, refreshed by polling. */
+export function JobsPanel({ subject, current }: { subject: string; current: PortabilityJob | null }) {
+  const [jobs, setJobs] = useState<PortabilityJob[]>([]);
+  useEffect(() => {
+    let live = true;
+    portabilityApi.jobs(subject).then((j) => live && setJobs(j)).catch(() => undefined);
+    return () => { live = false; };
+  }, [subject, current?.state, current?.id]);
+  if (!jobs.length) return null;
+  return (
+    <Section title="Jobs">
+      <table className="w-full text-sm">
+        <thead className="text-left text-xs text-slate-500">
+          <tr><th className="py-1">Step</th><th>State</th><th>By</th><th>Started</th><th>Duration</th><th /></tr>
+        </thead>
+        <tbody>
+          {jobs.map((j) => (
+            <tr key={j.id} className="border-t border-slate-100 align-top">
+              <td className="py-1">{human(j.action)}</td>
+              <td><span className={`rounded px-2 py-0.5 text-xs ${JOB_TONE[j.state]}`}>{j.state}</span></td>
+              <td className="text-xs">{j.requested_by}</td>
+              <td className="text-xs">{when(j.started_at ?? j.created_at)}</td>
+              <td className="text-xs">{j.metrics?.seconds !== undefined ? `${j.metrics.seconds} s` : "—"}</td>
+              <td className="text-xs text-rose-700">{j.error?.error}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Section>
+  );
+}
+
+/** Suspend (or resume) automatic deletion. Administrators only; audited. */
+export function LegalHold({ kind, id, on, reason, purgedAt, onChange }: {
+  kind: "exports" | "imports"; id: string; on: boolean; reason: string | null; purgedAt: string | null;
+  onChange: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const act = async (next: boolean) => {
+    setBusy(true); setErr(null);
+    try { await portabilityApi.legalHold(kind, id, next, text); setText(""); onChange(); }
+    catch (e) { setErr(problemText(e)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="space-y-2 text-sm">
+      {purgedAt && <p className="text-slate-600">Local files deleted by retention on {when(purgedAt)}; the record and its
+        audit remain.</p>}
+      {on ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">legal hold</span>
+          <span className="text-slate-700">{reason}</span>
+          <ActionButton label="Release hold" busy={busy} onClick={() => act(false)}
+                        confirm="Automatic deletion will apply again." />
+        </div>
+      ) : !purgedAt && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Reason (e.g. audit reference)"
+                 className="min-w-64 rounded border border-slate-300 px-2 py-1 text-sm" />
+          <ActionButton label="Place legal hold" busy={busy} disabled={!text.trim()} onClick={() => act(true)} />
+        </div>
+      )}
+      {err && <ErrorBox error={err} />}
+    </div>
+  );
+}
+
+/** The policy in force, with every relaxed choice spelled out. */
+export function PolicySummary({ policy }: { policy: PortabilityPolicy }) {
+  return (
+    <div className="space-y-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded px-2 py-0.5 text-xs font-medium ${policy.profile === "strict"
+          ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>{policy.profile} policy</span>
+        <span className="text-slate-600">retention {policy.retention_days} days · readers {policy.blob_readers.join(", ")}</span>
+      </div>
+      {policy.relaxations.length > 0 && (
+        <div className="text-xs text-slate-600">
+          Relaxed compared with the strict policy:
+          <ul className="mt-1 flex flex-wrap gap-1">
+            {policy.relaxations.map((r) => (
+              <li key={r} className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-mono text-[11px] text-amber-900">{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }

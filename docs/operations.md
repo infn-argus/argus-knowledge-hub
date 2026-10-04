@@ -103,15 +103,35 @@ deployment.
 | `ARGUS_PORTABILITY_PSEUDONYM_SALT` | the institutional secret of the `pseudonymized` identity profile |
 | `ARGUS_PORTABILITY_EVIDENCE_READERS` | the user ids or e-mails that may read restricted rows of evidence archives |
 | `ARGUS_PORTABILITY_STEP_UP_SECONDS` | how recent a sign-in must be for high-risk approval and restricted generation (300) |
+| `ARGUS_PORTABILITY_POLICY` | `trusted` (default) or `strict`; see [`export-import-design.md`](export-import-design.md) §20 |
+| `ARGUS_PORTABILITY_POLICY_<SETTING>` | overrides one policy setting, e.g. `_SEPARATION_OF_DUTIES=1`, `_OPAQUE_BLOBS=require_decision`, `_RETENTION_DAYS=180`, `_BLOB_READERS=text,pdf` |
+| `ARGUS_PORTABILITY_REPOSITORY_KEYS` | `repository=/path,…`: the SSH deploy key of each repository, mounted from a secret |
+| `ARGUS_PORTABILITY_REPOSITORY_TOKENS` | `repository=/path,…`: a token file per HTTPS repository, answered through `GIT_ASKPASS` |
 | `ARGUS_PORTABILITY_STAGING_URL` | the PostgreSQL server for staging databases (default: the active one) |
 | `ARGUS_PORTABILITY_GIT_NAME`, `ARGUS_PORTABILITY_GIT_EMAIL` | the committer of export commits (a service identity) |
 | `ARGUS_INSTANCE_NAME` | this deployment's name in manifests |
 
 The API image includes `git` and `openssh-client`. Nothing from Git is checked out or executed.
 
-**The database role** needs `CREATEDB` on the staging server. Each import creates
-`argus_stage_<import>`, migrates it to the current head, and drops it at finalization or discard.
-Exclude `argus_stage_*` from backups.
+**The database role.** Each import creates `argus_stage_<import>`, migrates it to the current head,
+and drops it at finalization, discard or retention cleanup. Use a **dedicated importer role** for
+this, not the application's normal role, set as `ARGUS_PORTABILITY_STAGING_URL`:
+
+```sql
+CREATE ROLE argus_importer LOGIN CREATEDB PASSWORD '…';   -- from the secret store
+-- It owns only the staging databases it creates, so it can drop only those.
+REVOKE CREATE ON DATABASE argus FROM argus_importer;      -- no objects in the active database
+```
+
+`CREATEDB` lets the role create any database; restrict it further with a dedicated staging server, or
+by monitoring that its databases are all named `argus_stage_*`. Exclude `argus_stage_*` from backups
+(for example, a `pg_dump` loop over `datname NOT LIKE 'argus_stage_%'`, or a separate server that is
+not backed up).
+
+**Policy.** The deployment runs the `trusted` policy unless `ARGUS_PORTABILITY_POLICY=strict`.
+`python -m app.portability policy` prints the policy and its relaxations, also shown under
+Administration → Portability. Making a rule stricter is a configuration change and a restart; it
+does not affect archives already made.
 
 ### In the web application
 
@@ -139,8 +159,12 @@ store `vault-dev` under the `portability` volume. Never use that key for anythin
    * Protected tags `export/*`: cannot be deleted, moved or re-created.
    * Protected `main`: no force push.
    * Code owners for `catalogue/`, `governance/` and `mappings/`.
-   * Deploy credentials: write access for exporting instances, read-only for importing ones,
-     short-lived where the server allows it.
+   * Protect `main` and the tags against deletion and force-push. One authorized maintainer may
+     approve changes to protected paths initially.
+   * Deploy credentials: one narrowly scoped deploy key or token per repository, write access for
+     exporting instances and read-only for importing ones. Store it as a secret, mount it, and point
+     `ARGUS_PORTABILITY_REPOSITORY_KEYS` (SSH) or `ARGUS_PORTABILITY_REPOSITORY_TOKENS` (HTTPS) at it.
+     Rotate it periodically. Short-lived workload credentials can come later.
 3. **Register them**:
    `ARGUS_PORTABILITY_REPOSITORIES=escrow=ssh://git@git.example/argus/escrow.git,escrow-costs=ssh://…`,
    and approve the restricted one with `ARGUS_PORTABILITY_RESTRICTED_DESTINATIONS=escrow-costs=costs|personnel`.
@@ -177,6 +201,24 @@ store `vault-dev` under the `portability` volume. Never use that key for anythin
     recipient affects later exports only.
 * **Pseudonym salt.** `ARGUS_PORTABILITY_PSEUDONYM_SALT` is an institutional secret; changing it
   changes every pseudonym in later exports.
+* **Where keys live.** All of these use the deployment's secret mechanism: a Kubernetes Secret
+  mounted read-only into the API pod. KMS or an HSM is optional. One Secret, for example
+  `argus-portability`, holds:
+  * `signing_key`;
+  * `allowed_signers`;
+  * the recipients files;
+  * repository deploy keys or tokens;
+  * the pseudonym salt.
+
+  Decryption keys go in a separate Secret, mounted only for an import session.
+* **Annual rotation** (and at once on suspected compromise). An ARGUS administrator:
+  1. generates the new signing key and adds its allowed-signers line on every importing instance;
+  2. replaces `signing_key` in the Secret, restarts the API, and runs one export and the restore
+     drill;
+  3. removes the old allowed-signers line once no checkpoint signed with it is still needed;
+  4. replaces repository deploy credentials the same way, revoking the old ones on the Git server.
+
+  Record each rotation as a change in the deployment's runbook.
 
 ### External artifacts
 
@@ -194,8 +236,10 @@ store `vault-dev` under the `portability` volume. Never use that key for anythin
 
 ```
 python -m app.portability export --mode full --repository escrow --store vault --by alice@example.org \
-       [--identity-profile institutional_reference|pseudonymized|anonymous_historical_actor|full_identity]
-python -m app.portability approve  exp-… --by bob@example.org          # another person: full is high-risk
+       [--purpose backup|restore|migration|analysis|external_sharing|evidence] \
+       [--identity-profile institutional_reference|pseudonymized|anonymous_historical_actor|full_identity] \
+       [--classification costs --recipient escrow-officer]   # restricted: approved recipients
+python -m app.portability approve  exp-… --by bob@example.org          # trusted policy: may be the requester
 python -m app.portability generate exp-… --by bob@example.org
 python -m app.portability publish  exp-… --by bob@example.org
 ```
@@ -242,6 +286,9 @@ signed checksums. An encrypted archive is verified as stored, without decrypting
 
 * Prefer **Download** on the export page (or `GET …/archive`). It uses your own credentials and
   puts no capability in a URL.
+* A token in the query string (`?token=`) is refused (`query_token_disabled`) unless
+  `ARGUS_PORTABILITY_POLICY_QUERY_TOKENS=1` **and** `ARGUS_PORTABILITY_POLICY_PROXY_REDACTS_TOKENS=1`.
+  The second variable is your confirmation that every proxy in front of ARGUS redacts `token`.
 * For an out-of-band tool, `POST …/download-token` gives a token that is:
   * single use (consumed when the download starts; a broken transfer needs a new token);
   * valid for five minutes;
@@ -264,9 +311,25 @@ signed checksums. An encrypted archive is verified as stored, without decrypting
 3. imports, stages, reconciles and promotes into it;
 4. drops it.
 
-Exit status 0 means it passed. Keep the printed JSON (tag, commit, checkpoint, vector hash,
-reconciliation hash) as evidence. Run it at least monthly and after every upgrade. The cadence is
-an open decision.
+Exit status 0 means it passed. The result goes into the audit (`portability_events`, subject
+`drill`) and is printed with its `drill_id`. **Run it every six months and after any substantial
+archive-format change.** One ARGUS administrator records the sign-off:
+
+```
+python -m app.portability drill --repository escrow --by alice@example.org
+python -m app.portability drill-signoff drill-… --by alice@example.org --note "H2 2026 drill, reviewed"
+```
+
+**Establishing the supported size.** Run one complete measured cycle on production data, or on an
+equivalent generated dataset, in a non-production deployment:
+
+```
+python -m app.portability cycle --repository escrow --store vault --by alice@example.org
+```
+
+It runs a full export (purpose `backup`), publishes it, and restores it into a scratch database. It
+records the duration, peak memory and promotion-transaction time in the audit. The figures set the
+initial supported size; record them in the deployment's runbook.
 
 ### Importing: dry run, staging, promotion
 
@@ -275,7 +338,7 @@ python -m app.portability import --mode clone --repository escrow --ref export/f
 python -m app.portability step imp-… fetch    --by carol@example.org   # quarantine: signed tag, safe tree
 python -m app.portability step imp-… verify   --by carol@example.org   # checksums, signature, external chunks, blobs
 python -m app.portability step imp-… dry-run  --by carol@example.org   # what would happen, row by row
-python -m app.portability step imp-… approve  --by dave@example.org    # merge, restore, restricted: another person
+python -m app.portability step imp-… approve  --by dave@example.org    # --accept-uninspected if the archive carries opaque files
 python -m app.portability step imp-… execute  --by dave@example.org    # in the staging database
 python -m app.portability step imp-… finalize --by dave@example.org    # one-transaction promotion
 ```
@@ -325,6 +388,33 @@ A discard does the following:
 **The active database is not touched, because nothing there was written. The import's audit trail
 stays, append-only.** No audit purge is used. A finalized import cannot be discarded: correct it
 with ledger decisions.
+
+### Retention and legal holds
+
+`python -m app.portability cleanup` deletes, for exports and imports older than `retention_days` (90):
+
+* local archive files;
+* quarantine and staging files and databases;
+* evidence copies.
+
+It keeps every record, its audit, Git history and published artifacts. Every deletion is audited, and
+a published export becomes `expired`. Run it daily, for example as a Kubernetes CronJob with the API
+image and its environment:
+`command: ["python", "-m", "app.portability", "cleanup"]`. `--dry-run` reports without deleting.
+
+A **legal hold** suspends deletion: on the export or import page, or
+
+```
+python -m app.portability legal-hold export exp-… --by alice@example.org --reason "audit 2026-17"
+python -m app.portability legal-hold export exp-… --by alice@example.org --release
+```
+
+### Long steps as jobs
+
+The web pages run generate, publish, fetch, verify, execute and finalize as background jobs and
+poll their state (queued, running, completed, failed). A restart marks running jobs `interrupted`:
+run the step again, and an import resumes from its staging checkpoints. The CLI runs every step in
+the foreground.
 
 If a staging database outlives its import (a crash during finalization), drop it with
 `DROP DATABASE argus_stage_… WITH (FORCE)` once the import is `finalized` or `discarded`. Old

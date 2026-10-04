@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { portabilityApi, problemText, workspacesApi } from "../../../api/client";
 import type { DryRunReport, ImportView, ReconciliationReport } from "../../../api/portabilityTypes";
-import { ActionButton, bytes, Empty, ErrorBox, IMPORT_STEPS, KV, Labels, Mono, Section, StateBadge, Steps, when } from "./shared";
+import { ActionButton, bytes, Empty, ErrorBox, IMPORT_STEPS, JobsPanel, KV, Labels, LegalHold, Mono, PolicySummary, Section,
+  StateBadge, Steps, UninspectedList, useJob, when } from "./shared";
 
 type Step = "fetch-git" | "verify" | "approve" | "execute" | "resume" | "finalize";
 
@@ -12,6 +13,8 @@ export function ImportDetailPage() {
   const qc = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: workspacesApi.me });
   const imp = useQuery({ queryKey: ["portability-import", id], queryFn: () => portabilityApi.getImport(id) });
+  const cfg = useQuery({ queryKey: ["portability-config"], queryFn: portabilityApi.config });
+  const [accepted, setAccepted] = useState(false);
   const state = imp.data?.state;
   const reconciled = !!state && ["ready_to_finalize", "finalized", "failed"].includes(state) && imp.data?.reconciliation_passed !== null;
   const rec = useQuery({ queryKey: ["portability-reconciliation", id], queryFn: () => portabilityApi.reconciliation(id),
@@ -24,8 +27,20 @@ export function ImportDetailPage() {
       void qc.invalidateQueries({ queryKey: k === "portability-imports" ? [k] : [k, id] });
     }
   };
+  const reload = useCallback(() => {
+    for (const k of ["portability-imports", "portability-import", "portability-reconciliation", "portability-provenance"]) {
+      void qc.invalidateQueries({ queryKey: k === "portability-imports" ? [k] : [k, id] });
+    }
+  }, [qc, id]);
+  const { job, setJob, running } = useJob(reload);
+  // Approving is quick; fetching, verifying, executing and finalizing run as background jobs the page polls.
   const step = useMutation({
-    mutationFn: (s: Step) => portabilityApi.importStep(id, s),
+    mutationFn: async (s: Step) => {
+      if (s === "approve") return portabilityApi.importStep(id, s, { acknowledge_uninspected: accepted });
+      const { job: started } = await portabilityApi.importJob(id, s);
+      setJob(started);
+      return undefined;
+    },
     onSuccess: (v) => { setError(null); refresh(v); },
     onError: (e) => { setError(problemText(e)); refresh(); },
   });
@@ -49,8 +64,13 @@ export function ImportDetailPage() {
   const busy = step.isPending ? step.variables : dry.isPending ? "dry-run" : null;
   const report = i.dry_run as DryRunReport;
   const hasDryRun = !!report && "ready" in report;
-  const needsSecond = i.mode === "merge" || i.mode === "restore" || (i.manifest?.classifications?.included ?? []).length > 0;
+  const policy = cfg.data?.policy;
+  const needsSecond = !!policy?.separation_of_duties &&
+    (i.mode === "merge" || i.mode === "restore" || (i.manifest?.classifications?.included ?? []).length > 0);
   const selfApproval = needsSecond && me.data?.email === i.requested_by;
+  const uninspected = report?.uninspected_content ?? (i.manifest?.blobs?.inspection?.uninspected
+    ? { count: i.manifest.blobs.inspection.uninspected, warning: "", items: i.manifest.blobs.uninspected ?? [] } : undefined);
+  const stepBusy = (s: Step) => busy === s || (running && job?.action === s);
   const final = i.state === "finalized" || i.state === "discarded";
 
   return (
@@ -75,11 +95,11 @@ export function ImportDetailPage() {
       <Section title="Next step">
         <div className="flex flex-wrap items-center gap-3">
           {i.state === "created" && i.source.repository && (
-            <ActionButton label="Fetch into quarantine" busy={busy === "fetch-git"} onClick={() => step.mutate("fetch-git")} />
+            <ActionButton label="Fetch into quarantine" busy={stepBusy("fetch-git")} disabled={running} onClick={() => step.mutate("fetch-git")} />
           )}
           {i.state === "created" && !i.source.repository && <span className="text-sm text-slate-500">Waiting for the uploaded checkpoint.</span>}
           {i.state === "quarantined" && (
-            <ActionButton label="Verify" busy={busy === "verify"} onClick={() => step.mutate("verify")} />
+            <ActionButton label="Verify" busy={stepBusy("verify")} disabled={running} onClick={() => step.mutate("verify")} />
           )}
           {(i.state === "dry_run_ready" || i.state === "awaiting_approval") && (
             <ActionButton label={hasDryRun ? "Run the dry run again" : "Dry run"} busy={busy === "dry-run"}
@@ -87,26 +107,35 @@ export function ImportDetailPage() {
           )}
           {i.state === "awaiting_approval" && (
             <>
+              {uninspected && (
+                <label className="flex items-center gap-2 text-sm text-amber-900">
+                  <input type="checkbox" checked={accepted} onChange={(ev) => setAccepted(ev.target.checked)} />
+                  I accept that {uninspected.count} file(s) were not inspected for secrets or classified content
+                </label>
+              )}
               <ActionButton label="Approve" busy={busy === "approve"} onClick={() => step.mutate("approve")}
-                            disabled={selfApproval} confirm="Approve this import as shown by the dry run?" />
+                            disabled={selfApproval || (!!uninspected && !accepted)}
+                            confirm="Approve this import as shown by the dry run?" />
               {selfApproval && <span className="text-sm text-amber-800">You registered it: another administrator must approve.</span>}
             </>
           )}
           {i.state === "approved" && (
-            <ActionButton label="Execute" busy={busy === "execute"} onClick={() => step.mutate("execute")}
+            <ActionButton label="Execute" busy={stepBusy("execute")} disabled={running} onClick={() => step.mutate("execute")}
                           confirm={i.mode === "evidence" ? "Store this archive as read-only evidence?" :
                             "Load the archive into staged workspaces, rebuild and reconcile?"} />
           )}
           {(i.state === "importing" || i.state === "failed") && (
-            <ActionButton label={`Resume in staging (${i.checkpoints.done} steps done)`} busy={busy === "resume"} onClick={() => step.mutate("resume")} />
+            <ActionButton label={`Resume in staging (${i.checkpoints.done} steps done)`} busy={stepBusy("resume")} disabled={running} onClick={() => step.mutate("resume")} />
           )}
           {i.state === "ready_to_finalize" && (
-            <ActionButton label="Finalize" busy={busy === "finalize"} onClick={() => step.mutate("finalize")}
+            <ActionButton label="Finalize" busy={stepBusy("finalize")} disabled={running} onClick={() => step.mutate("finalize")}
                           confirm={i.mode === "evidence" ? "Finalize: keep this archive as read-only evidence."
                             : "Finalize: promote the reconciled import into this instance in one transaction — all of it becomes visible at once, as permanent history."} />
           )}
           {i.state === "finalized" && <span className="text-sm text-emerald-700">Finalized {i.reconciliation_sha256 ? <>— reconciliation <Mono short>{i.reconciliation_sha256}</Mono></> : null}.</span>}
           {i.state === "discarded" && <span className="text-sm text-slate-500">Discarded: nothing it loaded remains.</span>}
+          {running && <span className="text-sm text-sky-700">{job?.action.replace("-", " ")} is {job?.state}… this page updates by itself.</span>}
+          {job?.state === "failed" && <span className="text-sm text-rose-700">{job.action} failed: {job.error?.error}</span>}
           {!final && (
             <span className="ml-auto flex items-center gap-2">
               <input value={reason} onChange={(ev) => setReason(ev.target.value)} placeholder="Reason to discard"
@@ -156,9 +185,19 @@ export function ImportDetailPage() {
             ["From", `${i.manifest.argus.instance_name ?? ""} ${i.manifest.argus.instance_id} · ARGUS ${i.manifest.argus.application_version}`],
             ["Restricted classes included", (i.manifest.classifications.included ?? []).join(", ") || "none"],
             ["Classes left out", (i.manifest.classifications.excluded_classes ?? []).join(", ") || "none"],
+            ["Purpose", i.manifest.purpose?.replace(/_/g, " ")],
           ]} />
+          {i.manifest.policy && (
+            <div className="mt-3 border-t border-slate-100 pt-3">
+              <div className="mb-1 text-xs text-slate-500">Made under</div>
+              <PolicySummary policy={i.manifest.policy} />
+            </div>
+          )}
         </Section>
       )}
+
+      <JobsPanel subject={i.id} current={job} />
+      {uninspected && uninspected.items.length > 0 && <UninspectedList items={uninspected.items} total={uninspected.count} />}
 
       {(i.state === "dry_run_ready" || i.state === "awaiting_approval") && i.mode !== "evidence" && (
         <DecisionsForm i={i} running={dry.isPending} onRun={(d) => dry.mutate(d)} />
@@ -186,6 +225,14 @@ export function ImportDetailPage() {
               </li>
             ))}
           </ol>
+        </Section>
+      )}
+      {cfg.data?.is_admin && (
+        <Section title="Retention">
+          <p className="mb-2 text-xs text-slate-500">Quarantine, staging and evidence copies are deleted {policy?.retention_days ?? 90} days
+            after registration unless held; the import's record and audit are kept.</p>
+          <LegalHold kind="imports" id={i.id} on={i.legal_hold} reason={i.legal_hold_reason} purgedAt={i.purged_at}
+                     onChange={reload} />
         </Section>
       )}
     </div>

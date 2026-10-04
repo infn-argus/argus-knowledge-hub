@@ -3248,3 +3248,4 @@ production-approved yet (export-import-design §0, §19).*
 | **I-PORT-9** | no blob is stored or published before its content has been inspected and every finding decided; a secret is never published |
 | **I-PORT-10** | restricted classes leave ARGUS only encrypted, to a destination approved for them |
 | **I-PORT-11** | a watermark is identified by its whole vector; a checkpoint number never repeats or moves backwards |
+| **I-PORT-12** | the portability policy decides gates, warnings and labels, never the archive format: an archive made under one policy verifies and imports under any other, and every relaxation in force is recorded in its manifest and in the audit of each approval |

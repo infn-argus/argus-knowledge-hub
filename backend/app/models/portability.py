@@ -42,6 +42,11 @@ class PortabilityExport(Base):
     manifest_sha256: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     out_dir: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     git: Mapped[dict] = mapped_column(JSONB, default=dict)               # repository, commit, tag, parent
+    # Retention (default 90 days for archives, quarantine, staging and evidence copies): a legal hold
+    # suspends deletion; `purged_at` records when the files went (the record and its audit stay).
+    legal_hold: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    legal_hold_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    purged_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -66,6 +71,11 @@ class PortabilityImport(Base):
     reconciliation: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     reconciliation_sha256: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     staging: Mapped[dict] = mapped_column(JSONB, default=dict)     # the isolated staging database
+    # Retention (default 90 days for archives, quarantine, staging and evidence copies): a legal hold
+    # suspends deletion; `purged_at` records when the files went (the record and its audit stay).
+    legal_hold: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    legal_hold_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    purged_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -168,3 +178,23 @@ class PortabilityDownloadToken(Base):
     expires_at: Mapped[object] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PortabilityJob(Base):
+    """A long step (generate, publish, fetch, verify, execute, finalize) run in the background:
+    queued → running → completed | failed. Polled by the web pages; the step's own audit is in
+    portability_events as always."""
+    __tablename__ = "portability_jobs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    subject_kind: Mapped[str] = mapped_column(String)            # export | import
+    subject_id: Mapped[str] = mapped_column(String, index=True)
+    action: Mapped[str] = mapped_column(String)
+    state: Mapped[str] = mapped_column(String, default="queued", index=True)
+    requested_by: Mapped[str] = mapped_column(String)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    metrics: Mapped[dict] = mapped_column(JSONB, default=dict)   # duration, peak memory
+

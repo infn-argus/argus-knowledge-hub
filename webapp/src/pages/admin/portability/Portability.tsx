@@ -50,6 +50,9 @@ function ConfigNotes({ c }: { c: PortabilityConfig }) {
       <span>Artifact stores: <b>{c.artifact_stores.join(", ") || "none"}</b></span>
       <span>Signing key: <b>{c.signing.configured ? `${c.signing.principal} · ${c.signing.key_id}` : "none"}</b></span>
       <span>Trusted keys: <b>{c.trusted_keys ? "configured" : "none"}</b></span>
+      <span title={c.policy.relaxations.join("\n")}>Policy: <b>{c.policy.profile}</b>
+        {c.policy.relaxations.length > 0 && ` (${c.policy.relaxations.length} relaxation${c.policy.relaxations.length === 1 ? "" : "s"})`}
+        {" · "}retention <b>{c.policy.retention_days} days</b></span>
       {notes.length > 0 && (
         <ul className="w-full list-disc pl-5 text-amber-800">{notes.map((n) => <li key={n}>{n}</li>)}</ul>
       )}
@@ -113,6 +116,14 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
   const [store, setStore] = useState(c.artifact_stores[0] ?? "");
   const [base, setBase] = useState("");
   const [profile, setProfile] = useState(c.default_identity_profile);
+  const [purpose, setPurpose] = useState("");
+  const [recipients, setRecipients] = useState<string[]>([]);
+  const choosePurpose = (p: string) => {
+    setPurpose(p);
+    const implied = c.purpose_profiles[p];
+    if (implied && (implied !== "full_identity" || c.is_admin)) setProfile(implied);
+  };
+  const available = c.recipients[repository] ?? [];
   const approvedClasses = c.restricted_destinations[repository] ?? [];
   const canEncrypt = c.encryption_recipients.includes(repository);
   const published = exports.filter((e) => e.state === "published");
@@ -121,6 +132,7 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
       mode, workspaces: mode === "workspace" || mode === "evidence-only" ? chosen : [],
       classifications: classes, repository: repository || null, artifact_store: store || null,
       base_export_id: mode === "incremental" ? base : null, identity_profile: profile,
+      purpose: purpose || null, recipients: classes.length ? recipients : [],
     }),
     onSuccess: (e) => {
       void qc.invalidateQueries({ queryKey: ["portability-exports"] });
@@ -129,7 +141,8 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
   });
   const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   const needsWorkspaces = mode === "workspace" || mode === "evidence-only";
-  const highRisk = mode === "full" || mode === "evidence-only" || classes.length > 0 || profile === "full_identity";
+  const highRisk = mode === "full" || mode === "evidence-only" || classes.length > 0 ||
+    (profile === "full_identity" && c.policy.full_identity_high_risk);
   return (
     <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
       <div className="grid gap-4 md:grid-cols-2">
@@ -153,7 +166,7 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
         ) : <div />}
         <label className="text-sm">
           <span className="block text-xs font-medium text-slate-600">Git portability repository</span>
-          <select value={repository} onChange={(e) => { setRepository(e.target.value); setClasses([]); }}
+          <select value={repository} onChange={(e) => { setRepository(e.target.value); setClasses([]); setRecipients([]); }}
                   className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
             <option value="">None (generate only)</option>
             {c.repositories.map((r) => (
@@ -186,6 +199,17 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
       )}
       {mode !== "incremental" && (
         <label className="block text-sm">
+          <span className="block text-xs font-medium text-slate-600">Purpose</span>
+          <select value={purpose} onChange={(e) => choosePurpose(e.target.value)} className="mt-1 w-full max-w-md rounded border border-slate-300 px-2 py-1.5">
+            <option value="">Not stated</option>
+            {c.purposes.map((p) => <option key={p} value={p}>{PURPOSE_HELP[p] ?? p}</option>)}
+          </select>
+          <span className="mt-1 block text-xs text-slate-500">Backup, restore and migration between trusted ARGUS installations keep
+            full identities; analysis and external sharing are pseudonymized.</span>
+        </label>
+      )}
+      {mode !== "incremental" && (
+        <label className="block text-sm">
           <span className="block text-xs font-medium text-slate-600">People in the archive (identity profile)</span>
           <select value={profile} onChange={(e) => setProfile(e.target.value)} className="mt-1 w-full max-w-md rounded border border-slate-300 px-2 py-1.5">
             {c.identity_profiles.map((p) => <option key={p} value={p} disabled={p === "full_identity" && !c.is_admin}>{PROFILE_HELP[p] ?? p}</option>)}
@@ -212,16 +236,31 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
             included only towards a destination approved for it, and the export is then encrypted for that
             destination's recipients. Unencrypted restricted exports are not available.
           </p>
+          {classes.length > 0 && (
+            <div className="mt-2">
+              <span className="block text-xs font-medium text-slate-600">Approved recipients who may decrypt it</span>
+              <div className="mt-1 flex flex-wrap gap-3 text-sm">
+                {available.map((r) => (
+                  <label key={r} className="flex items-center gap-1">
+                    <input type="checkbox" checked={recipients.includes(r)} onChange={() => setRecipients(toggle(recipients, r))} />
+                    {r}
+                  </label>
+                ))}
+                {available.length === 0 && <span className="text-xs text-amber-800">No recipients are configured for {repository}.</span>}
+              </div>
+            </div>
+          )}
         </div>
       )}
       {highRisk && (
         <p className="rounded bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          High-risk export: another administrator must approve it.
+          High-risk export: {c.policy.separation_of_duties ? "another administrator must approve it" : "it needs an administrator's approval with a recent sign-in"}.
         </p>
       )}
       <div className="flex items-center gap-3">
         <button type="button" onClick={() => create.mutate()}
-                disabled={create.isPending || (needsWorkspaces && chosen.length === 0) || (mode === "incremental" && !base)}
+                disabled={create.isPending || (needsWorkspaces && chosen.length === 0) || (mode === "incremental" && !base) ||
+                          (classes.length > 0 && recipients.length === 0)}
                 className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:bg-slate-300">
           {create.isPending ? "Analysing…" : "Request and analyse"}
         </button>
@@ -230,6 +269,15 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
     </div>
   );
 }
+
+const PURPOSE_HELP: Record<string, string> = {
+  backup: "Backup — full identities",
+  restore: "Restore — full identities",
+  migration: "Migration to another trusted ARGUS — full identities",
+  analysis: "Analysis — pseudonymized",
+  external_sharing: "External sharing — pseudonymized",
+  evidence: "Evidence — institutional references",
+};
 
 const PROFILE_HELP: Record<string, string> = {
   institutional_reference: "Institutional reference (default): user ids and subjects; no e-mail, DN or names",

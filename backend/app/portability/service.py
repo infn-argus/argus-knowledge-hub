@@ -41,6 +41,8 @@ from app.models.portability import (PortabilityDownloadToken, PortabilityEvent, 
                                     PortabilityTagSeen)
 from app.portability import (artifacts, chunks, closure, envelope, exporter, gitrepo, identity_policy, importer,
                              signing, staging)
+from app.portability import policy as policy_mod
+from app.portability.policy import Policy
 from app.portability import verify as verifier
 from app.portability.blob_scan import DECISIONS as BLOB_OUTCOMES
 from app.portability.families import Scope
@@ -65,6 +67,15 @@ class Config:
     decryption_keys: Optional[Path] = None
     evidence_readers: set = field(default_factory=set)
     step_up_seconds: int = 300
+    policy: Policy = field(default_factory=Policy.trusted)
+    repository_keys: dict = field(default_factory=dict)      # repository -> SSH deploy key file
+    repository_tokens: dict = field(default_factory=dict)    # repository -> token file
+
+    def git_env(self, repository: Optional[str]) -> Optional[dict]:
+        key, token = self.repository_keys.get(repository or ""), self.repository_tokens.get(repository or "")
+        if key is None and token is None:
+            return None
+        return gitrepo.credentials_env(key, token, self.root / "git-askpass")
 
     def export_dir(self, export_id: str) -> Path:
         return self.root / "exports" / export_id
@@ -107,7 +118,10 @@ def config() -> Config:
                   decryption_keys=Path(keys) if keys else None,
                   evidence_readers=set(filter(None, (os.environ.get("ARGUS_PORTABILITY_EVIDENCE_READERS") or "")
                                               .replace(" ", "").split(","))),
-                  step_up_seconds=int(os.environ.get("ARGUS_PORTABILITY_STEP_UP_SECONDS", "300")))
+                  step_up_seconds=int(os.environ.get("ARGUS_PORTABILITY_STEP_UP_SECONDS", "300")),
+                  policy=policy_mod.from_env(),
+                  repository_keys={k: Path(v) for k, v in _pairs("ARGUS_PORTABILITY_REPOSITORY_KEYS").items()},
+                  repository_tokens={k: Path(v) for k, v in _pairs("ARGUS_PORTABILITY_REPOSITORY_TOKENS").items()})
 
 
 class ServiceError(ValueError):
@@ -128,11 +142,36 @@ def _fail(db: Session, subject, actor: str, exc: Exception, to: str = "failed") 
     db.commit()
 
 
-def fresh(claims: Optional[dict], cfg: Config) -> bool:
-    """Step-up: the person signed in (or re-authenticated) within the configured window."""
-    if not claims or not claims.get("auth_time"):
-        return False
-    return time.time() - float(claims["auth_time"]) <= cfg.step_up_seconds
+def fresh(claims: Optional[dict], cfg: Config, confirmed: bool = False) -> bool:
+    return step_up(claims, cfg, confirmed)[0]
+
+
+def step_up(claims: Optional[dict], cfg: Config, confirmed: bool = False) -> tuple[bool, str]:
+    """Step-up authentication, and how it was satisfied (recorded in the audit):
+
+    * `auth_time`, when the identity provider sends it, within `step_up_seconds`;
+    * otherwise, under the `session_confirmation` policy, a session issued (`iat`) within
+      `session_seconds` plus the person's explicit confirmation of the step;
+    * nothing else. Under the `strict` policy only `auth_time` counts."""
+    p = cfg.policy
+    claims = claims or {}
+    if claims.get("auth_time"):
+        ok = time.time() - float(claims["auth_time"]) <= min(p.step_up_seconds, cfg.step_up_seconds)
+        return ok, "auth_time" if ok else "auth_time too old"
+    if p.step_up == "session_confirmation":
+        if not confirmed:
+            return False, "confirmation required (the identity provider sends no auth_time)"
+        if claims.get("iat") and time.time() - float(claims["iat"]) <= p.session_seconds:
+            return True, "recent session + confirmation"
+        return False, "session too old: sign in again"
+    return False, "auth_time required by policy"
+
+
+def _peak_memory_mb() -> float:
+    import resource
+    import sys
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return round(peak / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)
 
 
 # =========================================================================== exports
@@ -151,18 +190,28 @@ def _check_destination(mode: str, classifications: list[str], destination: dict,
     if repo not in cfg.recipients or not cfg.recipients[repo].exists():
         raise ServiceError(f"{repo} has no encryption recipients: an unencrypted restricted export is not available",
                            "encryption_unavailable", 422)
+    chosen = destination.get("recipients") or []
+    known = {r.name for r in envelope.load_recipients(cfg.recipients[repo])}
+    if not chosen:
+        raise ServiceError("a restricted export needs an administrator to choose its approved recipient(s)",
+                           "recipient_required", 422, {"recipients": sorted(known)})
+    if set(chosen) - known:
+        raise ServiceError(f"not approved recipients of {repo}: {sorted(set(chosen) - known)}", "invalid", 422)
 
 
 def create_export(db: Session, actor: str, *, mode: str, workspaces: list[str], classifications: list[str],
                   destination: dict, decisions: Optional[dict] = None, base_export_id: Optional[str] = None,
-                  identity_profile: Optional[str] = None, cfg: Config) -> PortabilityExport:
+                  identity_profile: Optional[str] = None, purpose: Optional[str] = None,
+                  cfg: Config) -> PortabilityExport:
     if mode not in exporter.MODES:
         raise ServiceError(f"unknown mode {mode!r}", "invalid", 422)
     if destination.get("repository") and destination["repository"] not in cfg.repositories:
         raise ServiceError(f"repository {destination['repository']!r} is not registered", "invalid", 422)
     if destination.get("artifact_store") and destination["artifact_store"] not in cfg.stores:
         raise ServiceError(f"artifact store {destination['artifact_store']!r} is not configured", "invalid", 422)
-    profile = identity_profile or identity_policy.DEFAULT
+    if purpose is not None and purpose not in policy_mod.PURPOSES:
+        raise ServiceError(f"unknown purpose {purpose!r}; one of {', '.join(policy_mod.PURPOSES)}", "invalid", 422)
+    profile = identity_profile or policy_mod.PURPOSE_PROFILE.get(purpose or "", identity_policy.DEFAULT)
     if profile not in identity_policy.PROFILES:
         raise ServiceError(f"unknown identity profile {profile!r}", "invalid", 422)
     if mode == "incremental":
@@ -176,20 +225,24 @@ def create_export(db: Session, actor: str, *, mode: str, workspaces: list[str], 
     if mode not in ("full", "incremental") and not workspaces:
         raise ServiceError("choose at least one workspace", "invalid", 422)
     _check_destination(mode, classifications, destination, cfg)
-    risk = "high" if mode in HIGH_RISK_MODES or classifications or profile in identity_policy.HIGH_RISK else "normal"
+    risk = "high" if mode in HIGH_RISK_MODES or classifications or \
+        (profile in identity_policy.HIGH_RISK and cfg.policy.full_identity_high_risk) else "normal"
     exp = PortabilityExport(id=f"exp-{time.strftime('%Y%m%d')}-{uuid.uuid4().hex[:8]}", mode=mode,
                             workspaces=sorted(workspaces), classifications=sorted(classifications),
-                            decisions={**(decisions or {}), "identity_profile": profile}, destination=destination,
+                            decisions={**(decisions or {}), "identity_profile": profile,
+                                       **({"purpose": purpose} if purpose else {})}, destination=destination,
                             state="requested", risk=risk, requested_by=actor, base_export_id=base_export_id)
     db.add(exp)
     db.flush()
     audit(db, exp, "request", actor, {"mode": mode, "workspaces": exp.workspaces, "risk": risk,
-                                      "classifications": exp.classifications, "identity_profile": profile},
-          None, "requested")
+                                      "classifications": exp.classifications, "identity_profile": profile,
+                                      "purpose": purpose, "policy": cfg.policy.profile,
+                                      "relaxations": cfg.policy.relaxations()}, None, "requested")
     return exp
 
 
-def analyse_export(db: Session, exp: PortabilityExport, actor: str) -> PortabilityExport:
+def analyse_export(db: Session, exp: PortabilityExport, actor: str, cfg: Optional[Config] = None) -> PortabilityExport:
+    cfg = cfg or config()
     from app.models.workspace import Workspace
     move(db, exp, "analysing", actor, "analyse")
     ws = exp.workspaces
@@ -198,11 +251,13 @@ def analyse_export(db: Session, exp: PortabilityExport, actor: str) -> Portabili
     sc = Scope(workspaces=list(ws), watermark={})
     restriction = exporter.restrict(db, sc, exp.classifications)
     analysis = closure.resolve(db, sc, exp.decisions or {})
-    blobs = exporter.prescan(db, sc, exp.classifications, exp.decisions or {}, bool(exp.classifications))
+    blobs = exporter.prescan(db, sc, exp.classifications, exp.decisions or {}, bool(exp.classifications),
+                             policy=cfg.policy)
     estimate = _estimate(db, sc)
     ready = not analysis["unresolved"] and not analysis["blocked"] and blobs["ready"]
     exp.analysis = {"closure": analysis, "restriction": restriction, "estimate": estimate, "blobs": blobs,
                     "identity_profile": (exp.decisions or {}).get("identity_profile"), "ready": ready,
+                    "policy": cfg.policy.describe(),
                     "warnings": _warnings(exp, restriction, analysis, blobs)}
     move(db, exp, "awaiting_approval", actor, "analysed", {"ready": ready})
     return exp
@@ -244,12 +299,16 @@ def _warnings(exp: PortabilityExport, restriction: dict, analysis: dict, blobs: 
                    "refused until the content is corrected")
     if blobs["needs_decision"]:
         out.append(f"{len(blobs['needs_decision'])} blob(s) could not be inspected or carry restricted markers")
+    if blobs.get("uninspected"):
+        out.append(f"{len(blobs['uninspected'])} file(s) will travel UNINSPECTED (opaque or unreadable), labelled as "
+                   "such; an importer must accept the warning")
     if analysis.get("workspaces") and sorted(analysis["workspaces"]) != sorted(exp.workspaces) and exp.mode != "full":
         out.append(f"the closure adds workspaces: {', '.join(sorted(set(analysis['workspaces']) - set(exp.workspaces)))}")
     return out
 
 
-def set_export_decisions(db: Session, exp: PortabilityExport, decisions: dict, actor: str) -> PortabilityExport:
+def set_export_decisions(db: Session, exp: PortabilityExport, decisions: dict, actor: str,
+                         cfg: Optional[Config] = None) -> PortabilityExport:
     expect(exp, "awaiting_approval", "failed")
     bad = {}
     for k, v in decisions.items():
@@ -263,24 +322,30 @@ def set_export_decisions(db: Session, exp: PortabilityExport, decisions: dict, a
             bad[k] = v
     if bad:
         raise ServiceError(f"unknown or unavailable outcomes {bad}", "invalid", 422)
-    if decisions.get("identity_profile") in identity_policy.HIGH_RISK:
+    cfg = cfg or config()
+    if decisions.get("identity_profile") in identity_policy.HIGH_RISK and cfg.policy.full_identity_high_risk:
         exp.risk = "high"
     exp.decisions = {**(exp.decisions or {}), **decisions}
     audit(db, exp, "decide", actor, {"decisions": decisions})
-    return analyse_export(db, exp, actor)
+    return analyse_export(db, exp, actor, cfg)
 
 
 def approve_export(db: Session, exp: PortabilityExport, actor: str, *, admin: bool,
-                   fresh_auth: bool = False, cfg: Optional[Config] = None) -> PortabilityExport:
+                   fresh_auth: bool = False, cfg: Optional[Config] = None,
+                   step_up_how: str = "") -> PortabilityExport:
     if exp.state == "approved":
         return exp
     expect(exp, "awaiting_approval")
     if not admin:
         raise ServiceError("approving an export needs an instance administrator", "forbidden", 403)
-    if exp.risk == "high" and actor == exp.requested_by:
+    pol = (cfg or config()).policy
+    if exp.risk == "high" and actor == exp.requested_by and pol.separation_of_duties:
         raise ServiceError("a high-risk export needs an approver other than its requester", "separation", 403)
     if exp.risk == "high" and not fresh_auth:
-        raise ServiceError("approving a high-risk export needs a recent sign-in: sign in again", "step_up_required", 401)
+        raise ServiceError("approving a high-risk export needs a recent sign-in"
+                           + (" or, with a recent session, an explicit confirmation" if pol.step_up ==
+                              "session_confirmation" else ""), "step_up_required", 401,
+                           {"step_up": step_up_how or "missing"})
     if not (exp.analysis or {}).get("ready"):
         raise ServiceError("dependencies or blobs still need an outcome", "closure", 409,
                            {"unresolved": exp.analysis.get("closure", {}).get("unresolved"),
@@ -288,12 +353,15 @@ def approve_export(db: Session, exp: PortabilityExport, actor: str, *, admin: bo
     if cfg is not None:
         _check_destination(exp.mode, exp.classifications, exp.destination or {}, cfg)
     exp.approved_by = actor
-    move(db, exp, "approved", actor, "approve", {"risk": exp.risk, "step_up": fresh_auth})
+    move(db, exp, "approved", actor, "approve", {"risk": exp.risk, "step_up": step_up_how or fresh_auth,
+                                                 "self_approved": actor == exp.requested_by,
+                                                 "policy": pol.profile, "relaxations": pol.relaxations()})
     return exp
 
 
 def generate_export(engine: Engine, db: Session, exp: PortabilityExport, actor: str, cfg: Config,
                     fresh_auth: bool = False) -> PortabilityExport:
+    started = time.monotonic()
     if exp.state in ("ready_to_publish", "published"):
         return exp
     expect(exp, "approved")
@@ -305,7 +373,9 @@ def generate_export(engine: Engine, db: Session, exp: PortabilityExport, actor: 
     _check_destination(exp.mode, exp.classifications, exp.destination or {}, cfg)
     env = None
     if exp.classifications:
-        env = envelope.Envelope.new(envelope.load_recipients(cfg.recipients[exp.destination["repository"]]))
+        chosen = set(exp.destination.get("recipients") or [])
+        env = envelope.Envelope.new([r for r in envelope.load_recipients(cfg.recipients[exp.destination["repository"]])
+                                     if r.name in chosen])
     move(db, exp, "generating", actor, "generate")
     db.commit()
     out = cfg.export_dir(exp.id)
@@ -322,7 +392,8 @@ def generate_export(engine: Engine, db: Session, exp: PortabilityExport, actor: 
                                      approved_by=exp.approved_by, classifications=exp.classifications,
                                      decisions=exp.decisions, base_manifest=base,
                                      repository={"name": (exp.destination or {}).get("repository")},
-                                     identity_profile=(exp.decisions or {}).get("identity_profile"), envelope=env)
+                                     identity_profile=(exp.decisions or {}).get("identity_profile"), envelope=env,
+                                     policy=cfg.policy, purpose=(exp.decisions or {}).get("purpose"))
         exp = db.get(PortabilityExport, exp.id)
         move(db, exp, "verifying", actor, "generated", {"checkpoint": manifest["watermark"]["checkpoint_sequence"],
                                                         "vector_sha256": manifest["watermark"]["vector_sha256"]})
@@ -339,7 +410,11 @@ def generate_export(engine: Engine, db: Session, exp: PortabilityExport, actor: 
         exp.manifest_sha256 = manifest["_sha256"]
         exp.watermark = manifest["watermark"]
         exp.out_dir = str(out)
-        move(db, exp, "ready_to_publish", actor, "verified", {"report": checked["report"]})
+        metrics = {"seconds": round(time.monotonic() - started, 2), "peak_memory_mb": _peak_memory_mb(),
+                   "rows": checked["report"]["rows"], "artifact_bytes": sum(
+                       c["bytes"] for f in manifest["families"].values() for c in f["chunks"]) + manifest["blobs"]["bytes"]}
+        exp.analysis = {**(exp.analysis or {}), "metrics": metrics}
+        move(db, exp, "ready_to_publish", actor, "verified", {"report": checked["report"], "metrics": metrics})
         db.commit()
     except Exception as e:  # noqa: BLE001 — every failure is recorded on the export
         exporter.secure_delete(out)
@@ -365,7 +440,8 @@ def publish_export(db: Session, exp: PortabilityExport, actor: str, cfg: Config)
     manifest = {**exp.manifest, "_sha256": exp.manifest_sha256}
     try:
         pub = gitrepo.publish(Path(exp.out_dir), manifest, remote=cfg.repositories[repo], work=cfg.work(repo),
-                              signer=cfg.signer, schemas=exporter.json_schemas(), previous_tag=previous)
+                              signer=cfg.signer, schemas=exporter.json_schemas(), previous_tag=previous,
+                              credentials=cfg.git_env(repo))
     except Exception as e:  # noqa: BLE001
         db.rollback()
         exp = db.get(PortabilityExport, exp.id)
@@ -461,6 +537,8 @@ def export_view(exp: PortabilityExport) -> dict:
             "identity_profile": (exp.decisions or {}).get("identity_profile"),
             "labels": labels(exp.manifest, {"git_published": exp.state == "published",
                                             "verified": exp.state in ("ready_to_publish", "publishing", "published")}),
+            "legal_hold": bool(exp.legal_hold), "legal_hold_reason": exp.legal_hold_reason,
+            "purged_at": exp.purged_at.isoformat() if exp.purged_at else None,
             "created_at": exp.created_at.isoformat() if exp.created_at else None}
 
 
@@ -497,7 +575,8 @@ def fetch_git(db: Session, imp: PortabilityImport, actor: str, cfg: Config) -> P
     try:
         if cfg.trusted is None:
             raise ServiceError("no trusted keys are configured (ARGUS_PORTABILITY_TRUSTED_KEYS)", "no_trusted_keys")
-        got = gitrepo.fetch_into_quarantine(url, src["ref"], Path(imp.quarantine_dir), cfg.trusted, limits=cfg.limits)
+        got = gitrepo.fetch_into_quarantine(url, src["ref"], Path(imp.quarantine_dir), cfg.trusted, limits=cfg.limits,
+                                            credentials_env=cfg.git_env(src["repository"]))
         if src.get("expected_commit") and src["expected_commit"] != got.commit:
             raise ServiceError(f"{src['ref']} names {got.commit[:12]}, not the expected {src['expected_commit'][:12]}",
                                "unexpected_commit")
@@ -509,7 +588,8 @@ def fetch_git(db: Session, imp: PortabilityImport, actor: str, cfg: Config) -> P
                 raise ServiceError(f"tag {got.tag} has moved since it was first imported here "
                                    f"(it named {seen.commit[:12]})", "moved_tag")
         if got.previous_tag and not gitrepo.has_commit(Path(imp.quarantine_dir), url, _tag_commit(
-                Path(imp.quarantine_dir), url, got.previous_tag), got.commit):
+                Path(imp.quarantine_dir), url, got.previous_tag, cfg.git_env(src["repository"])), got.commit,
+                cfg.git_env(src["repository"])):
             raise ServiceError(f"the previous export {got.previous_tag} is not in this repository's history",
                                "missing_commit")
     except Exception as e:  # noqa: BLE001
@@ -525,10 +605,10 @@ def fetch_git(db: Session, imp: PortabilityImport, actor: str, cfg: Config) -> P
     return imp
 
 
-def _tag_commit(qdir: Path, url: str, tag: str) -> str:
+def _tag_commit(qdir: Path, url: str, tag: str, credentials: Optional[dict] = None) -> str:
     repo = qdir / "repo.git"
     gitrepo.git(["fetch", "-q", "--no-tags", "--no-recurse-submodules", url, f"+refs/tags/{tag}:refs/tags/{tag}"],
-                cwd=repo, check=False)
+                cwd=repo, check=False, env=credentials)
     r = gitrepo.git(["rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}"], cwd=repo, check=False)
     return r.stdout.strip() or "0" * 40
 
@@ -621,6 +701,11 @@ def dry_run(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
     if imp.mode == "evidence":
         report["ready"] = True
         report["note"] = "evidence-only: kept read-only, nothing loaded into active state"
+    uninspected = (imp.manifest.get("blobs") or {}).get("inspection", {}).get("uninspected", 0)
+    if uninspected:
+        report["uninspected_content"] = {"count": uninspected, "warning": f"{uninspected} file(s) in this archive "
+                                         "were not inspected at export (opaque or unreadable); approving the import "
+                                         "accepts them", "items": (imp.manifest.get("blobs") or {}).get("uninspected", [])[:50]}
     if imp.mode == "selective" and not plan.selected:
         report.setdefault("blocking", []).append({"family": "workspaces", "key": "-",
                                                   "reason": "a selective import names the workspaces it takes "
@@ -647,15 +732,23 @@ def dry_run(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
     return imp
 
 
-def approve_import(db: Session, imp: PortabilityImport, actor: str) -> PortabilityImport:
+def approve_import(db: Session, imp: PortabilityImport, actor: str, *, acknowledge_uninspected: bool = False,
+                   cfg: Optional[Config] = None) -> PortabilityImport:
     if imp.state == "approved":
         return imp
     expect(imp, "awaiting_approval")
+    pol = (cfg or config()).policy
     restricted = bool((imp.manifest.get("classifications") or {}).get("included"))
-    if (imp.mode in ("merge", "restore") or restricted) and actor == imp.requested_by:
+    if (imp.mode in ("merge", "restore") or restricted) and actor == imp.requested_by and pol.separation_of_duties:
         raise ServiceError("this import needs an approver other than its requester", "separation", 403)
+    uninspected = (imp.manifest.get("blobs") or {}).get("inspection", {}).get("uninspected", 0)
+    if uninspected and not acknowledge_uninspected:
+        raise ServiceError(f"the archive carries {uninspected} uninspected file(s): accept the warning to approve",
+                           "acknowledgement_required", 409, {"uninspected": uninspected})
     imp.approved_by = actor
-    move(db, imp, "approved", actor, "approve")
+    move(db, imp, "approved", actor, "approve", {"accepted_uninspected": uninspected or None,
+                                                 "self_approved": actor == imp.requested_by,
+                                                 "policy": pol.profile, "relaxations": pol.relaxations()})
     return imp
 
 
@@ -787,6 +880,7 @@ def finalize(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
     if not (imp.reconciliation or {}).get("passed"):
         raise ServiceError("the reconciliation did not pass", "reconciliation_failed")
     plan = None
+    started = time.monotonic()
     try:
         promoted = None
         if imp.mode != "evidence" and not imp.reconciliation.get("already_applied"):
@@ -805,7 +899,9 @@ def finalize(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
         if git.get("tag") and db.get(PortabilityTagSeen, (git["repository_id"], git["tag"])) is None:
             db.add(PortabilityTagSeen(repository_id=git["repository_id"], tag=git["tag"], commit=git["commit"],
                                       tag_object=git["tag_object"], import_id=imp.id))
-        detail = {"reconciliation_sha256": imp.reconciliation_sha256}
+        detail = {"reconciliation_sha256": imp.reconciliation_sha256,
+                  "metrics": {"promotion_seconds": round(time.monotonic() - started, 2),
+                              "peak_memory_mb": _peak_memory_mb()}}
         if promoted is not None:
             imp.reconciliation = {**imp.reconciliation, "promotion": {
                 k: promoted[k] for k in ("origin_chain", "rebuild", "passed")}}
@@ -855,7 +951,8 @@ def import_view(imp: PortabilityImport) -> dict:
     return {"id": imp.id, "mode": imp.mode, "state": imp.state, "source": imp.source, "commit": imp.commit,
             "requested_by": imp.requested_by, "approved_by": imp.approved_by, "decisions": imp.decisions,
             "manifest": {k: m.get(k) for k in ("export_id", "mode", "workspaces", "watermark", "argus", "labels",
-                                                 "classifications", "base", "blobs", "identity")} if m else None,
+                                               "policy", "purpose", "classifications", "base", "blobs",
+                                               "identity")} if m else None,
             "verification": {k: v for k, v in (imp.verification or {}).items() if k != "plain"},
             "dry_run": imp.dry_run,
             "checkpoints": {"done": len((imp.checkpoints or {}).get("done") or [])},
@@ -865,6 +962,8 @@ def import_view(imp: PortabilityImport) -> dict:
             "labels": labels(m, {"git_published": bool(git.get("tag")),
                                  "verified": imp.state not in ("created", "fetching", "quarantined", "verifying",
                                                                "invalid")}),
+            "legal_hold": bool(imp.legal_hold), "legal_hold_reason": imp.legal_hold_reason,
+            "purged_at": imp.purged_at.isoformat() if imp.purged_at else None,
             "created_at": imp.created_at.isoformat() if imp.created_at else None}
 
 
@@ -885,23 +984,39 @@ def provenance(db: Session, imp: PortabilityImport) -> dict:
 # --------------------------------------------------------------------------- evidence
 
 def _reader(cfg: Config, viewer) -> bool:
-    """Whether a viewer may read restricted rows of evidence: an explicit institutional list, never
-    implied by being an administrator."""
+    """Whether a viewer may read every restricted row of evidence: an explicit institutional list,
+    never implied by being an administrator."""
     return bool(cfg.evidence_readers & {getattr(viewer, "id", None), getattr(viewer, "email", None)})
 
 
-def _evidence_filter(imp: PortabilityImport, cfg: Config, full: bool):
-    """A predicate for rows a viewer without restricted grants may see: no restricted record, nothing
-    naming one, no personal identity data."""
+def _administered(db: Session, cfg: Config, imp: PortabilityImport, viewer) -> set:
+    """The archive's workspaces whose local namesake this viewer administers: under the trusted policy,
+    a workspace administrator reads the evidence of their own workspace."""
+    if viewer is None or not cfg.policy.evidence_workspace_admins:
+        return set()
+    from app.services.permissions import has_permission
+    out = set()
+    for w in imp.manifest.get("workspaces", []):
+        try:
+            if not getattr(viewer, "is_admin", False) and has_permission(db, viewer, w, "manage_members", "workspace"):
+                out.add(w)
+        except Exception:  # noqa: BLE001 — a workspace that does not exist here
+            continue
+    return out
+
+
+def _evidence_filter(imp: PortabilityImport, cfg: Config, full: bool, administered: set = frozenset()):
+    """A predicate for rows a viewer may see: restricted records, rows naming them, and personal identity
+    data only for evidence readers — or, for a workspace administrator, those of their own workspace."""
     from app.portability.families import BY_NAME
     base = cfg.evidence(imp.id) / "checkpoint"
-    restricted: set = set()
+    restricted: dict = {}
     for name in ("assets", "tickets"):
         for c in (imp.manifest["families"].get(name) or {}).get("chunks", []):
             for _, r in chunks.read_chunk(base / c["file"], name, cfg.limits):
                 cls = ((r.get("attributes") or {}).get("classification") or "")
                 if isinstance(cls, str) and cls.startswith("restricted:"):
-                    restricted.add(r["uid"])
+                    restricted[r["uid"]] = r.get("workspace_id")
 
     def visible(family: str, row: dict) -> bool:
         if full:
@@ -909,10 +1024,11 @@ def _evidence_filter(imp: PortabilityImport, cfg: Config, full: bool):
         if family == "identities" and imp.manifest.get("identity", {}).get("profile") == "full_identity":
             return False
         fam = BY_NAME.get(family)
-        for col in (fam.subjects if fam else ()):
-            if row.get(col) in restricted:
+        named = [row.get(col) for col in (fam.subjects if fam else ())] + [row.get("uid")]
+        for uid in named:
+            if uid in restricted and restricted[uid] not in administered:
                 return False
-        return row.get("uid") not in restricted
+        return True
     return visible
 
 
@@ -921,7 +1037,8 @@ def evidence_families(db: Session, imp: PortabilityImport, cfg: Config, viewer, 
     if imp.mode != "evidence":
         raise ServiceError("only an evidence import is browsed from its archive", "invalid", 422)
     full = _reader(cfg, viewer)
-    visible = _evidence_filter(imp, cfg, full)
+    administered = _administered(db, cfg, imp, viewer)
+    visible = _evidence_filter(imp, cfg, full, administered)
     out = []
     for name, fam in imp.manifest["families"].items():
         n = 0
@@ -930,21 +1047,23 @@ def evidence_families(db: Session, imp: PortabilityImport, cfg: Config, viewer, 
                      if visible(name, r))
         if n or full:
             out.append({"family": name, "visible_rows": n})
-    audit(db, imp, "evidence_list", actor, {"restricted_reader": full})
+    audit(db, imp, "evidence_list", actor, {"restricted_reader": full, "workspace_admin_of": sorted(administered)})
     return out
 
 
 def evidence_rows(db: Session, imp: PortabilityImport, cfg: Config, family: str, offset: int, limit: int,
                   viewer=None, actor: str = "system") -> dict:
     """Browse an evidence archive. Restricted rows (and personal identity data under a full-identity
-    profile) are shown only to the institution's evidence readers; counts are of visible rows only.
-    Every read is audited. Evidence is browsed only: not searched, not indexed, not downloadable."""
+    profile) are shown only to the institution's evidence readers and, under the trusted policy, to a
+    workspace's administrators for that workspace; counts are of visible rows only. Every read is
+    audited. Evidence is browsed only: not searched, not indexed, not downloadable."""
     expect(imp, "finalized")
     if imp.mode != "evidence":
         raise ServiceError("only an evidence import is browsed from its archive", "invalid", 422)
     fam = (imp.manifest or {}).get("families", {}).get(family)
     full = _reader(cfg, viewer)
-    visible = _evidence_filter(imp, cfg, full)
+    administered = _administered(db, cfg, imp, viewer)
+    visible = _evidence_filter(imp, cfg, full, administered)
     if fam is None:
         raise ServiceError(f"no family {family!r}", "not_found", 404)
     rows, i = [], 0
@@ -958,5 +1077,60 @@ def evidence_rows(db: Session, imp: PortabilityImport, cfg: Config, family: str,
     if i == 0 and not full:
         raise ServiceError(f"no family {family!r}", "not_found", 404)     # not even its existence
     audit(db, imp, "evidence_read", actor, {"family": family, "offset": offset, "returned": len(rows),
-                                            "restricted_reader": full})
+                                            "restricted_reader": full, "workspace_admin_of": sorted(administered)})
     return {"family": family, "total": i, "offset": offset, "rows": rows}
+
+
+# --------------------------------------------------------------------------- retention, legal holds
+
+def set_legal_hold(db: Session, subject, on: bool, reason: str, actor: str):
+    """Suspend (or resume) automatic deletion of an export's or import's files. Audited."""
+    if on and not reason.strip():
+        raise ServiceError("a legal hold needs a reason", "invalid", 422)
+    subject.legal_hold = on
+    subject.legal_hold_reason = reason.strip() if on else None
+    audit(db, subject, "legal_hold" if on else "legal_hold_released", actor, {"reason": reason.strip() or None})
+    return subject
+
+
+EXPORT_DONE = ("published", "ready_to_publish", "failed", "revoked", "expired")
+IMPORT_DONE = ("finalized", "discarded", "failed", "invalid")
+
+
+def cleanup(db: Session, cfg: Config, actor: str = "retention", now: Optional[datetime] = None) -> dict:
+    """Delete the files of exports and imports older than the retention period (archives, quarantine,
+    staging databases and files, evidence copies), unless a legal hold suspends it. The records, their
+    audit, Git history and artifacts already published are kept. Every deletion is audited."""
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=cfg.policy.retention_days)
+    report = {"exports": [], "imports": [], "held": 0}
+    for exp in db.scalars(select(PortabilityExport).where(PortabilityExport.created_at < cutoff,
+                                                          PortabilityExport.purged_at.is_(None),
+                                                          PortabilityExport.state.in_(EXPORT_DONE))):
+        if exp.legal_hold:
+            report["held"] += 1
+            continue
+        if exp.out_dir:
+            exporter.secure_delete(Path(exp.out_dir))
+        if exp.state in ("published", "ready_to_publish"):
+            move(db, exp, "expired", actor, "expire", {"retention_days": cfg.policy.retention_days})
+        exp.purged_at = now
+        audit(db, exp, "purged", actor, {"what": "local archive files", "retention_days": cfg.policy.retention_days})
+        report["exports"].append(exp.id)
+    for imp in db.scalars(select(PortabilityImport).where(PortabilityImport.created_at < cutoff,
+                                                          PortabilityImport.purged_at.is_(None),
+                                                          PortabilityImport.state.in_(IMPORT_DONE))):
+        if imp.legal_hold:
+            report["held"] += 1
+            continue
+        staging.drop(db.get_bind().url, (imp.staging or {}).get("database"))
+        for p in (Path(imp.quarantine_dir) if imp.quarantine_dir else None, cfg.staged_files(imp.id),
+                  cfg.evidence(imp.id)):
+            if p is not None:
+                exporter.secure_delete(p)
+        imp.purged_at = now
+        audit(db, imp, "purged", actor, {"what": "quarantine, staging and evidence files",
+                                         "retention_days": cfg.policy.retention_days})
+        report["imports"].append(imp.id)
+    db.flush()
+    return report

@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { portabilityApi, problemText, workspacesApi } from "../../../api/client";
 import type { Dependency, ExportView } from "../../../api/portabilityTypes";
-import { ActionButton, bytes, Empty, ErrorBox, EXPORT_STEPS, KV, Labels, Mono, Section, StateBadge, Steps, when } from "./shared";
+import { ActionButton, bytes, Empty, ErrorBox, EXPORT_STEPS, JobsPanel, KV, Labels, LegalHold, Mono, PolicySummary, Section,
+  StateBadge, Steps, UninspectedList, useJob, when } from "./shared";
 
 const OUTCOME_HELP: Record<string, string> = {
   include_workspace: "add that workspace to the export",
@@ -17,6 +18,8 @@ export function ExportDetailPage() {
   const qc = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: workspacesApi.me });
   const exp = useQuery({ queryKey: ["portability-export", id], queryFn: () => portabilityApi.getExport(id) });
+  const cfg = useQuery({ queryKey: ["portability-config"], queryFn: portabilityApi.config });
+  const [confirmed, setConfirmed] = useState(false);
   const generated = !!exp.data?.manifest_sha256;
   const manifest = useQuery({ queryKey: ["portability-manifest", id], queryFn: () => portabilityApi.manifest(id),
                               enabled: generated });
@@ -31,8 +34,21 @@ export function ExportDetailPage() {
     setError(problemText(e));
     void qc.invalidateQueries({ queryKey: ["portability-export", id] });
   };
-  const step = useMutation({ mutationFn: (s: "approve" | "generate" | "publish-git") => portabilityApi.exportStep(id, s),
-                             onSuccess: done, onError: fail });
+  const reload = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ["portability-export", id] });
+    void qc.invalidateQueries({ queryKey: ["portability-exports"] });
+    void qc.invalidateQueries({ queryKey: ["portability-manifest", id] });
+  }, [qc, id]);
+  const { job, setJob, running } = useJob(reload);
+  // Approving is quick; generating and publishing run as background jobs the page polls.
+  const step = useMutation({
+    mutationFn: async (s: "approve" | "generate" | "publish-git") => {
+      if (s === "approve") return portabilityApi.exportStep(id, s, { confirm: confirmed });
+      const { job: started } = await portabilityApi.exportJob(id, s, { confirm: confirmed });
+      setJob(started);
+      return null;
+    },
+    onSuccess: (v) => { if (v) done(v); else setError(null); }, onError: fail });
   const [reason, setReason] = useState("");
   const revoke = useMutation({ mutationFn: () => portabilityApi.revokeExport(id, reason), onSuccess: done, onError: fail });
   const download = useMutation({
@@ -52,7 +68,10 @@ export function ExportDetailPage() {
   if (!exp.data) return <p className="text-sm text-slate-500">Loading…</p>;
   const e = exp.data;
   const myEmail = me.data?.email;
-  const selfApproval = e.risk === "high" && myEmail === e.requested_by;
+  const policy = cfg.data?.policy;
+  const selfApproval = e.risk === "high" && myEmail === e.requested_by && !!policy?.separation_of_duties;
+  const needsConfirm = e.risk === "high" && policy?.step_up === "session_confirmation";
+  const uninspected = e.analysis.blobs?.uninspected ?? [];
   const busy = step.isPending ? step.variables : null;
 
   return (
@@ -76,21 +95,31 @@ export function ExportDetailPage() {
         <div className="flex flex-wrap items-center gap-3">
           {e.state === "awaiting_approval" && (
             <>
+              {needsConfirm && (
+                <label className="flex items-center gap-2 text-sm text-slate-700"
+                       title="Your identity provider does not report when you last signed in: confirm this step explicitly">
+                  <input type="checkbox" checked={confirmed} onChange={(ev) => setConfirmed(ev.target.checked)} />
+                  I confirm this high-risk approval
+                </label>
+              )}
               <ActionButton label="Approve" busy={busy === "approve"} onClick={() => step.mutate("approve")}
                             disabled={!e.analysis.ready || selfApproval}
                             title={selfApproval ? "A high-risk export needs another approver" : undefined}
                             confirm={`Approve this ${e.risk === "high" ? "high-risk " : ""}export?`} />
               {!e.analysis.ready && <span className="text-sm text-amber-800">Give every dependency an outcome first.</span>}
               {selfApproval && <span className="text-sm text-amber-800">You requested it: another administrator must approve.</span>}
+              {uninspected.length > 0 && <span className="text-sm text-amber-800">{uninspected.length} file(s) will travel uninspected.</span>}
             </>
           )}
           {e.state === "approved" && (
-            <ActionButton label="Generate" busy={busy === "generate"} onClick={() => step.mutate("generate")} />
+            <ActionButton label="Generate" busy={busy === "generate" || (running && job?.action === "generate")}
+                          disabled={running} onClick={() => step.mutate("generate")} />
           )}
           {e.state === "ready_to_publish" && (
             <>
-              <ActionButton label="Publish to Git" busy={busy === "publish-git"} onClick={() => step.mutate("publish-git")}
-                            disabled={!e.destination.repository}
+              <ActionButton label="Publish to Git" busy={busy === "publish-git" || (running && job?.action === "publish-git")}
+                            onClick={() => step.mutate("publish-git")}
+                            disabled={!e.destination.repository || running}
                             confirm={`Commit and tag this checkpoint in ${e.destination.repository}? A published tag cannot be withdrawn from history.`} />
               {!e.destination.repository && <span className="text-sm text-slate-500">No repository was chosen: download it instead.</span>}
             </>
@@ -101,6 +130,8 @@ export function ExportDetailPage() {
               {download.isPending ? "Preparing…" : "Download checkpoint (.tar)"}
             </button>
           )}
+          {running && <span className="text-sm text-sky-700">{job?.action.replace("-", " ")} is {job?.state}… this page updates by itself.</span>}
+          {job?.state === "failed" && <span className="text-sm text-rose-700">{job.action} failed: {job.error?.error}</span>}
           {e.state === "published" && <span className="text-sm text-emerald-700">Published. Import it elsewhere by its tag.</span>}
           {(e.state === "revoked" || e.state === "expired") && <span className="text-sm text-slate-500">This export is {e.state}.</span>}
           {!["revoked", "expired", "generating", "verifying", "publishing"].includes(e.state) && (
@@ -120,7 +151,9 @@ export function ExportDetailPage() {
             ["Requested by", e.requested_by], ["Approved by", e.approved_by ?? "—"], ["Created", when(e.created_at)],
             ["Repository", e.destination.repository ?? "none"], ["Artifact store", e.destination.artifact_store ?? "none"],
             ["Restricted classes included", e.classifications.length ? `${e.classifications.join(", ")} (encrypted)` : "none"],
+            ["Purpose", e.decisions.purpose?.replace(/_/g, " ")],
             ["People", e.identity_profile?.replace(/_/g, " ")],
+            ["Generation", e.analysis.metrics ? `${e.analysis.metrics.seconds} s · peak ${e.analysis.metrics.peak_memory_mb} MB · ${e.analysis.metrics.rows} rows · ${bytes(e.analysis.metrics.artifact_bytes)}` : undefined],
             ["Base export", e.base_export_id ? <Link className="text-indigo-700 hover:underline" to={`/admin/portability/exports/${e.base_export_id}`}>{e.base_export_id}</Link> : undefined],
           ]} />
         </Section>
@@ -140,6 +173,8 @@ export function ExportDetailPage() {
           )}
         </Section>
       </div>
+
+      <JobsPanel subject={e.id} current={job} />
 
       <Dependencies e={e} onSaved={done} onError={fail} />
       <BlobReview e={e} onSaved={done} onError={fail} />
@@ -162,6 +197,22 @@ export function ExportDetailPage() {
       )}
 
       {manifest.data && <ManifestView m={manifest.data.manifest} sha={manifest.data.sha256} />}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {(manifest.data?.manifest.policy ?? policy) && (
+          <Section title={manifest.data?.manifest.policy ? "Policy this archive was made under" : "Policy in force"}>
+            <PolicySummary policy={(manifest.data?.manifest.policy ?? policy)!} />
+          </Section>
+        )}
+        {cfg.data?.is_admin && (
+          <Section title="Retention">
+            <p className="mb-2 text-xs text-slate-500">Local archive files are deleted {policy?.retention_days ?? 90} days after the
+              request unless held; Git history and the audit trail are kept.</p>
+            <LegalHold kind="exports" id={e.id} on={e.legal_hold} reason={e.legal_hold_reason} purgedAt={e.purged_at}
+                       onChange={reload} />
+          </Section>
+        )}
+      </div>
     </div>
   );
 }
@@ -277,6 +328,7 @@ function BlobReview({ e, onSaved, onError }: { e: ExportView; onSaved: (v: Expor
         </table>
       )}
       {b.excluded.length > 0 && <p className="mt-2 text-xs text-slate-500">{b.excluded.length} file(s) left out by decision.</p>}
+      {(b.uninspected ?? []).length > 0 && <div className="mt-3"><UninspectedList items={b.uninspected!} /></div>}
     </Section>
   );
 }

@@ -107,13 +107,23 @@ def _sniff(data: bytes, mime: Optional[str], name: str) -> str:
     return "opaque"
 
 
-def extract(data: bytes, mime: Optional[str], name: str, limits: ScanLimits = LIMITS, depth: int = 0
-            ) -> Iterator[tuple[str, str]]:
+READER_OF = {"text": "text", "email": "email", "pdf": "pdf", "office": "office", "zip": "archive", "tar": "archive"}
+ALL_READERS = ("text", "email", "pdf", "office", "archive")
+
+
+class ReaderDisabled(UnreadableBlob):
+    """A format whose reader is not enabled by the policy: kept as opaque, with a warning."""
+
+
+def extract(data: bytes, mime: Optional[str], name: str, limits: ScanLimits = LIMITS, depth: int = 0,
+            readers: tuple = ALL_READERS) -> Iterator[tuple[str, str]]:
     """(location, text) pieces of a blob's content. Raises UnreadableBlob for what cannot be read
     within the limits; yields nothing for opaque content (the caller decides)."""
     if len(data) > limits.max_bytes:
         raise UnreadableBlob(f"over {limits.max_bytes} bytes")
     kind = _sniff(data, mime, name)
+    if kind in READER_OF and READER_OF[kind] not in readers:
+        raise ReaderDisabled(f"the {READER_OF[kind]} reader is not enabled")
     if kind == "text":
         yield "", data.decode("utf-8", errors="replace")[: limits.max_text]
     elif kind == "email":
@@ -127,7 +137,7 @@ def extract(data: bytes, mime: Optional[str], name: str, limits: ScanLimits = LI
             payload = part.get_payload(decode=True) or b""
             if depth >= limits.max_depth:
                 raise UnreadableBlob("e-mail nesting beyond the limit")
-            for loc, text in extract(payload, part.get_content_type(), part.get_filename() or "", limits, depth + 1):
+            for loc, text in extract(payload, part.get_content_type(), part.get_filename() or "", limits, depth + 1, readers):
                 yield f"part{i}:{part.get_filename() or part.get_content_type()}{'/' + loc if loc else ''}", text
     elif kind == "pdf":
         from pypdf import PdfReader
@@ -146,11 +156,11 @@ def extract(data: bytes, mime: Optional[str], name: str, limits: ScanLimits = LI
         except Exception as e:  # noqa: BLE001 — a malformed PDF is uninspectable, not ok
             raise UnreadableBlob(f"unreadable PDF ({type(e).__name__})") from e
     elif kind == "office":
-        yield from _zip(data, limits, depth, office=True)
+        yield from _zip(data, limits, depth, office=True, readers=readers)
     elif kind == "zip":
-        yield from _zip(data, limits, depth, office=False)
+        yield from _zip(data, limits, depth, office=False, readers=readers)
     elif kind == "tar":
-        yield from _tar(data, limits, depth)
+        yield from _tar(data, limits, depth, readers=readers)
     elif kind == "ole":
         raise UnreadableBlob("legacy binary Office format: not read (it may carry macros)")
     # opaque: nothing to yield
@@ -168,7 +178,8 @@ def _xml_text(raw: bytes) -> str:
     return text.decode("utf-8", errors="replace")
 
 
-def _zip(data: bytes, limits: ScanLimits, depth: int, office: bool) -> Iterator[tuple[str, str]]:
+def _zip(data: bytes, limits: ScanLimits, depth: int, office: bool, readers: tuple = ALL_READERS
+         ) -> Iterator[tuple[str, str]]:
     if depth >= limits.max_depth:
         raise UnreadableBlob("archive nesting beyond the limit")
     try:
@@ -198,17 +209,17 @@ def _zip(data: bytes, limits: ScanLimits, depth: int, office: bool) -> Iterator[
             yield m.filename, _xml_text(raw)
         elif office:
             if not name.endswith((".png", ".jpeg", ".jpg", ".emf", ".wmf", ".gif", ".bin")):
-                for loc, text in extract(raw, None, m.filename, limits, depth + 1):
+                for loc, text in extract(raw, None, m.filename, limits, depth + 1, readers):
                     yield f"{m.filename}/{loc}" if loc else m.filename, text
         else:
             k = _sniff(raw, None, m.filename)
             if k == "opaque":
                 raise UnreadableBlob(f"opaque entry {m.filename} inside an archive")
-            for loc, text in extract(raw, None, m.filename, limits, depth + 1):
+            for loc, text in extract(raw, None, m.filename, limits, depth + 1, readers):
                 yield f"{m.filename}/{loc}" if loc else m.filename, text
 
 
-def _tar(data: bytes, limits: ScanLimits, depth: int) -> Iterator[tuple[str, str]]:
+def _tar(data: bytes, limits: ScanLimits, depth: int, readers: tuple = ALL_READERS) -> Iterator[tuple[str, str]]:
     if depth >= limits.max_depth:
         raise UnreadableBlob("archive nesting beyond the limit")
     try:
@@ -230,16 +241,19 @@ def _tar(data: bytes, limits: ScanLimits, depth: int) -> Iterator[tuple[str, str
         raw = t.extractfile(m).read()
         if _sniff(raw, None, m.name) == "opaque":
             raise UnreadableBlob(f"opaque entry {m.name} inside an archive")
-        for loc, text in extract(raw, None, m.name, limits, depth + 1):
+        for loc, text in extract(raw, None, m.name, limits, depth + 1, readers):
             yield f"{m.name}/{loc}" if loc else m.name, text
 
 
 def scan(digest: str, data: bytes, mime: Optional[str], name: str, where: str,
-         limits: ScanLimits = LIMITS) -> BlobReport:
-    """Inspect one blob. `where` names it (family, key, column) in findings."""
+         limits: ScanLimits = LIMITS, readers: tuple = ALL_READERS) -> BlobReport:
+    """Inspect one blob. `where` names it (family, key, column) in findings. A format whose reader the
+    policy has not enabled is reported as opaque — preserved, labelled, never parsed."""
     try:
         kind = kind_of(data, mime, name)
-        pieces = list(extract(data, mime, name, limits))
+        pieces = list(extract(data, mime, name, limits, readers=readers))
+    except ReaderDisabled as e:
+        return BlobReport(digest, "opaque", kind_of(data, mime, name), reason=str(e))
     except UnreadableBlob as e:
         return BlobReport(digest, "uninspectable", reason=str(e))
     if kind == "opaque":
