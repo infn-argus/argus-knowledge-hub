@@ -146,3 +146,189 @@ def test_the_ai_proposes_what_unrecognised_channels_drive_and_nothing_is_confirm
     assert db.query(Relation).filter(Relation.from_asset_uid == device.uid,
                                      Relation.relation_type == "acts on").count() == 0
     db.close()
+
+
+# --- a workspace nobody seeded (bugs/importing-epik8s.txt) ---------------------------------------------
+
+@pytest.fixture()
+def unseeded(monkeypatch):
+    """A beamline workspace with no object types, next to a catalogue holding the shared (global) set: what
+    a workspace created in the web app looks like before anyone runs the seeder."""
+    t = secrets.token_hex(3)
+    tag, ws, cat = f"T{t}".upper(), f"bare-{t}", f"cat-{t}"
+    db = SessionLocal()
+    db.add_all([Workspace(id=w, name=w) for w in (ws, cat)])
+    db.flush()
+    at.ensure_asset_types(db, cat, scope=at.SCOPE_GLOBAL)
+    db.commit()
+    db.close()
+    monkeypatch.setattr(epik8s_import, "_fetch", lambda *a, **k: CONFIG.replace("BEAMLINE", tag))
+    monkeypatch.setattr(epik8s_import, "_resolve_commit", lambda *a, **k: "abc123")
+    yield {"tag": tag, "ws": ws, "cat": cat}
+    db = SessionLocal()
+    from app.ledger.audit import allow_purge
+    for w in (ws, cat):
+        allow_purge(db)
+        db.delete(db.get(Workspace, w))
+        db.commit()
+    db.close()
+
+
+def test_the_web_import_seeds_a_workspace_nobody_seeded_as_the_cli_does(unseeded):
+    db = SessionLocal()
+    others = {w for w in db.scalars(__import__("sqlalchemy").select(Schema.workspace_id).where(
+        Schema.is_global.is_(True), Schema.workspace_id != unseeded["cat"]))}
+    db.close()
+    if others:
+        pytest.skip(f"another catalogue exists in this database ({sorted(others)}): the import would ask which")
+    run(unseeded, infer_elements=True)
+    db = SessionLocal()
+    job = db.query(ImportJob).filter(ImportJob.workspace_id == unseeded["ws"]).one()
+    assert job.status == "completed", job.error
+    # Its own beamline types hang from the catalogue; the shared ones are used where they are.
+    assert at.catalogue_of(db, unseeded["ws"]) == unseeded["cat"]
+    usable = at.resolve_type_uids(db, unseeded["ws"])
+    assert {"Quadrupole", "Dipole", "Beam Position Monitor", "IOC", "Power Supply"} <= set(usable)
+    # a shared type (Power Supply) is used from the catalogue, not copied into the beamline
+    assert db.query(Schema).filter(Schema.workspace_id == unseeded["ws"], Schema.name == "Power Supply").count() == 0
+    assert db.query(Schema).filter(Schema.workspace_id == unseeded["ws"], Schema.name == "Quadrupole").count() == 1
+    db.close()
+
+
+def test_seeding_for_an_import_picks_the_right_catalogue(unseeded):
+    db = SessionLocal()
+    try:
+        # Several catalogues and no types: the importer is told to choose, not left to guess.
+        other = f"cat2-{secrets.token_hex(3)}"
+        db.add(Workspace(id=other, name=other))
+        db.flush()
+        at.ensure_asset_types(db, other, scope=at.SCOPE_GLOBAL)
+        with pytest.raises(at.CatalogueMissing) as e:
+            at.ensure_for_import(db, unseeded["ws"])
+        assert unseeded["cat"] in str(e.value) and other in str(e.value)
+        # Named explicitly, it hangs from that one; seeded again later, it keeps using it.
+        _seeded, used = at.ensure_for_import(db, unseeded["ws"], unseeded["cat"])
+        assert used == unseeded["cat"]
+        assert at.ensure_for_import(db, unseeded["ws"])[1] == unseeded["cat"]
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_a_self_contained_workspace_stays_self_contained(world):
+    db = SessionLocal()
+    try:
+        result, used = at.ensure_for_import(db, world["ws"])
+        assert used is None and not result.created          # already whole: nothing new, no catalogue imposed
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_a_catalogue_seeded_before_a_shared_type_existed_is_brought_up_to_date(unseeded):
+    """bugs/importing-epik8s.txt, second report: the catalogue lacked Observable (added by the beam model)."""
+    db = SessionLocal()
+    try:
+        obs = db.query(Schema).filter(Schema.workspace_id == unseeded["cat"], Schema.name == "Observable").one()
+        db.delete(obs)
+        db.flush()
+        result, used = at.ensure_for_import(db, unseeded["ws"], unseeded["cat"])
+        assert used == unseeded["cat"] and result.catalogue_created == ["Observable"]
+        assert "Quadrupole" in result.created
+        assert db.query(Schema).filter(Schema.workspace_id == unseeded["cat"], Schema.name == "Observable",
+                                       Schema.is_global.is_(True)).count() == 1
+    finally:
+        db.rollback()
+        db.close()
+
+
+# --- an overlay file (values-linac.yaml) -------------------------------------------------------------
+
+BASE = """
+beamline: BEAMLINE
+namespace: ns-BEAMLINE
+iocDefaults:
+  caenels: {charturl: "https://github.com/infn-epics/ioc-chart.git", devgroup: mag}
+epicsConfiguration:
+  iocs:
+    main-only: {template: caenels, devtype: fastps, iocprefix: MAIN:MAG, devices: [{name: PS, ip: 10.0.0.1}]}
+"""
+
+OVERLAY = """
+epicsConfiguration:
+  iocs:
+    easy-linac-1:
+      template: caenels
+      devtype: easydriver
+      iocprefix: LINAC:MAG:EASY
+      devices:
+        - {name: CHHLL023, ip: 192.168.190.190, port: 10001, zones: LINAC}
+        - {name: CVVLL023, ip: 192.168.190.191, port: 10001, zones: LINAC}
+"""
+
+
+def test_an_overlay_takes_its_beamline_and_template_defaults_from_values_yaml(unseeded, monkeypatch):
+    """bugs: values-linac.yaml has no `beamline` nor `iocDefaults`; imported alone it made a facility called
+    "unknown" and inferred nothing, since its magnet supplies' devgroup is in values.yaml."""
+    fetched = []
+
+    def fetch(provider, repo, pat, branch, path):
+        fetched.append(path)
+        return {"deploy/values.yaml": BASE, "deploy/values-linac.yaml": OVERLAY}[path].replace(
+            "BEAMLINE", unseeded["tag"].lower())
+    monkeypatch.setattr(epik8s_import, "_fetch", fetch)
+    db = SessionLocal()
+    others = {w for w in db.scalars(__import__("sqlalchemy").select(Schema.workspace_id).where(
+        Schema.is_global.is_(True), Schema.workspace_id != unseeded["cat"]))}
+    db.close()
+    if others:
+        pytest.skip(f"another catalogue exists in this database ({sorted(others)})")
+    run(unseeded, path="deploy/values-linac.yaml", infer_elements=True)
+    assert fetched == ["deploy/values-linac.yaml", "deploy/values.yaml"]
+    db = SessionLocal()
+    job = db.query(ImportJob).filter(ImportJob.workspace_id == unseeded["ws"]).one()
+    assert job.status == "completed", job.error
+    tag = unseeded["tag"]
+    keys = {a.key: a for a in db.query(Asset).filter(Asset.workspace_id == unseeded["ws"])}
+    assert not any(k.startswith("UNKNOWN:") for k in keys)
+    assert f"{tag}:IOC:easy-linac-1" in keys
+    assert f"{tag}:IOC:main-only" not in keys                 # the base's own IOCs are its own import's
+    # its own configuration record, beside (not over) the beamline's
+    assert f"{tag}:CFG:values-linac" in keys and f"{tag}:CFG" not in keys
+    assert job.counts["inferred_elements"] > 0                # caenels' devgroup came from values.yaml
+    db.close()
+
+
+def test_with_base_keeps_the_overlay_and_merges_template_defaults():
+    base = {"beamline": "btf", "namespace": "n", "iocDefaults": {"ocem": {"devgroup": "mag", "devtype": "E642"},
+                                                                  "motor": {"devgroup": "mot"}},
+            "epicsConfiguration": {"iocs": {"a": {}}}, "nfsMounts": [{"name": "data"}]}
+    overlay = {"iocDefaults": {"ocem": {"devtype": "E643"}}, "epicsConfiguration": {"iocs": {"b": {}}}}
+    out = epik8s_import.with_base(overlay, base)
+    assert out["beamline"] == "btf" and out["epicsConfiguration"] == {"iocs": {"b": {}}}
+    assert out["iocDefaults"] == {"ocem": {"devgroup": "mag", "devtype": "E643"}}
+    assert "nfsMounts" not in out
+    assert epik8s_import.base_values_path("deploy/values.yaml", {}) is None
+    assert epik8s_import.base_values_path("deploy/values-linac.yaml", {"beamline": "x"}) is None
+    assert epik8s_import.base_values_path("deploy/values-linac.yaml", {}) == "deploy/values.yaml"
+
+
+def test_two_files_ai_proposals_do_not_withdraw_each_other(world, monkeypatch):
+    """values.yaml and values-linac.yaml shared one `ai-channels:` stream: each run's revision replaced the
+    other file's proposals (or was held for retracting them all)."""
+    w = world
+    other = CONFIG.replace("odd-ioc", "odd-ioc2").replace("ZZZ01", "YYY01").replace("EUAPS:ODD", "EUAPS:ODD2")
+    files = {"deploy/values.yaml": CONFIG, "deploy/values-linac.yaml": other}
+    monkeypatch.setattr(epik8s_import, "_fetch",
+                        lambda provider, repo, pat, branch, path: files[path].replace("BEAMLINE", w["tag"]))
+
+    def complete(endpoint, system, user, max_tokens=512, extra=None):
+        return json.dumps({"channels": [{"id": 1, "type": "Chiller", "confidence": 0.7, "reason": "cooling"}]})
+    monkeypatch.setattr("app.services.llm.complete", complete)
+    run(w, path="deploy/values.yaml", infer_elements=True, ai_unrecognised=True)
+    run(w, path="deploy/values-linac.yaml", infer_elements=True, ai_unrecognised=True)
+    db = SessionLocal()
+    names = {a.name for a in db.query(Asset).filter(Asset.workspace_id == w["ws"], Asset.type == "Chiller",
+                                                     Asset.record_status == "Provisional")}
+    assert {"ZZZ01 Chiller", "YYY01 Chiller"} <= names
+    db.close()

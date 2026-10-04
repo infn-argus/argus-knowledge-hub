@@ -41,7 +41,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.schema import Schema
@@ -840,6 +840,7 @@ class SeedResult:
     duplicates: list = field(default_factory=list)   # a same-named type that is not ours
     iconed: list = field(default_factory=list)       # given their default icon (catalogue_icons)
     reused: list = field(default_factory=list)       # a beamline type the catalogue already shares
+    catalogue_created: list = field(default_factory=list)  # shared types added to the catalogue first
 
 
 def _bound(attributes: list, uids: dict) -> list:
@@ -901,6 +902,46 @@ def catalogue_of(db: Session, workspace_id: str) -> Optional[str]:
     homes = list(db.scalars(select(Schema.workspace_id).where(
         Schema.uid.in_(parents), Schema.workspace_id != workspace_id)))
     return max(set(homes), key=homes.count) if homes else None
+
+
+def ensure_for_import(db: Session, workspace_id: str,
+                      catalogue_workspace_id: Optional[str] = None) -> tuple[SeedResult, Optional[str]]:
+    """The types an importer writes, made available before it writes: what the CLI importers always did, and
+    every importer (web ones too) now does, so a workspace nobody seeded imports as well as a seeded one.
+
+    * a workspace already hanging from a catalogue is brought up to date against it;
+    * one seeded on its own (its own types, no catalogue) keeps being self-contained;
+    * one with no types: against the given catalogue, else the only global catalogue there is; with several,
+      the importer is told to choose rather than guess; with none, the whole catalogue goes in this workspace.
+
+    A catalogue seeded before a shared type existed (Observable came with the beam model) is brought up to
+    date first — additive, as seeding it again by hand would be — and the result says what it gained.
+
+    Returns the seed result and the catalogue used (None: self-contained)."""
+    catalogue = catalogue_workspace_id or catalogue_of(db, workspace_id)
+    if catalogue is None:
+        own = db.scalar(select(func.count()).select_from(Schema).where(
+            Schema.workspace_id == workspace_id, Schema.applies_to == "objects"))
+        if not own:
+            homes = sorted({w for w in db.scalars(select(Schema.workspace_id).where(
+                Schema.is_global.is_(True), Schema.applies_to == "objects", Schema.workspace_id != workspace_id))})
+            if len(homes) == 1:
+                catalogue = homes[0]
+            elif len(homes) > 1:
+                raise CatalogueMissing(
+                    f"workspace “{workspace_id}” has no object types yet, and there are several catalogues "
+                    f"({', '.join(homes)}): seed it against one first — `scripts/seed_asset_types.py beamline "
+                    f"{workspace_id} --catalogue <catalogue>`")
+    added: list = []
+    if catalogue:
+        shared = set(db.scalars(select(Schema.name).where(Schema.workspace_id == catalogue,
+                                                         Schema.applies_to == "objects")))
+        if any(n not in shared for n in GLOBAL_TYPES):
+            added = ensure_asset_types(db, catalogue, scope=SCOPE_GLOBAL).created
+    scope = SCOPE_BEAMLINE if catalogue else SCOPE_ALL
+    result = ensure_asset_types(db, workspace_id, scope=scope, catalogue_workspace_id=catalogue)
+    result.catalogue_created = added
+    return result, catalogue
 
 
 def resolve_type_uids(db: Session, workspace_id: str,

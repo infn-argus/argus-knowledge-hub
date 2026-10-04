@@ -156,6 +156,39 @@ def _present(attributes: dict) -> dict:
     return {k: v for k, v in attributes.items() if v not in (None, "", [], {})}
 
 
+# What a partial values file (an overlay such as values-linac.yaml, deployed on top of the beamline's
+# values.yaml) takes from the file beside it: who it belongs to and the templates' defaults, not the other
+# file's IOCs, services or mounts, which that file's own import declares.
+BASE_CONTEXT_KEYS = ("beamline", "namespace", "epik8namespace", "giturl", "gitrev", "baseIp",
+                     "argocdProject", "ingressClassName")
+
+
+def base_values_path(path: str, values: dict) -> Optional[str]:
+    """The values.yaml an overlay sits on, when this file names no beamline of its own; None otherwise."""
+    if str(values.get("beamline") or "").strip():
+        return None
+    folder, _, name = path.rpartition("/")
+    if name in ("values.yaml", "values.yml"):
+        return None
+    return f"{folder}/values.yaml" if folder else "values.yaml"
+
+
+def with_base(values: dict, base: dict) -> dict:
+    """The overlay with the beamline's context filled in from its base: its own keys win, the defaults of the
+    templates it uses are merged per template (an overlay's iocDefaults entry refines the base's)."""
+    out = {k: base[k] for k in BASE_CONTEXT_KEYS if k in base and k not in values}
+    out.update(values)
+    # Only the templates this overlay uses: the others are declared by the base's own import.
+    used = set(values.get("iocDefaults") or {}) | {str(e["template"]) for e in _ioc_entries(
+        (values.get("epicsConfiguration") or {}).get("iocs")) if e.get("template")}
+    defaults = {name: dict(body or {}) for name, body in (base.get("iocDefaults") or {}).items() if name in used}
+    for name, body in (values.get("iocDefaults") or {}).items():
+        defaults[name] = {**defaults.get(name, {}), **(body or {})}
+    if defaults:
+        out["iocDefaults"] = defaults
+    return out
+
+
 def _seed_hint(workspace_id: str) -> str:
     """What to run: shared types go in the catalogue workspace, a beamline's own (magnets, BPMs, RF
     structures) in each beamline, hanging from it."""
@@ -952,13 +985,18 @@ class _Importer:
         """This file at this revision: the one thing every other object is declared
         in, so "what did the configuration say when this broke" has an answer."""
         max_bytes = epics.get("max_array_bytes")
+        config_path = self.source_ref.rsplit(":", 1)[-1]
+        stem = config_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        # values.yaml is the beamline's configuration; an overlay beside it (values-linac.yaml) is one more.
+        key, label = (f"{tag}:CFG", f"{beamline} configuration") if stem in ("values", "") else (
+            f"{tag}:CFG:{stem}", f"{beamline} configuration ({stem})")
         self.cfg = self.upsert(
-            "Control Configuration", f"{tag}:CFG", f"{beamline} configuration",
+            "Control Configuration", key, label,
             _present({
                 "beamline": beamline,
                 "git_url": values.get("giturl"),
                 "git_revision": values.get("gitrev"),
-                "config_path": self.source_ref.rsplit(":", 1)[-1],
+                "config_path": config_path,
                 "namespace": values.get("namespace"),
                 "cluster": values.get("epik8namespace"),
                 "argocd_project": values.get("argocdProject"),
@@ -1373,10 +1411,33 @@ def run_epik8s_import(
         values = yaml.safe_load(text)
         if not isinstance(values, dict):
             raise ValueError(f"{path} did not parse as a mapping — is that the right file?")
+        base_path = base_values_path(path, values)
+        if base_path:
+            # An overlay (values-linac.yaml): no beamline of its own, its templates' defaults in values.yaml.
+            _progress(db, job, f"{path} names no beamline: reading {base_path} beside it for the beamline and "
+                               "its templates' defaults")
+            try:
+                base = yaml.safe_load(_fetch(provider, repo_url, pat, branch, base_path))
+            except Exception as e:
+                raise ValueError(f"{path} names no beamline, and {base_path} beside it, which would, could not "
+                                 f"be read ({e}). Import a file that says `beamline:`.") from e
+            if not isinstance(base, dict) or not str(base.get("beamline") or "").strip():
+                raise ValueError(f"{path} names no beamline, and neither does {base_path} beside it.")
+            values = with_base(values, base)
 
         # The revision, not the branch: a branch names whatever is newest, so
         # "which revision said so" needs the commit it pointed at when read.
         revision = _resolve_commit(provider, repo_url, pat, branch) or branch
+        # The catalogue's types first, as the CLI always did: a workspace nobody seeded imports too.
+        from app.services.asset_types import ensure_for_import
+        seeded, catalogue = ensure_for_import(db, workspace_id)
+        if seeded.catalogue_created:
+            _progress(db, job, f"The catalogue {catalogue} gained {len(seeded.catalogue_created)} shared type(s) "
+                               f"it lacked ({', '.join(seeded.catalogue_created[:5])})")
+        if seeded.created:
+            _progress(db, job, f"Seeded {len(seeded.created)} object type(s) of the catalogue"
+                               + (f" (hanging from {catalogue})" if catalogue else ""))
+        db.commit()
         importer = _Importer(db, job, workspace_id, f"{repo_url}@{revision}:{path}",
                              infer_elements=infer_elements, it_workspace=it_workspace,
                              infer_controllers=infer_controllers, link_inventory=link_inventory)
@@ -1403,7 +1464,8 @@ def run_epik8s_import(
         if ai_unrecognised and importer.unrecognised:
             _progress(db, job, f"Asking the AI about {len(importer.unrecognised)} channel(s) no rule recognised")
             from app.services import epik8s_ai
-            ai = epik8s_ai.propose(db, workspace_id, actor, importer.unrecognised)
+            # Per file: a stream's new revision withdraws the last one's proposals, the other file's included.
+            ai = epik8s_ai.propose(db, workspace_id, actor, importer.unrecognised, source=f"{repo_url}:{path}")
             importer.counts["ai_asked"] = ai.get("asked", 0)
             importer.counts["ai_proposed"] = ai.get("proposed", 0)
             if not ai.get("used"):

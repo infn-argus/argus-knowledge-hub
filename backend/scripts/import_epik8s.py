@@ -43,10 +43,11 @@ With --infer-elements, --infer-controllers also makes the controller box each IO
 address) instead of inferring a twin, as a proposal to confirm under Channels ↔ hardware.
 Asking the AI about unrecognised channels is in the web import only.
 
-The types are seeded first if they are not there: with --catalogue the shared ones
-are used where they are and only this beamline's own are created here; a workspace
-already seeded against a catalogue keeps using it; any other gets the whole
-catalogue. Run it again after the file changes: it updates what the file says and
+The types are seeded first if they are not there (asset_types.ensure_for_import, as the
+web import does): with --catalogue the shared ones are used where they are and only
+this beamline's own are created here; a workspace already seeded against a catalogue
+keeps using it; one with no types hangs from the only catalogue there is (and is told
+to choose when there are several); a self-contained one stays so. Run it again after the file changes: it updates what the file says and
 leaves what has been added since.
 
 Usage (from anywhere, with the backend's virtualenv and DATABASE_URL set):
@@ -100,9 +101,7 @@ def main() -> None:
     from app.db import SessionLocal, engine
     from app.models.import_job import ImportJob
     from app.models.workspace import Workspace
-    from app.services.asset_types import (
-        SCOPE_ALL, SCOPE_BEAMLINE, CatalogueMissing, catalogue_of, ensure_asset_types,
-    )
+    from app.services.asset_types import CatalogueMissing, ensure_for_import
     from app.services.epik8s_import import _Importer
     from app.services.relations import rebuild_asset_relations
 
@@ -110,6 +109,16 @@ def main() -> None:
     if not isinstance(values, dict):
         print(f"{path} did not parse as a mapping: is that the right file?")
         sys.exit(1)
+    from app.services.epik8s_import import base_values_path, with_base
+    base_path = base_values_path(path.replace(os.sep, "/"), values)
+    if base_path:
+        # An overlay (values-linac.yaml): the beamline and its templates' defaults are in values.yaml beside it.
+        base = yaml.safe_load(open(base_path)) if os.path.exists(base_path) else None
+        if not isinstance(base, dict) or not str(base.get("beamline") or "").strip():
+            print(f"{path} names no beamline, and {base_path} beside it does not either (or is missing).")
+            sys.exit(1)
+        print(f"{path} names no beamline: using {base_path} for the beamline and its templates' defaults")
+        values = with_base(values, base)
 
     if dry_run:
         # The importer commits as it goes, so a rollback at the end would undo
@@ -126,11 +135,8 @@ def main() -> None:
             if name and db.get(Workspace, name) is None:
                 print(f"No workspace {name!r}.")
                 sys.exit(1)
-        catalogue = catalogue or catalogue_of(db, workspace_id)
         try:
-            seeded = ensure_asset_types(
-                db, workspace_id, scope=SCOPE_BEAMLINE if catalogue else SCOPE_ALL,
-                catalogue_workspace_id=catalogue)
+            seeded, catalogue = ensure_for_import(db, workspace_id, catalogue)
         except (CatalogueMissing, ValueError) as e:
             print(e)
             sys.exit(1)
@@ -160,6 +166,8 @@ def main() -> None:
 
         beamline = str(values.get("beamline") or "").strip() or "unknown"
         print(f"read {path}: beamline {beamline}")
+        if seeded.catalogue_created:
+            print(f"  (the catalogue {catalogue} gained {len(seeded.catalogue_created)} shared types first)")
         if seeded.created:
             where = f", hanging from {catalogue!r}" if catalogue else ""
             print(f"  ({len(seeded.created)} types created first{where})")

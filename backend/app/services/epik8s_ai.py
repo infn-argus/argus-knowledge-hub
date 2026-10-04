@@ -4,7 +4,9 @@ The import's rules read a channel's metadata and the LNF naming code; a channel 
 about is counted and reported, not guessed at. Here the configured model is asked, for those channels only,
 which kind of equipment each one drives, choosing from the catalogue's equipment types and nothing else.
 
-Its answers are proposals, never records: each becomes, in the workspace's `ai-channels:` stream, an inferred
+Its answers are proposals, never records: each becomes, in the `ai-channels:` stream of the file it came from
+(one per configuration file: a stream's revision replaces the one before, so two files sharing one would each
+withdraw the other's proposals), an inferred
 claim that a unit of that type exists and that the channel acts on it, with the model's reason and confidence.
 Under the default policy an inferred claim is advisory, so the unit waits as Provisional in the review queue
 until a person accepts it (and with it the channel's `acts on`), or rejects it. What was sent and what came
@@ -69,8 +71,13 @@ def _row(n: int, device: Asset, ioc: dict, entry: dict) -> str:
     return "\n".join(parts)
 
 
+def stream_id(workspace_id: str, source: Optional[str] = None) -> str:
+    """The stream a configuration file's proposals live in: values.yaml and values-linac.yaml each their own."""
+    return f"ai-channels:{workspace_id}" + (f":{source}" if source else "")
+
+
 def propose(db: Session, workspace_id: str, actor: str,
-            unrecognised: list[tuple[Asset, dict, dict]]) -> dict:
+            unrecognised: list[tuple[Asset, dict, dict]], source: Optional[str] = None) -> dict:
     """Ask the AI about the channels no rule recognised; write its answers as proposals. Returns a report."""
     from app.intake import secrets
     from app.intake.assist import _payload
@@ -93,12 +100,12 @@ def propose(db: Session, workspace_id: str, actor: str,
         started = time.monotonic()
         try:
             try:
-                reply = complete(ep, SYSTEM, user, max_tokens=80 * len(chunk) + 300, extra=extra)
+                reply = complete(ep, SYSTEM, user, extra=extra)
             except LLMError as exc:
                 if " 400" not in str(exc) and " 422" not in str(exc):
                     raise
                 extra = None
-                reply = complete(ep, SYSTEM, user, max_tokens=80 * len(chunk) + 300)
+                reply = complete(ep, SYSTEM, user)
         except LLMError as exc:
             errors.append(str(exc)[:200])
             break
@@ -140,7 +147,7 @@ def propose(db: Session, workspace_id: str, actor: str,
     if claims:
         content = engine.canonical(sorted(claims, key=engine.canonical)).encode()
         digest = hashlib.sha256(content).hexdigest()
-        stream = engine.register_stream(db, f"ai-channels:{workspace_id}", workspace_id, "ai", may_create=types)
+        stream = engine.register_stream(db, stream_id(workspace_id, source), workspace_id, "ai", may_create=types)
         stream.may_create = sorted(set(stream.may_create or []) | set(types))
         engine.ingest(db, stream.id, revision=digest[:12], content=content, observed_at=engine.now(),
                       parser="resolved", cause="AI classification of unrecognised channels")
