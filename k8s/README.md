@@ -1,274 +1,165 @@
-# Deploying the asset-management API
+# Deploying ARGUS Knowledge Hub
+
+The hub runs on the INFN cloud cluster (`kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt`) as the
+Helm chart in [`charts/argus-knowledge-hub`](../charts/argus-knowledge-hub), deployed by Argo CD
+([`argocd/application.yaml`](argocd/application.yaml)) into the namespace `argus`. The chart is the
+docker-compose setup for a cluster:
+
+| Part | What it is | Address |
+|---|---|---|
+| `argus-postgres` | Postgres 16 with pgvector (Ask ARGUS's written-knowledge search); also Keycloak's database | inside the cluster |
+| `argus-api` | the API; migrates the database when it starts | `https://assets-api.90.147.174.30.myip.cloud.infn.it` |
+| `argus-web` | the web app | `https://assets.90.147.174.30.myip.cloud.infn.it` |
+| `argus-keycloak` | a temporary Keycloak, realm `argus`, for sign-in until INFN's is used | `https://keycloak.90.147.174.30.myip.cloud.infn.it` |
+
+Google sign-in (Firebase) keeps working next to Keycloak: the API accepts both (`api.extraProviders`).
+Certificates come from cert-manager (`letsencrypt-prod-issuer`) through the nginx ingress.
+
+```
+KC="kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt"
+```
 
 ## Releases: a tag is a deployment
 
-Once set up (below), releasing is:
-
 ```
-git tag v1.33.0 && git push origin v1.33.0
+git tag v1.34.0 && git push origin v1.34.0
 ```
 
 `.github/workflows/release.yml` then:
 
 1. runs the backend tests inside the backend image, against Postgres with pgvector, and type-checks
-   and builds the web app; a failure stops the release here, before anything is pushed;
-2. builds both images and pushes them to ghcr.io as `1.33.0` and `latest`;
-3. commits `Deploy 1.33.0` to `main`, setting the two `newTag`s in `k8s/kustomization.yaml`.
+   and builds the web app; a failure stops the release before anything is pushed;
+2. builds both images and pushes them to ghcr.io as `1.34.0` and `latest`. The web app is built
+   with the production Keycloak and API addresses (`WEB_KEYCLOAK`, `WEB_API` in the workflow);
+3. commits `Deploy 1.34.0` to `main`, setting the image tags in
+   `charts/argus-knowledge-hub/values-production.yaml`.
 
-Argo CD watches `k8s/` on `main` (`k8s/argocd/application.yaml`) and rolls that version out. So
-`main` always says which version runs, and going back is reverting the `Deploy` commit (or setting
-`newTag` by hand). The API applies its database migrations on start.
+Argo CD follows `main` and rolls that version out. Going back is reverting the `Deploy` commit.
+Argo CD never deletes (`prune: false`) and puts back hand edits to what it manages (`selfHeal`).
+The volumes are also marked to be kept if the chart or the Application is removed.
 
-What Argo CD manages is what `k8s/kustomization.yaml` lists: the namespace, the API and web app with
-their services and ingresses, and the attachments volume. The Postgres manifests are left out,
-because the cluster may run a pgvector build the manifest does not name. The portability CronJobs are
-left out until their Secret exists. Both are still applied by hand. Argo CD never deletes
-(`prune: false`); it puts back hand edits to what it manages (`selfHeal`).
+## Storage
 
-### Setting it up, once
+The volumes are `local-path`: each lives on one node's own disk, and its size is not enforced; the real
+limit is that disk's free space. The nodes are small (vnode-0, the control plane, 21 GB with under
+2 GB free; vnode-1 and vnode-2, 42 GB each), so `values-production.yaml` places each part:
 
-With `KC="kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt"`:
+| Volume | Planned | Node |
+|---|---|---|
+| `argus-postgres-data` | 10 Gi | vnode-1 |
+| `argus-attachments` | 15 Gi | vnode-2 (with the API) |
+| `argus-portability` | 5 Gi | vnode-2 (with the API) |
+
+Check the free space before a large import:
+`$KC get --raw /api/v1/nodes/vnode-2/proxy/stats/summary | jq '.node.fs.availableBytes/1e9'`.
+More room needs bigger node disks or a network storage class.
+
+## Setting it up, once
 
 1. **The packages accept the workflow.** On GitHub, for each of `argus-knowledge-hub-backend` and
    `argus-knowledge-hub-web`: *Package settings → Manage Actions access → Add repository*
-   `infn-argus/argus-knowledge-hub`, role **Write**. Without it the push is refused (403).
-2. **The workflow may push to `main`.** If `main` is protected, allow `github-actions[bot]` to bypass
-   the rule for the `Deploy` commit, or the last step fails (the images are pushed regardless).
-3. **Argo CD is installed** in the cluster (`kubectl get crd applications.argoproj.io`). If it is not:
+   `infn-argus/argus-knowledge-hub`, role **Write**.
+2. **The workflow may push to `main`.** If `main` is protected, let `github-actions[bot]` push the
+   `Deploy` commit.
+3. **The Secret**, never in Git:
    ```
-   $KC create namespace argocd
-   $KC apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+   $KC create namespace argus
+   PG=$(openssl rand -hex 24)
+   $KC -n argus create secret generic argus-secrets \
+     --from-literal=postgres-password="$PG" \
+     --from-literal=database-url="postgresql://argus:$PG@argus-postgres:5432/argus" \
+     --from-literal=token-pepper="$(openssl rand -base64 32)" \
+     --from-literal=import-secrets-key="$(python3 -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" \
+     --from-literal=keycloak-admin-password="$(openssl rand -base64 18)"
    ```
-4. **Check what it would change**, then hand the namespace over:
-   ```
-   $KC diff -k k8s/        # the live objects against the manifests; set newTag to what runs first
-   $KC apply -f k8s/argocd/application.yaml
-   ```
-   The repository is public, so Argo CD needs no credentials to read it.
+   The token pepper is mixed into every API token's hash: changing it invalidates every token.
+4. **Argo CD takes over:** `$KC apply -f k8s/argocd/application.yaml`.
 
-## Building and rolling out by hand
+## After the first start
 
-Target: the INFN cluster via `kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt`.
-
-## 1. Build and push the image
-
-```
-cd ../backend
-./deploy.sh 0.1.0
-```
-
-Requires `docker login ghcr.io -u <your-github-username>` first, with a GitHub
-PAT that has `write:packages` scope. The `ghcr.io/infn-argus/argus-knowledge-hub-backend`
-package should be public (Package settings → Change visibility) so the cluster
-needs no `imagePullSecret`. If you'd rather keep it private, create one:
-
-```
-kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt create secret docker-registry ghcr-pull-secret \
-  --namespace assetmanagement \
-  --docker-server=ghcr.io \
-  --docker-username=<github-username> \
-  --docker-password=<github-PAT-with-read:packages> \
-  --docker-email=<your-email>
-```
-
-...and add `imagePullSecrets: [{name: ghcr-pull-secret}]` under `spec.template.spec`
-in `api-deployment.yaml`.
-
-## 2. Create the namespace and secrets
-
-```
-KC="kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt"
-
-$KC apply -f namespace.yaml
-
-$KC create secret generic postgres-secret -n assetmanagement \
-  --from-literal=username=assetmanagement \
-  --from-literal=password="$(openssl rand -base64 24)"
-
-$KC create secret generic api-secret -n assetmanagement \
-  --from-literal=database-url="postgresql://assetmanagement:<same password as above>@postgres:5432/assetmanagement" \
-  --from-literal=token-pepper="$(openssl rand -base64 32)"
-```
-
-Never commit the real values — these two secrets are the only place credentials live.
-
-## 3. Deploy everything else
-
-```
-$KC apply -f postgres-pvc.yaml -f postgres-deployment.yaml -f postgres-service.yaml
-$KC apply -f attachments-pvc.yaml -f api-deployment.yaml -f api-service.yaml -f api-ingress.yaml
-```
-
-## 4. Verify
-
-```
-$KC -n assetmanagement get pods
-curl https://assets-api.90.147.174.30.myip.cloud.infn.it/health
-```
-
-## 5. Mint the first API token
-
-```
-$KC -n assetmanagement exec deploy/assetmanagement-api -- \
-  python scripts/create_token.py ws-default "Default Workspace" cli
-```
-
-Save the printed token — it's the `Authorization: Bearer <token>` value for every
-request after this, and it is not recoverable once you lose it (mint a new one
-with the same command if that happens).
-
-## Postgres with pgvector (Ask ARGUS's written-knowledge search)
-
-The API runs without it, but Ask ARGUS can then only use exact lookups. To enable the search over
-documents, tickets and attached files, run the same Postgres 16 with the pgvector extension. Use the
-build with the **same Debian release** as the current one, or Postgres reports a collation version
-mismatch (text indexes built under one C library may sort differently under another):
-
-```
-$KC -n assetmanagement exec deploy/postgres -- psql -U assetmanagement -d assetmanagement -tAc "select version()"
-```
-
-`pgdg13` in the answer is Debian 13: use `pgvector/pgvector:pg16-trixie`; `pgdg12` is Debian 12: use
-`pgvector/pgvector:pg16-bookworm`. Back up first, then:
-
-```
-$KC -n assetmanagement exec deploy/postgres -- pg_dump -U assetmanagement -Fc assetmanagement > argus-before-pgvector.dump
-$KC -n assetmanagement set image deployment/postgres postgres=pgvector/pgvector:pg16-trixie
-$KC -n assetmanagement rollout status deployment/postgres
-```
-
-The data volume is reused as it is. Then restart the API (its startup migration creates the extension and
-the index tables) and build the index from *Workspace → AI*, or:
-
-```
-$KC -n assetmanagement rollout restart deployment/assetmanagement-api
-$KC -n assetmanagement exec deploy/assetmanagement-api -- python -m app.services.knowledge_index all
-```
-
-The chat streams its answers as server-sent events: an ingress that buffers responses would hold them
-back until the end. The API sends `X-Accel-Buffering: no`, which nginx ingress honours.
-
-## Redeploying a new API image version
-
-```
-cd ../backend && ./deploy.sh <new-version>
-kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt -n assetmanagement \
-  set image deployment/assetmanagement-api api=ghcr.io/infn-argus/argus-knowledge-hub-backend:<new-version>
-```
-
-The container's startup command runs `alembic upgrade head` before serving,
-so schema migrations apply automatically on rollout.
-
-## Web app
-
-A React/Vite SPA (`webapp/`) served by nginx, deployed the same way:
-
-```
-cd ../webapp
-./deploy.sh 0.1.0
-```
-
-Same registry-visibility note as the API image applies — make
-`ghcr.io/infn-argus/argus-knowledge-hub-web` public, or wire up an
-`imagePullSecret` in `web-deployment.yaml`.
-
-```
-$KC apply -f web-deployment.yaml -f web-service.yaml -f web-ingress.yaml
-```
-
-It's stateless (no Secrets, no PVC) — the API server URL and Bearer token are
-entered once in the browser on first load and kept in that browser's
-`localStorage`, not baked into the image. Live at
-`https://assets.90.147.174.30.myip.cloud.infn.it`.
-
-Redeploy the same way as the API:
-
-```
-cd ../webapp && ./deploy.sh <new-version>
-kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt -n assetmanagement \
-  set image deployment/assetmanagement-web web=ghcr.io/infn-argus/argus-knowledge-hub-web:<new-version>
-```
+- **Keycloak's admin:** `https://keycloak.90.147.174.30.myip.cloud.infn.it/admin`, user `admin`, password
+  `$KC -n argus get secret argus-secrets -o jsonpath='{.data.keycloak-admin-password}' | base64 -d`.
+  The realm `argus` has no users: add them under *Users*, with a temporary password.
+- **The first ARGUS administrator:** a person who signs in has no rights yet. Make one an administrator
+  and create workspaces with `tools/argus-admin` against this API, or in the pod:
+  `$KC -n argus exec deploy/argus-api -- python scripts/…` (README.md, "Administration").
+- **An API token for scripts:** `$KC -n argus exec deploy/argus-api -- python scripts/create_token.py
+  <workspace> "<name>" cli`. It is printed once.
 
 ## Portable exports and imports
 
-Settings are in `portability-configmap.yaml`, secrets in two Secrets (`portability-secret.example.yaml`
-shows their keys; it is a template, never applied), volumes in `portability-pvc.yaml`, scheduled work
-in `portability-cronjobs.yaml`. Background: `docs/operations.md`, "Portable exports", and
-`docs/export-import-design.md` §20.
+Settings go in `api.env` in `values-production.yaml` (`docs/operations.md`, "Configuration"), keys in
+the Secret `argus-portability`, mounted at `/etc/argus/portability` when it exists
+([`portability-secret.example.yaml`](portability-secret.example.yaml) shows its keys; it is a template,
+never applied). Scheduled work is in the chart: a daily cleanup, and a restore drill twice a year,
+created suspended (`portabilityJobs`). Background: `docs/export-import-design.md` §20.
 
-### 1. Keys and credentials (on an administrator's machine, not the cluster)
+### Keys (on an administrator's machine, not the cluster)
 
 ```
 ssh-keygen -t ed25519 -N '' -C argus-portability -f signing_key
 echo "argus-portability namespaces=\"git,argus-archive\" $(cat signing_key.pub)" > allowed_signers
 ssh-keygen -t ed25519 -N '' -C argus-escrow-deploy -f deploy-key-escrow
-ssh-keyscan git.example.org > known_hosts        # check the fingerprint against the Git server's
+ssh-keyscan <git server> > known_hosts        # check the fingerprint against the Git server's
 openssl rand -base64 32 > pseudonym-salt
 ```
 
-Register `deploy-key-escrow.pub` on the `escrow` repository as a deploy key: write access here
-(an exporting instance), read-only on instances that only import. On the Git server, protect `main`
-and the `export/*` tags against deletion and force-push.
-
-### 2. The Secrets
+An instance that imports what another exported trusts that instance's signing key: add the other
+instance's `allowed_signers` line to this one's. Register `deploy-key-escrow.pub` on the repository as a
+deploy key (write access to export, read-only to import only).
 
 ```
-$KC create secret generic argus-portability -n assetmanagement \
+$KC create secret generic argus-portability -n argus \
   --from-file=signing_key --from-file=allowed_signers \
   --from-file=deploy-key-escrow --from-file=known_hosts \
   --from-literal=pseudonym-salt="$(cat pseudonym-salt)"
 ```
 
-Then remove the local copies of `signing_key`, `deploy-key-escrow` and `pseudonym-salt` (keep the
-private keys in the institutional secret store only). Add `--from-file=recipients-<repository>` for
-a restricted destination.
-
-**Decrypting an encrypted archive** is the only time a recipient private key enters the cluster:
+and in `values-production.yaml`, under `api.env`:
 
 ```
-$KC create secret generic argus-portability-decryption -n assetmanagement --from-file=escrow-officer
+ARGUS_PORTABILITY_REPOSITORIES: escrow=ssh://git@<git server>/<path>.git
+ARGUS_PORTABILITY_SIGNING_KEY: /etc/argus/portability/signing_key
+ARGUS_PORTABILITY_SIGNER: argus-portability
+ARGUS_PORTABILITY_TRUSTED_KEYS: /etc/argus/portability/allowed_signers
+ARGUS_PORTABILITY_REPOSITORY_KEYS: escrow=/etc/argus/portability/deploy-key-escrow
+ARGUS_PORTABILITY_SSH_KNOWN_HOSTS: /etc/argus/portability/known_hosts
+```
+
+**An encrypted archive** is the only time a recipient private key enters the cluster:
+
+```
+$KC create secret generic argus-portability-decryption -n argus --from-file=escrow-officer
 # … wait a minute for the files to appear, then verify, dry run, approve, execute, finalize …
-$KC delete secret argus-portability-decryption -n assetmanagement
+$KC delete secret argus-portability-decryption -n argus
 ```
 
-### 3. The importer role (staging databases)
-
-A dedicated role creates and drops the per-import staging databases, not the application's role:
+**Staging databases.** By default an import stages in the active Postgres. A dedicated role is safer:
 
 ```
-$KC -n assetmanagement exec deploy/postgres -- psql -U assetmanagement -d assetmanagement -c \
+$KC -n argus exec deploy/argus-postgres -- psql -U argus -d argus -c \
   "CREATE ROLE argus_importer LOGIN CREATEDB PASSWORD '<generated>'"
-$KC -n assetmanagement get secret api-secret -o json \
-  | jq --arg v "$(printf %s 'postgresql://argus_importer:<generated>@postgres:5432/assetmanagement' | base64)" \
-       '.data["portability-staging-url"]=$v' | $KC apply -f -
 ```
 
-Exclude `argus_stage_*` and `argus_drill_*` databases from backups.
+then `ARGUS_PORTABILITY_STAGING_URL: postgresql://argus_importer:<generated>@argus-postgres:5432/argus` in a
+Secret-backed value. Exclude `argus_stage_*` and `argus_drill_*` databases from backups.
 
-### 4. Apply
-
-```
-$KC apply -f portability-pvc.yaml -f portability-configmap.yaml
-$KC apply -f api-deployment.yaml -f portability-cronjobs.yaml
-$KC -n assetmanagement exec deploy/assetmanagement-api -- python -m app.portability policy
-```
-
-* **`portability-artifacts` must be backed up**; it holds the archive data that is not in Git.
-* **The drill CronJob is created suspended.** Resume it after the first full export is published:
-  `$KC -n assetmanagement patch cronjob portability-restore-drill -p '{"spec":{"suspend":false}}'`.
-  It runs on 1 January and 1 July. Sign off each result with
-  `python -m app.portability drill-signoff <drill_id> --by <admin>`.
-* **Both portability volumes are ReadWriteOnce.** The CronJobs therefore run on the API pod's node
-  (pod affinity).
-* **The API's 512Mi memory limit has not been sized for exports.** Run
-  `python -m app.portability cycle …` on a non-production copy first, and set the limit from the peak
-  memory it records.
+**The restore drill** is created suspended. After the first full export:
+`$KC -n argus patch cronjob argus-portability-restore-drill -p '{"spec":{"suspend":false}}'`, or set
+`portabilityJobs.restoreDrill.suspend: false`.
 
 ### Annual rotation
 
 1. Generate a new signing key and add its allowed-signers line on every importing instance.
 2. Replace `signing_key` (and `allowed_signers`) in the Secret.
-3. Restart the API: `$KC -n assetmanagement rollout restart deploy/assetmanagement-api`.
+3. Restart the API: `$KC -n argus rollout restart deploy/argus-api`.
 4. Run one export and a manual drill:
-   `$KC -n assetmanagement create job --from=cronjob/portability-restore-drill drill-rotation`.
+   `$KC -n argus create job --from=cronjob/argus-portability-restore-drill drill-rotation`.
 5. Rotate the deploy key the same way, and revoke the old one on the Git server.
+
+## Building images by hand
+
+`backend/deploy.sh <version>` and `webapp/deploy.sh <version>` build and push to ghcr.io (after
+`docker login ghcr.io` with a PAT that has `write:packages`). The web app built that way has no
+Keycloak address: pass the `VITE_*` build arguments the workflow passes. Then set the tags in
+`values-production.yaml` on `main`; Argo CD does the rest.

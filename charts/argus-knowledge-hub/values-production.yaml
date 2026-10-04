@@ -1,0 +1,38 @@
+# The INFN cloud cluster (kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt), namespace argus.
+# The image tags are set by the release workflow (.github/workflows/release.yml) on each version tag.
+hosts:
+  web: assets.90.147.174.30.myip.cloud.infn.it
+  api: assets-api.90.147.174.30.myip.cloud.infn.it
+  keycloak: keycloak.90.147.174.30.myip.cloud.infn.it
+
+images:
+  backend:
+    tag: "1.33.0"
+  web:
+    tag: "1.33.0"
+
+# local-path volumes live on one node's disk and do not enforce their size: these are the room planned on
+# each worker. vnode-0, the control plane, has under 2 GB free and takes none.
+postgres:
+  size: 10Gi
+  nodeSelector:
+    kubernetes.io/hostname: vnode-1
+api:
+  attachmentsSize: 15Gi
+  portabilitySize: 5Gi
+  nodeSelector:
+    kubernetes.io/hostname: vnode-2
+  # Google sign-in (Firebase), as before Keycloak, so existing accounts keep working.
+  extraProviders:
+    - issuer: https://securetoken.google.com/seraphic-camera-479521-s5
+      jwks_uri: https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com
+      audience: seraphic-camera-479521-s5
+  env:
+    ARGUS_INSTANCE_NAME: argus-infn
+    ARGUS_PORTABILITY_POLICY: trusted
+web:
+  nodeSelector:
+    kubernetes.io/hostname: vnode-1
+keycloak:
+  nodeSelector:
+    kubernetes.io/hostname: vnode-1

@@ -1,6 +1,6 @@
 # A version tag (v1.33.0) is a release: the tests run, the two images are built and pushed to ghcr.io
-# with that version and `latest`, and k8s/kustomization.yaml on main is set to the version, which is what
-# Argo CD (k8s/argocd/application.yaml) rolls out. A failing test stops it before anything is pushed.
+# with that version and `latest`, and the chart's production values on main are set to the version, which
+# is what Argo CD (k8s/argocd/application.yaml) rolls out. A failing test stops it before anything is pushed.
 name: release
 
 on:
@@ -14,6 +14,10 @@ concurrency:
 env:
   BACKEND_IMAGE: ghcr.io/infn-argus/argus-knowledge-hub-backend
   WEB_IMAGE: ghcr.io/infn-argus/argus-knowledge-hub-web
+  VALUES: charts/argus-knowledge-hub/values-production.yaml
+  # Built into the web app (Vite): where the browser signs in and finds the API in production.
+  WEB_KEYCLOAK: https://keycloak.90.147.174.30.myip.cloud.infn.it/realms/argus
+  WEB_API: https://assets-api.90.147.174.30.myip.cloud.infn.it
 
 jobs:
   backend-tests:
@@ -97,12 +101,17 @@ jobs:
         with:
           context: webapp
           push: true
+          build-args: |
+            VITE_OIDC_AUTHORITY=${{ env.WEB_KEYCLOAK }}
+            VITE_OIDC_CLIENT_ID=argus-webapp
+            VITE_OIDC_LABEL=Keycloak login
+            VITE_API_BASE_URL=${{ env.WEB_API }}
           tags: ${{ env.WEB_IMAGE }}:${{ steps.version.outputs.version }},${{ env.WEB_IMAGE }}:latest
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
-  # The deployment itself: Argo CD follows k8s/kustomization.yaml on main.
+  # The deployment itself: Argo CD follows the chart's production values on main.
   deploy:
     needs: publish
     runs-on: ubuntu-latest
@@ -116,7 +125,8 @@ jobs:
         env:
           VERSION: ${{ needs.publish.outputs.version }}
         run: |
-          sed -i -E "/argus-knowledge-hub-(backend|web)$/{n;s/newTag: .*/newTag: ${VERSION}/}" k8s/kustomization.yaml
+          sed -i -E "s/^(    tag: ).*/\1\"${VERSION}\"/" "$VALUES"
+          grep -q "tag: \"${VERSION}\"" "$VALUES"
           git diff --quiet && { echo "already at ${VERSION}"; exit 0; }
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: argus-attachments
+  labels: {{- include "argus.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.api.attachmentsSize }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: argus-portability
+  labels: {{- include "argus.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.api.portabilitySize }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argus-api
+  labels: {{- include "argus.labels" . | nindent 4 }}
+    app: argus-api
+spec:
+  replicas: 1
+  # ReadWriteOnce volumes: the old pod lets go before the new one starts.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: argus-api}
+  template:
+    metadata:
+      labels: {app: argus-api}
+    spec:
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          ports: [{containerPort: 8080}]
+          env:
+            {{- include "argus.apiEnv" . | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: 8080}
+            # Migrations run before the server starts (alembic upgrade head).
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - {name: attachments, mountPath: /data/attachments}
+            - {name: portability, mountPath: /data/portability}
+            - {name: portability-secret, mountPath: /etc/argus/portability, readOnly: true}
+            # Recipient keys, only while an encrypted archive is imported (the Secret exists then).
+            - {name: portability-decryption, mountPath: /etc/argus/portability-decryption, readOnly: true}
+      volumes:
+        - name: attachments
+          persistentVolumeClaim: {claimName: argus-attachments}
+        - name: portability
+          persistentVolumeClaim: {claimName: argus-portability}
+        - name: portability-secret
+          secret:
+            secretName: {{ .Values.portabilitySecret }}
+            defaultMode: 0400
+            optional: true
+        - name: portability-decryption
+          secret:
+            secretName: {{ .Values.portabilitySecret }}-decryption
+            defaultMode: 0400
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argus-api
+  labels: {{- include "argus.labels" . | nindent 4 }}
+spec:
+  selector: {app: argus-api}
+  ports: [{port: 80, targetPort: 8080}]

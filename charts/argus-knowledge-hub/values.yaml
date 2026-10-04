@@ -1,0 +1,81 @@
+# Defaults; a deployment's own values (values-production.yaml) say where and how big.
+
+# Created by hand, never in Git (README.md): postgres-password, database-url, token-pepper,
+# import-secrets-key, keycloak-admin-password.
+existingSecret: argus-secrets
+
+hosts:
+  web: assets.example.org
+  api: assets-api.example.org
+  keycloak: keycloak.example.org
+
+ingress:
+  className: nginx
+  clusterIssuer: letsencrypt-prod-issuer
+
+images:
+  backend:
+    repository: ghcr.io/infn-argus/argus-knowledge-hub-backend
+    tag: "1.33.0"
+  web:
+    repository: ghcr.io/infn-argus/argus-knowledge-hub-web
+    tag: "1.33.0"
+  postgres: pgvector/pgvector:pg16-trixie
+  keycloak: quay.io/keycloak/keycloak:24.0.5
+
+storageClass: local-path
+
+postgres:
+  database: argus
+  user: argus
+  size: 10Gi
+  nodeSelector: {}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+api:
+  attachmentsSize: 15Gi
+  portabilitySize: 5Gi
+  nodeSelector: {}
+  # Sign-in providers besides Keycloak, as the API's OIDC_EXTRA_PROVIDERS entries: {issuer, jwks_uri, audience}.
+  extraProviders: []
+  # More environment, e.g. the portability settings (docs/operations.md, "Configuration").
+  env: {}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+web:
+  nodeSelector: {}
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+keycloak:
+  enabled: true
+  realm: argus
+  clientId: argus-webapp
+  adminUser: admin
+  nodeSelector: {}
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 1Gi}
+
+# Keys and files for exports and imports (signing key, allowed_signers, deploy keys…), mounted at
+# /etc/argus/portability when the Secret exists.
+portabilitySecret: argus-portability
+
+# Scheduled portability work (docs/operations.md), on the API's node (its volumes are ReadWriteOnce).
+portabilityJobs:
+  # Daily: removes archive files, quarantine, staging and evidence copies past the retention policy.
+  cleanup:
+    enabled: true
+    schedule: "30 2 * * *"
+  # Twice a year: restores the newest full export into a scratch database and records the result. Suspended
+  # until the signing key, trusted keys, repository and one full export exist.
+  restoreDrill:
+    enabled: true
+    suspend: true
+    schedule: "0 3 1 1,7 *"
+    repository: escrow

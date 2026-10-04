@@ -1,0 +1,40 @@
+{{- $root := . -}}
+{{- $sites := list
+      (dict "name" "argus-web" "host" .Values.hosts.web "service" "argus-web" "port" 80 "annotations" (dict))
+      (dict "name" "argus-api" "host" .Values.hosts.api "service" "argus-api" "port" 80 "annotations" (dict
+          "nginx.ingress.kubernetes.io/proxy-body-size" "1g"
+          "nginx.ingress.kubernetes.io/proxy-read-timeout" "600"
+          "nginx.ingress.kubernetes.io/proxy-buffering" "off")) -}}
+{{- if .Values.keycloak.enabled }}
+{{- $sites = append $sites (dict "name" "argus-keycloak" "host" .Values.hosts.keycloak "service" "argus-keycloak" "port" 8080 "annotations" (dict
+      "nginx.ingress.kubernetes.io/proxy-buffer-size" "128k")) }}
+{{- end }}
+{{- range $sites }}
+---
+# {{ .name }}: proxy-body-size for uploads and imports; buffering off for Ask's server-sent events.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .name }}
+  labels: {{- include "argus.labels" $root | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ $root.Values.ingress.clusterIssuer }}
+    {{- range $k, $v := .annotations }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ $root.Values.ingress.className }}
+  tls:
+    - hosts: [{{ .host | quote }}]
+      secretName: {{ .name }}-tls
+  rules:
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .service }}
+                port: {number: {{ .port }}}
+{{- end }}

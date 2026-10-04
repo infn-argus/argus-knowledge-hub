@@ -1,0 +1,8 @@
+apiVersion: v2
+name: argus-knowledge-hub
+description: >-
+  ARGUS Knowledge Hub as docker-compose runs it, for a cluster: Postgres 16 with pgvector, the API, the web
+  app and a Keycloak for sign-in, behind the nginx ingress with cert-manager certificates.
+type: application
+version: 0.1.0
+appVersion: "1.33.0"

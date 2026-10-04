@@ -1,8 +1,8 @@
-# Argo CD keeps the hub running the version k8s/kustomization.yaml names on main. The release workflow
-# (.github/workflows/release.yml) sets that version when a tag passes its tests, so a tag is a deployment.
+# Argo CD runs the hub from the Helm chart in charts/argus-knowledge-hub, with values-production.yaml, as
+# main says. The release workflow (.github/workflows/release.yml) sets the image tags there when a version
+# tag passes its tests, so a tag is a deployment.
 #
 # Apply once:  kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt apply -f k8s/argocd/application.yaml
-# First compare what it would change:  kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt diff -k k8s/
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -13,20 +13,20 @@ spec:
   source:
     repoURL: https://github.com/infn-argus/argus-knowledge-hub.git
     targetRevision: main
-    path: k8s
+    path: charts/argus-knowledge-hub
+    helm:
+      releaseName: argus
+      valueFiles: [values-production.yaml]
   destination:
     server: https://kubernetes.default.svc
-    namespace: assetmanagement
+    namespace: argus
   syncPolicy:
     automated:
-      # Never delete what the manifests stop naming (a PVC holds the attachments): removal is by hand.
+      # Never delete what the chart stops naming (the volumes hold the database and attachments).
       prune: false
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
     retry:
       limit: 5
-      backoff:
-        duration: 30s
-        factor: 2
-        maxDuration: 5m
+      backoff: {duration: 30s, factor: 2, maxDuration: 5m}

@@ -1,0 +1,105 @@
+{{- if .Values.keycloak.enabled }}
+# A Keycloak for sign-in until the hub uses INFN's: the realm below is imported on its first start (an
+# existing realm is left as it is), with no users. People are added in its admin console, as the admin
+# whose password is in the Secret. Its data is in Postgres (database keycloak), so a restart keeps them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argus-keycloak-realm
+  labels: {{- include "argus.labels" . | nindent 4 }}
+data:
+  realm.json: |
+    {
+      "realm": {{ .Values.keycloak.realm | quote }},
+      "enabled": true,
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "bruteForceProtected": true,
+      "accessTokenLifespan": 1800,
+      "clients": [
+        {
+          "clientId": {{ .Values.keycloak.clientId | quote }},
+          "name": "ARGUS Knowledge Hub",
+          "enabled": true,
+          "publicClient": true,
+          "protocol": "openid-connect",
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": false,
+          "redirectUris": ["https://{{ .Values.hosts.web }}/*"],
+          "webOrigins": ["https://{{ .Values.hosts.web }}"],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "post.logout.redirect.uris": "https://{{ .Values.hosts.web }}/*"
+          },
+          "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argus-keycloak
+  labels: {{- include "argus.labels" . | nindent 4 }}
+    app: argus-keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: argus-keycloak}
+  template:
+    metadata:
+      labels: {app: argus-keycloak}
+    spec:
+      {{- with .Values.keycloak.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: keycloak
+          image: {{ .Values.images.keycloak }}
+          args: [start, --import-realm]
+          ports: [{containerPort: 8080}]
+          env:
+            - {name: KEYCLOAK_ADMIN, value: {{ .Values.keycloak.adminUser | quote }}}
+            {{- include "argus.secretEnv" (dict "name" "KEYCLOAK_ADMIN_PASSWORD" "secret" .Values.existingSecret "key" "keycloak-admin-password") | nindent 12 }}
+            - {name: KC_DB, value: postgres}
+            - {name: KC_DB_URL, value: "jdbc:postgresql://argus-postgres:5432/keycloak"}
+            - {name: KC_DB_USERNAME, value: {{ .Values.postgres.user | quote }}}
+            {{- include "argus.secretEnv" (dict "name" "KC_DB_PASSWORD" "secret" .Values.existingSecret "key" "postgres-password") | nindent 12 }}
+            # TLS ends at the ingress. The hostname fixes the issuer the API checks, whichever way a request
+            # arrives (the API fetches the keys inside the cluster).
+            - {name: KC_HOSTNAME, value: {{ .Values.hosts.keycloak | quote }}}
+            - {name: KC_HOSTNAME_STRICT_BACKCHANNEL, value: "false"}
+            - {name: KC_PROXY, value: edge}
+            - {name: KC_HTTP_ENABLED, value: "true"}
+            - {name: KC_HEALTH_ENABLED, value: "true"}
+          startupProbe:
+            httpGet: {path: /health/started, port: 8080}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health/ready, port: 8080}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health/live, port: 8080}
+            periodSeconds: 20
+          resources: {{- toYaml .Values.keycloak.resources | nindent 12 }}
+          volumeMounts:
+            - {name: realm, mountPath: /opt/keycloak/data/import, readOnly: true}
+      volumes:
+        - name: realm
+          configMap: {name: argus-keycloak-realm}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argus-keycloak
+  labels: {{- include "argus.labels" . | nindent 4 }}
+spec:
+  selector: {app: argus-keycloak}
+  ports: [{port: 8080, targetPort: 8080}]
+{{- end }}

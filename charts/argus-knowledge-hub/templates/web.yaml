@@ -1,0 +1,40 @@
+# The web app's sign-in and API addresses are built into its image (VITE_* build arguments in
+# .github/workflows/release.yml), not set here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argus-web
+  labels: {{- include "argus.labels" . | nindent 4 }}
+    app: argus-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: argus-web}
+  template:
+    metadata:
+      labels: {app: argus-web}
+    spec:
+      {{- with .Values.web.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: web
+          image: "{{ .Values.images.web.repository }}:{{ .Values.images.web.tag }}"
+          ports: [{containerPort: 8080}]
+          readinessProbe:
+            httpGet: {path: /, port: 8080}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /, port: 8080}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources: {{- toYaml .Values.web.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argus-web
+  labels: {{- include "argus.labels" . | nindent 4 }}
+spec:
+  selector: {app: argus-web}
+  ports: [{port: 80, targetPort: 8080}]
