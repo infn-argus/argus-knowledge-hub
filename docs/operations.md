@@ -1089,6 +1089,17 @@ The proposed gates, for sign-off (U15), are:
 - no field more than one point worse than the active profile;
 - no language or domain more than five points below overall.
 
+A reasoning model (Qwen, DeepSeek…) is asked not to think before these
+structured answers (vLLM's `chat_template_kwargs.enable_thinking=false`;
+a provider that refuses the switch is asked again without it). Before
+October 2026 the replies had a fixed 900-token budget, and `qwen36-27b`
+spent all of it thinking: every field came back *missing*, 0 % accuracy
+with no errors. An evaluation where every field is missing and nothing
+is wrong is that, not a poor model. The workspace's **output-token
+limit** (*Workspace → AI*, empty for none) now applies to every AI call,
+and a reply cut off before any answer is reported as an error naming
+the limit.
+
 A profile that misses the gate is activated only with a stated exception.
 A security failure, or an evaluation whose cases did not run, cannot be
 activated at all. A new golden dataset version needs a new evaluation.
@@ -1104,3 +1115,31 @@ saves, and a failed assist call leaves the form untouched and writes a
 `failed` run. AI streams are internal, like person streams, and AI methods
 default to `advisory` in the authority policy. No AI claim becomes
 effective without a decision.
+
+## Ask ARGUS: changes it proposes
+
+Ask's lookups only read. Somebody who may create or change records can
+also ask it for a change ("create the six screens and link their cameras
+and motors"). The model can only **propose** one:
+
+| Proposal | Checked when proposed | Applied as |
+|---|---|---|
+| create a record | the type is usable here; the attributes are that type's; a given key is free | `POST /v1/assets` |
+| change a record | the record is this workspace's; something actually changes | `PUT /v1/assets/{uid}` |
+| relate two records, or remove a relation | both exist (or one is proposed here as `new:N`); the relation registry allows the edge | `POST /v1/relations`, `DELETE /v1/relations/{id}` |
+
+A refused proposal goes back to the model with the reason, so it can
+correct it. An accepted one is kept in `ask_actions` and shown under the
+answer, where the person ticks which to **Apply** or **Discard**
+(`POST /v1/ai/conversations/{id}/actions/apply|discard`). Applying runs
+each one, in the order proposed, through the same code as the forms:
+
+- it needs the permission it would by hand (create, modify or delete);
+- it gets the same validation and key allocation;
+- it is written to the ledger as that person's statement.
+
+Each change stands or fails on its own, and the card shows the error. A
+relation to a record whose creation failed fails with it. The model's
+next turn is told what became of each proposal. Nothing is applied
+without the person, and the external MCP server stays read-only.
+

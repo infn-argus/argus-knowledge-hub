@@ -49,7 +49,7 @@ One row per family. *Link* is how a matrix row is found in the configuration; *R
 | **Ion pump controllers** | `VPCON01`–`04`, `08` | 9 IOCs (`vpcon01`–`04`, `vpcon4`–`8`) on two 16-port Moxa units (`scelimxa16001`, `…002`) | the number in the name | `VPCON01`/`02` agree. The matrix puts six pumps on `VPCON03` and omits `IONP12`; the configuration splits them over `vpcon03` and `vpcon04`, four and three. A controller here has four channels, so the configuration is the consistent one. Waveguide pumps are grouped by section in the matrix and packed four to a controller in the configuration | controllers are the IOCs; no controller asset |
 | **Vacuum gauges** | 6 cold-cathode (`GAUCC`), 3 thermal-conductivity (`GAUTC`) | 6 `CC` channels on `vgcon01`/`02` | `GAUCC01` is `CC01` | the 6 cold-cathode match; the 3 thermal gauges have no channel | 6 `Vacuum Gauge` |
 | **Valves, RGA** | 7 valves (4 manual, 2 pneumatic, 1 fast) and 1 residual gas analyser | none | | not controlled through EPICS; the PLCs interlock them | nothing |
-| **Screens** | `SCN01`–`SCN06`, each a camera, an illuminator and a motion box (trigger and control) | `SCN0n:CAM01` (6 cameras on 6 IOCs, each with its IP), `SCN0n:MOT01` (6 axes on `diag-tml`, through a Moxa port), one `CAMILLUM` relay | the parent is in the name: `LEL-DIA-SCN01:CAM01` and `SCN01:MOT01` share `SCN01` | 6 of 6 cameras and motion boxes; 1 illuminator channel for 6 illuminators | 6 `Camera`, 6 `Motor Axis`; **no screen station**, because the code is `SCN`, not `FLG` |
+| **Screens** | `SCN01`–`SCN06`, each a camera, an illuminator and a motion box (trigger and control) | `SCN0n:CAM01` (6 cameras on 6 IOCs, each with its IP), `SCN0n:MOT01` (6 axes on `diag-tml`, through a Moxa port), one `CAMILLUM` relay | the parent is in the name: `LEL-DIA-SCN01:CAM01` and `SCN01:MOT01` share `SCN01` | 6 of 6 cameras and motion boxes; 1 illuminator channel for 6 illuminators | 6 `Camera`, 6 `Motor Axis`, and 6 `Screen Station` `SCN01`…`SCN06` composed of them (the station-part rule: `SCN0n:` names the parent) |
 | **BPMs** | `BPM01`–`BPM05` | 5 channels on two Libera Spectra units | the name | 5 of 5 | 2 `Digitizer` and 5 `Beam Position Monitor` |
 | **Charge monitors** | `FCT01`, `FCT02` | `DIA:FCT01`, `DIA:FCT02`, listed on a **timing** IOC | the name with `DIA:` | 2 of 2 | nothing: a timing IOC has no rule |
 | **RF: structures** | gun cavity, 3 accelerating structures (S, S, C band), 4 directional couplers | none | | not controlled | nothing |
@@ -219,9 +219,9 @@ None of this is built. Each step stands on its own.
    the normalized name (ELI) or PBS code (EuAPS), writes source claims with cell evidence. Authority
    policy and explicit decisions handle conflicts. For ELI the join is exact for magnets, pumps,
    gauges, cameras, motion boxes and BPMs.
-3. **Add the ELI screen rule.** `SCN01` is the parent of `SCN01:CAM01` and `SCN01:MOT01`, and the
-   matrix says the screen is the camera, illuminator and motion box. This is the same composition
-   the SPARC flags already get, with a stated parent instead of a paired name.
+3. ~~**Add the ELI screen rule.**~~ Done: `SCN01` is the parent of `SCN01:CAM01` and `SCN01:MOT01`,
+   which are composed into Screen Station `SCN01` (`STATION_PART` in `element_inference.py`; also
+   `SCR` and `YAG` codes). The illuminator is not yet included: one `CAMILLUM` relay serves all six.
 4. **Treat the ICPDAS channels**: RTD as `Temperature Sensor`, `rly` and `di` as relay and
    input channels, with the ELI polarity-reversal groups linked to the magnets they reverse.
 5. **Treat timing, chillers and PLCs** with the types they already have (`Timing Module`,

@@ -202,6 +202,18 @@ currently valid* revision rather than to an arbitrary PDF.
   Build or update the index on *Workspace → AI* (only what changed is embedded again), or
   `python -m app.services.knowledge_index <workspace|all>`, e.g. nightly. Served by `/v1/ai/chat`
   (server-sent events), `/v1/ai/conversations` and `/v1/ai/knowledge`.
+  Asked to, it can also **propose changes**: create a record, change one, relate two records or remove
+  a relation. A proposal changes nothing. It is checked when made (the type, the record, the type's
+  attributes, the relation registry) and shown under the answer, and a record proposed in the same
+  answer is referred to as `new:N` until it exists. The person applies or discards each one; applying
+  runs it through the same code as the forms, with their permissions and in their name in the ledger.
+  Only people who could make the change by hand are offered this, and the MCP tools stay read-only.
+  Served by `/v1/ai/conversations/{id}/actions` (`/apply`, `/discard`).
+- **AI settings.** *Workspace → AI* holds the endpoint, its models and an **output-token limit**:
+  empty (the default) means no limit, a number caps every reply, for a gateway that bills or
+  throttles by token. Reasoning models (Qwen, DeepSeek…) are asked not to think before a structured
+  answer such as a form suggestion, where thinking only spends the budget; a reply cut off before
+  any answer is reported as such rather than as an empty answer.
 - **Beam model.** A simulator-independent, directed beam-transport network linked to the facility:
   * Structure:
     * beam systems and any number of beams (particle or photon);
@@ -414,7 +426,8 @@ A few notes:
   (`--dry-run` reads it in full and keeps nothing). Add `--infer-elements` to also make what the
   channels drive, which the file never lists: the ion pumps, magnets and their supplies, cameras,
   BPM electronics, LLRF and modulator units, motor axes, screens (a flag and the camera its name
-  pairs it with) and mirrors. They are inferences, marked `inferred`, and a person's later edits
+  pairs it with, or, as at ELI, the camera and motor axis named after their station: `SCN01:CAM01`
+  and `SCN01:MOT01` make Screen Station `SCN01`) and mirrors. They are inferences, marked `inferred`, and a person's later edits
   survive a re-read. The catalogue gained a `Mirror` type for this: run
   `scripts/seed_asset_types.py beamline <workspace> --catalogue <catalogue>` again on a workspace
   seeded before.
@@ -428,8 +441,12 @@ A few notes:
   channel to the unit the inventory already holds, by tag or address, as a proposal under
   *Channels ↔ hardware*, instead of inferring a twin. The web import (*Imports → New → EPIK8s*)
   has the same options, plus asking the workspace's AI about channels no rule recognises; its
-  answers are proposals in the review queue. Workspaces seeded before need
-  `seed_asset_types.py` again for the `Vacuum Controller` type.
+  answers are proposals in the review queue, kept per configuration file. The web import seeds the
+  catalogue's types first, as the script does: a workspace nobody seeded hangs from the only global
+  catalogue (it asks which when there are several), and a catalogue seeded before a newer shared
+  type is brought up to date. A values file that names no `beamline:`, an overlay such as
+  `values-linac.yaml`, takes the beamline and its templates' defaults from the `values.yaml` beside
+  it and imports only its own IOCs, under its own Control Configuration.
 - State lives in two named volumes and survives `docker compose down`;
   `docker compose down -v` wipes it (see [Starting over with no data](#starting-over-with-no-data)).
 
