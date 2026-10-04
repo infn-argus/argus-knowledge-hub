@@ -1,0 +1,44 @@
+# Non-secret portability settings, shared by the API Deployment and the portability CronJobs.
+# Paths under /etc/argus/portability come from the `argus-portability` Secret
+# (portability-secret.example.yaml); nothing secret belongs here.
+# Policy: docs/export-import-design.md §20. Every setting can be made stricter with
+# ARGUS_PORTABILITY_POLICY_<SETTING> (or ARGUS_PORTABILITY_POLICY: strict).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argus-portability-config
+  namespace: assetmanagement
+data:
+  ARGUS_INSTANCE_NAME: argus-infn
+  ARGUS_PORTABILITY_POLICY: trusted
+  ARGUS_PORTABILITY_ROOT: /data/portability
+
+  # Registered destinations. Replace with the institutional Git server's repositories.
+  ARGUS_PORTABILITY_REPOSITORIES: escrow=ssh://git@git.example.org/argus/escrow.git
+  ARGUS_PORTABILITY_ARTIFACT_STORES: vault=/data/portability-artifacts
+
+  # Signing and verification.
+  ARGUS_PORTABILITY_SIGNING_KEY: /etc/argus/portability/signing_key
+  ARGUS_PORTABILITY_SIGNER: argus-portability
+  ARGUS_PORTABILITY_TRUSTED_KEYS: /etc/argus/portability/allowed_signers
+
+  # One narrowly scoped deploy credential per repository, and the Git server's pinned host key.
+  ARGUS_PORTABILITY_REPOSITORY_KEYS: escrow=/etc/argus/portability/deploy-key-escrow
+  ARGUS_PORTABILITY_SSH_KNOWN_HOSTS: /etc/argus/portability/known_hosts
+  # For HTTPS repositories instead: escrow=/etc/argus/portability/token-escrow
+  # ARGUS_PORTABILITY_REPOSITORY_TOKENS: ""
+
+  # Restricted classes: uncomment once a restricted repository and its recipients exist.
+  # ARGUS_PORTABILITY_RESTRICTED_DESTINATIONS: escrow-restricted=costs|personnel
+  # ARGUS_PORTABILITY_RECIPIENTS: escrow-restricted=/etc/argus/portability/recipients-escrow-restricted
+
+  # Recipient private keys: the `argus-portability-decryption` Secret, present only during an
+  # import session (the directory is empty otherwise).
+  ARGUS_PORTABILITY_DECRYPTION_KEYS: /etc/argus/portability-decryption
+
+  # Who may read every restricted row of evidence archives (user ids or e-mails, comma-separated).
+  ARGUS_PORTABILITY_EVIDENCE_READERS: ""
+
+  # The committer of export commits (a service identity; placeholders).
+  ARGUS_PORTABILITY_GIT_NAME: "[IL_TUO_NOME]"
+  ARGUS_PORTABILITY_GIT_EMAIL: "[Inserisci Qui La Tua Email]"

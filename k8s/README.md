@@ -140,3 +140,87 @@ cd ../webapp && ./deploy.sh <new-version>
 kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt -n assetmanagement \
   set image deployment/assetmanagement-web web=ghcr.io/infn-argus/argus-knowledge-hub-web:<new-version>
 ```
+
+## Portable exports and imports
+
+Settings are in `portability-configmap.yaml`, secrets in two Secrets (`portability-secret.example.yaml`
+shows their keys; it is a template, never applied), volumes in `portability-pvc.yaml`, scheduled work
+in `portability-cronjobs.yaml`. Background: `docs/operations.md`, "Portable exports", and
+`docs/export-import-design.md` §20.
+
+### 1. Keys and credentials (on an administrator's machine, not the cluster)
+
+```
+ssh-keygen -t ed25519 -N '' -C argus-portability -f signing_key
+echo "argus-portability namespaces=\"git,argus-archive\" $(cat signing_key.pub)" > allowed_signers
+ssh-keygen -t ed25519 -N '' -C argus-escrow-deploy -f deploy-key-escrow
+ssh-keyscan git.example.org > known_hosts        # check the fingerprint against the Git server's
+openssl rand -base64 32 > pseudonym-salt
+```
+
+Register `deploy-key-escrow.pub` on the `escrow` repository as a deploy key: write access here
+(an exporting instance), read-only on instances that only import. On the Git server, protect `main`
+and the `export/*` tags against deletion and force-push.
+
+### 2. The Secrets
+
+```
+$KC create secret generic argus-portability -n assetmanagement \
+  --from-file=signing_key --from-file=allowed_signers \
+  --from-file=deploy-key-escrow --from-file=known_hosts \
+  --from-literal=pseudonym-salt="$(cat pseudonym-salt)"
+```
+
+Then remove the local copies of `signing_key`, `deploy-key-escrow` and `pseudonym-salt` (keep the
+private keys in the institutional secret store only). Add `--from-file=recipients-<repository>` for
+a restricted destination.
+
+**Decrypting an encrypted archive** is the only time a recipient private key enters the cluster:
+
+```
+$KC create secret generic argus-portability-decryption -n assetmanagement --from-file=escrow-officer
+# … wait a minute for the files to appear, then verify, dry run, approve, execute, finalize …
+$KC delete secret argus-portability-decryption -n assetmanagement
+```
+
+### 3. The importer role (staging databases)
+
+A dedicated role creates and drops the per-import staging databases, not the application's role:
+
+```
+$KC -n assetmanagement exec deploy/postgres -- psql -U assetmanagement -d assetmanagement -c \
+  "CREATE ROLE argus_importer LOGIN CREATEDB PASSWORD '<generated>'"
+$KC -n assetmanagement get secret api-secret -o json \
+  | jq --arg v "$(printf %s 'postgresql://argus_importer:<generated>@postgres:5432/assetmanagement' | base64)" \
+       '.data["portability-staging-url"]=$v' | $KC apply -f -
+```
+
+Exclude `argus_stage_*` and `argus_drill_*` databases from backups.
+
+### 4. Apply
+
+```
+$KC apply -f portability-pvc.yaml -f portability-configmap.yaml
+$KC apply -f api-deployment.yaml -f portability-cronjobs.yaml
+$KC -n assetmanagement exec deploy/assetmanagement-api -- python -m app.portability policy
+```
+
+* **`portability-artifacts` must be backed up**; it holds the archive data that is not in Git.
+* **The drill CronJob is created suspended.** Resume it after the first full export is published:
+  `$KC -n assetmanagement patch cronjob portability-restore-drill -p '{"spec":{"suspend":false}}'`.
+  It runs on 1 January and 1 July. Sign off each result with
+  `python -m app.portability drill-signoff <drill_id> --by <admin>`.
+* **Both portability volumes are ReadWriteOnce.** The CronJobs therefore run on the API pod's node
+  (pod affinity).
+* **The API's 512Mi memory limit has not been sized for exports.** Run
+  `python -m app.portability cycle …` on a non-production copy first, and set the limit from the peak
+  memory it records.
+
+### Annual rotation
+
+1. Generate a new signing key and add its allowed-signers line on every importing instance.
+2. Replace `signing_key` (and `allowed_signers`) in the Secret.
+3. Restart the API: `$KC -n assetmanagement rollout restart deploy/assetmanagement-api`.
+4. Run one export and a manual drill:
+   `$KC -n assetmanagement create job --from=cronjob/portability-restore-drill drill-rotation`.
+5. Rotate the deploy key the same way, and revoke the old one on the Git server.

@@ -1,0 +1,167 @@
+# Scheduled portability work (docs/operations.md, "Retention and legal holds" and "Restore drills").
+#
+# Both jobs use the API image and the same configuration as the API. The portability volumes are
+# ReadWriteOnce on local-path storage, so each job is scheduled on the API pod's node (podAffinity):
+# a ReadWriteOnce volume can be shared by pods on the same node.
+
+# Retention: every day, delete archive files, quarantine, staging and evidence copies older than
+# the policy's retention_days (90), unless a legal hold suspends it. Records, audit and Git history
+# are kept; every deletion is audited.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: portability-cleanup
+  namespace: assetmanagement
+spec:
+  schedule: "30 2 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: portability-cleanup
+        spec:
+          restartPolicy: Never
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: assetmanagement-api
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: cleanup
+              image: ghcr.io/infn-argus/argus-knowledge-hub-backend:latest
+              command: ["python", "-m", "app.portability", "cleanup"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-secret
+                      key: database-url
+                - name: TOKEN_PEPPER
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-secret
+                      key: token-pepper
+                - name: ARGUS_PORTABILITY_STAGING_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-secret
+                      key: portability-staging-url
+                      optional: true
+              envFrom:
+                - configMapRef:
+                    name: argus-portability-config
+              volumeMounts:
+                - name: portability-work
+                  mountPath: /data/portability
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: portability-work
+              persistentVolumeClaim:
+                claimName: portability-work
+---
+# Restore drill: every six months (1 January and 1 July). Fetches the newest export/full/* tag,
+# restores it into a scratch database, reconciles and promotes there, drops it, and records the
+# result in the audit. One ARGUS administrator then signs it off:
+#   python -m app.portability drill-signoff <drill_id> --by <admin> --note "…"
+# Also run it by hand after any substantial archive-format change:
+#   kubectl -n assetmanagement create job --from=cronjob/portability-restore-drill drill-manual
+#
+# SUSPENDED until the signing key, trusted keys, repository and deploy key are in place and one
+# full export has been published. Then: kubectl -n assetmanagement patch cronjob
+# portability-restore-drill -p '{"spec":{"suspend":false}}'
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: portability-restore-drill
+  namespace: assetmanagement
+spec:
+  schedule: "0 3 1 1,7 *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 86400
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 21600
+      template:
+        metadata:
+          labels:
+            app: portability-restore-drill
+        spec:
+          restartPolicy: Never
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: assetmanagement-api
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: drill
+              image: ghcr.io/infn-argus/argus-knowledge-hub-backend:latest
+              command: ["python", "-m", "app.portability", "drill", "--repository", "escrow",
+                        "--by", "restore-drill-cronjob"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-secret
+                      key: database-url
+                - name: TOKEN_PEPPER
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-secret
+                      key: token-pepper
+                # The scratch database is created with the importer role.
+                - name: ARGUS_PORTABILITY_STAGING_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-secret
+                      key: portability-staging-url
+                      optional: true
+              envFrom:
+                - configMapRef:
+                    name: argus-portability-config
+              volumeMounts:
+                - name: portability-work
+                  mountPath: /data/portability
+                - name: portability-artifacts
+                  mountPath: /data/portability-artifacts
+                  readOnly: true
+                - name: portability-secrets
+                  mountPath: /etc/argus/portability
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 512Mi
+                limits:
+                  cpu: "1"
+                  memory: 2Gi
+          volumes:
+            - name: portability-work
+              persistentVolumeClaim:
+                claimName: portability-work
+            - name: portability-artifacts
+              persistentVolumeClaim:
+                claimName: portability-artifacts
+            - name: portability-secrets
+              secret:
+                secretName: argus-portability
+                defaultMode: 0400

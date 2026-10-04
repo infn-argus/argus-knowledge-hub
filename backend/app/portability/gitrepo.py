@@ -223,8 +223,12 @@ def credentials_env(ssh_key: Optional[Path] = None, token_file: Optional[Path] =
     repository or a log."""
     env: dict = {}
     if ssh_key is not None:
+        # The server's host key is pinned: ARGUS_PORTABILITY_SSH_KNOWN_HOSTS names a known_hosts file
+        # mounted with the deploy key (an unknown or changed host key is refused).
+        known = os.environ.get("ARGUS_PORTABILITY_SSH_KNOWN_HOSTS")
         env["GIT_SSH_COMMAND"] = (f"ssh -i {ssh_key} -o IdentitiesOnly=yes -o BatchMode=yes "
-                                  "-o StrictHostKeyChecking=yes")
+                                  "-o StrictHostKeyChecking=yes"
+                                  + (f" -o UserKnownHostsFile={known}" if known else ""))
     if token_file is not None:
         d = askpass_dir or token_file.parent
         script = d / "argus-git-askpass.sh"

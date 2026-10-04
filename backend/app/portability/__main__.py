@@ -48,11 +48,17 @@ def latest_tag(cfg: service.Config, repository: str, prefix: str = "export/full/
     """The newest signed export tag of a repository, by its ledger watermark."""
     url = cfg.repositories[repository]
     out = subprocess.run(["git", "ls-remote", "--tags", "--refs", url, f"refs/tags/{prefix}*"], capture_output=True,
-                         text=True, env=gitrepo._env(), timeout=120, check=True).stdout
+                         text=True, env=gitrepo._env(cfg.git_env(repository)), timeout=120, check=True).stdout
     tags = [line.split("refs/tags/", 1)[1] for line in out.splitlines() if "refs/tags/" in line]
     if not tags:
         raise SystemExit(f"no {prefix}* tag in {repository}")
-    return max(tags, key=lambda t: int(re.search(r"@ledger-(\d+)$", t).group(1)) if re.search(r"@ledger-(\d+)$", t) else -1)
+    return max(tags, key=_checkpoint_of)
+
+
+def _checkpoint_of(tag: str) -> int:
+    """The checkpoint number a tag names (`…@cp<n>-<vector hash>`); never repeats or goes back."""
+    m = re.search(r"@cp(\d+)-[0-9a-f]+$", tag)
+    return int(m.group(1)) if m else -1
 
 
 def restore_drill(cfg: service.Config, repository: str, database_url: str, prefix: str = "export/full/",
@@ -61,7 +67,8 @@ def restore_drill(cfg: service.Config, repository: str, database_url: str, prefi
     head, reconcile, and drop the database. The report is the drill's evidence."""
     tag = latest_tag(cfg, repository, prefix)
     name = f"argus_drill_{secrets.token_hex(4)}"
-    base = database_url.rsplit("/", 1)[0]
+    # The scratch database is created by the importer role when one is configured, not the app's.
+    base = (os.environ.get("ARGUS_PORTABILITY_STAGING_URL") or database_url).rsplit("/", 1)[0]
     admin = create_engine(f"{base}/postgres", isolation_level="AUTOCOMMIT")
     with admin.connect() as c:
         c.execute(text(f'CREATE DATABASE "{name}"'))

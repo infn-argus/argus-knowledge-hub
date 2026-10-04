@@ -106,6 +106,7 @@ deployment.
 | `ARGUS_PORTABILITY_POLICY` | `trusted` (default) or `strict`; see [`export-import-design.md`](export-import-design.md) §20 |
 | `ARGUS_PORTABILITY_POLICY_<SETTING>` | overrides one policy setting, e.g. `_SEPARATION_OF_DUTIES=1`, `_OPAQUE_BLOBS=require_decision`, `_RETENTION_DAYS=180`, `_BLOB_READERS=text,pdf` |
 | `ARGUS_PORTABILITY_REPOSITORY_KEYS` | `repository=/path,…`: the SSH deploy key of each repository, mounted from a secret |
+| `ARGUS_PORTABILITY_SSH_KNOWN_HOSTS` | a known_hosts file pinning the Git server's host key, used with deploy keys |
 | `ARGUS_PORTABILITY_REPOSITORY_TOKENS` | `repository=/path,…`: a token file per HTTPS repository, answered through `GIT_ASKPASS` |
 | `ARGUS_PORTABILITY_STAGING_URL` | the PostgreSQL server for staging databases (default: the active one) |
 | `ARGUS_PORTABILITY_GIT_NAME`, `ARGUS_PORTABILITY_GIT_EMAIL` | the committer of export commits (a service identity) |

@@ -46,9 +46,37 @@ spec:
               value: https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com
             - name: OIDC_AUDIENCE
               value: seraphic-camera-479521-s5
+            # Portable exports and imports: settings in the ConfigMap, secrets from Secrets.
+            - name: ARGUS_PORTABILITY_PSEUDONYM_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: argus-portability
+                  key: pseudonym-salt
+                  optional: true
+            # The dedicated importer role (CREATEDB, owns only argus_stage_* databases).
+            - name: ARGUS_PORTABILITY_STAGING_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-secret
+                  key: portability-staging-url
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: argus-portability-config
+                optional: true
           volumeMounts:
             - name: attachments-data
               mountPath: /data/attachments
+            - name: portability-work
+              mountPath: /data/portability
+            - name: portability-artifacts
+              mountPath: /data/portability-artifacts
+            - name: portability-secrets
+              mountPath: /etc/argus/portability
+              readOnly: true
+            - name: portability-decryption
+              mountPath: /etc/argus/portability-decryption
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /health
@@ -72,3 +100,20 @@ spec:
         - name: attachments-data
           persistentVolumeClaim:
             claimName: attachments-data
+        - name: portability-work
+          persistentVolumeClaim:
+            claimName: portability-work
+        - name: portability-artifacts
+          persistentVolumeClaim:
+            claimName: portability-artifacts
+        - name: portability-secrets
+          secret:
+            secretName: argus-portability
+            defaultMode: 0400
+            optional: true
+        # Present only while an encrypted archive is being imported (create, import, delete).
+        - name: portability-decryption
+          secret:
+            secretName: argus-portability-decryption
+            defaultMode: 0400
+            optional: true

@@ -312,3 +312,11 @@ def test_jobs_run_in_the_background_record_failures_and_recover_after_a_restart(
         assert jobs.get(db, "job-stale")["error"]["code"] == "interrupted"
         assert [j["action"] for j in jobs.for_subject(db, "exp-x")] == ["publish-git", "generate"]
         assert db.scalar(select(PortabilityImport)) is None
+
+
+def test_the_restore_drill_picks_the_newest_checkpoint_by_its_number_not_its_spelling():
+    from app.portability.__main__ import _checkpoint_of
+    tags = ["export/full/2026-10-01@cp9-1a2b3c4d5e6f", "export/full/2026-10-03@cp184-aa11bb22cc33",
+            "export/full/2026-10-02@cp27-0f0f0f0f0f0f", "export/full/old-style@ledger-900"]
+    assert max(tags, key=_checkpoint_of) == "export/full/2026-10-03@cp184-aa11bb22cc33"
+    assert _checkpoint_of("export/full/old-style@ledger-900") == -1
