@@ -1,8 +1,8 @@
 # The INFN cloud cluster (kubectl --kubeconfig ~/kubeconfigs/cloud-config.txt), namespace argus.
 # The image tags are set by the release workflow (.github/workflows/release.yml) on each version tag.
 hosts:
-  web: assets.90.147.174.30.myip.cloud.infn.it
-  api: assets-api.90.147.174.30.myip.cloud.infn.it
+  web: argus-hub.90.147.174.30.myip.cloud.infn.it
+  api: argus-hub-api.90.147.174.30.myip.cloud.infn.it
   keycloak: keycloak.90.147.174.30.myip.cloud.infn.it
 
 images:

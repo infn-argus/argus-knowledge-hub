@@ -138,7 +138,7 @@ export function defaultApiBaseUrl(): string {
     import.meta.env.VITE_API_BASE_URL ||
     (window.location.hostname.includes("localhost")
       ? "http://localhost:8000"
-      : "https://assets-api.90.147.174.30.myip.cloud.infn.it")
+      : "https://argus-hub-api.90.147.174.30.myip.cloud.infn.it")
   );
 }
 

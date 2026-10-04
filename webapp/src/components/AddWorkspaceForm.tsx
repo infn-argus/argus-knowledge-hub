@@ -2,7 +2,7 @@ import { FormEvent, useState } from "react";
 import { checkHealth, checkToken } from "../api/client";
 import { addProfile, Profile, removeProfile } from "../api/session";
 
-const DEFAULT_BASE_URL = "https://assets-api.90.147.174.30.myip.cloud.infn.it";
+const DEFAULT_BASE_URL = "https://argus-hub-api.90.147.174.30.myip.cloud.infn.it";
 
 export function AddWorkspaceForm({
   onAdded,

@@ -17,7 +17,7 @@ env:
   VALUES: charts/argus-knowledge-hub/values-production.yaml
   # Built into the web app (Vite): where the browser signs in and finds the API in production.
   WEB_KEYCLOAK: https://keycloak.90.147.174.30.myip.cloud.infn.it/realms/argus
-  WEB_API: https://assets-api.90.147.174.30.myip.cloud.infn.it
+  WEB_API: https://argus-hub-api.90.147.174.30.myip.cloud.infn.it
 
 jobs:
   backend-tests:

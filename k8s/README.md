@@ -8,8 +8,8 @@ docker-compose setup for a cluster:
 | Part | What it is | Address |
 |---|---|---|
 | `argus-postgres` | Postgres 16 with pgvector (Ask ARGUS's written-knowledge search); also Keycloak's database | inside the cluster |
-| `argus-api` | the API; migrates the database when it starts | `https://assets-api.90.147.174.30.myip.cloud.infn.it` |
-| `argus-web` | the web app | `https://assets.90.147.174.30.myip.cloud.infn.it` |
+| `argus-api` | the API; migrates the database when it starts | `https://argus-hub-api.90.147.174.30.myip.cloud.infn.it` |
+| `argus-web` | the web app | `https://argus-hub.90.147.174.30.myip.cloud.infn.it` |
 | `argus-keycloak` | a temporary Keycloak, realm `argus`, for sign-in until INFN's is used | `https://keycloak.90.147.174.30.myip.cloud.infn.it` |
 
 Google sign-in (Firebase) keeps working next to Keycloak: the API accepts both (`api.extraProviders`).
