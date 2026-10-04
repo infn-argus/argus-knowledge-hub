@@ -3,15 +3,20 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError, beamModelApi } from "../../api/client";
 import type {
-  BeamImportReport, BeamModelCheck, BeamModelV2, BeamVocabulary, V2Boundary, V2Component, V2Dataset, V2Path,
-  V2Placement, V2Profile,
+  BeamImportReport, BeamModelCheck, BeamModelV2, BeamVocabulary, V2Boundary, V2Component, V2Dataset, V2Definition,
+  V2Field, V2Path, V2Placement, V2Profile,
 } from "../../api/types";
 
 /** The beam model editor for argus.beam-model/2 (docs/beam-model-format.md). It edits the document an import
  *  reads: beams, systems, paths of placements (a component may be on several paths), the connections between
- *  paths, and each component — type, capabilities, aliases, supports, fiducials, boundaries, material, states,
- *  measurement model. Everything it does not show (definitions, other datasets, bindings, provenance, a tool's
- *  own fields) is passed through untouched, so saving never loses what came in. */
+ *  paths, each component — type, capabilities, aliases, supports, fiducials, boundaries, material, states,
+ *  measurement model —, the definitions components instantiate, and the datasets: their provenance, every
+ *  value (s, reference trajectory, physics, optics) and the fields along a path. What it does not show
+ *  (bindings, provenance, a tool's own fields) is passed through untouched, so saving never loses what came in. */
+const DATASET_KINDS = ["design", "nominal", "commissioning", "measured", "current_model", "operational", "simulation",
+  "snapshot"];
+const DATASET_CATEGORIES = ["", "lattice", "optics", "survey", "orbit", "dispersion", "aperture", "field_map",
+  "envelope", "vacuum", "measured_optics"];
 
 const SYSTEM_KINDS = ["Storage ring", "Synchrotron", "Accumulator", "Collider", "Linac", "Transfer line",
   "Laser transport", "FEL line", "Injector", "Experimental line", "Other"];
@@ -72,9 +77,9 @@ function pathDataset(doc: BeamModelV2, pathId: string): V2Dataset | undefined {
   return all.find((d) => Object.keys(d.values ?? {}).length > 0) ?? all[0];
 }
 
-function ensureDataset(d: BeamModelV2, pathId: string): V2Dataset {
+function ensureDataset(d: BeamModelV2, pathId: string, datasetId?: string): V2Dataset {
   d.datasets = d.datasets ?? [];
-  let ds = pathDataset(d, pathId);
+  let ds = (datasetId ? d.datasets.find((x) => x.id === datasetId) : undefined) ?? pathDataset(d, pathId);
   if (!ds) {
     const p = d.paths.find((x) => x.id === pathId)!;
     ds = { id: `${pathId}-design`, name: `${p.name || p.id} design`, kind: "design", path: pathId, values: {} };
@@ -132,7 +137,11 @@ export function EditorV2({ initial, editing }: { initial: BeamModelV2; editing: 
   const vocab = useQuery({ queryKey: ["beam-vocabulary"], queryFn: beamModelApi.vocabulary, staleTime: Infinity });
   const [doc, setDoc] = useState<BeamModelV2>(() => normalise(clone(initial)));
   const [pathId, setPathId] = useState(initial.paths[0]?.id ?? "");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelectedComponent] = useState<string | null>(null);
+  const [selectedDef, setSelectedDef] = useState<string | null>(null);
+  const setSelected = (id: string | null) => { setSelectedComponent(id); if (id) setSelectedDef(null); };
+  const pickDef = (id: string | null) => { setSelectedDef(id); if (id) setSelectedComponent(null); };
+  const [writeTo, setWriteTo] = useState<Record<string, string>>({});     // path → the dataset its table writes
   const update: Update = (fn) => setDoc((d) => { const n = clone(d); fn(n); return n; });
   const check = useMutation({ mutationFn: () => beamModelApi.validate(tidyV2(doc, vocab.data)) });
   const save = useMutation({
@@ -171,6 +180,7 @@ export function EditorV2({ initial, editing }: { initial: BeamModelV2; editing: 
           </div>
           {path && (
             <PathEditor doc={doc} path={path} vocab={vocab.data} update={update} selected={selected} onSelect={setSelected}
+                        datasetId={writeTo[path.id]} onDataset={(id) => setWriteTo({ ...writeTo, [path.id]: id })}
                         onRenamed={setPathId} onRemoved={() => setPathId(doc.paths.find((p) => p.id !== path.id)?.id ?? "")} />
           )}
         </Box>
@@ -198,6 +208,9 @@ export function EditorV2({ initial, editing }: { initial: BeamModelV2; editing: 
             </div>
           )}
         </Box>
+
+        <DefinitionsBox doc={doc} vocab={vocab.data} update={update} selected={selectedDef} onSelect={pickDef} />
+        <DatasetsBox doc={doc} update={update} />
 
         <PassedThrough doc={doc} />
 
@@ -232,8 +245,11 @@ export function EditorV2({ initial, editing }: { initial: BeamModelV2; editing: 
       </div>
 
       <aside className="xl:sticky xl:top-4 xl:self-start">
-        {selected && doc.components.some((c) => c.id === selected)
-          ? <ComponentPanel doc={doc} id={selected} vocab={vocab.data} update={update} onRenamed={setSelected} onClose={() => setSelected(null)} />
+        {selectedDef && (doc.definitions ?? []).some((x) => x.id === selectedDef)
+          ? <DefinitionPanel doc={doc} id={selectedDef} vocab={vocab.data} update={update} onRenamed={pickDef} onClose={() => pickDef(null)} />
+          : selected && doc.components.some((c) => c.id === selected)
+          ? <ComponentPanel doc={doc} id={selected} vocab={vocab.data} update={update} onRenamed={setSelected} onClose={() => setSelected(null)}
+                            onDefinition={pickDef} />
           : <p className="rounded border border-dashed border-slate-300 p-4 text-xs text-slate-500">
               Select a component (its row, or a chip above) to edit what a table cannot show: aliases, capabilities,
               supports and fiducials, boundaries, material, states, measurement model, parameters.
@@ -379,20 +395,23 @@ function SystemsBox({ doc, update }: { doc: BeamModelV2; update: Update }) {
 
 // ------------------------------------------------------------------------- one path
 
-function PathEditor({ doc, path, vocab, update, selected, onSelect, onRenamed, onRemoved }: {
+function PathEditor({ doc, path, vocab, update, selected, onSelect, onRenamed, onRemoved, datasetId, onDataset }: {
   doc: BeamModelV2; path: V2Path; vocab?: BeamVocabulary; update: Update; selected: string | null;
   onSelect: (id: string) => void; onRenamed: (id: string) => void; onRemoved: () => void;
+  datasetId?: string; onDataset: (id: string) => void;
 }) {
   const byId = useMemo(() => new Map(doc.components.map((c) => [c.id, c])), [doc.components]);
   const pls = placements(path);
   const pids = placementIds(path);
-  const ds = pathDataset(doc, path.id);
+  const ds = (datasetId ? (doc.datasets ?? []).find((x) => x.id === datasetId && x.path === path.id) : undefined)
+    ?? pathDataset(doc, path.id);
+  const forPath = (doc.datasets ?? []).filter((x) => x.path === path.id);
   const [adding, setAdding] = useState("");
   const withPath = (fn: (p: V2Path, d: BeamModelV2) => void) => update((d) => fn(d.paths.find((x) => x.id === path.id)!, d));
   const otherPaths = (cid: string) => doc.paths.filter((p) => p.id !== path.id && placements(p).some((pl) => pl.component === cid)).map((p) => p.name || p.id);
 
   const setValue = (pid: string, key: string, raw: string) => update((d) => {
-    const dataset = ensureDataset(d, path.id);
+    const dataset = ensureDataset(d, path.id, ds?.id);
     const v = (dataset.values![pid] = dataset.values![pid] ?? {});
     const n = num(raw);
     if (key === "s") v.s = n ?? null;
@@ -465,7 +484,13 @@ function PathEditor({ doc, path, vocab, update, selected, onSelect, onRenamed, o
         </div>
       )}
       <div className="text-xs text-slate-500">
-        Values go into dataset <b>{ds?.name ?? ds?.id ?? `${path.id}-design`}</b> ({ds?.kind ?? "design"}); other datasets are kept as they are.
+        Values go into dataset{" "}
+        {forPath.length > 1 ? (
+          <select value={ds?.id ?? ""} onChange={(e) => onDataset(e.target.value)} className="rounded border border-slate-300 px-1 py-0.5">
+            {forPath.map((x) => <option key={x.id} value={x.id}>{x.name ?? x.id} ({x.kind ?? "design"})</option>)}
+          </select>
+        ) : <b>{ds?.name ?? ds?.id ?? `${path.id}-design`} ({ds?.kind ?? "design"})</b>}
+        ; the others are kept as they are (edit any of them under Datasets).
         {doc.paths.length > 1 && <> <Small danger onClick={() => {
           update((d) => {
             const p = d.paths.find((x) => x.id === path.id)!;
@@ -645,8 +670,9 @@ function PathPick({ doc, value, onChange }: { doc: BeamModelV2; value: string; o
 
 // ------------------------------------------------------------------------- one component
 
-function ComponentPanel({ doc, id, vocab, update, onRenamed, onClose }: {
+function ComponentPanel({ doc, id, vocab, update, onRenamed, onClose, onDefinition }: {
   doc: BeamModelV2; id: string; vocab?: BeamVocabulary; update: Update; onRenamed: (id: string) => void; onClose: () => void;
+  onDefinition: (id: string) => void;
 }) {
   const c = doc.components.find((x) => x.id === id)!;
   const edit = (fn: (el: V2Component) => void) => update((d) => { fn(d.components.find((x) => x.id === id)!); });
@@ -681,6 +707,15 @@ function ComponentPanel({ doc, id, vocab, update, onRenamed, onClose }: {
         </label>
         <Field label="Model family" value={c.family ?? ""} placeholder="QF" onChange={(v) => edit((el) => { el.family = v || undefined; })} />
         <Select label="Definition" value={c.definition ?? ""} options={["", ...(doc.definitions ?? []).map((x) => x.id)]} onChange={(v) => edit((el) => { el.definition = v || undefined; })} />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {c.definition && <button type="button" className="text-indigo-700 hover:underline" onClick={() => onDefinition(c.definition!)}>open definition {c.definition}</button>}
+        {!c.definition && c.type && <button type="button" className="text-indigo-700 hover:underline" onClick={() => {
+          const defId = (c.family || c.id).replace(/#\d+$/, "");
+          update((d) => makeDefinition(d, id, defId));
+          onDefinition((doc.definitions ?? []).some((x) => x.id === defId) ? `${defId}_DEF` : defId);
+        }} title="Copy its type, parameters, length, boundaries, material and states into a definition other components can use">
+          make a definition from this component</button>}
       </div>
       <Field label="Aliases (asset tags, control names — evidence for asset matching)" value={(c.aliases ?? []).join(", ")}
              onChange={(v) => edit((el) => { el.aliases = v.split(",").map((x) => x.trim()).filter(Boolean); if (!el.aliases.length) delete el.aliases; })} />
@@ -780,6 +815,375 @@ function ComponentPanel({ doc, id, vocab, update, onRenamed, onClose }: {
   );
 }
 
+// ------------------------------------------------------------------------- definitions
+
+/** A component's own description moved into a definition it then instantiates (others can share it). */
+function makeDefinition(d: BeamModelV2, componentId: string, wanted: string) {
+  const c = d.components.find((x) => x.id === componentId)!;
+  d.definitions = d.definitions ?? [];
+  const id = d.definitions.some((x) => x.id === wanted) ? `${wanted}_DEF` : wanted;
+  const def: V2Definition = { id, type: c.type ?? "generic" };
+  if (c.capabilities) def.capabilities = c.capabilities;
+  if (c.parameters && Object.keys(c.parameters).length) def.parameters = c.parameters;
+  if (c.geometry?.length !== undefined) def.geometry = { length: c.geometry.length };
+  for (const k of ["boundaries", "material", "states"] as const) {
+    if (c[k] !== undefined) (def as Record<string, unknown>)[k] = c[k];
+    delete c[k];
+  }
+  delete c.capabilities;
+  delete c.parameters;
+  if (c.geometry) { delete c.geometry.length; if (!Object.keys(c.geometry).length) delete c.geometry; }
+  c.definition = id;
+  d.definitions.push(def);
+}
+
+function renameDefinition(d: BeamModelV2, old: string, v: string) {
+  if (!v || v === old || (d.definitions ?? []).some((x) => x.id === v)) return;
+  d.definitions!.find((x) => x.id === old)!.id = v;
+  d.components.forEach((c) => { if (c.definition === old) c.definition = v; });
+}
+
+function DefinitionsBox({ doc, vocab, update, selected, onSelect }: {
+  doc: BeamModelV2; vocab?: BeamVocabulary; update: Update; selected: string | null; onSelect: (id: string | null) => void;
+}) {
+  const defs = doc.definitions ?? [];
+  const uses = (id: string) => doc.components.filter((c) => c.definition === id).length;
+  return (
+    <Box title="Definitions" action={<Small onClick={() => update((d) => {
+      d.definitions = d.definitions ?? [];
+      let n = d.definitions.length + 1;
+      while (d.definitions.some((x) => x.id === `DEF${n}`)) n++;
+      d.definitions.push({ id: `DEF${n}`, type: "quadrupole" });
+      onSelect(`DEF${n}`);
+    })}>+ definition</Small>}>
+      {defs.length === 0 ? (
+        <p className="text-xs text-slate-400">
+          None. A definition is what a simulator reuses (a magnet family: type, length, bore, material); components name
+          it and override what differs. Make one from a component in its panel, or add one here.
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          {defs.map((x) => (
+            <button key={x.id} type="button" onClick={() => onSelect(x.id)}
+                    className={`rounded border px-2 py-0.5 text-xs ${selected === x.id ? "border-indigo-500 bg-indigo-50" : "border-slate-300"}`}>
+              <span className="font-mono">{x.id}</span> <span className="text-slate-400">{x.type} · {uses(x.id)} use{uses(x.id) === 1 ? "" : "s"}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {vocab && defs.some((x) => !Object.values(vocab.families).some((ts) => x.type in ts)) && (
+        <p className="mt-1 text-xs text-amber-700">Some definitions have a type outside the vocabulary; they are kept as they are.</p>
+      )}
+    </Box>
+  );
+}
+
+function DefinitionPanel({ doc, id, vocab, update, onRenamed, onClose }: {
+  doc: BeamModelV2; id: string; vocab?: BeamVocabulary; update: Update; onRenamed: (id: string | null) => void; onClose: () => void;
+}) {
+  const def = (doc.definitions ?? []).find((x) => x.id === id)!;
+  const edit = (fn: (x: V2Definition) => void) => update((d) => { fn(d.definitions!.find((x) => x.id === id)!); });
+  const users = doc.components.filter((c) => c.definition === id).map((c) => c.id);
+  const defaults = vocab?.families[familyOf(vocab, def.type)]?.[def.type] ?? [];
+  const caps = def.capabilities ?? defaults;
+  const typeStates = vocab?.states[def.type];
+  const stateNames = (def.states?.states ?? []).map((x) => x.name);
+  const asComponent = def as unknown as V2Component;
+  return (
+    <div className="space-y-3 rounded border border-slate-200 bg-white p-3 text-xs">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-slate-400">Definition</div>
+          <div className="font-mono text-sm font-semibold text-slate-900">{def.id}</div>
+          <div className="text-slate-500">{def.type} · used by {users.length ? users.join(", ") : "no component"}</div>
+        </div>
+        <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700">✕</button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block text-xs text-slate-500">Rename to
+          <Cell value="" placeholder="new id" onCommit={(v) => { const n = v.trim(); if (n && !(doc.definitions ?? []).some((x) => x.id === n)) { update((d) => renameDefinition(d, id, n)); onRenamed(n); } }} />
+        </label>
+        <label className="block text-xs text-slate-500">Type
+          <div className="mt-0.5"><TypeSelect vocab={vocab} value={def.type} onChange={(t) => edit((x) => { x.type = t; delete x.capabilities; })} /></div>
+        </label>
+        <Field label="Name" value={def.name ?? ""} onChange={(v) => edit((x) => { x.name = v || undefined; })} />
+        <Field label="Length (m)" value={def.geometry?.length?.toString() ?? ""} onChange={(v) => edit((x) => {
+          const n = num(v);
+          x.geometry = { ...(x.geometry ?? {}) };
+          if (n === undefined) delete x.geometry.length; else x.geometry.length = n;
+          if (!Object.keys(x.geometry).length) delete x.geometry;
+        })} />
+      </div>
+      <Group title="Parameters" hint="shared by every instance unless it overrides them">
+        <Cell value={kv(def.parameters ?? {})} placeholder="length=0.3, k1=4.3" onCommit={(v) => edit((x) => { x.parameters = parseKv(v); if (!Object.keys(x.parameters).length) delete x.parameters; })} />
+      </Group>
+      <Group title="Capabilities" hint={def.capabilities ? "set for this definition" : "the type's defaults"}
+             action={def.capabilities ? <button type="button" className="text-indigo-700 hover:underline" onClick={() => edit((x) => { delete x.capabilities; })}>use the type's</button> : undefined}>
+        <div className="flex flex-wrap gap-1">
+          {Object.keys(vocab?.capabilities ?? {}).map((k) => {
+            const on = caps.includes(k);
+            return <button key={k} type="button" title={vocab?.capabilities[k]} onClick={() => edit((x) => {
+              const cur = x.capabilities ?? [...defaults];
+              x.capabilities = on ? cur.filter((y) => y !== k) : [...cur, k];
+            })} className={`rounded px-1.5 py-0.5 text-[11px] ${on ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"}`}>{k}</button>;
+          })}
+        </div>
+      </Group>
+      <BoundariesGroup c={asComponent} vocab={vocab} stateNames={stateNames.length ? stateNames : Object.keys(typeStates ?? {})}
+                       edit={(fn) => edit((x) => fn(x as unknown as V2Component))} />
+      <Group title="Material" action={!def.material ? <button type="button" className="text-indigo-700 hover:underline" onClick={() => edit((x) => { x.material = { material: "" }; })}>add</button>
+        : <button type="button" className="text-rose-700 hover:underline" onClick={() => edit((x) => { delete x.material; })}>remove</button>}>
+        {def.material && (
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Material" value={def.material.material} onChange={(v) => edit((x) => { x.material!.material = v; })} />
+            <Field label="Thickness (m)" value={def.material.thickness?.toString() ?? ""} onChange={(v) => edit((x) => { x.material!.thickness = num(v); })} />
+          </div>
+        )}
+      </Group>
+      {def.native && <p className="text-[11px] text-slate-400">Native: {def.native.format} {def.native.type} {def.native.name ? `“${def.native.name}”` : ""} — kept as it came.</p>}
+      <div className="border-t border-slate-100 pt-2">
+        <button type="button" className="text-rose-700 hover:underline" onClick={() => {
+          update((d) => {
+            d.definitions = (d.definitions ?? []).filter((x) => x.id !== id);
+            // Instances keep what the definition gave them, so removing it changes no component.
+            d.components.forEach((c) => {
+              if (c.definition !== id) return;
+              delete c.definition;
+              c.type = c.type ?? def.type;
+              if (!c.parameters && def.parameters) c.parameters = clone(def.parameters);
+              if (!c.boundaries && def.boundaries) c.boundaries = clone(def.boundaries);
+              if (!c.material && def.material) c.material = clone(def.material);
+              if (!c.states && def.states) c.states = clone(def.states);
+              if (!c.capabilities && def.capabilities) c.capabilities = clone(def.capabilities);
+              if (def.geometry?.length !== undefined && c.geometry?.length === undefined) c.geometry = { ...(c.geometry ?? {}), length: def.geometry.length };
+            });
+          });
+          onClose();
+        }}>remove definition</button>
+        <span className="ml-1 text-slate-400">(its instances keep what it gave them)</span>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------------- datasets
+
+function renameDataset(d: BeamModelV2, old: string, v: string) {
+  if (!v || v === old || (d.datasets ?? []).some((x) => x.id === v)) return;
+  d.datasets!.find((x) => x.id === old)!.id = v;
+  if (d.model.dataset === old) d.model.dataset = v;
+}
+
+const GEOMETRY_KEYS = ["x", "y", "z", "yaw", "pitch", "roll"];
+
+function DatasetsBox({ doc, update }: { doc: BeamModelV2; update: Update }) {
+  const datasets = doc.datasets ?? [];
+  const [sel, setSel] = useState<string | null>(datasets[0]?.id ?? null);
+  const ds = datasets.find((x) => x.id === sel);
+  return (
+    <Box title="Datasets" action={<Small onClick={() => update((d) => {
+      d.datasets = d.datasets ?? [];
+      let n = d.datasets.length + 1;
+      while (d.datasets.some((x) => x.id === `dataset${n}`)) n++;
+      d.datasets.push({ id: `dataset${n}`, kind: "design", path: d.paths[0]?.id, values: {} });
+      setSel(`dataset${n}`);
+    })}>+ dataset</Small>}>
+      <p className="mb-2 text-xs text-slate-500">
+        What depends on a configuration — positions, strengths, optics, the reference trajectory, fields along a path —
+        so a design lattice, a measurement and next year's version sit side by side on the same components.
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {datasets.map((x) => (
+          <button key={x.id} type="button" onClick={() => setSel(x.id)}
+                  className={`rounded border px-2 py-0.5 text-xs ${sel === x.id ? "border-indigo-500 bg-indigo-50" : "border-slate-300"}`}>
+            <span className="font-mono">{x.id}</span> <span className="text-slate-400">{x.kind ?? "design"}{x.path ? ` · ${x.path}` : ""}
+              {" · "}{Object.keys(x.values ?? {}).length} values{(x.fields ?? []).length ? ` · ${x.fields!.length} fields` : ""}</span>
+          </button>
+        ))}
+      </div>
+      {ds && <DatasetEditor key={ds.id} doc={doc} ds={ds} update={update} onRenamed={setSel} onRemoved={() => setSel(null)} />}
+    </Box>
+  );
+}
+
+function DatasetEditor({ doc, ds, update, onRenamed, onRemoved }: {
+  doc: BeamModelV2; ds: V2Dataset; update: Update; onRenamed: (id: string) => void; onRemoved: () => void;
+}) {
+  const edit = (fn: (x: V2Dataset) => void) => update((d) => { fn(d.datasets!.find((x) => x.id === ds.id)!); });
+  const path = doc.paths.find((p) => p.id === ds.path);
+  const values = ds.values ?? {};
+  const rows = path ? placementIds(path) : Object.keys(values);
+  const [showGeometry, setShowGeometry] = useState(() => Object.values(values).some((v) => v.geometry));
+  const [extra, setExtra] = useState<{ physics: string[]; optics: string[] }>({ physics: [], optics: [] });
+  const [newCol, setNewCol] = useState("");
+  const keysOf = (part: "physics" | "optics") => {
+    const seen = new Set<string>(extra[part]);
+    Object.values(values).forEach((v) => Object.entries(v[part] ?? {}).forEach(([k, x]) => {
+      if (typeof x === "number" || typeof x === "string" || typeof x === "boolean") seen.add(k);
+    }));
+    if (part === "physics") seen.add("length");
+    return [...seen].sort((a, b) => (a === "length" ? -1 : b === "length" ? 1 : a.localeCompare(b)));
+  };
+  const physicsKeys = keysOf("physics");
+  const opticsKeys = keysOf("optics");
+  const setCell = (row: string, part: "s" | "geometry" | "physics" | "optics", key: string, raw: string) => edit((x) => {
+    x.values = x.values ?? {};
+    const v = (x.values[row] = x.values[row] ?? {});
+    const n = raw.trim() === "" ? undefined : Number.isNaN(Number(raw)) ? raw.trim() : Number(raw);
+    if (part === "s") { if (n === undefined) delete v.s; else v.s = typeof n === "number" ? n : null; }
+    else {
+      const bag = { ...((v[part] as Record<string, unknown> | null | undefined) ?? {}) };
+      if (n === undefined) delete bag[key]; else bag[key] = n;
+      if (Object.keys(bag).length) (v as Record<string, unknown>)[part] = bag; else delete (v as Record<string, unknown>)[part];
+    }
+    if (!Object.keys(v).length) delete x.values[row];
+  });
+  const freeRows = !path;
+  const [addRow, setAddRow] = useState("");
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div className="grid gap-2 sm:grid-cols-4">
+        <Field label="Id" value={ds.id} onChange={() => undefined} disabled />
+        <label className="block text-xs text-slate-500">Rename to
+          <Cell value="" placeholder="new id" onCommit={(v) => { const n = v.trim(); if (n && !(doc.datasets ?? []).some((x) => x.id === n)) { update((d) => renameDataset(d, ds.id, n)); onRenamed(n); } }} />
+        </label>
+        <Field label="Name" value={ds.name ?? ""} onChange={(v) => edit((x) => { x.name = v || undefined; })} />
+        <label className="block text-xs text-slate-500">Kind
+          <input list="dataset-kinds" value={ds.kind ?? ""} onChange={(e) => edit((x) => { x.kind = e.target.value || undefined; })}
+                 className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-sm text-slate-900" />
+          <datalist id="dataset-kinds">{DATASET_KINDS.map((k) => <option key={k} value={k} />)}</datalist>
+        </label>
+        <label className="block text-xs text-slate-500">Category
+          <input list="dataset-categories" value={ds.category ?? ""} onChange={(e) => edit((x) => { x.category = e.target.value || undefined; })}
+                 className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-sm text-slate-900" />
+          <datalist id="dataset-categories">{DATASET_CATEGORIES.filter(Boolean).map((k) => <option key={k} value={k} />)}</datalist>
+        </label>
+        <Select label="Path" value={ds.path ?? ""} options={["", ...doc.paths.map((p) => p.id)]} onChange={(v) => edit((x) => {
+          if (v && x.path !== v && Object.keys(x.values ?? {}).length) {
+            // Values are keyed by placement: keep only those the new path has.
+            const keep = new Set(placementIds(doc.paths.find((p) => p.id === v)!));
+            x.values = Object.fromEntries(Object.entries(x.values ?? {}).filter(([k]) => keep.has(k)));
+          }
+          if (v) x.path = v; else delete x.path;
+        })} />
+        <Field label="Source" value={ds.source ?? ""} placeholder="LOCO, survey 2026…" onChange={(v) => edit((x) => { x.source = v || undefined; })} />
+        <Field label="Version" value={ds.version ?? ""} onChange={(v) => edit((x) => { x.version = v || undefined; })} />
+        <Field label="Simulator" value={ds.simulator ?? ""} onChange={(v) => edit((x) => { x.simulator = v || undefined; })} />
+        <Field label="Simulator version" value={ds.simulator_version ?? ""} onChange={(v) => edit((x) => { x.simulator_version = v || undefined; })} />
+        <Field label="Git commit" value={ds.git_commit ?? ""} onChange={(v) => edit((x) => { x.git_commit = v || undefined; })} />
+        <Field label="Generated at" value={ds.generated_at ?? ""} placeholder="2026-05-12" onChange={(v) => edit((x) => { x.generated_at = v || undefined; })} />
+        <Field label="Valid from" value={ds.valid_from ?? ""} onChange={(v) => edit((x) => { x.valid_from = v || undefined; })} />
+        <Field label="Valid until" value={ds.valid_until ?? ""} onChange={(v) => edit((x) => { x.valid_until = v || undefined; })} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-semibold text-slate-700">Values</span>
+        <label className="flex items-center gap-1 text-slate-500"><input type="checkbox" checked={showGeometry} onChange={(e) => setShowGeometry(e.target.checked)} /> reference trajectory (x y z yaw pitch roll)</label>
+        <input value={newCol} onChange={(e) => setNewCol(e.target.value)} placeholder="new column, e.g. k1 or beta_x"
+               className="w-48 rounded border border-slate-300 px-1 py-0.5" />
+        <Small onClick={() => { if (newCol.trim()) { setExtra({ ...extra, physics: [...extra.physics, newCol.trim()] }); setNewCol(""); } }}>+ physics</Small>
+        <Small onClick={() => { if (newCol.trim()) { setExtra({ ...extra, optics: [...extra.optics, newCol.trim()] }); setNewCol(""); } }}>+ optics</Small>
+      </div>
+      <div className="max-h-[28rem] overflow-auto rounded border border-slate-100">
+        <table className="text-xs">
+          <thead className="sticky top-0 bg-white">
+            <tr className="text-left text-slate-500">
+              <th className="px-1">{path ? "Placement" : "Component"}</th><th>s (m)</th>
+              {showGeometry && GEOMETRY_KEYS.map((k) => <th key={`g${k}`} className="text-sky-700">{k}</th>)}
+              {physicsKeys.map((k) => <th key={`p${k}`}>{k}</th>)}
+              {opticsKeys.map((k) => <th key={`o${k}`} className="text-violet-700">{k}</th>)}
+              <th className="text-slate-400">native</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const v = values[r] ?? {};
+              const cellOf = (part: "geometry" | "physics" | "optics", k: string) => {
+                const x = ((v[part] as Record<string, unknown> | null | undefined) ?? {})[k];
+                return x === undefined || x === null ? "" : String(x);
+              };
+              return (
+                <tr key={r} className="border-t border-slate-100">
+                  <td className="whitespace-nowrap px-1 font-mono">{r}</td>
+                  <td><Cell value={v.s?.toString() ?? ""} onCommit={(x) => setCell(r, "s", "s", x)} narrow /></td>
+                  {showGeometry && GEOMETRY_KEYS.map((k) => <td key={`g${k}`}><Cell value={cellOf("geometry", k)} onCommit={(x) => setCell(r, "geometry", k, x)} narrow /></td>)}
+                  {physicsKeys.map((k) => <td key={`p${k}`}><Cell value={cellOf("physics", k)} onCommit={(x) => setCell(r, "physics", k, x)} narrow /></td>)}
+                  {opticsKeys.map((k) => <td key={`o${k}`}><Cell value={cellOf("optics", k)} onCommit={(x) => setCell(r, "optics", k, x)} narrow /></td>)}
+                  <td className="whitespace-nowrap px-1 text-slate-400">{v.native ? `${v.native.type ?? ""} (${Object.keys(v.native.parameters ?? {}).length})` : ""}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {freeRows && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">This dataset is on no path: its values are per component.</span>
+          <select value={addRow} onChange={(e) => setAddRow(e.target.value)} className="rounded border border-slate-300 px-1 py-0.5">
+            <option value="">add a component…</option>
+            {doc.components.filter((c) => !(c.id in values)).map((c) => <option key={c.id} value={c.id}>{c.id}</option>)}
+          </select>
+          <Small onClick={() => { if (addRow) { edit((x) => { x.values = { ...(x.values ?? {}), [addRow]: { s: null } }; }); setAddRow(""); } }}>add</Small>
+        </div>
+      )}
+      <p className="text-[11px] text-slate-500">
+        Empty a cell to remove the value. The simulator's native parameters of each value are kept as they came. A
+        component on this path with no row values has nothing in this dataset — normal for a measured dataset that
+        covers only the BPMs.
+      </p>
+
+      <FieldsEditor doc={doc} ds={ds} edit={edit} />
+
+      <div className="border-t border-slate-100 pt-2 text-xs">
+        <button type="button" className="text-rose-700 hover:underline" onClick={() => { update((d) => {
+          d.datasets = (d.datasets ?? []).filter((x) => x.id !== ds.id);
+          if (d.model.dataset === ds.id) delete d.model.dataset;
+        }); onRemoved(); }}>remove dataset {ds.id}</button>
+      </div>
+    </div>
+  );
+}
+
+/** Quantities along a path — pressure, temperature, loss, field — as [s, value] samples. */
+function FieldsEditor({ doc, ds, edit }: { doc: BeamModelV2; ds: V2Dataset; edit: (fn: (x: V2Dataset) => void) => void }) {
+  const fields = ds.fields ?? [];
+  const setF = (i: number, fn: (f: V2Field) => void) => edit((x) => { fn(x.fields![i]); });
+  const parse = (text: string): number[][] => text.split("\n").map((l) => l.trim().split(/[\s,;]+/).map(Number))
+    .filter((p) => p.length === 2 && p.every((n) => !Number.isNaN(n))).sort((a, b) => a[0] - b[0]);
+  return (
+    <Group title="Fields along a path" hint="model or snapshot data, never a telemetry stream"
+           action={doc.paths.length > 0 ? <button type="button" className="text-indigo-700 hover:underline" onClick={() => edit((x) => {
+             x.fields = [...(x.fields ?? []), { quantity: "vacuum.pressure", unit: "mbar", path: x.path ?? doc.paths[0].id, samples: [] }];
+           })}>+ field</button> : undefined}>
+      {fields.length === 0 && <p className="text-xs text-slate-400">None.</p>}
+      {fields.map((f, i) => (
+        <div key={i} className="mb-2 grid gap-2 rounded border border-slate-100 p-2 sm:grid-cols-4">
+          <Field label="Quantity" value={f.quantity} placeholder="vacuum.pressure" onChange={(v) => setF(i, (x) => { x.quantity = v; })} />
+          <Field label="Unit" value={f.unit ?? ""} onChange={(v) => setF(i, (x) => { x.unit = v || undefined; })} />
+          <Select label="Path" value={f.path} options={doc.paths.map((p) => p.id)} onChange={(v) => setF(i, (x) => { x.path = v; })} />
+          <Select label="Interpolation" value={f.interpolation ?? "linear"} options={["linear", "step", "none"]} onChange={(v) => setF(i, (x) => { x.interpolation = v as V2Field["interpolation"]; })} />
+          <label className="block text-xs text-slate-500 sm:col-span-3">Samples (one “s value” per line, s in metres)
+            <SamplesArea value={f.samples.map((p) => p.join(" ")).join("\n")} onCommit={(t) => setF(i, (x) => { x.samples = parse(t); })} />
+          </label>
+          <div className="flex items-end text-xs"><button type="button" className="text-rose-700 hover:underline" onClick={() => edit((x) => {
+            x.fields!.splice(i, 1);
+            if (!x.fields!.length) delete x.fields;
+          })}>remove</button>
+            <span className="ml-2 text-slate-400">{f.samples.length} samples</span></div>
+        </div>
+      ))}
+    </Group>
+  );
+}
+
+function SamplesArea({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  return <textarea value={v} rows={4} onChange={(e) => setV(e.target.value)} onBlur={() => v !== value && onCommit(v)}
+                   className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 font-mono text-xs text-slate-900" />;
+}
+
 const SHAPE_FIELDS: Record<string, [keyof V2Profile, string][]> = {
   circle: [["radius", "radius"]],
   ellipse: [["semi_axis_x", "semi-axis x"], ["semi_axis_y", "semi-axis y"]],
@@ -848,12 +1252,11 @@ function TypeSelect({ vocab, value, onChange }: { vocab?: BeamVocabulary; value:
 /** What the editor keeps without showing: listed, so a person knows it is there and travels with a save. */
 function PassedThrough({ doc }: { doc: BeamModelV2 }) {
   const items: string[] = [];
-  if ((doc.definitions ?? []).length) items.push(`${doc.definitions!.length} definitions`);
-  const datasets = doc.datasets ?? [];
-  if (datasets.length) items.push(`${datasets.length} datasets (${datasets.map((d) => d.kind ?? "design").join(", ")})`);
   if ((doc.boundaries ?? []).length) items.push(`${doc.boundaries!.length} boundaries along paths`);
   if ((doc.external_bindings ?? []).length) items.push(`${doc.external_bindings!.length} asset bindings`);
   if ((doc.observables ?? []).length) items.push(`${doc.observables!.length} declared observables`);
+  const dsBoundaries = (doc.datasets ?? []).reduce((n, d) => n + (d.boundaries ?? []).length, 0);
+  if (dsBoundaries) items.push(`${dsBoundaries} dataset aperture boundaries`);
   if (!items.length) return null;
   return <p className="text-xs text-slate-500">Kept as they are and saved with the model: {items.join(" · ")}.</p>;
 }

@@ -1737,16 +1737,27 @@ export interface V2Values {
   s?: number | null; geometry?: Record<string, number> | null; physics?: Record<string, unknown>;
   optics?: Record<string, unknown>; native?: V2Native; [k: string]: unknown;
 }
+export interface V2Field {
+  quantity: string; path: string; unit?: string; samples: number[][]; interpolation?: "linear" | "step" | "none";
+  description?: string; [k: string]: unknown;
+}
 export interface V2Dataset {
   id: string; name?: string; kind?: string; category?: string; path?: string; values?: Record<string, V2Values>;
+  source?: string; version?: string; git_commit?: string; simulator?: string; simulator_version?: string;
+  generated_at?: string; valid_from?: string; valid_until?: string; fields?: V2Field[]; boundaries?: V2Boundary[];
   [k: string]: unknown;
+}
+export interface V2Definition {
+  id: string; type: string; name?: string; capabilities?: string[]; parameters?: Record<string, unknown>;
+  geometry?: { length?: number; [k: string]: unknown }; boundaries?: V2Boundary[];
+  material?: V2Component["material"]; states?: V2StateModel; native?: V2Native; [k: string]: unknown;
 }
 export interface BeamModelV2 {
   schema_version: "argus.beam-model/2";
   model: { id: string; name?: string; source?: string; version?: string; git_commit?: string; simulator?: string; [k: string]: unknown };
   facility?: { id: string; name?: string; namespace?: string; site?: string; [k: string]: unknown };
   systems: V2System[]; beams: V2Beam[]; paths: V2Path[]; connections: V2Connection[];
-  definitions?: { id: string; type: string; [k: string]: unknown }[];
+  definitions?: V2Definition[];
   components: V2Component[]; boundaries?: V2Boundary[]; observables?: { quantity: string; unit?: string; [k: string]: unknown }[];
   datasets?: V2Dataset[]; external_bindings?: unknown[]; provenance?: Record<string, unknown>; [k: string]: unknown;
 }
