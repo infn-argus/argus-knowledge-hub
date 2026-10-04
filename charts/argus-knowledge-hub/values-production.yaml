@@ -29,6 +29,8 @@ api:
       audience: seraphic-camera-479521-s5
   env:
     ARGUS_INSTANCE_NAME: argus-infn
+    # Made administrators at their first sign-in (a new instance has none); later ones are granted in the app.
+    ARGUS_BOOTSTRAP_ADMINS: andrea.michelotti@lnf.infn.it
     ARGUS_PORTABILITY_POLICY: trusted
     # The daily cleanup removes the files of finished exports and imports (archives, quarantine, staging
     # databases, evidence copies) after one day: the disks are small. Records, audit and Git history stay;

@@ -13,6 +13,31 @@ export function WorkspacePicker({
 }) {
   const [workspaces, setWorkspaces] = useState<MyWorkspace[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // An administrator on an instance with no workspace yet makes the first one here: there is nowhere else.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    workspacesApi.me().then((me) => setIsAdmin(me.is_admin)).catch(() => setIsAdmin(false));
+  }, [profile.id]);
+
+  const createFirst = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const ws = await workspacesApi.create(name);
+      updateProfile(profile.id, { activeWorkspaceId: ws.id });
+      onPicked();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  };
 
   useEffect(() => {
     workspacesApi
@@ -41,11 +66,40 @@ export function WorkspacePicker({
         {!error && workspaces === null && (
           <p className="text-sm text-slate-500">Loading…</p>
         )}
-        {workspaces?.length === 0 && (
+        {workspaces?.length === 0 && !isAdmin && (
           <p className="text-sm text-slate-500">
             You don't have access to any workspace yet — ask an admin to add{" "}
             {profile.name} to one.
           </p>
+        )}
+        {workspaces?.length === 0 && isAdmin && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void createFirst();
+            }}
+            className="space-y-2"
+          >
+            <p className="text-sm text-slate-600">
+              You are an administrator and have no workspace yet. Create one to start; you can import
+              data into it, or create more, from inside.
+            </p>
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Workspace name, e.g. SPARC"
+              className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
+              autoFocus
+            />
+            <button
+              type="submit"
+              disabled={!newName.trim() || creating}
+              className="w-full rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:bg-slate-300"
+            >
+              {creating ? "Creating…" : "Create workspace"}
+            </button>
+            {createError && <p className="text-sm text-red-600">{createError}</p>}
+          </form>
         )}
         {workspaces && workspaces.length > 0 && (
           <div className="space-y-2">

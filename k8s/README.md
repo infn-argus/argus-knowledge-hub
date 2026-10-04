@@ -80,9 +80,11 @@ More room needs bigger node disks or a network storage class.
 - **Keycloak's admin:** `https://keycloak.90.147.174.30.myip.cloud.infn.it/admin`, user `admin`, password
   `$KC -n argus get secret argus-secrets -o jsonpath='{.data.keycloak-admin-password}' | base64 -d`.
   The realm `argus` has no users: add them under *Users*, with a temporary password.
-- **The first ARGUS administrator:** a person who signs in has no rights yet. Make one an administrator
-  and create workspaces with `tools/argus-admin` against this API, or in the pod:
-  `$KC -n argus exec deploy/argus-api -- python scripts/…` (README.md, "Administration").
+- **The first ARGUS administrators** are the emails in `ARGUS_BOOTSTRAP_ADMINS` (`api.env` in
+  `values-production.yaml`): they are administrators from their first sign-in. An administrator with no
+  workspace yet is offered to create one on the workspace screen. Anyone else is made an administrator
+  in the app, or in the pod:
+  `$KC -n argus exec deploy/argus-api -- python scripts/argus_admin.py user add <email> --admin`.
 - **An API token for scripts:** `$KC -n argus exec deploy/argus-api -- python scripts/create_token.py
   <workspace> "<name>" cli`. It is printed once.
 

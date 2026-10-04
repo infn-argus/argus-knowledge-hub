@@ -50,6 +50,12 @@ class OidcIdentity:
 Identity = Union[PatIdentity, OidcIdentity]
 
 
+def bootstrap_admins() -> set[str]:
+    """ARGUS_BOOTSTRAP_ADMINS: the emails (comma-separated) made administrators when they first sign in. A new
+    instance has no administrator and nobody to make one in the web app; every later one is granted there."""
+    return {e.strip().lower() for e in os.environ.get("ARGUS_BOOTSTRAP_ADMINS", "").split(",") if e.strip()}
+
+
 def _resolve_oidc_user(db: Session, claims: dict) -> User:
     """Find the person behind a verified token, in the order that avoids
     creating a second row for someone who already exists:
@@ -71,7 +77,8 @@ def _resolve_oidc_user(db: Session, claims: dict) -> User:
         user = db.scalar(select(User).where(User.email == email))
 
     if user is None:
-        user = User(id=str(uuid.uuid4()), oidc_sub=sub, email=email, name=claims.get("name"))
+        user = User(id=str(uuid.uuid4()), oidc_sub=sub, email=email, name=claims.get("name"),
+                    is_admin=bool(email) and email.lower() in bootstrap_admins())
         db.add(user)
         db.flush()
         return user
