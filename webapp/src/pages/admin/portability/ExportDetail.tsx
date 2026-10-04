@@ -153,7 +153,7 @@ export function ExportDetailPage() {
             ["Restricted classes included", e.classifications.length ? `${e.classifications.join(", ")} (encrypted)` : "none"],
             ["Purpose", e.decisions.purpose?.replace(/_/g, " ")],
             ["People", e.identity_profile?.replace(/_/g, " ")],
-            ["Generation", e.analysis.metrics ? `${e.analysis.metrics.seconds} s · peak ${e.analysis.metrics.peak_memory_mb} MB · ${e.analysis.metrics.rows} rows · ${bytes(e.analysis.metrics.artifact_bytes)}` : undefined],
+            ["Generation", e.analysis.metrics ? `${e.analysis.metrics.seconds} s · process peak ${e.analysis.metrics.peak_memory_mb} MB · ${e.analysis.metrics.rows} rows · ${bytes(e.analysis.metrics.artifact_bytes)}` : undefined],
             ["Base export", e.base_export_id ? <Link className="text-indigo-700 hover:underline" to={`/admin/portability/exports/${e.base_export_id}`}>{e.base_export_id}</Link> : undefined],
           ]} />
         </Section>
@@ -302,7 +302,9 @@ function BlobReview({ e, onSaved, onError }: { e: ExportView; onSaved: (v: Expor
         </div>
       )}
       {b.needs_decision.length === 0 && b.secrets.length === 0 ? (
-        <Empty>Every file was inspected: no secret, and nothing that needs a decision.</Empty>
+        <Empty>{(b.uninspected ?? []).length > 0
+          ? `No secret found, and nothing that needs a decision; ${b.uninspected!.length} file(s) could not be inspected (below).`
+          : "Every file was inspected: no secret, and nothing that needs a decision."}</Empty>
       ) : (
         <table className="w-full text-sm">
           <tbody>

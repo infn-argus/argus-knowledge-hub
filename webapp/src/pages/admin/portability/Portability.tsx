@@ -212,7 +212,10 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
         <label className="block text-sm">
           <span className="block text-xs font-medium text-slate-600">People in the archive (identity profile)</span>
           <select value={profile} onChange={(e) => setProfile(e.target.value)} className="mt-1 w-full max-w-md rounded border border-slate-300 px-2 py-1.5">
-            {c.identity_profiles.map((p) => <option key={p} value={p} disabled={p === "full_identity" && !c.is_admin}>{PROFILE_HELP[p] ?? p}</option>)}
+            {c.identity_profiles.map((p) => (
+              <option key={p} value={p} disabled={p === "full_identity" && !c.is_admin}>
+                {PROFILE_HELP[p] ?? p}{p === "full_identity" && c.policy.full_identity_high_risk ? " (high risk)" : ""}
+              </option>))}
           </select>
         </label>
       )}
@@ -283,7 +286,7 @@ const PROFILE_HELP: Record<string, string> = {
   institutional_reference: "Institutional reference (default): user ids and subjects; no e-mail, DN or names",
   pseudonymized: "Pseudonymized: an institutional pseudonym per person",
   anonymous_historical_actor: "Anonymous: actions grouped by actor, nothing links to a person",
-  full_identity: "Full identity: e-mail, names, directory DN (high risk)",
+  full_identity: "Full identity: e-mail, names, directory DN",
 };
 
 // ------------------------------------------------------------------------------ imports
@@ -391,7 +394,7 @@ function NewImport({ c }: { c: PortabilityConfig }) {
           </label>
           <label className="text-sm">
             <span className="block text-xs font-medium text-slate-600">Signed export tag, or a signed commit hash</span>
-            <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="export/full/2026-10-03@ledger-81234"
+            <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="export/full/2026-10-03@cp184-1a2b3c4d5e6f"
                    className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-xs" />
             <span className="mt-1 block text-xs text-slate-500">Never a branch: a branch head moves.</span>
           </label>

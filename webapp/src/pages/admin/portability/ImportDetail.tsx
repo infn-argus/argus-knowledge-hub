@@ -410,18 +410,20 @@ function Reconciliation({ r, sha }: { r: ReconciliationReport; sha: string }) {
 }
 
 function Evidence({ id }: { id: string }) {
-  const [family, setFamily] = useState("assets");
+  const [chosen, setFamily] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
-  const rows = useQuery({ queryKey: ["portability-evidence", id, family, offset], queryFn: () => portabilityApi.evidence(id, family, offset, 25),
-                          retry: false });
   const fams = useQuery({ queryKey: ["portability-evidence-families", id], queryFn: () => portabilityApi.evidenceFamilies(id) });
   const families = (fams.data ?? []).map((f) => f.family);
+  // Start on assets when the archive has them, else on the first family it does have.
+  const family = chosen ?? (families.includes("assets") ? "assets" : families[0] ?? null);
+  const rows = useQuery({ queryKey: ["portability-evidence", id, family, offset],
+                          queryFn: () => portabilityApi.evidence(id, family!, offset, 25), enabled: !!family, retry: false });
   return (
     <Section title="Evidence (read-only, from the archive)">
       <p className="mb-2 text-xs text-slate-500">Browsed only — not searched, indexed or downloadable. Restricted rows appear only for the
         institution's evidence readers; counts are of what you may see. Every read is audited.</p>
       <div className="mb-2 flex items-center gap-2 text-sm">
-        <select value={family} onChange={(e) => { setFamily(e.target.value); setOffset(0); }} className="rounded border border-slate-300 px-2 py-1">
+        <select value={family ?? ""} onChange={(e) => { setFamily(e.target.value); setOffset(0); }} className="rounded border border-slate-300 px-2 py-1">
           {families.map((f) => <option key={f} value={f}>{f}</option>)}
         </select>
         {rows.data && <span className="text-xs text-slate-500">{rows.data.total === 0 ? "no rows" :

@@ -320,3 +320,10 @@ def test_the_restore_drill_picks_the_newest_checkpoint_by_its_number_not_its_spe
             "export/full/2026-10-02@cp27-0f0f0f0f0f0f", "export/full/old-style@ledger-900"]
     assert max(tags, key=_checkpoint_of) == "export/full/2026-10-03@cp184-aa11bb22cc33"
     assert _checkpoint_of("export/full/old-style@ledger-900") == -1
+
+
+def test_an_svg_image_is_read_as_text_not_passed_as_opaque():
+    svg = b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>pump</title></svg>'
+    assert blob_scan.scan("d" * 64, svg, "image/svg+xml", "icon.svg", "icons.x").status == "ok"
+    leaky = svg.replace(b"pump", SECRET.encode())
+    assert blob_scan.scan("d" * 64, leaky, "image/svg+xml", "icon.svg", "icons.x").status == "finding"

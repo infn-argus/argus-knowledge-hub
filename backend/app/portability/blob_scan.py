@@ -92,6 +92,8 @@ def _sniff(data: bytes, mime: Optional[str], name: str) -> str:
     if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
         return "ole"                                  # legacy Office: binary, may carry macros
     m = (mime or "").lower()
+    if (m == "image/svg+xml" or n.endswith(".svg")) and b"<svg" in data[:4096]:
+        return "svg"                                  # an SVG image is XML text: read it, never trust its type
     if m.startswith(OPAQUE_TYPES) or data[:8] in (b"\x89PNG\r\n\x1a\n",) or data[:3] == b"\xff\xd8\xff" or \
             data[:6] in (b"GIF87a", b"GIF89a"):
         return "opaque"
@@ -107,7 +109,7 @@ def _sniff(data: bytes, mime: Optional[str], name: str) -> str:
     return "opaque"
 
 
-READER_OF = {"text": "text", "email": "email", "pdf": "pdf", "office": "office", "zip": "archive", "tar": "archive"}
+READER_OF = {"text": "text", "svg": "text", "email": "email", "pdf": "pdf", "office": "office", "zip": "archive", "tar": "archive"}
 ALL_READERS = ("text", "email", "pdf", "office", "archive")
 
 
@@ -126,6 +128,10 @@ def extract(data: bytes, mime: Optional[str], name: str, limits: ScanLimits = LI
         raise ReaderDisabled(f"the {READER_OF[kind]} reader is not enabled")
     if kind == "text":
         yield "", data.decode("utf-8", errors="replace")[: limits.max_text]
+    elif kind == "svg":
+        # Text between tags, one piece per line, so `key = value` content is seen as it would be in a file.
+        _xml_text(data[:4096])                        # refuses a DTD or entities, as for Office parts
+        yield "", re.sub(rb"<[^>]+>", b"\n", data).decode("utf-8", errors="replace")[: limits.max_text]
     elif kind == "email":
         msg = email.message_from_bytes(data, policy=email.policy.default)
         for h in ("from", "to", "cc", "subject"):
