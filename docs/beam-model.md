@@ -271,14 +271,18 @@ same model.
       leaves its instances with what it gave them;
     * datasets: kind, category, path, source, version, simulator, dates; every value as a grid (`s`, the
       reference trajectory, physics and optics columns, more columns on request); fields along a path as
-      `s value` samples. Each path's placement table writes into the dataset chosen for it;
+      `s value` samples, and the dataset's own aperture model. Each path's placement table writes into the
+      dataset chosen for it;
+    * boundaries along a path: an aperture no single component produces, or one a simulator gives as its own
+      element, with its `s` range, the component producing it (if any), its kind (physical or model) and the
+      state it applies in;
     * a panel per component: aliases, family, definition, capabilities, observables and measurement model,
-      supports, containment and fiducials, boundaries of any shape (and the state they apply in), material,
-      states, parameters.
+      supports, containment and fiducials, boundaries of any shape (and the state they apply in), alignment
+      (reference point, the object's pose in the hall, design and surveyed poses, the offset — computed from
+      the survey on request — survey date and campaign), material, states, parameters.
 
     *Check* shows the completeness levels and what each missing level needs. What the editor does not show is
-    kept and saved as it came: boundaries along paths and in datasets, bindings, provenance, a tool's own
-    fields. Editing an existing model loads its v2 export and saves it back as an import, so its
+    kept and saved as it came: bindings, provenance, a tool's own fields. Editing an existing model loads its v2 export and saves it back as an import, so its
     history stays. The page uses `GET /v1/beam-model/vocabulary` and `POST /v1/beam-model/upgrade` (a v1
     file opened in the editor).
 
@@ -357,8 +361,8 @@ by `branches to` from the beam splitter `BSP01`, observes `optical.profile` and 
   (they are reported); Elegant's SDDS outputs (twiss) are left to the Toolbox.
 * **The editor writes canonical values only**: simulator-specific types and parameters come with an uploaded
   file, and are kept through edits.
-* **Not editable there:** boundaries along a path or in a dataset, alignment poses, state-to-signal mappings,
-  and value provenance. They are kept, and come from the Toolbox or a file.
+* **Not editable there:** state-to-signal mappings, the meaning of each state (beam passes, intercepts…) and
+  value provenance. They are kept, and come from the Toolbox or a file.
 * **Not modelled here, on purpose**: vacuum pumping, electrical distribution, cooling, PLC logic, networks,
   maintenance, documents and inventory. The beam model identifies a component and its relevance to the beam;
   the Knowledge Hub holds the engineering detail, linked by the binding.

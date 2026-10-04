@@ -210,7 +210,7 @@ export function EditorV2({ initial, editing }: { initial: BeamModelV2; editing: 
         </Box>
 
         <DefinitionsBox doc={doc} vocab={vocab.data} update={update} selected={selectedDef} onSelect={pickDef} />
-        <DatasetsBox doc={doc} update={update} />
+        <DatasetsBox doc={doc} update={update} vocab={vocab.data} />
 
         <PassedThrough doc={doc} />
 
@@ -244,7 +244,7 @@ export function EditorV2({ initial, editing }: { initial: BeamModelV2; editing: 
         )}
       </div>
 
-      <aside className="xl:sticky xl:top-4 xl:self-start">
+      <aside className="xl:sticky xl:top-4 xl:max-h-[calc(100vh-6rem)] xl:self-start xl:overflow-y-auto">
         {selectedDef && (doc.definitions ?? []).some((x) => x.id === selectedDef)
           ? <DefinitionPanel doc={doc} id={selectedDef} vocab={vocab.data} update={update} onRenamed={pickDef} onClose={() => pickDef(null)} />
           : selected && doc.components.some((c) => c.id === selected)
@@ -500,6 +500,7 @@ function PathEditor({ doc, path, vocab, update, selected, onSelect, onRenamed, o
             d.components = d.components.filter((c) => !mine.has(c.id) || still.has(c.id));
             d.datasets = (d.datasets ?? []).filter((x) => x.path !== path.id);
             d.connections = d.connections.filter((c) => c.from.path !== path.id && c.to.path !== path.id);
+            if (d.boundaries) { d.boundaries = d.boundaries.filter((b) => b.path !== path.id); if (!d.boundaries.length) delete d.boundaries; }
           });
           onRemoved();
         }}>remove this path</Small></>}
@@ -578,6 +579,9 @@ function PathEditor({ doc, path, vocab, update, selected, onSelect, onRenamed, o
         A component on several paths (an interaction region) keeps one identity; tick <i>Rev</i> where a beam passes it backwards.
         How paths join is under Connections. Capabilities follow the type unless set in the component's panel.
       </p>
+      <PathBoundaries doc={doc} path={path} vocab={vocab} list={doc.boundaries} title="Boundaries along this path"
+                      hint="an aperture no single component produces, or one a simulator gives as its own element; s along this path"
+                      change={(fn) => update((d) => { d.boundaries = d.boundaries ?? []; fn(d.boundaries); if (!d.boundaries.length) delete d.boundaries; })} />
     </div>
   );
 }
@@ -632,7 +636,7 @@ function ConnectionsBox({ doc, update }: { doc: BeamModelV2; update: Update }) {
     })}>+ connection</Small> : undefined}>
       {doc.connections.length === 0 ? (
         <p className="text-xs text-slate-400">
-          None. A <b>branch</b> leaves a component (a septum, a beam splitter) for the start of another path; a <b>merge</b>
+          None. A <b>branch</b> leaves a component (a septum, a beam splitter) for the start of another path; a <b>merge</b>{" "}
           brings a path's end into a component of another (injection); <b>continue</b> joins a path's end to the next one's start.
         </p>
       ) : (
@@ -771,6 +775,16 @@ function ComponentPanel({ doc, id, vocab, update, onRenamed, onClose, onDefiniti
       </Group>
 
       <BoundariesGroup c={c} vocab={vocab} stateNames={boundaryStates} edit={edit} />
+      {(doc.boundaries ?? []).some((b) => b.component === id && !b.path) && (
+        <Group title="More boundaries from the model's list" hint="tied to this component, kept in the document's boundaries">
+          {(doc.boundaries ?? []).map((b, i) => ({ b, i })).filter(({ b }) => b.component === id && !b.path).map(({ b, i }) => (
+            <BoundaryCard key={i} b={b} vocab={vocab} stateNames={boundaryStates}
+                          onChange={(fn) => update((d) => { fn(d.boundaries![i]); })}
+                          onRemove={() => update((d) => { d.boundaries!.splice(i, 1); if (!d.boundaries!.length) delete d.boundaries; })} />
+          ))}
+        </Group>
+      )}
+      <AlignmentGroup c={c} edit={edit} />
 
       <Group title="Material" action={!c.material ? <button type="button" className="text-indigo-700 hover:underline" onClick={() => edit((el) => { el.material = { material: "" }; })}>add</button>
         : <button type="button" className="text-rose-700 hover:underline" onClick={() => edit((el) => { delete el.material; })}>remove</button>}>
@@ -976,7 +990,7 @@ function renameDataset(d: BeamModelV2, old: string, v: string) {
 
 const GEOMETRY_KEYS = ["x", "y", "z", "yaw", "pitch", "roll"];
 
-function DatasetsBox({ doc, update }: { doc: BeamModelV2; update: Update }) {
+function DatasetsBox({ doc, update, vocab }: { doc: BeamModelV2; update: Update; vocab?: BeamVocabulary }) {
   const datasets = doc.datasets ?? [];
   const [sel, setSel] = useState<string | null>(datasets[0]?.id ?? null);
   const ds = datasets.find((x) => x.id === sel);
@@ -1001,13 +1015,14 @@ function DatasetsBox({ doc, update }: { doc: BeamModelV2; update: Update }) {
           </button>
         ))}
       </div>
-      {ds && <DatasetEditor key={ds.id} doc={doc} ds={ds} update={update} onRenamed={setSel} onRemoved={() => setSel(null)} />}
+      {ds && <DatasetEditor key={ds.id} doc={doc} ds={ds} update={update} vocab={vocab} onRenamed={setSel} onRemoved={() => setSel(null)} />}
     </Box>
   );
 }
 
-function DatasetEditor({ doc, ds, update, onRenamed, onRemoved }: {
+function DatasetEditor({ doc, ds, update, onRenamed, onRemoved, vocab }: {
   doc: BeamModelV2; ds: V2Dataset; update: Update; onRenamed: (id: string) => void; onRemoved: () => void;
+  vocab?: BeamVocabulary;
 }) {
   const edit = (fn: (x: V2Dataset) => void) => update((d) => { fn(d.datasets!.find((x) => x.id === ds.id)!); });
   const path = doc.paths.find((p) => p.id === ds.path);
@@ -1134,6 +1149,11 @@ function DatasetEditor({ doc, ds, update, onRenamed, onRemoved }: {
       </p>
 
       <FieldsEditor doc={doc} ds={ds} edit={edit} />
+      {path && (
+        <PathBoundaries doc={doc} path={path} vocab={vocab} list={ds.boundaries} title="Aperture model of this dataset"
+                        hint="boundaries that hold for this configuration only"
+                        change={(fn) => edit((x) => { x.boundaries = x.boundaries ?? []; fn(x.boundaries); if (!x.boundaries.length) delete x.boundaries; })} />
+      )}
 
       <div className="border-t border-slate-100 pt-2 text-xs">
         <button type="button" className="text-rose-700 hover:underline" onClick={() => { update((d) => {
@@ -1196,40 +1216,171 @@ function BoundariesGroup({ c, vocab, stateNames, edit }: {
   c: V2Component; vocab?: BeamVocabulary; stateNames: string[]; edit: (fn: (el: V2Component) => void) => void;
 }) {
   const list = c.boundaries ?? [];
-  const setB = (i: number, fn: (b: V2Boundary) => void) => edit((el) => { fn(el.boundaries![i]); });
   return (
     <Group title="Beam boundaries" hint="the space this component leaves the beam, in metres from the axis"
            action={<button type="button" className="text-indigo-700 hover:underline" onClick={() => edit((el) => {
              el.boundaries = [...(el.boundaries ?? []), { profile: { shape: "circle", radius: 0.02 } }];
            })}>+ boundary</button>}>
       {list.map((b, i) => (
-        <div key={i} className="mb-2 rounded border border-slate-100 p-2">
-          <div className="grid grid-cols-3 gap-2">
-            <Select label="Shape" value={b.profile.shape} options={vocab?.shapes ?? ["circle", "ellipse", "rectangle", "racetrack", "polygon"]}
-                    onChange={(v) => setB(i, (x) => { x.profile = { shape: v as V2Profile["shape"] }; })} />
-            {SHAPE_FIELDS[b.profile.shape]?.map(([k, label]) => (
-              <Field key={k} label={`${label} (m)`} value={(b.profile[k] as number | undefined)?.toString() ?? ""}
-                     onChange={(v) => setB(i, (x) => { (x.profile as Record<string, unknown>)[k] = num(v); })} />
-            ))}
-            {(b.profile.shape === "polygon" || b.profile.shape === "custom") && (
-              <label className="col-span-2 block text-xs text-slate-500">Points (x y; x y; …)
-                <Cell value={(b.profile.points ?? []).map((p) => p.join(" ")).join("; ")} placeholder="0.02 0.01; -0.02 0.01; -0.02 -0.01; 0.02 -0.01"
-                      onCommit={(v) => setB(i, (x) => { x.profile.points = v.split(";").map((p) => p.trim().split(/[\s,]+/).map(Number)).filter((p) => p.length === 2 && p.every((n) => !Number.isNaN(n))); })} />
+        <BoundaryCard key={i} b={b} vocab={vocab} stateNames={stateNames}
+                      onChange={(fn) => edit((el) => { fn(el.boundaries![i]); })}
+                      onRemove={() => edit((el) => { el.boundaries!.splice(i, 1); if (!el.boundaries!.length) delete el.boundaries; })} />
+      ))}
+    </Group>
+  );
+}
+
+/** States a boundary may be limited to: the source component's own, else its type's defaults. */
+function statesOf(doc: BeamModelV2, vocab: BeamVocabulary | undefined, componentId?: string): string[] {
+  const c = componentId ? doc.components.find((x) => x.id === componentId) : undefined;
+  if (!c) return [];
+  const own = (c.states?.states ?? []).map((x) => x.name);
+  return own.length ? own : Object.keys((c.type && vocab?.states[c.type]) || {});
+}
+
+/** One boundary. `along` edits one that lies along a path (its own s range, its source component, its kind);
+ *  otherwise the range is relative to the owning component's entry. */
+function BoundaryCard({ b, vocab, stateNames, onChange, onRemove, along }: {
+  b: V2Boundary; vocab?: BeamVocabulary; stateNames: string[]; onChange: (fn: (b: V2Boundary) => void) => void;
+  onRemove: () => void; along?: { components: string[]; label: string };
+}) {
+  const setB = onChange;
+  return (
+    <div className="mb-2 rounded border border-slate-100 p-2">
+      <div className="grid grid-cols-3 gap-2">
+        {along && <Field label="Id" value={b.id ?? ""} placeholder="optional" onChange={(v) => setB((x) => { x.id = v || undefined; })} />}
+        {along && <Select label="Produced by" value={b.component ?? ""} options={["", ...along.components]} onChange={(v) => setB((x) => { x.component = v || undefined; })} />}
+        {along && <Select label="Kind" value={b.kind ?? "physical"} options={["physical", "model"]} onChange={(v) => setB((x) => { x.kind = v === "physical" ? undefined : "model"; })} />}
+        <Select label="Shape" value={b.profile.shape} options={vocab?.shapes ?? ["circle", "ellipse", "rectangle", "racetrack", "polygon"]}
+                onChange={(v) => setB((x) => { x.profile = { shape: v as V2Profile["shape"] }; })} />
+        {SHAPE_FIELDS[b.profile.shape]?.map(([k, label]) => (
+          <Field key={k} label={`${label} (m)`} value={(b.profile[k] as number | undefined)?.toString() ?? ""}
+                 onChange={(v) => setB((x) => { (x.profile as Record<string, unknown>)[k] = num(v); })} />
+        ))}
+        {(b.profile.shape === "polygon" || b.profile.shape === "custom") && (
+          <label className="col-span-2 block text-xs text-slate-500">Points (x y; x y; …)
+            <Cell value={(b.profile.points ?? []).map((p) => p.join(" ")).join("; ")} placeholder="0.02 0.01; -0.02 0.01; -0.02 -0.01; 0.02 -0.01"
+                  onCommit={(v) => setB((x) => { x.profile.points = v.split(";").map((p) => p.trim().split(/[\s,]+/).map(Number)).filter((p) => p.length === 2 && p.every((n) => !Number.isNaN(n))); })} />
+          </label>
+        )}
+        <Field label="Offset x" value={b.profile.offset_x?.toString() ?? ""} onChange={(v) => setB((x) => { x.profile.offset_x = num(v); })} />
+        <Field label="Offset y" value={b.profile.offset_y?.toString() ?? ""} onChange={(v) => setB((x) => { x.profile.offset_y = num(v); })} />
+        <Select label="Only when" value={b.when_state ?? ""} options={["", ...new Set([...stateNames, ...(b.when_state ? [b.when_state] : [])])]}
+                onChange={(v) => setB((x) => { x.when_state = v || undefined; })} />
+        <Field label={along ? `From s (m, ${along.label})` : "From (m, from entry)"} value={b.s_start?.toString() ?? ""} onChange={(v) => setB((x) => { x.s_start = num(v); })} />
+        <Field label={along ? "To s (m)" : "To (m)"} value={b.s_end?.toString() ?? ""} onChange={(v) => setB((x) => { x.s_end = num(v); })} />
+        <div className="flex items-end"><button type="button" className="text-rose-700 hover:underline" onClick={onRemove}>remove</button></div>
+      </div>
+      {along && b.note && <div className="mt-1 text-[11px] text-slate-400">{b.note}</div>}
+    </div>
+  );
+}
+
+/** Boundaries that lie along a path rather than belonging to one component: a model aperture, an aperture
+ *  element of a simulator, a restriction a survey found. Kept in the document's (or a dataset's) list. */
+function PathBoundaries({ doc, path, vocab, list, change, title, hint }: {
+  doc: BeamModelV2; path: V2Path; vocab?: BeamVocabulary; list: V2Boundary[] | undefined;
+  change: (fn: (list: V2Boundary[]) => void) => void; title: string; hint: string;
+}) {
+  const items = (list ?? []).map((b, i) => ({ b, i })).filter(({ b }) => b.path === path.id);
+  const comps = [...new Set(placements(path).map((pl) => pl.component))];
+  return (
+    <Group title={title} hint={hint}
+           action={<button type="button" className="text-indigo-700 hover:underline" onClick={() => change((l) => {
+             l.push({ path: path.id, s_start: 0, s_end: 0, kind: "model", profile: { shape: "circle", radius: 0.02 } });
+           })}>+ boundary</button>}>
+      {items.length === 0 && <p className="text-xs text-slate-400">None.</p>}
+      {items.map(({ b, i }) => (
+        <BoundaryCard key={i} b={b} vocab={vocab} stateNames={statesOf(doc, vocab, b.component)}
+                      along={{ components: comps, label: `along ${path.name || path.id}` }}
+                      onChange={(fn) => change((l) => { fn(l[i]); })} onRemove={() => change((l) => { l.splice(i, 1); })} />
+      ))}
+    </Group>
+  );
+}
+
+const POSE_KEYS = ["x", "y", "z", "yaw", "pitch", "roll"] as const;
+type Pose = Partial<Record<(typeof POSE_KEYS)[number], number>> & Record<string, unknown>;
+
+function PoseRow({ label, value, onChange, unitHint }: {
+  label: string; value: Pose | undefined; onChange: (p: Pose | undefined) => void; unitHint?: string;
+}) {
+  const set = (k: string, raw: string) => {
+    const next: Pose = { ...(value ?? {}) };
+    const n = num(raw);
+    if (n === undefined) delete next[k]; else next[k] = n;
+    onChange(Object.keys(next).length ? next : undefined);
+  };
+  return (
+    <div>
+      <div className="text-[11px] text-slate-500">{label}{unitHint ? <span className="text-slate-400"> · {unitHint}</span> : null}</div>
+      <div className="mt-0.5 grid grid-cols-6 gap-1">
+        {POSE_KEYS.map((k) => (
+          <label key={k} className="block text-[10px] text-slate-400">{k}
+            <Cell value={value?.[k]?.toString() ?? ""} onCommit={(v) => set(k, v)} fill />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Where the physical object is: its pose in the hall, and design, surveyed and offset (all optional). The
+ *  reference trajectory at the component is a dataset value; this is the object itself. */
+function AlignmentGroup({ c, edit }: { c: V2Component; edit: (fn: (el: V2Component) => void) => void }) {
+  const geo = (c.geometry ?? {}) as Record<string, unknown>;
+  const al = (geo.alignment ?? {}) as Record<string, unknown>;
+  const setGeo = (k: string, v: unknown) => edit((el) => {
+    const g = { ...((el.geometry ?? {}) as Record<string, unknown>) };
+    if (v === undefined || v === "") delete g[k]; else g[k] = v;
+    if (Object.keys(g).length) el.geometry = g as V2Component["geometry"]; else delete el.geometry;
+  });
+  const setAl = (k: string, v: unknown) => edit((el) => {
+    const g = { ...((el.geometry ?? {}) as Record<string, unknown>) };
+    const a = { ...((g.alignment ?? {}) as Record<string, unknown>) };
+    if (v === undefined || v === "") delete a[k]; else a[k] = v;
+    if (Object.keys(a).length) g.alignment = a; else delete g.alignment;
+    if (Object.keys(g).length) el.geometry = g as V2Component["geometry"]; else delete el.geometry;
+  });
+  const design = al.design as Pose | undefined;
+  const surveyed = al.surveyed as Pose | undefined;
+  const offset = al.offset as Record<string, number> | undefined;
+  const canDiff = !!design && !!surveyed && POSE_KEYS.some((k) => design[k] !== undefined && surveyed[k] !== undefined);
+  return (
+    <Group title="Alignment" hint="the physical object; all optional"
+           action={canDiff ? <button type="button" className="text-indigo-700 hover:underline" title="offset = surveyed − design" onClick={() => {
+             const o: Record<string, number> = {};
+             POSE_KEYS.forEach((k) => {
+               if (design![k] !== undefined && surveyed![k] !== undefined) o[`d${k}`] = Number((surveyed![k]! - design![k]!).toPrecision(12));
+             });
+             setAl("offset", o);
+           }}>offset from survey</button> : undefined}>
+      <div className="space-y-2">
+        <Select label="Reference point" value={(geo.reference_point as string) ?? ""} options={["", "entry", "centre", "exit"]}
+                onChange={(v) => setGeo("reference_point", v || undefined)} />
+        <PoseRow label="Placement in the hall" unitHint="m, rad" value={geo.placement as Pose | undefined} onChange={(p) => setGeo("placement", p)} />
+        <PoseRow label="Design" value={design} onChange={(p) => setAl("design", p)} />
+        <PoseRow label="Surveyed" value={surveyed} onChange={(p) => setAl("surveyed", p)} />
+        <div>
+          <div className="text-[11px] text-slate-500">Offset</div>
+          <div className="mt-0.5 grid grid-cols-6 gap-1">
+            {POSE_KEYS.map((k) => (
+              <label key={k} className="block text-[10px] text-slate-400">d{k}
+                <Cell value={offset?.[`d${k}`]?.toString() ?? ""} fill onCommit={(v) => {
+                  const o: Record<string, number> = { ...(offset ?? {}) };
+                  const n = num(v);
+                  if (n === undefined) delete o[`d${k}`]; else o[`d${k}`] = n;
+                  setAl("offset", Object.keys(o).length ? o : undefined);
+                }} />
               </label>
-            )}
-            <Field label="Offset x" value={b.profile.offset_x?.toString() ?? ""} onChange={(v) => setB(i, (x) => { x.profile.offset_x = num(v); })} />
-            <Field label="Offset y" value={b.profile.offset_y?.toString() ?? ""} onChange={(v) => setB(i, (x) => { x.profile.offset_y = num(v); })} />
-            <Select label="Only when" value={b.when_state ?? ""} options={["", ...new Set([...stateNames, ...(b.when_state ? [b.when_state] : [])])]}
-                    onChange={(v) => setB(i, (x) => { x.when_state = v || undefined; })} />
-            <Field label="From (m, from entry)" value={b.s_start?.toString() ?? ""} onChange={(v) => setB(i, (x) => { x.s_start = num(v); })} />
-            <Field label="To (m)" value={b.s_end?.toString() ?? ""} onChange={(v) => setB(i, (x) => { x.s_end = num(v); })} />
-            <div className="flex items-end"><button type="button" className="text-rose-700 hover:underline" onClick={() => edit((el) => {
-              el.boundaries!.splice(i, 1);
-              if (!el.boundaries!.length) delete el.boundaries;
-            })}>remove</button></div>
+            ))}
           </div>
         </div>
-      ))}
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Surveyed at" value={(al.surveyed_at as string) ?? ""} placeholder="2026-04-02" onChange={(v) => setAl("surveyed_at", v || undefined)} />
+          <Field label="Survey" value={(al.survey as string) ?? ""} placeholder="campaign or dataset" onChange={(v) => setAl("survey", v || undefined)} />
+        </div>
+      </div>
     </Group>
   );
 }
@@ -1252,11 +1403,10 @@ function TypeSelect({ vocab, value, onChange }: { vocab?: BeamVocabulary; value:
 /** What the editor keeps without showing: listed, so a person knows it is there and travels with a save. */
 function PassedThrough({ doc }: { doc: BeamModelV2 }) {
   const items: string[] = [];
-  if ((doc.boundaries ?? []).length) items.push(`${doc.boundaries!.length} boundaries along paths`);
   if ((doc.external_bindings ?? []).length) items.push(`${doc.external_bindings!.length} asset bindings`);
   if ((doc.observables ?? []).length) items.push(`${doc.observables!.length} declared observables`);
-  const dsBoundaries = (doc.datasets ?? []).reduce((n, d) => n + (d.boundaries ?? []).length, 0);
-  if (dsBoundaries) items.push(`${dsBoundaries} dataset aperture boundaries`);
+  const orphan = (doc.boundaries ?? []).filter((b) => b.path && !doc.paths.some((p) => p.id === b.path)).length;
+  if (orphan) items.push(`${orphan} boundaries along paths that no longer exist`);
   if (!items.length) return null;
   return <p className="text-xs text-slate-500">Kept as they are and saved with the model: {items.join(" · ")}.</p>;
 }
@@ -1336,15 +1486,15 @@ function Select({ label, value, options, onChange }: { label: string; value: str
 }
 
 /** Edited in place and committed on blur or Enter, so a rename does not happen per keystroke. */
-function Cell({ value, onCommit, mono, narrow, placeholder }: {
-  value: string; onCommit: (v: string) => void; mono?: boolean; narrow?: boolean; placeholder?: string;
+function Cell({ value, onCommit, mono, narrow, fill, placeholder }: {
+  value: string; onCommit: (v: string) => void; mono?: boolean; narrow?: boolean; fill?: boolean; placeholder?: string;
 }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
   return (
     <input value={v} placeholder={placeholder} onChange={(e) => setV(e.target.value)} onClick={(e) => e.stopPropagation()}
            onBlur={() => v !== value && onCommit(v)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-           className={`rounded border border-slate-200 px-1 py-0.5 ${mono ? "font-mono" : ""} ${narrow ? "w-20" : "w-full min-w-[7rem]"}`} />
+           className={`rounded border border-slate-200 px-1 py-0.5 ${mono ? "font-mono" : ""} ${fill ? "w-full min-w-0" : narrow ? "w-20" : "w-full min-w-[7rem]"}`} />
   );
 }
 
