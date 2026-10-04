@@ -1609,7 +1609,13 @@ export interface BeamModelCheck {
   model: string | null;
   ok: boolean;
   problems: string[];
-  summary: { systems: number; paths: number; elements: number; datasets: number; observables: number } | null;
+  format?: "1" | "2";
+  levels?: string[];
+  warnings?: string[];
+  gaps?: Record<string, string[]>;
+  summary: { systems: number; paths: number; elements: number; datasets: number; observables: number;
+             components?: number; definitions?: number; placements?: number; connections?: number;
+             boundaries?: number; shared_components?: string[] } | null;
 }
 
 export interface BeamImportReport {
@@ -1621,6 +1627,9 @@ export interface BeamImportReport {
   datasets: number;
   values: number;
   awaiting_policy: boolean;
+  format?: "1" | "2";
+  levels?: string[];
+  warnings?: string[];
 }
 
 /** The canonical representation (argus.beam-model/1, docs/beam-model.md §8). */
@@ -1678,4 +1687,77 @@ export interface CanonicalBeamModel {
   elements: CanonicalElement[];
   observables?: { quantity: string; unit?: string; domain?: string; plane?: string }[];
   datasets?: CanonicalDataset[];
+}
+
+
+// ------------------------------------------------------------------- argus.beam-model/2 (docs/beam-model-format.md)
+// Loose on purpose: the editor changes what it shows and passes everything else through untouched.
+
+export interface V2Profile {
+  shape: "circle" | "ellipse" | "rectangle" | "racetrack" | "polygon" | "custom";
+  radius?: number; semi_axis_x?: number; semi_axis_y?: number; half_width_x?: number; half_height_y?: number;
+  corner_radius?: number; points?: number[][]; offset_x?: number; offset_y?: number; [k: string]: unknown;
+}
+export interface V2Boundary {
+  id?: string; component?: string; path?: string; s_start?: number; s_end?: number; profile: V2Profile;
+  when_state?: string; kind?: "physical" | "model"; note?: string; [k: string]: unknown;
+}
+export interface V2StateModel {
+  states: { name: string; meaning?: Record<string, unknown>; description?: string }[];
+  default?: string; mappings?: { signal?: string; value: unknown; state: string }[];
+}
+export interface V2Native { format?: string; type?: string; name?: string; file?: string; parameters?: Record<string, unknown>; [k: string]: unknown }
+export interface V2Component {
+  id: string; name?: string; type?: string; definition?: string; family?: string; aliases?: string[];
+  capabilities?: string[]; parameters?: Record<string, unknown>;
+  geometry?: { length?: number; [k: string]: unknown };
+  boundaries?: V2Boundary[];
+  material?: { material: string; thickness?: number; density?: number; radiation_length?: number; [k: string]: unknown };
+  states?: V2StateModel;
+  measurement_model?: { type: string; observables?: string[]; [k: string]: unknown };
+  observes?: string[]; mounted_on?: string; contained_in?: string; fiducials?: string[];
+  native?: V2Native; description?: string; [k: string]: unknown;
+}
+export interface V2Placement { component: string; id?: string; s?: number; length?: number; reversed?: boolean }
+export interface V2Path {
+  id: string; name?: string; system?: string; beams?: string[]; topology: "open" | "closed";
+  placements: (string | V2Placement)[]; reference?: string; length?: number; direction?: string; [k: string]: unknown;
+}
+export interface V2Connection {
+  kind: "branch" | "merge" | "continue"; from: { path: string; component?: string }; to: { path: string; component?: string };
+  note?: string;
+}
+export interface V2Beam {
+  id: string; name?: string; kind?: "particle" | "photon"; species?: string; charge?: number; rest_mass?: number;
+  reference_energy?: number; reference_momentum?: number; wavelength?: number; systems?: string[];
+  parameters?: Record<string, unknown>; [k: string]: unknown;
+}
+export interface V2System { id: string; name?: string; kind?: string; beams?: string[]; [k: string]: unknown }
+export interface V2Values {
+  s?: number | null; geometry?: Record<string, number> | null; physics?: Record<string, unknown>;
+  optics?: Record<string, unknown>; native?: V2Native; [k: string]: unknown;
+}
+export interface V2Dataset {
+  id: string; name?: string; kind?: string; category?: string; path?: string; values?: Record<string, V2Values>;
+  [k: string]: unknown;
+}
+export interface BeamModelV2 {
+  schema_version: "argus.beam-model/2";
+  model: { id: string; name?: string; source?: string; version?: string; git_commit?: string; simulator?: string; [k: string]: unknown };
+  facility?: { id: string; name?: string; namespace?: string; site?: string; [k: string]: unknown };
+  systems: V2System[]; beams: V2Beam[]; paths: V2Path[]; connections: V2Connection[];
+  definitions?: { id: string; type: string; [k: string]: unknown }[];
+  components: V2Component[]; boundaries?: V2Boundary[]; observables?: { quantity: string; unit?: string; [k: string]: unknown }[];
+  datasets?: V2Dataset[]; external_bindings?: unknown[]; provenance?: Record<string, unknown>; [k: string]: unknown;
+}
+
+export interface BeamVocabulary {
+  families: Record<string, Record<string, string[]>>;
+  capabilities: Record<string, string>;
+  observables: Record<string, { unit: string; domain: string; plane: string }>;
+  measurement_models: string[];
+  states: Record<string, Record<string, Record<string, unknown>>>;
+  binding_relations: Record<string, string>;
+  shapes: string[];
+  virtual_families: string[];
 }

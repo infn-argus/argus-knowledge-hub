@@ -200,8 +200,8 @@ All under the usual workspace header and permissions (`read`, `create`, `approve
 
 **The current format is `argus.beam-model/2`: the full reference is [beam-model-format.md](beam-model-format.md)**,
 with the JSON Schema [beam-model.schema.json](beam-model.schema.json). What follows is the v1 form, still
-imported (held to the v1 rules, then upgraded) and exported on request (`?format=1`; the web editor uses it,
-and an edit keeps what v1 cannot say). Its schema is [beam-model-1.schema.json](beam-model-1.schema.json). The hub's core reads only this; simulator files are turned
+imported (held to the v1 rules, then upgraded) and exported on request (`?format=1`; a v1 client's
+edit keeps what v1 cannot say). Its schema is [beam-model-1.schema.json](beam-model-1.schema.json). The hub's core reads only this; simulator files are turned
 into it by converters — the ones in `app/beam_converters/` (MAD-X, TFS, Elegant, extensible) or the
 Accelerator Model Toolbox for the rest (Xsuite, Bmad, AT, laser optics tools…). Normalised kinds: `drift dipole quadrupole sextupole corrector kicker septum rf_cavity bpm screen
 source dump mirror lens beam_splitter generic_monitor generic` (plus `solenoid collimator undulator`). A
@@ -252,12 +252,29 @@ same model.
   lines and β functions under the line when the dataset has them. Each kind has its own glyph and colour;
   the chips (with counts) hide and show kinds, *Names* the labels. Branches, and the panel of a selected
   element. *Export all*, and per model *edit* and *export*.
-* **+ New → Beam model**: *Upload files* takes several files — canonical JSON (models or bundles) and simulator
-  files (MAD-X, TFS, Elegant), which are converted on upload with a report (elements, ring or line, survey
-  closure, statements not executed) — checks every model with the server and imports them all or none; *Write a model* is an editor for the model, its systems and
-  beams, its paths and, per path, an element table (kind, name, `s`, length, strength, observables, branch)
-  written into the path's first dataset (or a design dataset made for it) — the other datasets are kept.
-  Editing an existing model loads its export and saves it back as an import, so its history stays.
+* **+ New → Beam model**:
+  * **Upload files** takes several files at once:
+    * canonical JSON (v2 or v1, models or bundles);
+    * simulator files (MAD-X, TFS, Elegant, Bmad, Xsuite, Accelerator Toolbox), converted on upload with a
+      report: components, ring or line, survey closure, statements not executed.
+
+    It checks every model with the server, showing levels and warnings, and imports them all or none.
+  * **Write a model** is the `argus.beam-model/2` editor:
+    * the model and its facility; beams; systems;
+    * paths, each with a placement table (component, type from the vocabulary, `s`, length, strength,
+      observes, passed backwards, the other paths it is on). Values go into the path's first dataset, or a
+      design dataset made for it. An existing component can be placed on another path;
+    * connections (branch, merge, continue);
+    * components on no path (girders, supports, fiducials);
+    * a panel per component: aliases, family, definition, capabilities, observables and measurement model,
+      supports, containment and fiducials, boundaries of any shape (and the state they apply in), material,
+      states, parameters.
+
+    *Check* shows the completeness levels and what each missing level needs. What the editor does not show is
+    kept and saved as it came: definitions, other datasets, boundaries along paths, bindings, provenance, a
+    tool's own fields. Editing an existing model loads its v2 export and saves it back as an import, so its
+    history stays. The page uses `GET /v1/beam-model/vocabulary` and `POST /v1/beam-model/upgrade` (a v1
+    file opened in the editor).
 
 ## 10. Examples
 
@@ -333,8 +350,9 @@ by `branches to` from the beam splitter `BSP01`, observes `optical.profile` and 
 * **Converters read lattice files, not programs**: MAD-X macros, loops and conditionals are not executed
   (they are reported); Elegant's SDDS outputs (twiss) are left to the Toolbox.
 * **The editor writes canonical values only**: simulator-specific types and parameters come with an uploaded
-  file, and are kept through edits. It edits the v1 form; v2-only content (supports, boundaries, states,
-  definitions) is carried over on save, but is not editable there — it comes from the Toolbox or a file.
+  file, and are kept through edits.
+* **Not editable there:** definitions, datasets other than one per path, fields along paths, alignment poses
+  and state-to-signal mappings. They are kept, and come from the Toolbox or a file.
 * **Not modelled here, on purpose**: vacuum pumping, electrical distribution, cooling, PLC logic, networks,
   maintenance, documents and inventory. The beam model identifies a component and its relevance to the beam;
   the Knowledge Hub holds the engineering detail, linked by the binding.

@@ -327,6 +327,30 @@ def schema(version: str = Query("2", pattern="^(1|2)$")):
     return json_schema()
 
 
+@model_router.get("/vocabulary")
+def vocabulary():
+    """The canonical vocabularies (docs/beam-model-format.md §4–§9): component types by family with their default
+    capabilities, capabilities, built-in observables, measurement models, default state sets, binding relations
+    and profile shapes — what an editor offers."""
+    from app.beam_model_core import vocabulary as V
+    return {"families": V.FAMILIES, "capabilities": V.CAPABILITIES,
+            "observables": {q: {"unit": u, "domain": d, "plane": p} for q, (u, d, p) in V.OBSERVABLES.items()},
+            "measurement_models": sorted(V.MEASUREMENT_MODELS), "states": V.DEFAULT_STATES,
+            "binding_relations": V.BINDING_RELATIONS, "shapes": sorted(V.SHAPES),
+            "virtual_families": sorted(set(V.FAMILIES) - V.PHYSICAL_FAMILIES)}
+
+
+@model_router.post("/upgrade")
+def upgrade_model(doc=Body(..., description="A model of any supported version"),
+                  workspace_id: str = Depends(require_permission("read"))):
+    """A v1 document as argus.beam-model/2 (a v2 one is returned as it is). Nothing is written."""
+    from app.beam_model_core.upgrade import upgrade
+    try:
+        return upgrade(doc)
+    except (ValueError, TypeError, AttributeError) as e:
+        raise HTTPException(status_code=422, detail={"problems": [str(e)]}) from e
+
+
 class ConvertIn(BaseModel):
     filename: str
     content: str

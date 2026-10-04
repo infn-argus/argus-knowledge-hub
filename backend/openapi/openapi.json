@@ -16605,6 +16605,86 @@
         ]
       }
     },
+    "/v1/beam-model/upgrade": {
+      "post": {
+        "description": "A v1 document as argus.beam-model/2 (a v2 one is returned as it is). Nothing is written.",
+        "operationId": "upgrade_model_v1_beam_model_upgrade_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "A model of any supported version",
+                "title": "Doc"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upgrade Model",
+        "tags": [
+          "beam-model"
+        ]
+      }
+    },
     "/v1/beam-model/validate": {
       "post": {
         "description": "Check models without importing them: each one's problems, or what it holds.",
@@ -16680,6 +16760,70 @@
           }
         ],
         "summary": "Validate Models",
+        "tags": [
+          "beam-model"
+        ]
+      }
+    },
+    "/v1/beam-model/vocabulary": {
+      "get": {
+        "description": "The canonical vocabularies (docs/beam-model-format.md §4–§9): component types by family with their default\ncapabilities, capabilities, built-in observables, measurement models, default state sets, binding relations\nand profile shapes — what an editor offers.",
+        "operationId": "vocabulary_v1_beam_model_vocabulary_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Vocabulary",
         "tags": [
           "beam-model"
         ]

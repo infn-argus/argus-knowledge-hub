@@ -289,3 +289,30 @@ def test_a_v1_edit_of_a_v2_model_keeps_what_v1_cannot_say(ring, db):
     assert comps["VLVA101"]["type"] == "gate_valve" and comps["VLVA101"]["boundaries"]
     assert comps["QUAA101"]["definition"] == "QUA1" and comps["QUAA101"]["mounted_on"] == "GIRDER_01"
     assert "GIRDER_01" in comps and doc["definitions"]
+
+
+def test_what_the_editor_needs_and_an_edited_v2_model_round_trips(ring, db):
+    h = ring["h"]
+    voc = client.get("/v1/beam-model/vocabulary", headers=h).json()
+    assert "gate_valve" in voc["families"]["vacuum"] and "aperture_limiting" in voc["capabilities"]
+    assert voc["states"]["gate_valve"]["OPEN"] == {"beam_passes": True} and "circle" in voc["shapes"]
+    v1 = json.loads((FX / "linac.json").read_text())
+    up = client.post("/v1/beam-model/upgrade", headers=h, json=v1).json()
+    assert up["schema_version"] == "argus.beam-model/2" and up["components"]
+    # The editor loads v2, changes it and saves it whole: a component placed on a second path, a branch, a boundary.
+    doc = client.get("/v1/beam-model/models/dafne-accumulator-v2/export?format=2", headers=h).json()
+    doc["paths"].append({"id": "spur", "topology": "open", "placements": ["DMPT101x"], "system": "dafne-accumulator"})
+    doc["components"].append({"id": "DMPT101x", "type": "beam_dump", "material": {"material": "graphite"}})
+    doc["paths"][1]["placements"].append({"component": "QUAT101", "reversed": True})     # passed again, backwards
+    doc["connections"].append({"kind": "branch", "from": {"path": "extraction-line", "component": "BPST101"},
+                               "to": {"path": "spur"}})
+    q = next(c for c in doc["components"] if c["id"] == "QUAA102")
+    q["boundaries"] = [{"profile": {"shape": "circle", "radius": 0.021}}]
+    saved = client.post("/v1/beam-model/import", headers=h, json=doc)
+    assert saved.status_code == 200, saved.text
+    back = client.get("/v1/beam-model/models/dafne-accumulator-v2/export", headers=h).json()
+    assert back["schema_version"] == "argus.beam-model/2" and back["definitions"]               # nothing lost
+    assert next(c for c in back["components"] if c["id"] == "QUAA102")["boundaries"][0]["profile"]["radius"] == 0.021
+    assert any(c["to"]["path"] == "spur" for c in back["connections"])
+    ext = next(p for p in back["paths"] if p["id"] == "extraction-line")
+    assert {"component": "QUAT101", "reversed": True} in ext["placements"]

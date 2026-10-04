@@ -564,7 +564,7 @@ survey is in); an asset binding is never required. The report's `gaps` say what 
 * element-level values are filed into datasets as v1 did.
 
 The hub keeps validating v1 documents by the v1 rules (its closed kind list, one path per element). When a
-v1 document updates a model stored as v2 (the web editor, an old client), what v1 cannot say is carried over.
+v1 document updates a model stored as v2 (an old client), what v1 cannot say is carried over. The web editor edits v2.
 `?format=1` exports the old form; v1 bundles (`argus.beam-model-bundle/1`) and v2 bundles
 (`argus.beam-model-bundle/2`, key `schema_version`) are both read.
 

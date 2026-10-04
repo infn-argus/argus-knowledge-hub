@@ -91,7 +91,7 @@ import type {
   RootCauseResult,
   BeamSystem,
   BeamPathGraph,
-  BeamElementContext, AssetSyncStatus, AssetSyncApply, AssetSyncApplied, AssetBinding,
+  BeamElementContext, BeamModelV2, BeamVocabulary, AssetSyncStatus, AssetSyncApply, AssetSyncApplied, AssetBinding,
   BeamRecord,
   BeamModelSummary,
   BeamModelCheck,
@@ -1456,6 +1456,9 @@ export const beamModelApi = {
   importModels: (doc: unknown) =>
     request<BeamImportReport | { models: BeamImportReport[] }>("/v1/beam-model/import", { method: "POST", body: json(doc) }),
   schema: () => request<Record<string, unknown>>("/v1/beam-model/schema"),
+  vocabulary: () => request<BeamVocabulary>("/v1/beam-model/vocabulary"),
+  upgrade: (doc: unknown) => request<BeamModelV2>("/v1/beam-model/upgrade", { method: "POST", body: json(doc) }),
+  exportV2: (id: string) => request<BeamModelV2>(`/v1/beam-model/models/${encodeURIComponent(id)}/export?format=2`),
   formats: () => request<{ name: string; label: string; extensions: string[] }[]>("/v1/beam-model/formats"),
   convert: (filename: string, content: string, options: Record<string, unknown> = {}, converter?: string) =>
     request<{ model: CanonicalBeamModel; report: BeamConversionReport; check: BeamModelCheck }>("/v1/beam-model/convert",
