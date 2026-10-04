@@ -25,6 +25,7 @@ export function WorkspaceAI() {
   const [apiKey, setApiKey] = useState("");
   const [enabled, setEnabled] = useState(false);
   const [allowConfidential, setAllowConfidential] = useState(false);
+  const [maxOutputTokens, setMaxOutputTokens] = useState("");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -39,6 +40,7 @@ export function WorkspaceAI() {
       setTtsModel(c.tts_model ?? "");
       setEnabled(c.enabled);
       setAllowConfidential(c.allow_confidential);
+      setMaxOutputTokens(c.max_output_tokens ? String(c.max_output_tokens) : "");
     }
     setLoaded(true);
   }, [config.data, config.isLoading, loaded]);
@@ -57,6 +59,7 @@ export function WorkspaceAI() {
         ...(apiKey ? { api_key: apiKey } : {}),
         enabled,
         allow_confidential: allowConfidential,
+        max_output_tokens: Number(maxOutputTokens) > 0 ? Math.floor(Number(maxOutputTokens)) : null,
       }),
     onSuccess: () => {
       setApiKey("");
@@ -191,6 +194,24 @@ export function WorkspaceAI() {
             placeholder={saved?.has_api_key ? "••••••••" : "Leave blank if the endpoint needs none"}
             className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
           />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Output-token limit</label>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={maxOutputTokens}
+            onChange={(e) => setMaxOutputTokens(e.target.value)}
+            placeholder="No limit"
+            className="mt-1 w-48 rounded border border-slate-300 px-3 py-2 text-sm"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Optional: the most a single reply may use, for a gateway that bills or throttles by
+            token. Empty means no limit. A reasoning model (Qwen, DeepSeek…) thinks before it
+            answers, so a tight limit can leave it no room for the answer itself.
+          </p>
         </div>
 
         <label className="flex items-start gap-2 text-sm text-slate-700">

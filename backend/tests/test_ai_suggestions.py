@@ -270,3 +270,25 @@ def test_a_document_already_proposed_is_not_asked_about_again(workspace, monkeyp
     assert second["considered"] == 0, "nothing left to ask about"
     assert len(calls) == 1, "and no second request was made"
     db.close()
+
+
+# --- the output-token limit ------------------------------------------------------------------------
+
+def test_the_output_token_limit_is_a_setting_and_empty_means_no_limit(workspace):
+    """Each call used to carry its own budget, sized for the answer; a reasoning model spent it thinking
+    and answered nothing. Now a reply is unlimited unless the AI settings say otherwise."""
+    from app.routers.ai import endpoint_for
+    workspace_id, raw = workspace
+    body = {"base_url": "https://x/v1", "model": "test-model", "enabled": True}
+    saved = client.put("/v1/ai/config", json={**body, "max_output_tokens": 4000}, headers=auth(raw))
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["max_output_tokens"] == 4000
+    db = SessionLocal()
+    assert endpoint_for(db.get(LLMConfig, workspace_id)).budget() == {"max_tokens": 4000}
+    db.close()
+    cleared = client.put("/v1/ai/config", json=body, headers=auth(raw))
+    assert cleared.json()["max_output_tokens"] is None
+    db = SessionLocal()
+    assert endpoint_for(db.get(LLMConfig, workspace_id)).budget() == {}
+    db.close()
+    assert client.put("/v1/ai/config", json={**body, "max_output_tokens": 0}, headers=auth(raw)).status_code == 422

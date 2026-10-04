@@ -875,6 +875,8 @@ export interface LLMConfig {
   has_api_key: boolean;
   enabled: boolean;
   allow_confidential: boolean;
+  /** The most a single reply may use; null: no limit. */
+  max_output_tokens: number | null;
   last_checked_at: string | null;
   last_check_ok: boolean | null;
   last_check_error: string | null;
@@ -891,6 +893,8 @@ export interface LLMConfigInput {
   api_key?: string;
   enabled: boolean;
   allow_confidential: boolean;
+  /** Null or omitted: no limit. */
+  max_output_tokens?: number | null;
 }
 
 export interface LLMCheckResult {

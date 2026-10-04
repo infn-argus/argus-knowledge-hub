@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -48,6 +48,10 @@ class LLMConfig(Base, TimestampMixin):
     # decides otherwise: it is a property of where the text is going, so it
     # belongs beside the endpoint.
     allow_confidential: Mapped[bool] = mapped_column(Boolean, default=False)
+    # How long a reply may be, for every AI call of this workspace. Empty: no limit, which is what a
+    # reasoning model needs (it thinks before answering, and a budget sized for the answer is spent
+    # thinking). A number caps every reply, for a gateway that bills or throttles by token.
+    max_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     last_checked_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

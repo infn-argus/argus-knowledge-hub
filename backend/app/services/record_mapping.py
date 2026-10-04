@@ -378,7 +378,7 @@ def _source_text(name: str, prof: dict) -> str:
     return "\n".join(lines)
 
 
-def _call(db: Session, mapping: CatalogueMapping, ep, profile_id, ws, system: str, user: str, max_tokens: int,
+def _call(db: Session, mapping: CatalogueMapping, ep, profile_id, ws, system: str, user: str,
           rule: str) -> Optional[dict]:
     from app.intake import secrets
     from app.intake.assist import _payload
@@ -388,11 +388,11 @@ def _call(db: Session, mapping: CatalogueMapping, ep, profile_id, ws, system: st
     extra = {"chat_template_kwargs": {"enable_thinking": False}}
     try:
         try:
-            reply = complete(ep, system, user, max_tokens=max_tokens, extra=extra)
+            reply = complete(ep, system, user, extra=extra)
         except LLMError as exc:
             if " 400" not in str(exc) and " 422" not in str(exc):
                 raise
-            reply = complete(ep, system, user, max_tokens=max_tokens)
+            reply = complete(ep, system, user)
     except LLMError as exc:
         cm._audit(db, mapping, ep, profile_id, user, None, "failed", str(exc), started, ws)
         mapping.ai = {**mapping.ai, "error": f"The AI stopped answering ({exc}); the rest comes from the rules."}
@@ -409,7 +409,7 @@ def ai_types(db, mapping, ep, profile_id, ws, profiles: dict, types: list[Schema
     menu = "\n".join(f"{path_of(db, t)}: {(t.description or '')[:90]}" for t in types)
     user = (f"<types>\n{menu}\n</types>\n\n<source>\n"
             + "\n\n".join(_source_text(p["name"], p) for p in profiles.values()) + "\n</source>")
-    data = _call(db, mapping, ep, profile_id, ws, TYPES_SYSTEM, user, 120 * len(profiles) + 300, RULE_TYPES)
+    data = _call(db, mapping, ep, profile_id, ws, TYPES_SYSTEM, user, RULE_TYPES)
     out = {}
     names = {p["name"].lower(): uid for uid, p in profiles.items()}
     for row in (data or {}).get("types", []) if isinstance(data, dict) else []:
@@ -435,7 +435,7 @@ def ai_fields(db, mapping, ep, profile_id, ws, prof: dict, menu: dict[str, dict]
     user = (f"New type attributes:\n{plain}\n{refs}\n\nRelation verbs:\n"
             + "\n".join(f"- {k}: {v[:100]}" for k, v in allowed.items())
             + f"\n\n<source>\n{_source_text(prof['name'], prof)}\n</source>")
-    return _call(db, mapping, ep, profile_id, ws, FIELDS_SYSTEM, user, 60 * len(prof["fields"]) + 60 * len(prof["relations"]) + 400,
+    return _call(db, mapping, ep, profile_id, ws, FIELDS_SYSTEM, user,
                  RULE_FIELDS)
 
 

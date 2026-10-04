@@ -6520,6 +6520,18 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
           "model": {
             "title": "Model",
             "type": "string"
@@ -6628,6 +6640,17 @@
               }
             ],
             "title": "Last Checked At"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
           },
           "model": {
             "title": "Model",

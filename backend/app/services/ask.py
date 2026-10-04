@@ -27,8 +27,6 @@ from app.services.mcp_tools import BY_NAME, catalogue
 # Enough hops for search → open → traverse, and a stop before a confused
 # model spends a workspace's quota going in circles.
 MAX_ROUNDS = 8
-# Room for an answer that lists records: at the 1200 default a list of 79 magnets stopped mid-key.
-ANSWER_TOKENS = 3000
 # What comes back from a tool can be long; the model does not need all of
 # it and the context window certainly does not.
 MAX_TOOL_CHARS = 12000
@@ -215,13 +213,12 @@ def ask_events(db: Session, workspace_id: str, endpoint: Endpoint, question: str
     def turn(with_tools: bool):
         """One model turn; yields events, and returns the assistant message."""
         if not stream:
-            message = converse(endpoint, messages, tools=tools if with_tools else None, max_tokens=ANSWER_TOKENS)
+            message = converse(endpoint, messages, tools=tools if with_tools else None)
             return message
         think = _ThinkFilter()
         message: dict = {}
         wrote = False
-        for kind, value in converse_stream(endpoint, messages, tools=tools if with_tools else None,
-                                           max_tokens=ANSWER_TOKENS):
+        for kind, value in converse_stream(endpoint, messages, tools=tools if with_tools else None):
             if kind == "reasoning":
                 yield {"type": "thinking", "text": value}
             elif kind == "content":

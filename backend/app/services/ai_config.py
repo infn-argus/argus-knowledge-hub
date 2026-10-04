@@ -77,6 +77,8 @@ def resolve(db: Session, workspace_id: str) -> tuple[Optional[LLMConfig], Option
         encrypted_secret=shared.encrypted_secret,
         enabled=shared.enabled,
         allow_confidential=False,
+        # The gateway's limit, not a decision about this workspace's data: it comes along.
+        max_output_tokens=shared.max_output_tokens,
         last_checked_at=shared.last_checked_at,
         last_check_ok=shared.last_check_ok,
         last_check_error=shared.last_check_error,

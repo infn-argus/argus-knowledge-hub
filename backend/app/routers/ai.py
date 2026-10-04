@@ -64,6 +64,7 @@ def endpoint_for(config: LLMConfig) -> Endpoint:
         asr_model=config.asr_model,
         tts_model=config.tts_model,
         api_key=decrypt_secret(config.encrypted_secret) if config.encrypted_secret else None,
+        max_output_tokens=config.max_output_tokens,
     )
 
 
@@ -79,6 +80,7 @@ def _out(config: LLMConfig) -> LLMConfigOut:
         has_api_key=bool(config.encrypted_secret),
         enabled=config.enabled,
         allow_confidential=config.allow_confidential,
+        max_output_tokens=config.max_output_tokens,
         last_checked_at=config.last_checked_at,
         last_check_ok=config.last_check_ok,
         last_check_error=config.last_check_error,
@@ -116,6 +118,7 @@ def put_config(
     config.tts_model = (body.tts_model or "").strip() or None
     config.enabled = body.enabled
     config.allow_confidential = body.allow_confidential
+    config.max_output_tokens = body.max_output_tokens
 
     if body.api_key is not None:
         # An empty string clears it; omitting the field keeps what is stored.

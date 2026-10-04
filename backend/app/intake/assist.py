@@ -272,7 +272,7 @@ def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint,
                  image: Optional[bytes] = None, mime_type: str = "image/jpeg", draft: Optional[dict] = None,
                  grants=None, profile_id: Optional[str] = None, file_refs: Optional[list] = None,
                  trace: Optional[list] = None) -> dict:
-    from app.services.llm import complete, look
+    from app.services.llm import complete_structured, look
     from app.services.visibility import asset_visible_in
     started = time.monotonic()
     draft = dict(draft or {})
@@ -293,8 +293,8 @@ def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint,
     if trace is not None:
         trace.append(user)
     try:
-        reply = (look(endpoint, image, mime_type, ASSET_SYSTEM, user, max_tokens=900) if image
-                 else complete(endpoint, ASSET_SYSTEM, user, max_tokens=900))
+        reply = (look(endpoint, image, mime_type, ASSET_SYSTEM, user) if image
+                 else complete_structured(endpoint, ASSET_SYSTEM, user))
     except LLMError as exc:
         _record(db, workspace_id, actor, "asset", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes, redactions=redactions,
                 output=None, validations=[], outcome="failed", error=str(exc), started=started,
@@ -369,7 +369,7 @@ def assist_ticket(db: Session, workspace_id: str, actor: str, endpoint: Endpoint
                   draft: Optional[dict] = None, grants=None, profile_id: Optional[str] = None,
                   file_refs: Optional[list] = None, trace: Optional[list] = None) -> dict:
     from app.ledger import temporal
-    from app.services.llm import complete
+    from app.services.llm import complete_structured
     from app.services.ticket_types import BASE_ATTRIBUTES
     started = time.monotonic()
     draft = dict(draft or {})
@@ -386,7 +386,7 @@ def assist_ticket(db: Session, workspace_id: str, actor: str, endpoint: Endpoint
     if trace is not None:
         trace.append(user)
     try:
-        reply = complete(endpoint, TICKET_SYSTEM, user, max_tokens=900)
+        reply = complete_structured(endpoint, TICKET_SYSTEM, user)
     except LLMError as exc:
         _record(db, workspace_id, actor, "ticket", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes, redactions=redactions,
                 output=None, validations=[], outcome="failed", error=str(exc), started=started)
@@ -468,7 +468,7 @@ def assist_ticket(db: Session, workspace_id: str, actor: str, endpoint: Endpoint
 def assist_document(db: Session, workspace_id: str, actor: str, endpoint: Endpoint, *, text: str,
                     draft: Optional[dict] = None, grants=None, profile_id: Optional[str] = None,
                     file_refs: Optional[list] = None, trace: Optional[list] = None) -> dict:
-    from app.services.llm import complete
+    from app.services.llm import complete_structured
     started = time.monotonic()
     draft = dict(draft or {})
     clean, redactions = _clean(text)
@@ -479,7 +479,7 @@ def assist_document(db: Session, workspace_id: str, actor: str, endpoint: Endpoi
     if trace is not None:
         trace.append(user)
     try:
-        reply = complete(endpoint, DOCUMENT_SYSTEM, user, max_tokens=700)
+        reply = complete_structured(endpoint, DOCUMENT_SYSTEM, user)
     except LLMError as exc:
         _record(db, workspace_id, actor, "document", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes,
                 redactions=redactions, output=None, validations=[], outcome="failed", error=str(exc),

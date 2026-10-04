@@ -170,7 +170,7 @@ def model(world, monkeypatch):
         def complete(endpoint, system, user, max_tokens=512):
             seen["system"], seen["user"] = system, user
             return reply if isinstance(reply, str) else json.dumps(reply)
-        monkeypatch.setattr("app.services.llm.complete", complete)
+        monkeypatch.setattr("app.services.llm.complete_structured", complete)
     return answer, seen
 
 
@@ -471,7 +471,7 @@ def stub_golden(monkeypatch, kind, seen_models, **kw):
             if prefix in user:
                 return json.dumps(a)
         return "{}"
-    monkeypatch.setattr("app.services.llm.complete", complete)
+    monkeypatch.setattr("app.services.llm.complete_structured", complete)
 
 
 def test_a_profile_is_evaluated_on_the_golden_dataset_and_gated(world, model, monkeypatch):
@@ -506,7 +506,7 @@ def test_a_profile_is_evaluated_on_the_golden_dataset_and_gated(world, model, mo
     seen.clear()
     answer, _ = model
     answer({"type": "Ion Pump", "evidence": {}, "confidence": {}})
-    monkeypatch.setattr("app.services.llm.complete",
+    monkeypatch.setattr("app.services.llm.complete_structured",
                         lambda endpoint, system, user, max_tokens=512: (seen.append(endpoint.model), json.dumps(
                             {"type": "Ion Pump", "evidence": {}, "confidence": {}}))[1])
     out = client.post("/v1/intake/assist/asset", headers=w["headers"], json={"text": "an ion pump"}).json()
@@ -540,7 +540,7 @@ def test_an_evaluation_that_could_not_run_cannot_be_activated(world, model, monk
 
     def down(endpoint, system, user, max_tokens=512):
         raise LLMError("unreachable")
-    monkeypatch.setattr("app.services.llm.complete", down)
+    monkeypatch.setattr("app.services.llm.complete_structured", down)
     report = client.post(f"/v1/intake/profiles/{p['id']}/evaluate", headers=w["headers"]).json()
     assert len(report["errors"]) == report["cases"]
     r = client.post(f"/v1/intake/profiles/{p['id']}/activate", headers=w["headers"],
@@ -581,3 +581,51 @@ def test_A69_a_password_read_from_a_nameplate_photo_is_never_proposed(world, mod
     assert "Tr0ub4dor" not in json.dumps(run.output, default=str) and "Tr0ub4dor" not in json.dumps(
         run.redactions or {}, default=str)
     db.close()
+
+
+# --- a reasoning model (Qwen 3.x behind vLLM) -------------------------------------------------------
+
+class _Reply:
+    def __init__(self, status, body):
+        self.status_code, self._body, self.text = status, body, json.dumps(body)
+
+    def json(self):
+        return self._body
+
+
+def test_a_reasoning_model_is_asked_not_to_think_and_a_cut_off_answer_is_an_error(monkeypatch):
+    """The golden evaluation scored qwen36-27b 0% everywhere: it spent the whole budget thinking and its
+    replies had no content, which read as "found nothing"."""
+    from app.services import llm
+    ep = llm.Endpoint(base_url="https://gateway.example/v1", model="qwen36-27b")
+    sent = []
+
+    def post(url, headers=None, json=None, timeout=None):
+        sent.append(json)
+        if "chat_template_kwargs" in json:
+            return _Reply(200, {"choices": [{"message": {"content": '{"type": "Ion Pump"}'},
+                                             "finish_reason": "stop"}]})
+        return _Reply(200, {"choices": [{"message": {"content": None, "reasoning": "hmm"},
+                                         "finish_reason": "length"}]})
+    monkeypatch.setattr(llm.requests, "post", post)
+    assert llm.complete_structured(ep, "s", "u") == '{"type": "Ion Pump"}'
+    assert sent[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "max_tokens" not in sent[0]                        # no limit unless the AI settings set one
+
+    # A provider that does not know the switch refuses it, and is asked again without.
+    sent.clear()
+
+    def strict(url, headers=None, json=None, timeout=None):
+        sent.append(json)
+        if "chat_template_kwargs" in json:
+            return _Reply(400, {"error": "unknown field chat_template_kwargs"})
+        return _Reply(200, {"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]})
+    monkeypatch.setattr(llm.requests, "post", strict)
+    assert llm.complete_structured(ep, "s", "u") == "{}" and len(sent) == 2
+
+    # Still thinking when the budget ran out: said, not returned as an empty answer.
+    monkeypatch.setattr(llm.requests, "post", lambda url, headers=None, json=None, timeout=None: _Reply(
+        200, {"choices": [{"message": {"content": None, "reasoning": "…"}, "finish_reason": "length"}]}))
+    capped = llm.Endpoint(base_url=ep.base_url, model=ep.model, max_output_tokens=900)
+    with pytest.raises(llm.LLMError, match="used all 900 tokens before answering"):
+        llm.complete_structured(capped, "s", "u")

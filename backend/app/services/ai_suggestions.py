@@ -166,7 +166,7 @@ def suggest_document_types(
             # Generous: a reasoning model spends most of its budget thinking
             # before it writes the answer, and a truncated reply is a lost
             # batch.
-            reply = complete(endpoint, SYSTEM_PROMPT, user, max_tokens=4000)
+            reply = complete(endpoint, SYSTEM_PROMPT, user)
         except LLMError:
             failed += 1
             continue

@@ -30,10 +30,17 @@ class Endpoint:
     asr_model: Optional[str] = None
     tts_model: Optional[str] = None
     api_key: Optional[str] = None
+    # The workspace's cap on a reply's length (AI settings); None: no limit, and no max_tokens is sent.
+    max_output_tokens: Optional[int] = None
 
     @property
     def root(self) -> str:
         return self.base_url.rstrip("/")
+
+    def budget(self) -> dict:
+        """The request's length limit: one the workspace set, or none. Not one per call: a budget sized
+        for the answer is what a reasoning model spends thinking, and then there is no answer."""
+        return {"max_tokens": self.max_output_tokens} if self.max_output_tokens else {}
 
     def headers(self) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -134,7 +141,7 @@ def check(endpoint: Endpoint) -> tuple[bool, Optional[str], list[str]]:
     return True, None, models
 
 
-def complete(endpoint: Endpoint, system: str, user: str, max_tokens: int = 512,
+def complete(endpoint: Endpoint, system: str, user: str,
              extra: Optional[dict] = None) -> str:
     """`extra` goes into the request as it is, for a provider-specific switch
     such as vLLM's chat_template_kwargs; a provider that rejects it answers 400."""
@@ -148,7 +155,7 @@ def complete(endpoint: Endpoint, system: str, user: str, max_tokens: int = 512,
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
-                "max_tokens": max_tokens,
+                **endpoint.budget(),
                 # Classification should not wander between runs.
                 "temperature": 0,
                 **(extra or {}),
@@ -165,8 +172,45 @@ def complete(endpoint: Endpoint, system: str, user: str, max_tokens: int = 512,
         raise LLMError("The endpoint's reply was not in the expected shape.") from e
 
 
-def converse(endpoint: Endpoint, messages: list[dict], tools: Optional[list[dict]] = None,
-             max_tokens: int = 1200) -> dict:
+# vLLM's switch for a reasoning model (Qwen, DeepSeek…) to answer without thinking first.
+NO_THINKING = {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def complete_structured(endpoint: Endpoint, system: str, user: str) -> str:
+    """`complete` for an answer that is data (a JSON object), not prose.
+
+    A reasoning model thinks before it answers, and on a budget sized for the answer it spends all of it
+    thinking: the reply comes back with no content at all, which reads as "the model found nothing". It is
+    told not to; a provider that does not know the switch refuses it (400/422) and is asked again without.
+    A reply cut off before any answer is an error that says so, not an empty answer."""
+    try:
+        resp = requests.post(
+            f"{endpoint.root}/chat/completions",
+            headers=endpoint.headers(),
+            json={"model": endpoint.model,
+                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                  **endpoint.budget(), "temperature": 0, **NO_THINKING},
+            timeout=COMPLETION_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as e:
+        raise LLMError(f"Could not reach {endpoint.root}: {e}") from e
+    if resp.status_code in (400, 422):
+        return complete(endpoint, system, user)
+    if resp.status_code >= 400:
+        raise LLMError(f"The endpoint answered {resp.status_code}: {(resp.text or '')[:200]}")
+    try:
+        choice = resp.json()["choices"][0]
+        content = choice["message"].get("content")
+    except (ValueError, KeyError, IndexError, AttributeError) as e:
+        raise LLMError("The endpoint's reply was not in the expected shape.") from e
+    if not (content or "").strip() and choice.get("finish_reason") == "length":
+        raise LLMError(f"{endpoint.model} used all {endpoint.max_output_tokens} tokens before answering (a "
+                       "reasoning model that kept thinking): nothing to read. Raise or clear the output-token "
+                       "limit in the AI settings.")
+    return content or ""
+
+
+def converse(endpoint: Endpoint, messages: list[dict], tools: Optional[list[dict]] = None) -> dict:
     """One turn of a tool-calling conversation; returns the assistant message.
 
     Unlike `complete`, the caller owns the message list, because a tool
@@ -176,7 +220,7 @@ def converse(endpoint: Endpoint, messages: list[dict], tools: Optional[list[dict
     payload: dict = {
         "model": endpoint.model,
         "messages": messages,
-        "max_tokens": max_tokens,
+        **endpoint.budget(),
         "temperature": 0,
     }
     if tools:
@@ -207,8 +251,7 @@ def converse(endpoint: Endpoint, messages: list[dict], tools: Optional[list[dict
         raise LLMError("The endpoint's reply was not in the expected shape.") from e
 
 
-def converse_stream(endpoint: Endpoint, messages: list[dict], tools: Optional[list[dict]] = None,
-                    max_tokens: int = 1200) -> Iterator[tuple[str, object]]:
+def converse_stream(endpoint: Endpoint, messages: list[dict], tools: Optional[list[dict]] = None) -> Iterator[tuple[str, object]]:
     """One turn of a tool-calling conversation, as it is written.
 
     Yields ("reasoning", text) while a reasoning model thinks, ("content", text) as the answer is
@@ -216,7 +259,7 @@ def converse_stream(endpoint: Endpoint, messages: list[dict], tools: Optional[li
     `converse` returns, tool calls included. A tool call arrives in fragments (its name, then its
     arguments a few characters at a time) keyed by index, and is only usable once the stream ends.
     """
-    payload: dict = {"model": endpoint.model, "messages": messages, "max_tokens": max_tokens,
+    payload: dict = {"model": endpoint.model, "messages": messages, **endpoint.budget(),
                      "temperature": 0, "stream": True}
     if tools:
         payload["tools"] = tools
@@ -296,8 +339,7 @@ def embed(endpoint: Endpoint, texts: list[str]) -> list[list[float]]:
         raise LLMError("The endpoint's embeddings reply was not in the expected shape.") from e
 
 
-def look(endpoint: Endpoint, image: bytes, mime_type: str, system: str, user: str,
-         max_tokens: int = 800) -> str:
+def look(endpoint: Endpoint, image: bytes, mime_type: str, system: str, user: str) -> str:
     """Ask the vision model about a picture.
 
     A separate model from `complete`'s, because they usually are: the chat
@@ -329,7 +371,7 @@ def look(endpoint: Endpoint, image: bytes, mime_type: str, system: str, user: st
                         ],
                     },
                 ],
-                "max_tokens": max_tokens,
+                **endpoint.budget(),
                 "temperature": 0,
             },
             timeout=COMPLETION_TIMEOUT_SECONDS,

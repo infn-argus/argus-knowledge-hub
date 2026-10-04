@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LLMConfigIn(BaseModel):
@@ -16,6 +16,8 @@ class LLMConfigIn(BaseModel):
     api_key: Optional[str] = None
     enabled: bool = False
     allow_confidential: bool = False
+    # Empty: no limit on a reply's length.
+    max_output_tokens: Optional[int] = Field(default=None, ge=1)
 
 
 class LLMConfigOut(BaseModel):
@@ -34,6 +36,7 @@ class LLMConfigOut(BaseModel):
     has_api_key: bool
     enabled: bool
     allow_confidential: bool
+    max_output_tokens: Optional[int] = None
     last_checked_at: Optional[datetime]
     last_check_ok: Optional[bool]
     last_check_error: Optional[str]

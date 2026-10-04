@@ -110,7 +110,7 @@ def draft_document(
         user += f"\nWhat the author has said so far:\n{notes.strip()}\n"
     user += "\nWrite the document."
 
-    reply = complete(endpoint, DRAFT_SYSTEM, user, max_tokens=2500)
+    reply = complete(endpoint, DRAFT_SYSTEM, user)
     body = THINK_BLOCK.sub("", reply or "").strip()
     fenced = CODE_FENCE.search(body)
     # A model asked for Markdown sometimes wraps the whole thing in a fence.
@@ -133,7 +133,7 @@ def review_document(
         user += f"Type: {kind}\n"
     user += f"\nDocument:\n{body_markdown[:12000]}"
 
-    data = _json_payload(complete(endpoint, REVIEW_SYSTEM, user, max_tokens=1500))
+    data = _json_payload(complete(endpoint, REVIEW_SYSTEM, user))
     findings = []
     for row in data if isinstance(data, list) else []:
         if not isinstance(row, dict):
@@ -158,7 +158,7 @@ def draft_ticket_fields(endpoint: Endpoint, title: str, description: str) -> dic
         f"Detected by: {_describe(DETECTED_BY_OPTIONS)}\n\n"
         f"Title: {title}\n\nReport:\n{(description or '')[:8000]}"
     )
-    data = _json_payload(complete(endpoint, TICKET_SYSTEM, user, max_tokens=900))
+    data = _json_payload(complete(endpoint, TICKET_SYSTEM, user))
     if not isinstance(data, dict):
         return {
             "category": None, "impact": None, "detected_by": None,

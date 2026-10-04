@@ -407,12 +407,12 @@ def ai_pass(db: Session, mapping: CatalogueMapping, items: list[CatalogueMapping
         started = time.monotonic()
         try:
             try:
-                reply = complete(ep, SYSTEM, user, max_tokens=250 * len(chunk) + 300, extra=extra)
+                reply = complete(ep, SYSTEM, user, extra=extra)
             except LLMError as exc:
                 if extra is None or " 400" not in str(exc) and " 422" not in str(exc):
                     raise
                 extra = None
-                reply = complete(ep, SYSTEM, user, max_tokens=250 * len(chunk) + 300)
+                reply = complete(ep, SYSTEM, user)
         except LLMError as exc:
             _audit(db, mapping, ep, profile_id, user, None, "failed", str(exc), started, ws)
             mapping.ai = {**mapping.ai, "error": f"The AI stopped answering ({exc}); the remaining rows come "
