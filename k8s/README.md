@@ -91,8 +91,9 @@ More room needs bigger node disks or a network storage class.
 Settings go in `api.env` in `values-production.yaml` (`docs/operations.md`, "Configuration"), keys in
 the Secret `argus-portability`, mounted at `/etc/argus/portability` when it exists
 ([`portability-secret.example.yaml`](portability-secret.example.yaml) shows its keys; it is a template,
-never applied). Scheduled work is in the chart: a daily cleanup, and a restore drill twice a year,
-created suspended (`portabilityJobs`). Background: `docs/export-import-design.md` §20.
+never applied). Scheduled work is in the chart: a daily cleanup, which removes the files of finished
+exports and imports after one day in production (`ARGUS_PORTABILITY_POLICY_RETENTION_DAYS`), and a
+restore drill twice a year, created suspended (`portabilityJobs`). Background: `docs/export-import-design.md` §20.
 
 ### Keys (on an administrator's machine, not the cluster)
 
