@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { aiApi, ApiError, streamChat } from "../../api/client";
-import type { AskMessage, AskStep, ChatEvent } from "../../api/types";
+import type { AskAction, AskMessage, AskStep, ChatEvent } from "../../api/types";
 import { MarkdownView } from "../../components/MarkdownView";
 import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 
@@ -36,6 +36,9 @@ const TOOL_WORDS: Record<string, string> = {
   root_cause_from_alarms: "Looking for the cause of the alarms",
   single_points_of_failure: "Looking for single points of failure",
   knowledge_summary: "Counting what this workspace holds",
+  propose_create_record: "Proposing a new record",
+  propose_update_record: "Proposing a change",
+  propose_relation: "Proposing a relation",
 };
 
 interface Turn {
@@ -48,12 +51,16 @@ interface Turn {
   error: string | null;
   seconds: number | null;
   live?: boolean;
+  /** The message's place in the conversation (a saved turn); its proposals carry the question's seq. */
+  seq?: number;
+  /** Proposals made while this turn streamed. */
+  actions?: AskAction[];
 }
 
 function fromMessage(m: AskMessage): Turn {
   return {
     id: m.id, role: m.role, content: m.content, steps: m.steps ?? [], thinking: "",
-    stopped: m.stopped, error: m.error, seconds: m.seconds,
+    stopped: m.stopped, error: m.error, seconds: m.seconds, seq: m.seq,
   };
 }
 
@@ -136,7 +143,107 @@ function Spinner() {
   return <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600 align-middle" />;
 }
 
-function AssistantTurn({ turn }: { turn: Turn }) {
+const STATUS: Record<AskAction["status"], { mark: string; tone: string; word: string }> = {
+  proposed: { mark: "○", tone: "text-indigo-600", word: "waiting for you" },
+  applied: { mark: "✓", tone: "text-emerald-600", word: "applied" },
+  failed: { mark: "✕", tone: "text-rose-600", word: "failed" },
+  discarded: { mark: "–", tone: "text-slate-400", word: "discarded" },
+};
+
+/** The changes a turn proposed. Nothing has changed until they are applied here, and then they go
+ * through the same checks as the forms, with your permissions, in your name. */
+function ProposedChanges({ actions, conversationId }: { actions: AskAction[]; conversationId: string | null }) {
+  const queryClient = useQueryClient();
+  const pending = actions.filter((a) => a.status === "proposed");
+  const [chosen, setChosen] = useState<Set<string>>(() => new Set(pending.map((a) => a.id)));
+  useEffect(() => {
+    setChosen((was) => new Set([...was, ...pending.filter((a) => !was.has(a.id)).map((a) => a.id)]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending.length]);
+  const decide = useMutation({
+    mutationFn: ({ apply, ids }: { apply: boolean; ids: string[] }) =>
+      apply ? aiApi.applyActions(conversationId!, ids) : aiApi.discardActions(conversationId!, ids),
+    onSuccess: (all) => {
+      queryClient.setQueryData(["ask-actions", conversationId], all);
+      void queryClient.invalidateQueries({ queryKey: ["assets"] });
+    },
+  });
+  const ids = pending.filter((a) => chosen.has(a.id)).map((a) => a.id);
+  return (
+    <div className="border-t border-slate-100 px-3 py-2">
+      <p className="text-xs font-medium text-slate-700">
+        Proposed changes{" "}
+        <span className="font-normal text-slate-500">
+          {pending.length ? "— nothing has been changed yet" : ""}
+        </span>
+      </p>
+      <ul className="mt-1 space-y-0.5">
+        {actions.map((a) => {
+          const st = STATUS[a.status];
+          return (
+            <li key={a.id} className="flex items-start gap-2 text-xs">
+              {a.status === "proposed" ? (
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={chosen.has(a.id)}
+                  onChange={(e) =>
+                    setChosen((was) => {
+                      const next = new Set(was);
+                      if (e.target.checked) next.add(a.id);
+                      else next.delete(a.id);
+                      return next;
+                    })
+                  }
+                  aria-label={`Include A${a.number}`}
+                />
+              ) : (
+                <span className={`w-3 shrink-0 text-center ${st.tone}`}>{st.mark}</span>
+              )}
+              <span className="shrink-0 font-mono text-slate-400">A{a.number}</span>
+              <span className="min-w-0 flex-1">
+                <span className="text-slate-800">{a.summary}</span>
+                {a.reason && <span className="block text-slate-500">{a.reason}</span>}
+                {a.status === "applied" && a.result?.uid && (
+                  <Link className="ml-1 text-indigo-600 underline" to={`/assets/${encodeURIComponent(a.result.uid)}`}>
+                    {a.result.key ?? "open"}
+                  </Link>
+                )}
+                {a.error && <span className="block text-rose-600">{a.error}</span>}
+              </span>
+              <span className={`shrink-0 ${st.tone}`}>{st.word}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {pending.length > 0 && (
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            disabled={!conversationId || !ids.length || decide.isPending}
+            onClick={() => decide.mutate({ apply: true, ids })}
+            className="rounded bg-slate-900 px-3 py-1 text-xs font-medium text-white disabled:bg-slate-300"
+          >
+            {decide.isPending ? "Applying…" : `Apply ${ids.length === pending.length ? "all" : ids.length}`}
+          </button>
+          <button
+            type="button"
+            disabled={!conversationId || !ids.length || decide.isPending}
+            onClick={() => decide.mutate({ apply: false, ids })}
+            className="rounded border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Discard
+          </button>
+          {decide.isError && <span className="text-xs text-rose-600">{String((decide.error as Error).message)}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssistantTurn({ turn, actions, conversationId }: {
+  turn: Turn; actions: AskAction[]; conversationId: string | null;
+}) {
   const [showThinking, setShowThinking] = useState(false);
   const links = useMemo(() => recordLinks(turn.steps), [turn.steps]);
   const working = turn.live && !turn.content;
@@ -168,6 +275,7 @@ function AssistantTurn({ turn }: { turn: Turn }) {
           <MarkdownView markdown={turn.content} codeLink={(t) => links.get(t)} />
         </div>
       )}
+      {actions.length > 0 && <ProposedChanges actions={actions} conversationId={conversationId} />}
       {!turn.live && !turn.content && (
         <p className="px-4 py-3 text-sm text-slate-500">
           {turn.stopped === "cancelled" ? "Stopped before an answer was written." : `No answer came back${turn.error ? `: ${turn.error}` : "."}`}
@@ -215,6 +323,17 @@ export function Ask() {
     queryFn: () => aiApi.conversation(current!),
     enabled: !!current && own.current !== current,
   });
+  const proposals = useQuery({
+    queryKey: ["ask-actions", current],
+    queryFn: () => aiApi.conversationActions(current!),
+    enabled: !!current,
+  });
+  const latest = useMemo(() => new Map((proposals.data ?? []).map((a) => [a.id, a])), [proposals.data]);
+  /** A turn's proposals, as they stand now: a saved turn's by its question, a streamed one's by its events. */
+  const actionsOf = (t: Turn): AskAction[] =>
+    t.seq != null
+      ? (proposals.data ?? []).filter((a) => a.turn_seq === t.seq! - 1)
+      : (t.actions ?? []).map((a) => latest.get(a.id) ?? a);
   useEffect(() => {
     if (!current) setTurns([]);
   }, [current]);
@@ -264,6 +383,9 @@ export function Ask() {
           steps: t.steps.map((s, i) => (i === ev.index ? { ...ev, running: false } : s)),
         }));
         break;
+      case "proposal":
+        update((t) => ({ ...t, actions: [...(t.actions ?? []), ev.action] }));
+        break;
       case "done":
         update((t) => ({
           ...t, live: false, content: ev.answer || t.content, stopped: ev.stopped, error: ev.error, seconds: ev.seconds,
@@ -302,6 +424,7 @@ export function Ask() {
       abort.current = null;
       void queryClient.invalidateQueries({ queryKey: ["ask-conversations"] });
       void queryClient.invalidateQueries({ queryKey: ["ask-conversation"] });
+      void queryClient.invalidateQueries({ queryKey: ["ask-actions"] });
     }
   };
 
@@ -393,7 +516,7 @@ export function Ask() {
                   {t.content}
                 </div>
               ) : (
-                <AssistantTurn key={t.id} turn={t} />
+                <AssistantTurn key={t.id} turn={t} actions={actionsOf(t)} conversationId={current} />
               ),
             )}
             <div ref={bottom} />

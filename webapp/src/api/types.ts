@@ -1329,6 +1329,20 @@ export interface AskConversationDetail extends AskConversation {
 }
 
 /** One server-sent event of a chat turn (POST /v1/ai/chat). */
+/** A change the assistant proposed: nothing is changed until the person applies it. */
+export interface AskAction {
+  id: string;
+  number: number;
+  /** The question it answered (its message seq); the answer that proposed it is the next message. */
+  turn_seq: number;
+  kind: "create" | "update" | "relate" | "unrelate";
+  summary: string;
+  status: "proposed" | "applied" | "failed" | "discarded";
+  result: { uid?: string; key?: string; name?: string; relation_id?: number } | null;
+  error: string | null;
+  reason: string | null;
+}
+
 export type ChatEvent =
   | { type: "conversation"; id: string; title: string }
   | { type: "thinking"; text: string }
@@ -1336,6 +1350,7 @@ export type ChatEvent =
   | { type: "text_reset" }
   | { type: "step_start"; index: number; tool: string; arguments: Record<string, unknown> }
   | ({ type: "step"; index: number; summary: string } & AskStep)
+  | { type: "proposal"; action: AskAction }
   | { type: "done"; answer: string; steps: AskStep[]; stopped: string; error: string | null; seconds: number | null };
 
 export interface KnowledgeStatus {

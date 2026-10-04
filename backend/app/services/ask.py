@@ -195,18 +195,25 @@ class _ThinkFilter:
 
 
 def ask_events(db: Session, workspace_id: str, endpoint: Endpoint, question: str,
-               history: Optional[list] = None, stream: bool = True):
+               history: Optional[list] = None, stream: bool = True, proposer=None,
+               context: Optional[str] = None):
     """The answer to a question, as it is worked out: what the model is doing, each lookup as it starts
     and what it found, the answer as it is written, and last the whole of it ("done").
 
     Events: {"type": "thinking", "text"}, {"type": "text", "text"}, {"type": "text_reset"} (what was
     written turned out to precede lookups, not to be the answer), {"type": "step_start", "index", "tool",
     "arguments"}, {"type": "step", "index", "tool", "arguments", "result", "error", "seconds",
-    "summary"}, {"type": "done", "answer", "steps", "stopped", "seconds", "error"}.
+    "summary"}, {"type": "proposal", "action"}, {"type": "done", "answer", "steps", "stopped", "seconds", "error"}.
+
+    With a `proposer` (services/ask_actions.py) the model may also propose changes, which it keeps for the
+    person to apply; `context` says what became of the ones proposed earlier in the conversation.
     """
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM}, *_history(history),
+    from app.services import ask_actions
+    system = SYSTEM + (ask_actions.SYSTEM if proposer else "")
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *_history(history),
+                                      *([{"role": "system", "content": context}] if context else []),
                                       {"role": "user", "content": question}]
-    tools = _tool_specs()
+    tools = _tool_specs() + (ask_actions.tool_specs() if proposer else [])
     steps: list[dict] = []
     started = time.monotonic()
 
@@ -257,11 +264,23 @@ def ask_events(db: Session, workspace_id: str, endpoint: Endpoint, question: str
             index = len(steps)
             yield {"type": "step_start", "index": index, "tool": name, "arguments": arguments}
             at = time.monotonic()
-            text, error = _run_tool(db, workspace_id, name, arguments)
+            proposal = None
+            if proposer is not None and name in ask_actions.TOOL_NAMES:
+                try:
+                    out = proposer(name, arguments)
+                    proposal = out.pop("_action")
+                    text, error = json.dumps(out, ensure_ascii=False), None
+                except ask_actions.Refused as e:
+                    text = error = f"Not proposed: {e}"
+            else:
+                text, error = _run_tool(db, workspace_id, name, arguments)
             step = {"tool": name, "arguments": arguments, "result": text, "error": error,
                     "seconds": round(time.monotonic() - at, 1)}
             steps.append(step)
-            yield {"type": "step", "index": index, **step, "summary": _summary(name, text, error)}
+            yield {"type": "step", "index": index, **step,
+                   "summary": f"proposed A{proposal['number']}" if proposal else _summary(name, text, error)}
+            if proposal:
+                yield {"type": "proposal", "action": proposal}
             messages.append({
                 "role": "tool",
                 "tool_call_id": call.get("id") or name,

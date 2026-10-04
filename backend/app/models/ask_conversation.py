@@ -41,3 +41,30 @@ class AskMessage(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AskAction(Base):
+    """A change the assistant proposed in a conversation: nothing until its person applies it.
+
+    Ask is read-only by construction (its lookups only retrieve); a person may still ask it to create a record,
+    change one or relate two. The model can only propose: the proposal is checked, kept here, shown under the
+    answer, and applied — through the same code as the forms, with the person's permissions and in their name
+    in the ledger — only when they confirm it."""
+    __tablename__ = "ask_actions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String, ForeignKey("ask_conversations.id", ondelete="CASCADE"), index=True)
+    # The question it answered (its AskMessage seq): the answer that proposed it is the next message.
+    turn_seq: Mapped[int] = mapped_column(Integer)
+    # Its handle in the conversation: A1, A2… and, for a record to be created, the `new:N` others refer to it by.
+    number: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String)               # create | update | relate | unrelate
+    payload: Mapped[dict] = mapped_column(JSONB)
+    summary: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String, default="proposed")   # proposed | applied | failed | discarded
+    result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    decided_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    decided_at = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at = mapped_column(DateTime(timezone=True), default=utcnow)

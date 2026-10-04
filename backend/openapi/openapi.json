@@ -222,6 +222,94 @@
         "title": "ApproveImportIn",
         "type": "object"
       },
+      "AskActionIds": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "AskActionIds",
+        "type": "object"
+      },
+      "AskActionOut": {
+        "description": "A change the assistant proposed; nothing is changed until it is applied.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "turn_seq": {
+            "title": "Turn Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "turn_seq",
+          "kind",
+          "summary",
+          "status"
+        ],
+        "title": "AskActionOut",
+        "type": "object"
+      },
       "AskConversationDetail": {
         "properties": {
           "created_at": {
@@ -11394,7 +11482,7 @@
     },
     "/v1/ai/chat": {
       "post": {
-        "description": "Ask, as a conversation, answered as it is worked out: server-sent events (one JSON object per\n`data:` line) for what the model is doing, each lookup and its result, and the answer as it is\nwritten. The turn is saved in the conversation, which a follow-up continues. Same permission as\nreading the records by hand: the lookups only retrieve.",
+        "description": "Ask, as a conversation, answered as it is worked out: server-sent events (one JSON object per\n`data:` line) for what the model is doing, each lookup and its result, and the answer as it is\nwritten. The turn is saved in the conversation, which a follow-up continues. Same permission as\nreading the records by hand: the lookups only retrieve. To somebody who may create or change records it\ncan also propose changes, which wait for them to apply (services/ask_actions.py).",
         "operationId": "chat_v1_ai_chat_post",
         "parameters": [
           {
@@ -11978,6 +12066,277 @@
           }
         ],
         "summary": "Get Conversation",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/conversations/{conversation_id}/actions": {
+      "get": {
+        "description": "The changes the assistant proposed in this conversation, and what became of each.",
+        "operationId": "conversation_actions_v1_ai_conversations__conversation_id__actions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AskActionOut"
+                  },
+                  "title": "Response Conversation Actions V1 Ai Conversations  Conversation Id  Actions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Actions",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/conversations/{conversation_id}/actions/apply": {
+      "post": {
+        "description": "Apply proposed changes, in the order they were proposed, as the person confirming them: each needs the\npermission it would by hand, goes through the forms' validation and is written to the ledger in their\nname. Each stands or fails on its own; the list says which.",
+        "operationId": "apply_actions_v1_ai_conversations__conversation_id__actions_apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskActionIds"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AskActionOut"
+                  },
+                  "title": "Response Apply Actions V1 Ai Conversations  Conversation Id  Actions Apply Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Apply Actions",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/conversations/{conversation_id}/actions/discard": {
+      "post": {
+        "operationId": "discard_actions_v1_ai_conversations__conversation_id__actions_discard_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskActionIds"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AskActionOut"
+                  },
+                  "title": "Response Discard Actions V1 Ai Conversations  Conversation Id  Actions Discard Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Discard Actions",
         "tags": [
           "ai"
         ]

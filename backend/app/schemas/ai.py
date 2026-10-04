@@ -253,3 +253,20 @@ class AskOut(BaseModel):
     stopped: str = "answered"
     error: Optional[str] = None
     seconds: float = 0
+
+
+class AskActionOut(BaseModel):
+    """A change the assistant proposed; nothing is changed until it is applied."""
+    id: str
+    number: int
+    turn_seq: int
+    kind: str                       # create | update | relate | unrelate
+    summary: str
+    status: str                     # proposed | applied | failed | discarded
+    result: Optional[dict] = None   # what was made: {uid, key, name} or {relation_id}
+    error: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class AskActionIds(BaseModel):
+    ids: list[str]

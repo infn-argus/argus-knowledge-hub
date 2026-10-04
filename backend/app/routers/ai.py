@@ -20,6 +20,8 @@ from app.models.document import Document
 from app.models.schema import Schema
 from app.schemas.ai import (
     AIStatus,
+    AskActionIds,
+    AskActionOut,
     AskConversationDetail,
     AskConversationOut,
     AskIn,
@@ -463,7 +465,7 @@ def _sse(event: dict) -> str:
 
 
 def _chat_events(workspace_id: str, owner: str, question: str, conversation_id: Optional[str],
-                 endpoint: Endpoint, grants):
+                 endpoint: Endpoint, grants, can_propose: bool = False):
     """The chat turn as server-sent events, saved as it ends. Runs after the request's own session is
     gone, so it has its own, and the viewer's restricted-class grants are set again here: the lookups
     must see what the person may see, no more."""
@@ -491,8 +493,11 @@ def _chat_events(workspace_id: str, owner: str, question: str, conversation_id: 
                           content=question))
         db.commit()
         yield _sse({"type": "conversation", "id": conversation.id, "title": conversation.title})
+        from app.services import ask_actions
+        proposer = ask_actions.Proposer(db, workspace_id, conversation.id, seq) if can_propose else None
         try:
-            for event in ask_events(db, workspace_id, endpoint, question, history=history):
+            for event in ask_events(db, workspace_id, endpoint, question, history=history, proposer=proposer,
+                                    context=ask_actions.context(db, conversation.id)):
                 if event["type"] == "step":
                     steps.append({k: event[k] for k in ("tool", "arguments", "result", "error", "seconds")})
                 if event["type"] == "done":
@@ -534,7 +539,8 @@ def chat(
     """Ask, as a conversation, answered as it is worked out: server-sent events (one JSON object per
     `data:` line) for what the model is doing, each lookup and its result, and the answer as it is
     written. The turn is saved in the conversation, which a follow-up continues. Same permission as
-    reading the records by hand: the lookups only retrieve."""
+    reading the records by hand: the lookups only retrieve. To somebody who may create or change records it
+    can also propose changes, which wait for them to apply (services/ask_actions.py)."""
     from fastapi.responses import StreamingResponse
     from app.models.ask_conversation import AskConversation
     from app.services.visibility import current_grants
@@ -548,11 +554,21 @@ def chat(
             raise HTTPException(status_code=404, detail="No such conversation")
     config = _usable_config(db, workspace_id)
     return StreamingResponse(
-        _chat_events(workspace_id, owner, question, body.conversation_id, endpoint_for(config), current_grants()),
+        _chat_events(workspace_id, owner, question, body.conversation_id, endpoint_for(config), current_grants(),
+                     can_propose=_may_change(db, identity, workspace_id)),
         media_type="text/event-stream",
         # Proxies (the cluster's ingress, nginx) would otherwise hold the events back until the end.
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+def _may_change(db: Session, identity, workspace_id: str) -> bool:
+    """Whether the assistant may offer this person changes to apply: they could make some by hand."""
+    from app.auth import OidcIdentity
+    from app.services.permissions import resolve_permission
+    if not isinstance(identity, OidcIdentity):
+        return True
+    return any(resolve_permission(db, identity.user, workspace_id, action, "objects") for action in ("create", "modify"))
 
 
 @router.get("/conversations", response_model=list[AskConversationOut])
@@ -601,6 +617,48 @@ def delete_conversation(
 ):
     db.delete(_own_conversation(db, workspace_id, identity, conversation_id))
     db.commit()
+
+
+@router.get("/conversations/{conversation_id}/actions", response_model=list[AskActionOut])
+def conversation_actions(
+    conversation_id: str,
+    workspace_id: str = Depends(require_permission("read")),
+    identity=Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    """The changes the assistant proposed in this conversation, and what became of each."""
+    from app.services import ask_actions
+    conversation = _own_conversation(db, workspace_id, identity, conversation_id)
+    return [ask_actions.view(a) for a in ask_actions.of_conversation(db, conversation.id)]
+
+
+@router.post("/conversations/{conversation_id}/actions/apply", response_model=list[AskActionOut])
+def apply_actions(
+    conversation_id: str,
+    body: AskActionIds,
+    workspace_id: str = Depends(require_permission("read")),
+    identity=Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    """Apply proposed changes, in the order they were proposed, as the person confirming them: each needs the
+    permission it would by hand, goes through the forms' validation and is written to the ledger in their
+    name. Each stands or fails on its own; the list says which."""
+    from app.services import ask_actions
+    conversation = _own_conversation(db, workspace_id, identity, conversation_id)
+    return ask_actions.apply(db, identity, workspace_id, _owner(identity), conversation.id, body.ids)
+
+
+@router.post("/conversations/{conversation_id}/actions/discard", response_model=list[AskActionOut])
+def discard_actions(
+    conversation_id: str,
+    body: AskActionIds,
+    workspace_id: str = Depends(require_permission("read")),
+    identity=Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    from app.services import ask_actions
+    conversation = _own_conversation(db, workspace_id, identity, conversation_id)
+    return ask_actions.discard(db, _owner(identity), conversation.id, body.ids)
 
 
 # --------------------------------------------------------------------------- the written knowledge (RAG)

@@ -84,6 +84,7 @@ import type {
   GraphSummary,
   AskResult,
   AskConversation,
+  AskAction,
   AskConversationDetail,
   ChatEvent,
   KnowledgeStatus,
@@ -1054,6 +1055,17 @@ export const aiApi = {
   conversation: (id: string) => request<AskConversationDetail>(`/v1/ai/conversations/${encodeURIComponent(id)}`),
   deleteConversation: (id: string) =>
     request<void>(`/v1/ai/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Changes the assistant proposed in a conversation; nothing changes until they are applied. */
+  conversationActions: (id: string) =>
+    request<AskAction[]>(`/v1/ai/conversations/${encodeURIComponent(id)}/actions`),
+  applyActions: (id: string, ids: string[]) =>
+    request<AskAction[]>(`/v1/ai/conversations/${encodeURIComponent(id)}/actions/apply`, {
+      method: "POST", body: json({ ids }),
+    }),
+  discardActions: (id: string, ids: string[]) =>
+    request<AskAction[]>(`/v1/ai/conversations/${encodeURIComponent(id)}/actions/discard`, {
+      method: "POST", body: json({ ids }),
+    }),
 
   reject: (ids: number[]) =>
     request<{ rejected: number; skipped: number[] }>("/v1/ai/suggestions/reject", {
