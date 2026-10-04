@@ -52,6 +52,12 @@ from app.models.user import User
 from app.models.workflow import TicketWatcher, Workflow
 from app.models.workspace import Workspace
 
+# Columns that describe this instance, not the history: never exported, set locally on import.
+LOCAL_COLUMNS = ("recorded_at",)
+# The append-only ledger families whose rows form the origin chain of an import.
+ORIGIN_CHAIN = ("source_revisions", "claims", "claim_events", "revision_events", "decisions", "status_events",
+                "identity_events", "record_events", "conflict_events", "migration_map", "reconciliation_reports")
+
 # Watermarked tables: the ledger's append-only sequences.
 SEQUENCED_TABLES = ("ledger_claim_events", "ledger_revision_events", "ledger_decisions", "ledger_status_events",
                     "ledger_identity_events", "ledger_record_events", "ledger_conflict_events", "ledger_rulesets")
@@ -108,7 +114,8 @@ class Family:
 
     @property
     def columns(self) -> list[str]:
-        return [c.name for c in self.model.__table__.columns if c.name not in self.exclude]
+        return [c.name for c in self.model.__table__.columns
+                if c.name not in self.exclude and c.name not in LOCAL_COLUMNS]
 
     def key_of(self, row: dict) -> str:
         return "|".join(str(row.get(k)) for k in self.key)

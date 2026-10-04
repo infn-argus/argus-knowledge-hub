@@ -29,7 +29,7 @@ APPEND_ONLY_TABLES = (
     "ledger_decisions", "ledger_status_events", "ledger_identity_events", "ledger_record_events",
     "ledger_conflict_events", "ledger_job_runs", "ledger_rulesets", "ledger_migration_map",
     "ledger_reconciliation_reports", "ledger_audit_digests",
-    "intake_runs", "intake_outcomes", "portability_events",
+    "intake_runs", "intake_outcomes", "portability_events", "portability_origin_records",
 )
 
 GUARD_FUNCTION = """
@@ -106,7 +106,10 @@ def day_digest(db: Session, day: date, prev: Optional[str]) -> tuple[str, dict]:
     counts = {}
     for name, model, cols in EVENT_TABLES:
         n = 0
-        for row in db.scalars(select(model).where(model.at >= start, model.at < end).order_by(model.seq)):
+        # A day holds what was recorded here that day: an imported event, with its original `at`, is
+        # sealed in the day it was ingested, never in a day sealed before it arrived (I-PORT-8).
+        when = getattr(model, "recorded_at", model.at)
+        for row in db.scalars(select(model).where(when >= start, when < end).order_by(model.seq)):
             h.update(canonical([name, [getattr(row, c) for c in cols], row.at.isoformat()]).encode())
             n += 1
         counts[name] = n

@@ -9,10 +9,12 @@
   row an import wrote, by its key in the archive and its key here.
 * `PortabilityTagSeen` remembers which commit each export tag named when it was imported, so a
   tag that has since moved is refused.
+* `PortabilityOriginRecord` is the origin chain of imported ledger rows (append-only).
+* `PortabilityDownloadToken` holds single-use download capabilities, as hashes.
 """
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, Sequence, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -63,6 +65,7 @@ class PortabilityImport(Base):
     checkpoints: Mapped[dict] = mapped_column(JSONB, default=dict)    # {"done": ["family:chunk", ...]}
     reconciliation: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     reconciliation_sha256: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    staging: Mapped[dict] = mapped_column(JSONB, default=dict)     # the isolated staging database
     error: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -110,12 +113,58 @@ class PortabilityTagSeen(Base):
 
 
 class PortabilityChainLink(Base):
-    """An export applied here, per origin: the order increments must follow."""
+    """An export applied here, per origin: the order increments must follow, by exact watermark."""
     __tablename__ = "portability_chain"
 
     origin: Mapped[str] = mapped_column(String, primary_key=True)
     export_id: Mapped[str] = mapped_column(String, primary_key=True)
     position: Mapped[int] = mapped_column(Integer)
-    watermark_label: Mapped[int] = mapped_column(BigInteger)
+    watermark_label: Mapped[int] = mapped_column(BigInteger)        # the origin's checkpoint sequence
+    vector_sha256: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    manifest_sha256: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     import_id: Mapped[str] = mapped_column(String)
     applied_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# Export checkpoints are numbered from a sequence that nothing purges: a discard, a rollback or a
+# purge never makes a checkpoint number repeat or move backwards.
+CHECKPOINT_SEQUENCE = Sequence("portability_checkpoint_seq", metadata=Base.metadata)
+
+
+class PortabilityOriginRecord(Base):
+    """One imported ledger row, as the origin chain recorded it. Append-only.
+
+    The imported row itself lives in its ordinary table with a new local sequence and a local
+    `recorded_at`; this record keeps where it came from — origin instance, family, original sequence
+    or key, original record time, the hash of its archive line and of the checkpoint — and which
+    local ingestion event brought it. `portability.origin.verify_chain` recomputes the hashes."""
+    __tablename__ = "portability_origin_records"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    import_id: Mapped[str] = mapped_column(String, index=True)
+    origin_instance_id: Mapped[str] = mapped_column(String, index=True)
+    origin_family: Mapped[str] = mapped_column(String)
+    origin_sequence: Mapped[str] = mapped_column(String)            # the origin's seq, or key for id-keyed rows
+    origin_recorded_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
+    origin_event_hash: Mapped[str] = mapped_column(String)
+    origin_checkpoint_hash: Mapped[str] = mapped_column(String)
+    local_table: Mapped[str] = mapped_column(String)
+    local_key: Mapped[str] = mapped_column(String)
+    local_ingested_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    local_ingestion_event_id: Mapped[int] = mapped_column(BigInteger)
+    position: Mapped[int] = mapped_column(BigInteger)               # order in the origin chain
+
+
+class PortabilityDownloadToken(Base):
+    """A single-use, short-lived download capability, stored as a hash, bound to an export, an actor
+    and the exact archive version (manifest hash)."""
+    __tablename__ = "portability_download_tokens"
+
+    token_sha256: Mapped[str] = mapped_column(String, primary_key=True)
+    export_id: Mapped[str] = mapped_column(String, index=True)
+    actor: Mapped[str] = mapped_column(String)
+    manifest_sha256: Mapped[str] = mapped_column(String)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[object] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)

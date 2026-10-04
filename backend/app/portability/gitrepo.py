@@ -4,9 +4,12 @@ Publishing (`publish`) adds a checkpoint under `exports/checkpoints/<export-id>/
 existing one — refreshes the reviewable views (`format/`, `catalogue/`, `governance/`), scans every
 added file for secrets, and makes one SSH-signed commit and one signed annotated tag:
 
-    export/full/<date>@ledger-<W>
-    export/workspace/<workspace>/<date>@ledger-<W>
-    export/increment/<full|workspace>/<date>@ledger-<W>
+    export/full/<date>@cp<checkpoint>-<vector hash>
+    export/workspace/<workspace>/<date>@cp<checkpoint>-<vector hash>
+    export/increment/<full|workspace>/<date>@cp<checkpoint>-<vector hash>
+
+Only small, reviewable files go into Git (`git_files`): bulk chunks and blobs are artifacts, so
+repeated full checkpoints do not accumulate data volume in Git history.
 
 It pushes without force. Protecting tags against deletion and movement is the Git server's job
 (protected tags, no force push); docs/operations.md lists the settings.
@@ -78,16 +81,31 @@ def git(args: list[str], cwd: Path, *, check: bool = True, input: Optional[bytes
                                            "stderr": r.stderr.decode(errors="replace")})()
 
 
+GIT_FILES = ("manifest.json", "checksums.sha256", "signature.json", "blobs.manifest.ndjson", "workspaces.ndjson",
+             "relation-registry.json", "reconciliation.json")
+
+
+def git_files(manifest: dict) -> list[str]:
+    """What of a checkpoint goes into Git: the manifest, checksums, signature, the review files and the
+    chunks stored in Git. Every other chunk is an artifact, named in the manifest."""
+    out = list(GIT_FILES)
+    for fam in manifest["families"].values():
+        out += [c["file"] for c in fam["chunks"] if c.get("storage") == "git"]
+    return out
+
+
 def tag_name(manifest: dict) -> str:
-    date = manifest["watermark"]["snapshot_at"][:10]
-    w = manifest["watermark"]["label"]
+    """`…/<date>@cp<checkpoint>-<vector hash, 12>`: the checkpoint number never repeats, and two
+    different watermark vectors never share a tag."""
+    date = manifest["watermark"]["snapshot_time"][:10]
+    w = f"cp{manifest['watermark']['checkpoint_sequence']}-{manifest['watermark']['vector_sha256'][:12]}"
     if manifest["mode"] == "incremental":
         # An increment and a checkpoint can share a watermark; their tags must not collide.
         scope = "full" if not manifest.get("selective") else _scope(manifest)
-        return f"export/increment/{scope}/{date}@ledger-{w}"
+        return f"export/increment/{scope}/{date}@{w}"
     if manifest["mode"] == "full":
-        return f"export/full/{date}@ledger-{w}"
-    return f"export/workspace/{_scope(manifest)}/{date}@ledger-{w}"
+        return f"export/full/{date}@{w}"
+    return f"export/workspace/{_scope(manifest)}/{date}@{w}"
 
 
 def _scope(manifest: dict) -> str:
@@ -108,6 +126,14 @@ class Published:
     tag_object: str
     previous_tag: Optional[str] = None
     files: list = field(default_factory=list)
+    repository_bytes: int = 0
+
+
+def repository_bytes(work: Path) -> int:
+    """Git's own measure of the repository's object store (loose and packed), in bytes."""
+    out = git(["count-objects", "-v"], cwd=work).stdout
+    vals = dict(line.split(": ", 1) for line in out.splitlines() if ": " in line)
+    return (int(vals.get("size", 0)) + int(vals.get("size-pack", 0))) * 1024
 
 
 def _identity(work: Path) -> Optional[dict]:
@@ -215,9 +241,13 @@ def publish(checkpoint: Path, manifest: dict, *, remote: str, work: Path, signer
         raise GitError(f"checkpoint {manifest['export_id']} is already in the repository; chunks are immutable",
                        code="immutable")
     _skeleton(work, schemas)
-    shutil.copytree(checkpoint, dest)
-    for rel, body in views(checkpoint).items():
-        (work / rel).write_text(body)
+    dest.mkdir(parents=True)
+    for name in git_files(manifest):
+        if (checkpoint / name).exists():
+            shutil.copyfile(checkpoint / name, dest / name)
+    if not manifest.get("encryption"):
+        for rel, body in views(checkpoint).items():
+            (work / rel).write_text(body)
     git(["add", "-A"], cwd=work)
     staged = [p for p in git(["diff", "--cached", "--name-only", "-z"], cwd=work).stdout.split("\0") if p]
     for rel in staged:
@@ -232,7 +262,9 @@ def publish(checkpoint: Path, manifest: dict, *, remote: str, work: Path, signer
     parent = git(["rev-parse", "--verify", "-q", "HEAD"], cwd=work, check=False).stdout.strip() or None
     tag = tag_name(manifest)
     msg = (f"ARGUS export {manifest['export_id']} ({manifest['mode']})\n\n"
-           f"watermark: {manifest['watermark']['label']}\nworkspaces: {', '.join(manifest['workspaces'])}\n"
+           f"checkpoint: {manifest['watermark']['checkpoint_sequence']}\n"
+           f"watermark-vector-sha256: {manifest['watermark']['vector_sha256']}\n"
+           f"workspaces: {', '.join(manifest['workspaces'])}\n"
            f"manifest: {CHECKPOINTS}/{manifest['export_id']}/manifest.json\n"
            f"manifest-sha256: {manifest['_sha256']}\n")
     git(["commit", "-q", "-S", "-m", msg], cwd=work, signer=signer)
@@ -245,7 +277,8 @@ def publish(checkpoint: Path, manifest: dict, *, remote: str, work: Path, signer
         raise GitError(f"push refused: {r.stderr.strip()[:300]}", code="push_refused")
     root = git(["rev-list", "--max-parents=0", "HEAD"], cwd=work).stdout.split()[0]
     tag_object = git(["rev-parse", f"refs/tags/{tag}"], cwd=work).stdout.strip()
-    return Published(ident["repository_id"], root, commit, parent, tag, tag_object, previous_tag, staged)
+    return Published(ident["repository_id"], root, commit, parent, tag, tag_object, previous_tag, staged,
+                     repository_bytes(work))
 
 
 def init_bare(path: Path) -> str:
@@ -405,12 +438,14 @@ Signed, reviewable checkpoints of an ARGUS deployment (docs/export-import-design
 * `catalogue/`, `governance/` — reviewable views of the catalogue, relation registry, authority policy,
   workflows and retention classes, derived from each checkpoint. Changing them here activates nothing.
 * `mappings/` — approved mapping profiles for foreign and legacy schemas.
-* `exports/checkpoints/<export-id>/` — one checkpoint: `manifest.json`, compressed NDJSON chunks,
-  `blobs.manifest.ndjson`, `reconciliation.json`, `checksums.sha256`, `signature.json`. Immutable.
+* `exports/checkpoints/<export-id>/` — one checkpoint: `manifest.json`, `blobs.manifest.ndjson`,
+  `reconciliation.json`, `checksums.sha256`, `signature.json`, and the few small chunks stored in Git.
+  Bulk chunks and blobs are artifacts named in the manifest by locator and digest. Immutable.
 * `tools/` — `validate` and `inspect` verify a checkpoint without ARGUS; ARGUS never runs them.
 
-An export is identified by its signed tag (`export/full/<date>@ledger-<W>`,
-`export/workspace/<workspace>/<date>@ledger-<W>`) and the commit it names — never by a branch.
-Attachments and other blobs are not in Git: `blobs.manifest.ndjson` names each by SHA-256 and locator.
+An export is identified by its signed tag (`export/full/<date>@cp<n>-<vector hash>`,
+`export/workspace/<workspace>/<date>@cp<n>-<vector hash>`) and the commit it names — never by a branch.
+Data chunks and blobs are not in Git: the manifest and `blobs.manifest.ndjson` name each by SHA-256 and
+locator; `tools/validate --artifacts store=/path` fetches and checks them.
 Do not merge across checkpoints, rewrite history, force-push, or move a tag.
 """

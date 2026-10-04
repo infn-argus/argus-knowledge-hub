@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate an ARGUS checkpoint without ARGUS: checksums, signature, blobs.
+"""Validate an ARGUS checkpoint without ARGUS: checksums, signature, external chunks, blobs.
 
     tools/validate exports/checkpoints/<export-id> [--trusted allowed_signers] [--artifacts name=/path ...]
 
@@ -30,14 +30,35 @@ def main() -> int:
     a = ap.parse_args()
     cp = Path(a.checkpoint)
     problems = []
+    stores = dict(x.split("=", 1) for x in a.artifacts)
+    manifest = json.loads((cp / "manifest.json").read_text())
+
+    def artifact(locator: str, digest: str):
+        name = locator.split("://", 1)[1].split("/", 1)[0]
+        if name not in stores:
+            return None, f"no path given for artifact store {name}"
+        p = Path(stores[name]) / "sha256" / digest[:2] / digest
+        return (p, None) if p.is_file() else (None, f"artifact missing: sha256:{digest}")
+
+    external = {c["file"]: c for f in manifest["families"].values() for c in f["chunks"]
+                if c.get("storage") == "artifact"}
     sums = (cp / "checksums.sha256").read_text()
     listed = {}
     for line in sums.splitlines():
         digest, _, name = line.partition("  ")
         listed[name] = digest
-        if "/" in name or not (cp / name).is_file():
+        path = cp / name
+        if "/" in name:
+            problems.append(f"unsafe name {name}")
+            continue
+        if not path.is_file() and name in external:
+            path, err = artifact(external[name]["locator"], digest)
+            if err:
+                problems.append(f"chunk {name}: {err}")
+                continue
+        if path is None or not path.is_file():
             problems.append(f"missing {name}")
-        elif sha256(cp / name) != digest:
+        elif sha256(path) != digest:
             problems.append(f"checksum differs: {name}")
     extra = {p.name for p in cp.iterdir()} - set(listed) - {"checksums.sha256", "signature.json"}
     problems += [f"not covered by checksums: {n}" for n in sorted(extra)]
@@ -68,20 +89,15 @@ def main() -> int:
                 problems.append("the signature does not verify against the trusted keys")
         except ImportError:
             print("note: `cryptography` is not installed; signature not checked")
-    stores = dict(x.split("=", 1) for x in a.artifacts)
-    manifest = json.loads((cp / "manifest.json").read_text())
-    blobs = [json.loads(x) for x in (cp / manifest["blobs"]["manifest"]).read_text().splitlines() if x.strip()]
+    blobs = manifest["blobs"].get("stored", [])          # cleartext even when the archive is encrypted
     for b in blobs:
-        name = b["locator"].split("://", 1)[1].split("/", 1)[0]
-        if name not in stores:
-            problems.append(f"no path given for artifact store {name}")
-            continue
-        p = Path(stores[name]) / "sha256" / b["sha256"][:2] / b["sha256"]
-        if not p.is_file():
-            problems.append(f"artifact missing: sha256:{b['sha256']}")
-        elif sha256(p) != b["sha256"]:
-            problems.append(f"artifact content differs: sha256:{b['sha256']}")
-    print(json.dumps({"export_id": manifest["export_id"], "files": len(listed), "blobs": len(blobs),
+        p, err = artifact(b["locator"], b["stored_sha256"])
+        if err:
+            problems.append(err)
+        elif sha256(p) != b["stored_sha256"]:
+            problems.append(f"artifact content differs: sha256:{b['stored_sha256']}")
+    print(json.dumps({"export_id": manifest["export_id"], "files": len(listed), "external_chunks": len(external),
+                      "blobs": len(blobs), "encrypted": bool(manifest.get("encryption")),
                       "problems": problems}, indent=1))
     return 1 if problems else 0
 

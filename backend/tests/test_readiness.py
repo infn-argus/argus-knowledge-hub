@@ -194,7 +194,8 @@ def test_the_audit_log_is_append_only_and_its_digest_chain_finds_a_changed_day()
     assert audit.verify(db)["ok"]
 
     start, end = audit._bounds(yesterday)
-    victim = db.scalar(select(RecordEvent).where(RecordEvent.at >= start, RecordEvent.at < end).limit(1))
+    victim = db.scalar(select(RecordEvent).where(RecordEvent.recorded_at >= start, RecordEvent.recorded_at < end)
+                       .limit(1))
     original = victim.cause
     db.execute(text("ALTER TABLE ledger_record_events DISABLE TRIGGER ledger_record_events_append_only"))
     db.execute(text("UPDATE ledger_record_events SET cause = 'tampered' WHERE seq = :s"), {"s": victim.seq})

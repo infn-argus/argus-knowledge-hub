@@ -35,8 +35,18 @@ export function ExportDetailPage() {
                              onSuccess: done, onError: fail });
   const [reason, setReason] = useState("");
   const revoke = useMutation({ mutationFn: () => portabilityApi.revokeExport(id, reason), onSuccess: done, onError: fail });
-  const download = useMutation({ mutationFn: () => portabilityApi.downloadUrl(id),
-                                 onSuccess: (url) => { window.location.href = url; }, onError: fail });
+  const download = useMutation({
+    mutationFn: () => portabilityApi.downloadArchive(id),
+    onSuccess: (blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${id}.tar`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    onError: fail,
+  });
 
   if (exp.isError) return <p className="text-sm text-rose-700">{problemText(exp.error)}</p>;
   if (!exp.data) return <p className="text-sm text-slate-500">Loading…</p>;
@@ -109,7 +119,8 @@ export function ExportDetailPage() {
           <KV rows={[
             ["Requested by", e.requested_by], ["Approved by", e.approved_by ?? "—"], ["Created", when(e.created_at)],
             ["Repository", e.destination.repository ?? "none"], ["Artifact store", e.destination.artifact_store ?? "none"],
-            ["Restricted classes included", e.classifications.length ? e.classifications.join(", ") : "none"],
+            ["Restricted classes included", e.classifications.length ? `${e.classifications.join(", ")} (encrypted)` : "none"],
+            ["People", e.identity_profile?.replace(/_/g, " ")],
             ["Base export", e.base_export_id ? <Link className="text-indigo-700 hover:underline" to={`/admin/portability/exports/${e.base_export_id}`}>{e.base_export_id}</Link> : undefined],
           ]} />
         </Section>
@@ -131,11 +142,13 @@ export function ExportDetailPage() {
       </div>
 
       <Dependencies e={e} onSaved={done} onError={fail} />
+      <BlobReview e={e} onSaved={done} onError={fail} />
 
       {e.watermark && (
         <Section title="Watermark">
-          <KV rows={[["Label", e.watermark.label], ["Taken at", when(e.watermark.snapshot_at)],
-                     ["Per table", <span className="font-mono text-xs">{Object.entries(e.watermark.tables).map(([t, n]) => `${t.replace("ledger_", "")} ${n}`).join(" · ")}</span>]]} />
+          <KV rows={[["Checkpoint", e.watermark.checkpoint_sequence], ["Vector", <Mono>{e.watermark.vector_sha256}</Mono>],
+                     ["Taken at", when(e.watermark.snapshot_time)],
+                     ["Per table", <span className="font-mono text-xs">{Object.entries(e.watermark.vector).map(([t, n]) => `${t.replace("ledger_", "")} ${n}`).join(" · ")}</span>]]} />
         </Section>
       )}
 
@@ -143,7 +156,8 @@ export function ExportDetailPage() {
         <Section title="Git">
           <KV rows={[["Repository", e.git.repository], ["Tag", <Mono>{e.git.tag}</Mono>], ["Commit", <Mono>{e.git.commit}</Mono>],
                      ["Parent", <Mono short>{e.git.parent}</Mono>], ["Previous export tag", e.git.previous_tag ? <Mono>{e.git.previous_tag}</Mono> : undefined],
-                     ["Repository identity", <Mono>{e.git.repository_id}</Mono>]]} />
+                     ["Repository identity", <Mono>{e.git.repository_id}</Mono>],
+                     ["In Git", e.git.files_in_git !== undefined ? `${e.git.files_in_git} files; repository ${bytes(e.git.repository_bytes)} (bulk chunks and blobs are artifacts)` : undefined]]} />
         </Section>
       )}
 
@@ -208,6 +222,65 @@ function Dependencies({ e, onSaved, onError }: { e: ExportView; onSaved: (v: Exp
   );
 }
 
+const BLOB_HELP: Record<string, string> = {
+  approve_opaque: "export it as an approved opaque binary",
+  accept_classified: "export it: the marking does not make it restricted",
+  exclude: "leave this file out of the export",
+  classify_encrypt: "export it as restricted content, encrypted",
+  block: "do not run this export",
+};
+
+function BlobReview({ e, onSaved, onError }: { e: ExportView; onSaved: (v: ExportView) => void; onError: (x: unknown) => void }) {
+  const b = e.analysis.blobs;
+  const editable = e.state === "awaiting_approval" || e.state === "failed";
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  useEffect(() => setDraft({}), [e.id, e.state]);
+  const save = useMutation({ mutationFn: () => portabilityApi.decideExport(e.id, draft), onSuccess: onSaved, onError });
+  if (!b) return null;
+  return (
+    <Section title={`Content inspection (${b.inspected} blob${b.inspected === 1 ? "" : "s"})`}
+             right={editable && Object.keys(draft).length > 0 && (
+               <button type="button" onClick={() => save.mutate()} disabled={save.isPending}
+                       className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+                 {save.isPending ? "Inspecting…" : "Save decisions and inspect again"}
+               </button>)}>
+      {b.secrets.length > 0 && (
+        <div className="mb-3 rounded border border-rose-200 bg-rose-50 p-2 text-sm text-rose-800">
+          <div className="font-medium">Secrets found inside files — the export is refused until the content is corrected.</div>
+          <ul className="mt-1 list-disc pl-5 text-xs">{b.secrets.slice(0, 10).map((f, i) => <li key={i}><span className="font-mono">{f.where}</span>: {f.kind}</li>)}</ul>
+        </div>
+      )}
+      {b.needs_decision.length === 0 && b.secrets.length === 0 ? (
+        <Empty>Every file was inspected: no secret, and nothing that needs a decision.</Empty>
+      ) : (
+        <table className="w-full text-sm">
+          <tbody>
+            {b.needs_decision.map((d) => (
+              <tr key={d.id} className="border-t border-slate-100 align-top">
+                <td className="py-2">
+                  <div className="font-mono text-xs">{d.where}</div>
+                  <div className="text-xs text-slate-500">{d.status === "finding" ? d.findings.map((f) => f.kind).join("; ")
+                    : d.reason ?? d.status}</div>
+                </td>
+                <td className="w-80 py-2">
+                  {editable ? (
+                    <select value={draft[d.id] ?? d.outcome ?? ""} onChange={(ev) => setDraft({ ...draft, [d.id]: ev.target.value })}
+                            className="w-full rounded border border-amber-400 bg-amber-50 px-2 py-1 text-sm">
+                      <option value="">Choose…</option>
+                      {d.options.map((o) => <option key={o} value={o}>{o.replace(/_/g, " ")} — {BLOB_HELP[o]}</option>)}
+                    </select>
+                  ) : <span>{d.outcome ?? "—"}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {b.excluded.length > 0 && <p className="mt-2 text-xs text-slate-500">{b.excluded.length} file(s) left out by decision.</p>}
+    </Section>
+  );
+}
+
 function ManifestView({ m, sha }: { m: import("../../../api/portabilityTypes").ArchiveManifest; sha: string }) {
   const [raw, setRaw] = useState(false);
   const groups = Object.entries(m.families).reduce<Record<string, [string, typeof m.families[string]][]>>((acc, f) => {
@@ -222,7 +295,9 @@ function ManifestView({ m, sha }: { m: import("../../../api/portabilityTypes").A
             ["Format", m.format], ["SHA-256", <Mono>{sha}</Mono>],
             ["From", `${m.argus.instance_name ?? ""} ${m.argus.instance_id} · ARGUS ${m.argus.application_version} · schema ${m.argus.database_schema ?? "?"}`],
             ["Signed", m.signature ? `${m.signature.algorithm} by ${m.signature.principal} (${m.signature.key_id})` : "no"],
-            ["Policy", m.versions.policy], ["Blobs", `${m.blobs.count} (${bytes(m.blobs.bytes)}) in ${m.blobs.stores.join(", ") || "—"}`],
+            ["Policy", m.versions.policy], ["Blobs", `${m.blobs.count} (${bytes(m.blobs.bytes)}) in ${m.blobs.stores.join(", ") || "—"}${m.blobs.excluded ? `; ${m.blobs.excluded} left out` : ""}`],
+            ["People", m.identity ? `${m.identity.profile.replace(/_/g, " ")} — ${m.identity.identity_columns.join(", ")}` : undefined],
+            ["Encryption", m.encryption ? `${m.encryption.algorithm}, for ${m.encryption.recipients.map((r) => r.recipient).join(", ")}` : "none"],
             ["Classes left out", m.classifications.excluded_classes.join(", ") || "none"],
             ["Invariants at export", m.invariants?.ok === null ? "not run" : m.invariants?.ok ? "ok" : `failing: ${(m.invariants?.codes ?? []).join(", ")}`],
           ]} />
@@ -236,7 +311,8 @@ function ManifestView({ m, sha }: { m: import("../../../api/portabilityTypes").A
                       <tr key={name} className="border-t border-slate-100">
                         <td className="py-0.5">{name}</td>
                         <td className="py-0.5 text-right tabular-nums">{f.rows}</td>
-                        <td className="py-0.5 pl-2 text-slate-400">{f.chunks.length} chunk{f.chunks.length === 1 ? "" : "s"}</td>
+                        <td className="py-0.5 pl-2 text-slate-400">{f.chunks.length} chunk{f.chunks.length === 1 ? "" : "s"}
+                          {f.chunks.length > 0 && ` · ${[...new Set(f.chunks.map((c) => c.storage ?? "git"))].join(", ")}`}</td>
                       </tr>
                     ))}
                   </tbody>

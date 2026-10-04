@@ -5,7 +5,7 @@ import { portabilityApi, problemText, workspacesApi } from "../../../api/client"
 import type { DryRunReport, ImportView, ReconciliationReport } from "../../../api/portabilityTypes";
 import { ActionButton, bytes, Empty, ErrorBox, IMPORT_STEPS, KV, Labels, Mono, Section, StateBadge, Steps, when } from "./shared";
 
-type Step = "fetch-git" | "verify" | "approve" | "execute" | "resume" | "finalize" | "discard";
+type Step = "fetch-git" | "verify" | "approve" | "execute" | "resume" | "finalize";
 
 export function ImportDetailPage() {
   const { id = "" } = useParams();
@@ -29,6 +29,14 @@ export function ImportDetailPage() {
     onSuccess: (v) => { setError(null); refresh(v); },
     onError: (e) => { setError(problemText(e)); refresh(); },
   });
+  const [reason, setReason] = useState("");
+  const discard = useMutation({
+    mutationFn: () => portabilityApi.discardImport(id, reason),
+    onSuccess: (v) => { setError(null); refresh(v); },
+    onError: (e) => { setError(problemText(e)); refresh(); },
+  });
+  const chain = useQuery({ queryKey: ["portability-origin-chain", id], queryFn: () => portabilityApi.originChain(id),
+                           enabled: imp.data?.state === "finalized" && imp.data?.mode !== "evidence", retry: false });
   const dry = useMutation({
     mutationFn: (decisions: Record<string, unknown>) => portabilityApi.dryRun(id, decisions),
     onSuccess: (v) => { setError(null); refresh(v); },
@@ -90,19 +98,21 @@ export function ImportDetailPage() {
                             "Load the archive into staged workspaces, rebuild and reconcile?"} />
           )}
           {(i.state === "importing" || i.state === "failed") && (
-            <ActionButton label={`Resume (${i.checkpoints.done} steps done)`} busy={busy === "resume"} onClick={() => step.mutate("resume")} />
+            <ActionButton label={`Resume in staging (${i.checkpoints.done} steps done)`} busy={busy === "resume"} onClick={() => step.mutate("resume")} />
           )}
           {i.state === "ready_to_finalize" && (
             <ActionButton label="Finalize" busy={busy === "finalize"} onClick={() => step.mutate("finalize")}
                           confirm={i.mode === "evidence" ? "Finalize: keep this archive as read-only evidence."
-                            : "Finalize: the imported workspaces become visible, and this becomes permanent history."} />
+                            : "Finalize: promote the reconciled import into this instance in one transaction — all of it becomes visible at once, as permanent history."} />
           )}
           {i.state === "finalized" && <span className="text-sm text-emerald-700">Finalized {i.reconciliation_sha256 ? <>— reconciliation <Mono short>{i.reconciliation_sha256}</Mono></> : null}.</span>}
           {i.state === "discarded" && <span className="text-sm text-slate-500">Discarded: nothing it loaded remains.</span>}
           {!final && (
-            <span className="ml-auto">
-              <ActionButton label="Discard" danger busy={busy === "discard"} onClick={() => step.mutate("discard")}
-                            confirm="Discard: remove everything this import wrote, and its quarantine?" />
+            <span className="ml-auto flex items-center gap-2">
+              <input value={reason} onChange={(ev) => setReason(ev.target.value)} placeholder="Reason to discard"
+                     className="w-48 rounded border border-slate-300 px-2 py-1 text-sm" />
+              <ActionButton label="Discard" danger busy={discard.isPending} onClick={() => discard.mutate()}
+                            confirm="Discard: drop its staging database and quarantine. Active data was never touched; the audit trail stays." />
             </span>
           )}
         </div>
@@ -118,6 +128,7 @@ export function ImportDetailPage() {
             ["Repository identity", i.verification.git ? <Mono>{i.verification.git.repository_id}</Mono> : undefined],
             ["Previous export tag", i.verification.git?.previous_tag ? <Mono>{i.verification.git.previous_tag}</Mono> : undefined],
             ["Upload", i.verification.upload ? `${bytes(i.verification.upload.bytes)}, sha256 ${i.verification.upload.sha256.slice(0, 12)}` : undefined],
+            ["Staging", i.staging?.database ? `${i.staging.database} — isolated; nothing is visible here before finalization` : undefined],
           ]} />
         </Section>
         <Section title="Verification">
@@ -126,6 +137,8 @@ export function ImportDetailPage() {
               ["Files", i.verification.checkpoint.files], ["Chunks", i.verification.checkpoint.chunks],
               ["Rows", i.verification.checkpoint.rows],
               ["Artifacts", `${i.verification.checkpoint.blobs} (${bytes(i.verification.checkpoint.blob_bytes)})${i.verification.checkpoint.artifact_complete ? ", all present" : ""}`],
+              ["External chunks", i.verification.checkpoint.external_chunks ?? undefined],
+              ["Content", i.verification.checkpoint.content_verified ? "verified" + (i.manifest?.labels?.encrypted ? " (decrypted for this session)" : "") : "not verified"],
               ["Manifest", <Mono>{i.verification.checkpoint.manifest_sha256}</Mono>],
             ]} />
           ) : <Empty>Not verified yet: checksums, signature, chunks and artifacts are checked in quarantine.</Empty>}
@@ -137,7 +150,8 @@ export function ImportDetailPage() {
           <KV rows={[
             ["Export", i.manifest.export_id], ["Mode", i.manifest.mode],
             ["Workspaces", i.manifest.workspaces.join(", ")],
-            ["Watermark", `${i.manifest.watermark.label} at ${when(i.manifest.watermark.snapshot_at)}`],
+            ["Watermark", <>checkpoint {i.manifest.watermark.checkpoint_sequence} · <Mono short>{i.manifest.watermark.vector_sha256}</Mono> at {when(i.manifest.watermark.snapshot_time)}</>],
+            ["People", i.manifest.identity?.profile.replace(/_/g, " ")],
             ["Base export", i.manifest.base?.export_id],
             ["From", `${i.manifest.argus.instance_name ?? ""} ${i.manifest.argus.instance_id} · ARGUS ${i.manifest.argus.application_version}`],
             ["Restricted classes included", (i.manifest.classifications.included ?? []).join(", ") || "none"],
@@ -151,6 +165,14 @@ export function ImportDetailPage() {
       )}
       {hasDryRun && <DryRun r={report} />}
       {rec.data && <Reconciliation r={rec.data.report} sha={rec.data.sha256} />}
+      {chain.data && (
+        <Section title="Origin chain" right={<span className={`text-sm font-medium ${chain.data.ok ? "text-emerald-700" : "text-rose-700"}`}>
+          {chain.data.ok ? "Verifies" : "Changed"}</span>}>
+          <KV rows={[["Chain", <Mono>{chain.data.origin_chain_sha256}</Mono>], ["Ingestion event", chain.data.ingestion_event],
+                     ["Problems", chain.data.problems?.length ? chain.data.problems.map((p) => `${p.family} ${p.key}: ${p.problem}`).join("; ") : undefined]]} />
+          <p className="mt-2 text-xs text-slate-500">Every imported ledger row, recomputed from what is here, against the hash of the archive line it came from.</p>
+        </Section>
+      )}
       {i.state === "finalized" && i.mode === "evidence" && <Evidence id={i.id} />}
       {prov.data && (
         <Section title="Provenance and audit">
@@ -175,6 +197,7 @@ function DecisionsForm({ i, onRun, running }: { i: ImportView; onRun: (d: Record
   const [map, setMap] = useState<Record<string, string>>(current.workspace_map ?? {});
   const [refs, setRefs] = useState(current.unresolved_references ?? "block");
   const [gov, setGov] = useState(current.governance === "load");
+  const [chosen, setChosen] = useState<string[]>((i.decisions as { select_workspaces?: string[] }).select_workspaces ?? []);
   return (
     <Section title="Decisions for the dry run">
       <div className="space-y-3 text-sm">
@@ -190,6 +213,20 @@ function DecisionsForm({ i, onRun, running }: { i: ImportView; onRun: (d: Record
             ))}
           </div>
         </div>
+        {i.mode === "selective" && (
+          <div>
+            <span className="block text-xs font-medium text-slate-600">Workspaces to import</span>
+            <div className="mt-1 flex flex-wrap gap-3">
+              {(i.manifest?.workspaces ?? []).map((w) => (
+                <label key={w} className="flex items-center gap-1 font-mono text-xs">
+                  <input type="checkbox" checked={chosen.includes(w)}
+                         onChange={() => setChosen(chosen.includes(w) ? chosen.filter((x) => x !== w) : [...chosen, w])} />
+                  {w}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         <label className="flex items-center gap-2">
           References the archive and this instance both lack:
           <select value={refs} onChange={(e) => setRefs(e.target.value)} className="rounded border border-slate-300 px-2 py-1">
@@ -205,7 +242,8 @@ function DecisionsForm({ i, onRun, running }: { i: ImportView; onRun: (d: Record
         )}
         <button type="button" disabled={running}
                 onClick={() => onRun({ workspace_map: Object.fromEntries(Object.entries(map).filter(([k, v]) => v && v !== k)),
-                                       unresolved_references: refs, ...(gov ? { governance: "load" } : {}) })}
+                                       unresolved_references: refs, ...(gov ? { governance: "load" } : {}),
+                                       ...(i.mode === "selective" ? { select_workspaces: chosen } : {}) })}
                 className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:bg-slate-300">
           {running ? "Running…" : "Run the dry run with these decisions"}
         </button>
@@ -329,10 +367,12 @@ function Evidence({ id }: { id: string }) {
   const [offset, setOffset] = useState(0);
   const rows = useQuery({ queryKey: ["portability-evidence", id, family, offset], queryFn: () => portabilityApi.evidence(id, family, offset, 25),
                           retry: false });
-  const families = ["assets", "tickets", "ticket_comments", "documents", "document_revisions", "relations", "claims",
-    "decisions", "status_events", "attachments", "types", "identities"];
+  const fams = useQuery({ queryKey: ["portability-evidence-families", id], queryFn: () => portabilityApi.evidenceFamilies(id) });
+  const families = (fams.data ?? []).map((f) => f.family);
   return (
     <Section title="Evidence (read-only, from the archive)">
+      <p className="mb-2 text-xs text-slate-500">Browsed only — not searched, indexed or downloadable. Restricted rows appear only for the
+        institution's evidence readers; counts are of what you may see. Every read is audited.</p>
       <div className="mb-2 flex items-center gap-2 text-sm">
         <select value={family} onChange={(e) => { setFamily(e.target.value); setOffset(0); }} className="rounded border border-slate-300 px-2 py-1">
           {families.map((f) => <option key={f} value={f}>{f}</option>)}

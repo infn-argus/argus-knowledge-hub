@@ -1,12 +1,23 @@
 """Generate a checkpoint: one consistent ledger watermark, the chosen families as immutable chunks,
 blobs as content-addressed artifacts, a manifest, checksums and a signature.
 
-The watermark. A short transaction takes SHARE locks on the ledger's sequenced tables (which waits
-for every transaction already writing to them, and holds new writers back for milliseconds),
-reads each table's highest `seq`, and exports its snapshot. The export then reads everything —
-ledger and records alike — in a read-only transaction that imports that snapshot, and the lock is
-released. So every row with `seq <= W` is committed and visible, no later transaction can take a
-`seq <= W`, and records are read at the same instant: the checkpoint is exactly the state at W.
+**The watermark.** A short transaction takes SHARE locks on the ledger's sequenced tables (which waits
+for every transaction already writing to them, and holds new writers back for milliseconds), reads
+each table's highest `seq`, allocates the next checkpoint number, and exports its snapshot. The
+export then reads everything — ledger and records alike — in a read-only transaction that imports
+that snapshot, and the lock is released. So every row with `seq <= W[table]` is committed and
+visible, no later transaction can take a `seq <= W[table]`, and records are read at the same instant.
+
+The watermark is the **vector** of per-table high-water marks. Its identity is the SHA-256 of its
+canonical serialization, never a sum; the checkpoint number comes from a sequence nothing purges.
+
+**What leaves, and in what order.** Rows are selected, restricted (§6), transformed by the identity
+profile (`identity_policy`), and scanned for secrets. Blobs are read and inspected (`blob_scan`)
+before they are stored anywhere, into a local staging area. Chunks are written; data chunks are
+destined for the artifact store, small catalogue and governance chunks may stay in Git. An export
+that includes restricted classes is encrypted (`envelope`). Only when every check has passed are
+chunks and blobs copied to the destination artifact store; on any failure the staging area and the
+checkpoint directory are securely removed, and nothing is published.
 """
 from __future__ import annotations
 
@@ -14,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -24,13 +36,20 @@ from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.portability import FORMAT, FORMAT_MAJOR, chunks, closure, secret_scan
+from app.portability import FORMAT, FORMAT_MAJOR, blob_scan, chunks, closure, secret_scan
 from app.portability.artifacts import DirectoryStore
+from app.portability.envelope import Envelope
 from app.portability.families import FAMILIES, GROUP_ORDER, SEQUENCED_TABLES, Family, Scope, to_json
+from app.portability.identity_policy import IdentityPolicy
 from app.portability.signing import Signer, sign_checkpoint
 
 MODES = ("full", "incremental", "workspace", "evidence-only", "backup-reference")
 INSTANCE_KEY = "portability.instance"
+WATERMARK_CAPABILITY = "watermark-vector/1"
+# Chunks small enough, of reviewable groups, may live in Git; every other chunk is an artifact.
+GIT_CHUNK_LIMIT = 256 * 1024
+GIT_CHUNK_GROUPS = ("catalogue", "governance", "access")
+REQUIRES = ["argus-archive/1", "zstd", "ed25519", "ledger-replay/1", WATERMARK_CAPABILITY, "external-chunks/1"]
 
 
 class ExportError(ValueError):
@@ -64,7 +83,35 @@ def schema_head(db: Session) -> Optional[str]:
         return None
 
 
+def secure_delete(path: Path) -> None:
+    """Overwrite and remove a file or a directory tree (best effort: copy-on-write and flash storage
+    may keep old blocks; the institution's volume encryption is the real protection)."""
+    if not path.exists():
+        return
+    files = [path] if path.is_file() else [p for p in path.rglob("*") if p.is_file()]
+    for f in files:
+        try:
+            size = f.stat().st_size
+            os.chmod(f, 0o600)
+            with open(f, "r+b") as fh:
+                fh.write(b"\0" * min(size, 64 << 20))
+                fh.flush()
+                os.fsync(fh.fileno())
+        except OSError:
+            pass
+    if path.is_file():
+        path.unlink(missing_ok=True)
+    else:
+        shutil.rmtree(path, ignore_errors=True)
+
+
 # --------------------------------------------------------------------------- the watermark
+
+def vector_sha256(vector: dict) -> str:
+    """The identity of a watermark: SHA-256 of the canonical serialization of its full vector."""
+    return hashlib.sha256(json.dumps({k: int(v) for k, v in sorted(vector.items())}, sort_keys=True,
+                                     separators=(",", ":")).encode()).hexdigest()
+
 
 @contextmanager
 def at_watermark(engine: Engine, lock_timeout: str = "30s") -> Iterator[tuple[Session, dict]]:
@@ -83,15 +130,17 @@ def at_watermark(engine: Engine, lock_timeout: str = "30s") -> Iterator[tuple[Se
         snapshot = locker.execute(text("SELECT pg_export_snapshot()")).scalar()
         if not re.fullmatch(r"[0-9A-F-]+", snapshot or ""):
             raise ExportError("unexpected snapshot identifier")
-        tables = {t: int(locker.execute(text(f"SELECT coalesce(max(seq), 0) FROM {t}")).scalar())
+        vector = {t: int(locker.execute(text(f"SELECT coalesce(max(seq), 0) FROM {t}")).scalar())
                   for t in SEQUENCED_TABLES}
+        checkpoint = int(locker.execute(text("SELECT nextval('portability_checkpoint_seq')")).scalar())
         at = locker.execute(text("SELECT clock_timestamp()")).scalar()
         reader = engine.connect()
         reader.begin()
         reader.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
         reader.execute(text(f"SET TRANSACTION SNAPSHOT '{snapshot}'"))
         lt.commit()                       # the lock is held only until the snapshot is shared
-        watermark = {"label": sum(tables.values()), "tables": tables, "snapshot_at": at.isoformat()}
+        watermark = {"checkpoint_sequence": checkpoint, "vector": vector, "vector_sha256": vector_sha256(vector),
+                     "snapshot_time": at.isoformat()}
         with Session(bind=reader) as session:
             yield session, watermark
     finally:
@@ -151,8 +200,10 @@ def _withheld(fam: Family, row: dict, sc: Scope) -> bool:
 
 # --------------------------------------------------------------------------- rows
 
-def rows_of(db: Session, fam: Family, sc: Scope, store: Optional[DirectoryStore], blobs: dict,
-            grants_classes: list[str], missing: list) -> Iterator[tuple[str, dict]]:
+def rows_of(db: Session, fam: Family, sc: Scope, blobs: Optional["Blobs"], grants_classes: list[str],
+            ident: Optional[IdentityPolicy] = None) -> Iterator[tuple[str, dict]]:
+    """The exported rows of a family: restricted, redacted, blobs replaced by their digest, people
+    transformed by the identity profile. A blob a decision excludes leaves its column null."""
     from app.services.visibility import Grants, redacted_attributes
     grants = Grants(grants_classes)
     for obj in db.scalars(fam.select(db, sc)):
@@ -162,7 +213,9 @@ def rows_of(db: Session, fam: Family, sc: Scope, store: Optional[DirectoryStore]
         if fam.redact and getattr(obj, "attributes", None) is not None:
             row["attributes"] = redacted_attributes(db, obj, grants)
         for col, kind in fam.blobs.items():
-            row[col] = _blob(obj, fam, col, kind, row, store, blobs, missing)
+            row[col] = blobs.add(obj, fam, col, kind, row) if blobs is not None else None
+        if ident is not None:
+            row = ident.row(fam.name, row)
         key = str(getattr(obj, "seq")) if fam.sequenced else fam.key_of(row)
         yield key, row
 
@@ -175,29 +228,116 @@ def _attr(fam: Family, column: str) -> str:
     return column
 
 
-def _blob(obj, fam: Family, col: str, kind: str, row: dict, store, blobs: dict, missing: list):
-    value = getattr(obj, _attr(fam, col))
-    if value is None:
-        return None
-    if store is None:
-        raise ExportError("an artifact store is needed for blobs")
-    if kind == "file":
-        path = Path(value)
-        if not path.is_file():
-            missing.append({"family": fam.name, "key": fam.key_of(row), "file": path.name})
+class Blobs:
+    """Every blob of an export: read, inspected, decided on, staged locally — never stored at the
+    destination until the whole export has passed (`publish_to`)."""
+
+    def __init__(self, staging: Optional[Path], decisions: dict, encrypted: bool,
+                 limits: blob_scan.ScanLimits = blob_scan.LIMITS):
+        self.staging = DirectoryStore("staging", staging) if staging is not None else None
+        self.decisions = decisions
+        self.encrypted = encrypted
+        self.limits = limits
+        self.entries: dict[str, dict] = {}
+        self.missing: list = []
+        self.reports: dict[str, dict] = {}
+        self.needs_decision: list = []
+        self.secrets: list = []
+        self.excluded: list = []
+
+    def decision(self, digest: str, status: str) -> Optional[str]:
+        return self.decisions.get(f"blob:{digest}") or (
+            self.decisions.get("opaque_blobs") if status in ("opaque", "uninspectable") else
+            self.decisions.get("classified_blobs") if status == "finding" else None)
+
+    def add(self, obj, fam: Family, col: str, kind: str, row: dict) -> Optional[str]:
+        value = getattr(obj, _attr(fam, col))
+        if value is None:
             return None
-        digest, size = store.put_file(path)
-        mime = row.get("mime_type")
-    else:
-        digest, size = store.put_bytes(bytes(value))
-        mime = "application/octet-stream"
-    cls = (getattr(obj, "attributes", None) or {}).get("classification") if hasattr(obj, "attributes") else None
-    blobs.setdefault(digest, {"sha256": digest, "size": size, "mime_type": mime, "locator": store.locator(digest),
-                              "classification": cls or "unrestricted", "encryption": None,
-                              "recipients": [], "retention_class": row.get("retention_class") or "archive",
-                              "referenced_by": []})
-    blobs[digest]["referenced_by"].append(f"{fam.name}:{fam.key_of(row)}:{col}")
-    return f"sha256:{digest}"
+        where = f"{fam.name}[{fam.key_of(row)}].{col}"
+        if kind == "file":
+            path = Path(value)
+            if not path.is_file():
+                self.missing.append({"family": fam.name, "key": fam.key_of(row), "file": path.name})
+                return None
+            data = path.read_bytes() if path.stat().st_size <= self.limits.max_bytes else None
+            name, mime = row.get("filename") or path.name, row.get("mime_type")
+        else:
+            data, name, mime = bytes(value), "", None
+        if data is None:
+            digest = _file_sha(Path(value))
+            report = blob_scan.BlobReport(digest, "uninspectable", reason="over the inspection size limit")
+        else:
+            digest = hashlib.sha256(data).hexdigest()
+            report = self.reports.get(digest) and blob_scan.BlobReport(digest, self.reports[digest]["status"],
+                                                                       findings=self.reports[digest]["findings"])
+            if report is None:
+                report = blob_scan.scan(digest, data, mime, name, where, self.limits)
+        self.reports[digest] = report.summary()
+        secrets = [f for f in report.findings if f.get("category") == "secret"]
+        if secrets:
+            self.secrets += secrets
+            return None
+        if report.status != "ok":
+            outcome = self.decision(digest, report.status)
+            options = ["approve_opaque", "exclude", "block"] if report.status in ("opaque", "uninspectable") \
+                else ["accept_classified", "exclude", "block"]
+            if self.encrypted:
+                options.append("classify_encrypt")
+            if outcome not in options or outcome == "block":
+                self.needs_decision.append({"id": f"blob:{digest}", "where": where, "status": report.status,
+                                            "reason": report.reason, "findings": report.findings[:5],
+                                            "options": options, "outcome": outcome})
+                return None
+            if outcome == "exclude":
+                self.excluded.append({"where": where, "sha256": digest, "status": report.status})
+                return None
+        cls = (getattr(obj, "attributes", None) or {}).get("classification") if hasattr(obj, "attributes") else None
+        if self.staging is not None and digest not in self.entries:
+            if data is None:
+                self.staging.put_file(Path(value))
+            else:
+                self.staging.put_bytes(data)
+        e = self.entries.setdefault(digest, {
+            "sha256": digest, "size": len(data) if data is not None else Path(value).stat().st_size,
+            "mime_type": mime or "application/octet-stream", "classification": cls or "unrestricted",
+            "content_inspection": report.status if report.status == "ok" else
+            f"{report.status}: {self.decision(digest, report.status)}",
+            "retention_class": row.get("retention_class") or "archive", "referenced_by": []})
+        e["referenced_by"].append(f"{fam.name}:{fam.key_of(row)}:{col}")
+        return f"sha256:{digest}"
+
+    def publish_to(self, store: DirectoryStore, envelope: Optional[Envelope]) -> None:
+        """Copy the staged blobs to the destination, encrypted when the export is."""
+        for digest, e in self.entries.items():
+            data = (self.staging.root / "sha256" / digest[:2] / digest).read_bytes()
+            stored = envelope.encrypt(data, f"blob:{digest}") if envelope is not None else data
+            sdigest, ssize = store.put_bytes(stored)
+            e.update({"stored_sha256": sdigest, "stored_size": ssize, "locator": store.locator(sdigest),
+                      "encryption": {"algorithm": "AES-256-GCM", "aad": f"blob:{digest}"} if envelope else None})
+
+
+def _file_sha(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def prescan(db: Session, sc: Scope, classifications: list[str], decisions: dict, encrypted: bool) -> dict:
+    """The blob inspection an approver sees before approving: what is blocked, what needs a decision.
+    Nothing is stored."""
+    blobs = Blobs(None, decisions, encrypted)
+    sc = Scope(workspaces=sc.workspaces, watermark={t: 2 ** 62 for t in SEQUENCED_TABLES},
+               excluded_uids=sc.excluded_uids, hidden=sc.hidden, excluded_claims=sc.excluded_claims)
+    for fam in FAMILIES:
+        if fam.blobs:
+            for _ in rows_of(db, fam, sc, blobs, classifications):
+                pass
+    return {"inspected": len(blobs.reports), "secrets": blobs.secrets[:50], "needs_decision": blobs.needs_decision,
+            "excluded": blobs.excluded, "missing": blobs.missing[:50],
+            "ready": not blobs.secrets and not blobs.needs_decision and not blobs.missing}
 
 
 # --------------------------------------------------------------------------- generate
@@ -206,8 +346,10 @@ def generate(engine: Engine, *, export_id: str, mode: str, workspaces: list[str]
              store: Optional[DirectoryStore], signer: Optional[Signer], requested_by: str,
              approved_by: Optional[str] = None, classifications: Optional[list[str]] = None,
              decisions: Optional[dict] = None, base_manifest: Optional[dict] = None,
-             repository: Optional[dict] = None, include_projections: bool = True) -> dict:
-    """Write a checkpoint into `out_dir` and return its manifest. Nothing is published here."""
+             repository: Optional[dict] = None, include_projections: bool = True,
+             identity_profile: Optional[str] = None, envelope: Optional[Envelope] = None) -> dict:
+    """Write a checkpoint into `out_dir`, copy its artifacts to `store`, and return its manifest.
+    Nothing is published to Git here. On any failure nothing is left at the destination."""
     if mode not in MODES:
         raise ExportError(f"unknown export mode {mode!r}")
     if mode == "backup-reference":
@@ -216,8 +358,29 @@ def generate(engine: Engine, *, export_id: str, mode: str, workspaces: list[str]
     if mode == "incremental" and base_manifest is None:
         raise ExportError("an incremental export needs its base export", code="no_base")
     classifications = sorted(classifications or [])
+    if classifications and envelope is None:
+        raise ExportError("restricted classes travel only encrypted, to an approved destination",
+                          code="restricted_destination_required")
+    if store is None:
+        raise ExportError("an artifact store is needed: data chunks and blobs are artifacts", code="no_store")
     decisions = dict(decisions or {})
     out_dir.mkdir(parents=True, exist_ok=False)
+    staging = out_dir.parent / f".{out_dir.name}.staging"
+    try:
+        return _generate(engine, export_id, mode, workspaces, out_dir, staging, store, signer, requested_by,
+                         approved_by, classifications, decisions, base_manifest, repository, include_projections,
+                         identity_profile, envelope)
+    except BaseException:
+        secure_delete(out_dir)
+        raise
+    finally:
+        secure_delete(staging)
+
+
+def _generate(engine, export_id, mode, workspaces, out_dir, staging, store, signer, requested_by, approved_by,
+              classifications, decisions, base_manifest, repository, include_projections, identity_profile,
+              envelope) -> dict:
+    from app.models.user import User
     with Session(engine) as w:
         inst = instance(w)
         w.commit()
@@ -233,10 +396,13 @@ def generate(engine: Engine, *, export_id: str, mode: str, workspaces: list[str]
         missing_ws = [w_ for w_ in workspaces if db.get(Workspace, w_) is None]
         if missing_ws:
             raise ExportError(f"unknown workspaces {missing_ws}", code="not_found")
-        previous = dict(base_manifest["watermark"]["tables"]) if mode == "incremental" else {}
-        if previous and any(watermark["tables"].get(t, 0) < v for t, v in previous.items()):
+        previous = dict(base_manifest["watermark"]["vector"]) if mode == "incremental" else {}
+        if previous and set(previous) != set(SEQUENCED_TABLES):
+            raise ExportError("the base export's watermark has other sequenced families: a new full "
+                              "checkpoint is needed", code="incompatible_base")
+        if previous and any(watermark["vector"].get(t, 0) < v for t, v in previous.items()):
             raise ExportError("the base export is ahead of this instance's ledger", code="out_of_order")
-        sc = Scope(workspaces=sorted(workspaces), watermark=watermark["tables"], previous=previous)
+        sc = Scope(workspaces=sorted(workspaces), watermark=watermark["vector"], previous=previous)
         restriction = restrict(db, sc, classifications)
         analysis = closure.resolve(db, sc, decisions)
         if analysis["unresolved"] or analysis["blocked"]:
@@ -244,15 +410,17 @@ def generate(engine: Engine, *, export_id: str, mode: str, workspaces: list[str]
                               detail={"closure": analysis})
         if sc.excluded_uids:            # computed again for workspaces the closure added
             restriction = restrict(db, sc, classifications)
-        blobs: dict = {}
-        missing: list = []
+        ident = IdentityPolicy.make(identity_profile, [(u.id, u.email, u.username if u.username and
+                                                        len(u.username) >= 3 else None)
+                                                       for u in db.scalars(select(User))])
+        blobs = Blobs(staging, decisions, envelope is not None)
         findings: list = []
         families: dict = {}
         for group in GROUP_ORDER:
             for fam in [f for f in FAMILIES if f.group == group]:
                 if fam.group == "projection" and not include_projections:
                     continue
-                items = list(rows_of(db, fam, sc, store, blobs, classifications, missing))
+                items = list(rows_of(db, fam, sc, blobs, classifications, ident))
                 findings += secret_scan.scan_rows(fam.name, items)
                 written = chunks.write_chunks(out_dir, f"{group}-{fam.name}", fam.name, items)
                 families[fam.name] = {
@@ -260,12 +428,16 @@ def generate(engine: Engine, *, export_id: str, mode: str, workspaces: list[str]
                     "replace_set": fam.replace_set, "rows": sum(c["rows"] for c in written),
                     "sha256": hashlib.sha256("".join(c["content_sha256"] for c in written).encode()).hexdigest(),
                     "chunks": written, "schema": f"format/families/{fam.name}.schema.json"}
-        if findings:
-            raise ExportError("the export holds what looks like a secret; nothing was published",
-                              code="secret_found", detail={"findings": findings[:50]})
-        if missing:
-            raise ExportError(f"{len(missing)} attachment file(s) are missing; the archive would not be "
-                              "artifact-complete", code="blob_missing", detail={"missing": missing[:50]})
+        if findings or blobs.secrets:
+            raise ExportError("the export holds what looks like a secret; nothing was stored or published",
+                              code="secret_found", detail={"findings": (findings + blobs.secrets)[:50]})
+        if blobs.needs_decision:
+            raise ExportError(f"{len(blobs.needs_decision)} blob(s) could not be inspected or carry restricted "
+                              "markers, and need a decision", code="blob_review",
+                              detail={"blobs": blobs.needs_decision[:100]})
+        if blobs.missing:
+            raise ExportError(f"{len(blobs.missing)} attachment file(s) are missing; the archive would not be "
+                              "artifact-complete", code="blob_missing", detail={"missing": blobs.missing[:50]})
         versions = _versions(db)
         from app.ledger import invariants
         try:
@@ -276,18 +448,29 @@ def generate(engine: Engine, *, export_id: str, mode: str, workspaces: list[str]
             db.rollback()
             inv_summary = {"ok": None, "error": str(e)[:200]}
 
-    blob_lines = [json.dumps(b, sort_keys=True) for b in sorted(blobs.values(), key=lambda b: b["sha256"])]
+    # Everything passed: chunks are placed (Git or artifact, encrypted when the export is), blobs copied.
+    for fam in families.values():
+        for c in fam["chunks"]:
+            _place_chunk(out_dir, c, fam["group"], store, envelope)
+    blobs.publish_to(store, envelope)
+    blob_lines = [json.dumps(b, sort_keys=True) for b in sorted(blobs.entries.values(), key=lambda b: b["sha256"])]
+    blob_manifest = "".join(x + "\n" for x in blob_lines).encode()
+    if envelope is not None:
+        blob_manifest = envelope.encrypt(blob_manifest, "blobs.manifest.ndjson")
+    (out_dir / "blobs.manifest.ndjson").write_bytes(blob_manifest)
     (out_dir / "relation-registry.json").write_text(json.dumps(registry_view(), indent=1, sort_keys=True) + "\n")
-    (out_dir / "blobs.manifest.ndjson").write_text("".join(x + "\n" for x in blob_lines))
     (out_dir / "workspaces.ndjson").write_text("".join(
         json.dumps({"id": w_}, sort_keys=True) + "\n" for w_ in sc.workspaces))
-    complete = mode in ("full",) and not restriction["excluded_classes"] and not restriction["fields_hidden"]
+    complete = mode in ("full",) and not restriction["excluded_classes"] and not restriction["fields_hidden"] \
+        and not blobs.excluded
     selective = mode in ("workspace", "evidence-only") or (mode == "incremental" and base_manifest.get("selective"))
+    stored = sorted(blobs.entries.values(), key=lambda b: b["sha256"])
     manifest = {
         "format": FORMAT, "format_major": FORMAT_MAJOR, "export_id": export_id, "mode": mode,
         "labels": {"complete": complete and not selective, "selective": bool(selective),
                    "incremental": mode == "incremental", "evidence_only": mode == "evidence-only",
-                   "signed": signer is not None, "encrypted": False, "artifact_complete": not missing},
+                   "signed": signer is not None, "encrypted": envelope is not None, "artifact_complete": True},
+        "selective": bool(selective),
         "argus": {"application_version": os.environ.get("ARGUS_VERSION", "1.0.0"), "database_schema": head,
                   "instance_id": inst["id"], "instance_name": inst.get("name")},
         "repository": repository or {},
@@ -296,24 +479,47 @@ def generate(engine: Engine, *, export_id: str, mode: str, workspaces: list[str]
         "base": ({"export_id": base_manifest["export_id"], "watermark": base_manifest["watermark"],
                   "manifest_sha256": base_manifest.get("_sha256")} if mode == "incremental" else None),
         "versions": versions,
-        "created_at": now().isoformat(), "requested_by": requested_by, "approved_by": approved_by,
+        "created_at": now().isoformat(), "requested_by": ident.value(requested_by),
+        "approved_by": ident.value(approved_by),
+        "identity": ident.describe(),
         "families": families,
-        "blobs": {"count": len(blobs), "bytes": sum(b["size"] for b in blobs.values()),
-                  "manifest": "blobs.manifest.ndjson", "stores": [store.name] if store and blobs else []},
+        "blobs": {"count": len(stored), "bytes": sum(b["size"] for b in stored),
+                  "manifest": "blobs.manifest.ndjson", "stores": [store.name] if stored else [],
+                  "stored": [{"stored_sha256": b["stored_sha256"], "size": b["stored_size"], "locator": b["locator"]}
+                             for b in stored],
+                  "excluded": len(blobs.excluded),
+                  "inspection": {"ok": sum(1 for b in stored if b["content_inspection"] == "ok"),
+                                 "by_decision": sum(1 for b in stored if b["content_inspection"] != "ok")}},
         "classifications": restriction,
         "closure": {"dependencies": [_public(d) for d in analysis["dependencies"]],
-                    "automatic": analysis["automatic"], "decisions": decisions},
+                    "automatic": analysis["automatic"],
+                    "decisions": {k: v for k, v in decisions.items() if not k.startswith("blob:")}},
         "invariants": inv_summary,
-        "encryption": {"chunks": None, "blobs": None},
-        "importer": {"requires": ["argus-archive/1", "zstd", "ed25519", "ledger-replay/1"],
-                     "database_schema": head},
+        "encryption": ({**envelope.metadata(), "covers": ["data chunks", "blobs", "blobs.manifest.ndjson"]}
+                       if envelope is not None else None),
+        "importer": {"requires": REQUIRES + (["envelope/1"] if envelope is not None else []),
+                     "database_schema": head, "sequenced_families": sorted(SEQUENCED_TABLES)},
     }
-    manifest["selective"] = bool(selective)
     (out_dir / "reconciliation.json").write_text(json.dumps({
         "export_id": export_id, "watermark": watermark,
         "families": {k: {"rows": v["rows"], "sha256": v["sha256"]} for k, v in families.items()},
         "invariants": inv_summary}, indent=1, sort_keys=True))
     return finish(out_dir, manifest, signer)
+
+
+def _place_chunk(out_dir: Path, c: dict, group: str, store: DirectoryStore, envelope: Optional[Envelope]) -> None:
+    """Decide where a chunk lives: Git for small reviewable groups, the artifact store otherwise; an
+    encrypted export keeps every chunk encrypted, as an artifact."""
+    path = out_dir / c["file"]
+    if envelope is None and group in GIT_CHUNK_GROUPS and c["bytes"] <= GIT_CHUNK_LIMIT:
+        c.update({"storage": "git", "path": c["file"]})
+        return
+    if envelope is not None:
+        path.write_bytes(envelope.encrypt(path.read_bytes(), c["file"]))
+    data = path.read_bytes()
+    digest, size = store.put_bytes(data)
+    c.update({"storage": "artifact", "locator": store.locator(digest), "sha256": digest, "bytes": size,
+              "encrypted": envelope is not None})
 
 
 def _public(dep: dict) -> dict:
@@ -413,6 +619,11 @@ def json_schemas() -> dict[str, dict]:
         props = {c.name: col_schema(c) for c in fam.model.__table__.columns if c.name not in fam.exclude}
         for col in fam.blobs:
             props[col] = {"anyOf": [{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, {"type": "null"}]}
+        if fam.name == "identities":     # which columns travel depends on the identity profile
+            props = {k: v for k, v in props.items() if k in ("id", "oidc_sub", "dn", "email", "name", "username",
+                                                             "source", "active", "created_at")}
+            props["actor_type"] = {"type": "string"}
+            props["issuer_hash"] = {"type": "string"}
         out[f"families/{fam.name}.schema.json"] = {
             "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": f"{base}/families/{fam.name}.json",
             "title": f"{fam.name} ({fam.group}{'' if fam.authoritative else ', not authoritative'})",
@@ -432,6 +643,8 @@ def json_schemas() -> dict[str, dict]:
         "title": "One line of blobs.manifest.ndjson", "type": "object",
         "required": ["sha256", "size", "locator", "classification"],
         "properties": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "size": {"type": "integer"},
+                       "stored_sha256": {"type": "string"}, "stored_size": {"type": "integer"},
+                       "content_inspection": {"type": "string"},
                        "mime_type": {"type": ["string", "null"]}, "locator": {"type": "string"},
                        "classification": {"type": "string"}, "encryption": {"type": ["object", "null"]},
                        "recipients": {"type": "array", "items": {"type": "string"}},
@@ -441,7 +654,7 @@ def json_schemas() -> dict[str, dict]:
         "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": f"{base}/manifest.json",
         "title": "argus-archive/1 manifest", "type": "object",
         "required": ["format", "format_major", "export_id", "mode", "labels", "argus", "workspaces", "watermark",
-                     "families", "blobs", "classifications", "closure", "importer"],
+                     "identity", "families", "blobs", "classifications", "closure", "importer"],
         "properties": {
             "format": {"const": FORMAT}, "format_major": {"const": FORMAT_MAJOR},
             "export_id": {"type": "string"}, "mode": {"enum": list(MODES)},
@@ -449,10 +662,21 @@ def json_schemas() -> dict[str, dict]:
                                                       "signed", "encrypted", "artifact_complete"]},
             "argus": {"type": "object", "required": ["application_version", "database_schema", "instance_id"]},
             "repository": {"type": "object"}, "workspaces": {"type": "array", "items": {"type": "string"}},
-            "watermark": {"type": "object", "required": ["label", "tables", "snapshot_at"]},
+            "watermark": {"type": "object", "required": ["checkpoint_sequence", "vector", "vector_sha256",
+                                                         "snapshot_time"],
+                          "properties": {"checkpoint_sequence": {"type": "integer"},
+                                         "vector": {"type": "object", "additionalProperties": {"type": "integer"}},
+                                         "vector_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                         "snapshot_time": {"type": "string", "format": "date-time"}}},
+            "identity": {"type": "object", "required": ["profile"]},
             "base": {"type": ["object", "null"]}, "versions": {"type": "object"},
             "families": {"type": "object", "additionalProperties": {
-                "type": "object", "required": ["group", "authoritative", "rows", "sha256", "chunks"]}},
+                "type": "object", "required": ["group", "authoritative", "rows", "sha256", "chunks"],
+                "properties": {"chunks": {"type": "array", "items": {
+                    "type": "object", "required": ["file", "storage", "sha256", "bytes", "rows", "content_sha256"],
+                    "properties": {"storage": {"enum": ["git", "artifact"]}, "path": {"type": "string"},
+                                   "locator": {"type": "string"}, "sha256": {"type": "string"},
+                                   "bytes": {"type": "integer"}, "encrypted": {"type": "boolean"}}}}}}},
             "blobs": {"type": "object", "required": ["count", "bytes", "manifest"]},
             "classifications": {"type": "object"}, "closure": {"type": "object"},
             "encryption": {"type": "object"}, "signature": {"type": "object"},

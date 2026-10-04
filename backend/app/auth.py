@@ -42,6 +42,9 @@ class PatIdentity:
 @dataclass
 class OidcIdentity:
     user: User
+    # The verified token's claims, for decisions that need more than who: `auth_time` for step-up
+    # authentication (portable exports and imports, docs/export-import-design.md §15).
+    claims: Optional[dict] = None
 
 
 Identity = Union[PatIdentity, OidcIdentity]
@@ -112,7 +115,7 @@ def get_identity(
             user = _resolve_oidc_user(db, claims)
             user.last_login_at = datetime.now(timezone.utc)
             db.commit()
-            return OidcIdentity(user=user)
+            return OidcIdentity(user=user, claims=claims)
 
     raise HTTPException(status_code=401, detail="Invalid or revoked token")
 

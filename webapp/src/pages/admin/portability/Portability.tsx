@@ -112,12 +112,15 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
   const [repository, setRepository] = useState(c.repositories[0] ?? "");
   const [store, setStore] = useState(c.artifact_stores[0] ?? "");
   const [base, setBase] = useState("");
+  const [profile, setProfile] = useState(c.default_identity_profile);
+  const approvedClasses = c.restricted_destinations[repository] ?? [];
+  const canEncrypt = c.encryption_recipients.includes(repository);
   const published = exports.filter((e) => e.state === "published");
   const create = useMutation({
     mutationFn: () => portabilityApi.createExport({
       mode, workspaces: mode === "workspace" || mode === "evidence-only" ? chosen : [],
       classifications: classes, repository: repository || null, artifact_store: store || null,
-      base_export_id: mode === "incremental" ? base : null,
+      base_export_id: mode === "incremental" ? base : null, identity_profile: profile,
     }),
     onSuccess: (e) => {
       void qc.invalidateQueries({ queryKey: ["portability-exports"] });
@@ -126,7 +129,7 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
   });
   const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   const needsWorkspaces = mode === "workspace" || mode === "evidence-only";
-  const highRisk = mode === "full" || mode === "evidence-only" || classes.length > 0;
+  const highRisk = mode === "full" || mode === "evidence-only" || classes.length > 0 || profile === "full_identity";
   return (
     <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
       <div className="grid gap-4 md:grid-cols-2">
@@ -150,9 +153,12 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
         ) : <div />}
         <label className="text-sm">
           <span className="block text-xs font-medium text-slate-600">Git portability repository</span>
-          <select value={repository} onChange={(e) => setRepository(e.target.value)} className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
+          <select value={repository} onChange={(e) => { setRepository(e.target.value); setClasses([]); }}
+                  className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
             <option value="">None (generate only)</option>
-            {c.repositories.map((r) => <option key={r} value={r}>{r}</option>)}
+            {c.repositories.map((r) => (
+              <option key={r} value={r}>{r}{c.restricted_destinations[r] ? ` — approved for ${c.restricted_destinations[r].join(", ")}` : ""}</option>
+            ))}
           </select>
         </label>
         <label className="text-sm">
@@ -179,19 +185,32 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
         </div>
       )}
       {mode !== "incremental" && (
+        <label className="block text-sm">
+          <span className="block text-xs font-medium text-slate-600">People in the archive (identity profile)</span>
+          <select value={profile} onChange={(e) => setProfile(e.target.value)} className="mt-1 w-full max-w-md rounded border border-slate-300 px-2 py-1.5">
+            {c.identity_profiles.map((p) => <option key={p} value={p} disabled={p === "full_identity" && !c.is_admin}>{PROFILE_HELP[p] ?? p}</option>)}
+          </select>
+        </label>
+      )}
+      {mode !== "incremental" && (
         <div>
           <span className="block text-xs font-medium text-slate-600">Restricted classes to include</span>
           <div className="mt-1 flex flex-wrap gap-3 text-sm">
-            {c.restricted_classes.map((k) => (
-              <label key={k} className="flex items-center gap-1">
-                <input type="checkbox" checked={classes.includes(k)} onChange={() => setClasses(toggle(classes, k))} disabled={!c.is_admin} />
-                {k.replace(/_/g, " ")}
-              </label>
-            ))}
+            {c.restricted_classes.map((k) => {
+              const allowed = c.is_admin && approvedClasses.includes(k) && canEncrypt;
+              return (
+                <label key={k} className={`flex items-center gap-1 ${allowed ? "" : "text-slate-400"}`}
+                       title={allowed ? "" : "Only to a destination approved for this class, with encryption recipients"}>
+                  <input type="checkbox" checked={classes.includes(k)} onChange={() => setClasses(toggle(classes, k))} disabled={!allowed} />
+                  {k.replace(/_/g, " ")}
+                </label>
+              );
+            })}
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Records of the classes not ticked are left out with everything that names them. Every reader of the
-            destination repository must be allowed to see what you include.
+            Records of the classes not ticked are left out with everything that names them. A restricted class can be
+            included only towards a destination approved for it, and the export is then encrypted for that
+            destination's recipients. Unencrypted restricted exports are not available.
           </p>
         </div>
       )}
@@ -211,6 +230,13 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
     </div>
   );
 }
+
+const PROFILE_HELP: Record<string, string> = {
+  institutional_reference: "Institutional reference (default): user ids and subjects; no e-mail, DN or names",
+  pseudonymized: "Pseudonymized: an institutional pseudonym per person",
+  anonymous_historical_actor: "Anonymous: actions grouped by actor, nothing links to a person",
+  full_identity: "Full identity: e-mail, names, directory DN (high risk)",
+};
 
 // ------------------------------------------------------------------------------ imports
 
@@ -260,9 +286,9 @@ function Imports({ c }: { c: PortabilityConfig }) {
 
 const MODE_HELP: Record<string, string> = {
   clone: "Keep every uid and its history; this instance keeps its own identity.",
-  merge: "Into this instance alongside its own data. Never replaces anything; conflicts block.",
-  restore: "Rebuild the exporting instance here. Needs an empty instance; this instance takes the archive's identity.",
-  selective: "The archive's workspaces into an instance that has other work.",
+  merge: "Into this instance alongside its own work, in new workspaces or this origin's own. Never replaces anything.",
+  restore: "Rebuild the exporting instance here: an empty instance and a full-identity archive; this instance takes the archive's identity.",
+  selective: "Only the workspaces you choose (in the dry run's decisions), into an instance that has other work.",
   evidence: "Keep a verified, read-only copy to consult. Nothing is loaded into active data.",
 };
 

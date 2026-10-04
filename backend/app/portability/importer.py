@@ -1,12 +1,20 @@
-"""Load a verified checkpoint: dry run, staged idempotent load, rebuild, reconciliation, finalize.
+"""Load a verified checkpoint: dry run, isolated load, rebuild, reconciliation, atomic promotion.
 
-Deterministic throughout. Every row an import writes is recorded in the row map by its key in the
-archive (sequenced rows: the exporting instance's `seq`) and its key here, so that
+The same deterministic functions run twice (`staging.py`): first in the import's own staging
+database, with durable per-chunk checkpoints (`execute`, `rebuild`, `reconcile`); then, at
+finalization, in the active database inside one transaction (`promote`), which commits only when
+its result equals the staged one. Every row an import writes is recorded in the row map by its key
+in the archive (sequenced rows: the exporting instance's `seq`) and its key here, so that
 
 * the same commit imported again changes nothing (identical rows are skipped and mapped);
-* an interrupted import resumes from its last finished chunk (`checkpoints`);
-* a staged import is discarded exactly, audit rows included, leaving active state as it was;
+* an interrupted import resumes from its last finished chunk, in staging;
+* a discarded or failed import never touched the active database: staging is dropped, nothing purged;
 * an increment updates only rows the same origin wrote and nobody here has changed since.
+
+Imported ledger rows keep their original `at`; their local `recorded_at` is the ingestion time, so a
+local audit day sealed before the import never changes (I-PORT-8). The origin chain — origin
+instance, family, original sequence, original time, the hash of each archive line and of the
+checkpoint — is kept in `portability_origin_records`, tied to one local ingestion event.
 
 Outcomes per row:
 
@@ -31,10 +39,11 @@ import os
 import shutil
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.orm import Session
 
 from app.db import Base
@@ -42,10 +51,10 @@ from app.ledger.writer import writing
 from app.models.attachment import file_sha256
 from app.models.ledger import (ClaimEvent, Conflict, ConflictEvent, Decision, IdentityBinding, IdentityEvent,
                                RecordEvent, RevisionEvent, SourceRevision, StatusEvent, StreamHead)
-from app.models.portability import PortabilityChainLink, PortabilityRowMap
+from app.models.portability import PortabilityChainLink, PortabilityEvent, PortabilityOriginRecord, PortabilityRowMap
 from app.models.workspace import Workspace
 from app.portability import chunks
-from app.portability.families import BY_NAME, FAMILIES, GROUP_ORDER, Family, Scope, from_json, to_json
+from app.portability.families import BY_NAME, FAMILIES, ORIGIN_CHAIN, Family, Scope, from_json, to_json
 
 LOAD_GROUPS = ("catalogue", "identity", "access", "governance", "records", "ledger")
 GOVERNANCE = ("policies", "rulesets")
@@ -69,6 +78,16 @@ class Plan:
     blob_dir: Path
     attachments_dir: Path
     decisions: dict = field(default_factory=dict)
+    ingested_at: Optional[datetime] = None          # the local record time of every row loaded
+    manifest_sha256: str = ""                        # the origin checkpoint hash
+    created_files: list = field(default_factory=list)  # files this run added (removed if it rolls back)
+    _index: Optional[dict] = None
+
+    @property
+    def selected(self) -> Optional[set]:
+        """For a selective import: the archive's workspaces chosen (None: all of them)."""
+        chosen = self.decisions.get("select_workspaces")
+        return set(chosen) if chosen else None
 
     @property
     def ws_map(self) -> dict:
@@ -91,16 +110,58 @@ class Plan:
 
     @property
     def workspaces(self) -> list[str]:
-        return [self.map_ws(w) for w in self.manifest["workspaces"]]
+        return [self.map_ws(w) for w in self.manifest["workspaces"] if self.selected is None or w in self.selected]
 
 
 _MODELS = {m.class_.__table__.name: m.class_ for m in Base.registry.mappers if hasattr(m.class_, "__table__")}
 
 
 def archive_rows(plan: Plan, fam: Family) -> Iterator[tuple[str, str, dict]]:
+    """The archive's rows of a family — for a selective import, only those of the chosen workspaces."""
     for c in plan.manifest["families"][fam.name]["chunks"]:
         for key, row in chunks.read_chunk(plan.checkpoint / c["file"], fam.name):
-            yield c["file"], key, row
+            if plan.selected is None or _kept(plan, fam, row):
+                yield c["file"], key, row
+
+
+def _index(plan: Plan) -> dict:
+    """Which workspace each record, stream, claim and domain of the archive belongs to."""
+    if plan._index is None:
+        idx: dict = {}
+
+        def read(name):
+            fam = BY_NAME[name]
+            for c in plan.manifest["families"].get(name, {}).get("chunks", []):
+                yield from chunks.read_chunk(plan.checkpoint / c["file"], fam.name)
+        for name, key in (("assets", "uid"), ("tickets", "uid"), ("documents", "uid"), ("streams", "id"),
+                          ("migration_domains", "id")):
+            for _, r in read(name):
+                idx[r[key]] = r["workspace_id"]
+        for _, r in read("claims"):
+            idx[r["claim_id"]] = idx.get(r["stream_id"])
+        plan._index = idx
+    return plan._index
+
+
+_CONTEXT = ("types", "icons", "identities", "policies", "rulesets", "roles")
+
+
+def _kept(plan: Plan, fam: Family, row: dict) -> bool:
+    """Whether a row belongs to the chosen workspaces of a selective import."""
+    if fam.name in _CONTEXT:
+        return True
+    chosen, idx = plan.selected, _index(plan)
+    if fam.name == "workspaces":
+        return row["id"] in chosen
+    if "workspace_id" in row and fam.name != "decisions":
+        return row["workspace_id"] in chosen
+    for col in ("stream_id", "issue_uid", "from_issue_uid", "asset_uid", "document_uid", "subject_uid", "uid",
+                "new_uid", "domain_id", "claim_id"):
+        if row.get(col) is not None and row[col] in idx:
+            return idx[row[col]] in chosen
+    if fam.name == "decisions":
+        return row.get("workspace_id") in chosen
+    return False
 
 
 def _attr(fam: Family, column: str) -> str:
@@ -192,6 +253,7 @@ def _blob_value(plan: Plan, kind: str, value):
         tmp = dest.with_suffix(".part")
         shutil.copyfile(src, tmp)
         os.replace(tmp, dest)
+        plan.created_files.append(dest)
     return str(dest)
 
 
@@ -204,9 +266,16 @@ def _values(plan: Plan, fam: Family, row: dict, *, with_deferred: bool) -> dict:
         if fam.sequenced and c == "seq":
             continue
         v = mapped.get(c)
+        if fam.name == "identities" and c not in row:
+            continue                            # a column the identity profile did not export
         out[_attr(fam, c)] = (_blob_value(plan, fam.blobs[c], v) if c in fam.blobs else from_json(fam.model, c, v))
-    if fam.name == "workspaces":
-        out["import_state"] = "staging"
+    if fam.name == "identities":
+        # A historical actor reference: no contact or directory data unless the profile exported it.
+        out.setdefault("email", f"{row['id']}@historical.invalid")
+        out["active"] = bool(row.get("active", False))
+        out.setdefault("source", "archive")
+    if "recorded_at" in fam.model.__table__.columns:
+        out["recorded_at"] = plan.ingested_at or datetime.now(timezone.utc)   # local ingestion time (I-PORT-8)
     return out
 
 
@@ -270,13 +339,21 @@ def dry_run(db: Session, plan: Plan) -> dict:
     governance = [f for f in GOVERNANCE if f in plan.manifest["families"] and f not in [x.name for x in plan.families()]]
     workspaces = []
     for w in plan.manifest["workspaces"]:
+        if plan.selected is not None and w not in plan.selected:
+            continue
         local_ws = plan.map_ws(w)
         here = db.get(Workspace, local_ws)
-        if here is not None and plan.mode in ("restore", "clone", "selective") and \
-                not _ours(db, plan, "workspaces", w):
+        # An import never mixes into a workspace with independent local history: a workspace is new
+        # here, or it is the same origin's (an increment), or it is mapped to another id.
+        if here is not None and not _ours(db, plan, "workspaces", w):
             blocking.append({"family": "workspaces", "key": w,
-                             "reason": f"workspace {local_ws} already exists here; map it to another id or merge"})
+                             "reason": f"workspace {local_ws} already exists here with its own history; map it "
+                                       "to another id"})
         workspaces.append({"archive": w, "local": local_ws, "exists": here is not None})
+    if plan.selected is not None:
+        unknown = sorted(plan.selected - set(plan.manifest["workspaces"]))
+        if unknown:
+            blocking.append({"family": "workspaces", "key": ",".join(unknown), "reason": "not in this archive"})
     chain = chain_status(db, plan)
     if chain.get("problem"):
         blocking.append({"family": "chain", "key": plan.manifest["export_id"], "reason": chain["problem"]})
@@ -334,7 +411,8 @@ def _ours(db: Session, plan: Plan, family: str, key: str) -> bool:
 
 
 def chain_status(db: Session, plan: Plan) -> dict:
-    """Where this export sits in the chain of exports applied here from the same origin."""
+    """Where this export sits in the chain of exports applied here from the same origin. Increments
+    match their base by the exact watermark vector and manifest hash, never by a number."""
     m = plan.manifest
     links = list(db.scalars(select(PortabilityChainLink).where(PortabilityChainLink.origin == plan.origin)
                             .order_by(PortabilityChainLink.position)))
@@ -342,17 +420,41 @@ def chain_status(db: Session, plan: Plan) -> dict:
     if m["export_id"] in applied:
         return {"status": "already_applied", "applied": len(links)}
     if m["mode"] == "incremental":
-        base = (m.get("base") or {}).get("export_id")
+        base = m.get("base") or {}
         if not links:
-            return {"status": "out_of_order", "problem": f"increment of {base}, which was never imported here"}
-        if links[-1].export_id != base:
             return {"status": "out_of_order",
-                    "problem": f"increment of {base}, but the last export applied here from this origin is "
-                               f"{links[-1].export_id}: an increment is missing or out of order"}
-        if links[-1].watermark_label != m["base"]["watermark"]["label"]:
-            return {"status": "out_of_order", "problem": "the base watermark differs from the one applied here"}
+                    "problem": f"increment of {base.get('export_id')}, which was never imported here"}
+        last = links[-1]
+        if last.export_id != base.get("export_id"):
+            return {"status": "out_of_order",
+                    "problem": f"increment of {base.get('export_id')}, but the last export applied here from this "
+                               f"origin is {last.export_id}: an increment is missing or out of order"}
+        if last.vector_sha256 != base["watermark"].get("vector_sha256"):
+            return {"status": "out_of_order", "problem": "the base watermark vector differs from the one applied here"}
+        if last.manifest_sha256 and base.get("manifest_sha256") and last.manifest_sha256 != base["manifest_sha256"]:
+            return {"status": "out_of_order", "problem": "the base manifest differs from the one applied here"}
         return {"status": "next", "applied": len(links)}
     return {"status": "first" if not links else "new_checkpoint", "applied": len(links)}
+
+
+def references(db_unused, plan: Plan) -> dict:
+    """Primary keys the archive's rows refer to and do not bring themselves, by table: what staging
+    must be seeded with from the active instance."""
+    pending = _pending_keys(plan)
+    out: dict = defaultdict(set)
+    for fam in plan.families():
+        fks = [(c, fk) for c in fam.model.__table__.columns if c.name in fam.columns for fk in c.foreign_keys]
+        if not fks:
+            continue
+        for _, key, row in archive_rows(plan, fam):
+            mapped = _mapped_row(plan, fam, row)
+            for c, fk in fks:
+                v = mapped.get(c.name)
+                if v is None or (isinstance(v, str) and v.startswith("sha256:")):
+                    continue
+                if v not in pending.get(fk.column.table.name, ()):
+                    out[fk.column.table.name].add(v)
+    return {k: sorted(v) for k, v in out.items()}
 
 
 # --------------------------------------------------------------------------- execute
@@ -409,6 +511,8 @@ def _local_key(fam: Family, obj) -> str:
 
 def _load_chunk(db: Session, plan: Plan, fam: Family, chunk: dict, pending: dict, report: dict) -> None:
     for key, row in chunks.read_chunk(plan.checkpoint / chunk["file"], fam.name):
+        if plan.selected is not None and not _kept(plan, fam, row):
+            continue
         local, rm = find_local(db, plan, fam, key, row)
         if local is not None:
             form = archive_form(plan, fam, local, key)
@@ -419,7 +523,8 @@ def _load_chunk(db: Session, plan: Plan, fam: Family, chunk: dict, pending: dict
                 continue
             if rm is None or rm.content_sha256 != _digest(form):
                 raise ImportBlocked(f"{fam.name} {key} exists here with different content", "divergent",
-                                    {"family": fam.name, "key": key})
+                                    {"family": fam.name, "key": key, "fields": _differs(row, form)[:10],
+                                     "same_origin": rm is not None})
             for attr, v in _values(plan, fam, row, with_deferred=True).items():
                 setattr(local, attr, v)
             db.flush()
@@ -450,10 +555,10 @@ def _load_chunk(db: Session, plan: Plan, fam: Family, chunk: dict, pending: dict
 
 def _ensure_owner(db: Session, plan: Plan, ws: Optional[str]) -> None:
     """A shared type's owner workspace, when this instance does not have it: a stub, so the type
-    keeps its identity. Staged like the rest, and removed if the import is discarded."""
+    keeps its identity. It appears with the rest of the import, at promotion."""
     if not ws or db.get(Workspace, ws) is not None:
         return
-    db.add(Workspace(id=ws, name=ws, is_global=True, import_state="staging"))
+    db.add(Workspace(id=ws, name=ws, is_global=True))
     db.flush()
     db.add(PortabilityRowMap(origin=plan.origin, family="workspaces", source_key=plan.unmap_ws(ws), local_key=ws,
                              import_id=plan.import_id, created=True, content_sha256=None))
@@ -574,8 +679,23 @@ def rebuild(db: Session, plan: Plan) -> dict:
                                .execution_options(synchronize_session=False))
         db.flush()
     db.expire_all()
+    _refresh_row_map(db, plan)
     after = {m.__tablename__: db.scalar(select(func.count()).select_from(m)) for m in EVENT_TABLES}
     return {"events_written_by_rebuild": {k: after[k] - before[k] for k in after if after[k] != before[k]}}
+
+
+def _refresh_row_map(db: Session, plan: Plan) -> None:
+    """Record each row as this import leaves it — after the rebuild and the timestamp restore — so a
+    later increment can tell a row nobody here changed from one a person changed."""
+    for rm in db.scalars(select(PortabilityRowMap).where(PortabilityRowMap.origin == plan.origin,
+                                                         PortabilityRowMap.import_id == plan.import_id)):
+        fam = BY_NAME.get(rm.family)
+        if fam is None or fam.sequenced or fam.name in REFERENCE_ONLY:
+            continue
+        obj = _by_local_key(db, fam, rm.local_key)
+        if obj is not None:
+            rm.content_sha256 = _digest(archive_form(plan, fam, obj, rm.source_key))
+    db.flush()
 
 
 # --------------------------------------------------------------------------- reconcile
@@ -592,6 +712,8 @@ def reconcile(db: Session, plan: Plan, deferred: Optional[list] = None) -> dict:
         for c in plan.manifest["families"][fam.name]["chunks"]:
             ch = hashlib.sha256()
             for key, row in chunks.read_chunk(plan.checkpoint / c["file"], fam.name):
+                if plan.selected is not None and not _kept(plan, fam, row):
+                    continue
                 local, _ = find_local(db, plan, fam, key, row)
                 form = archive_form(plan, fam, local, key) if local is not None else {}
                 if form != row and (fam.name, key) not in explained and fam.name not in REFERENCE_ONLY:
@@ -604,7 +726,8 @@ def reconcile(db: Session, plan: Plan, deferred: Optional[list] = None) -> dict:
         fams[fam.name] = {"rows": rows, "expected_rows": expected["rows"], "sha256": h.hexdigest(),
                           "expected_sha256": expected["sha256"], "mismatches": mismatches[:20],
                           "mismatch_count": len(mismatches),
-                          "ok": not mismatches and rows == expected["rows"]}
+                          "ok": not mismatches and (rows == expected["rows"] or plan.selected is not None),
+                          "selective": plan.selected is not None}
     projections = _compare_projections(db, plan)
     from app.ledger import invariants
     local_inv = invariants.report(db, [w for w in plan.workspaces if db.get(Workspace, w) is not None])
@@ -639,17 +762,29 @@ def _proj_key(fam: Family, row: dict) -> str:
                       sort_keys=True, default=str)
 
 
+def _names_unselected(plan: Plan, fam: Family, row: dict) -> bool:
+    idx = _index(plan)
+    return any(row.get(c) in idx and idx[row[c]] not in plan.selected for c in fam.subjects)
+
+
 def _compare_projections(db: Session, plan: Plan) -> dict:
     out = {}
     sc = Scope(workspaces=plan.workspaces, watermark={})
     for fam in [f for f in FAMILIES if f.group == "projection" and f.name in plan.manifest["families"]]:
-        exported = {_proj_key(fam, _mapped_row(plan, fam, row)) for _, _, row in archive_rows(plan, fam)}
+        outside = 0
+        exported = set()
+        for _, _, row in archive_rows(plan, fam):
+            if plan.selected is not None and _names_unselected(plan, fam, row):
+                outside += 1              # derived from records this selective import did not take
+                continue
+            exported.add(_proj_key(fam, _mapped_row(plan, fam, row)))
         local = set()
         for obj in db.scalars(fam.select(db, sc)):
             row = {c: to_json(getattr(obj, _attr(fam, c))) for c in fam.columns}
             local.add(_proj_key(fam, row))
         only_exported, only_local = sorted(exported - local), sorted(local - exported)
         out[fam.name] = {"exported": len(exported), "rebuilt": len(local), "ok": not only_exported and not only_local,
+                         "outside_selection": outside,
                          "only_in_export": [json.loads(x) for x in only_exported[:5]],
                          "only_rebuilt": [json.loads(x) for x in only_local[:5]]}
     return out
@@ -657,65 +792,102 @@ def _compare_projections(db: Session, plan: Plan) -> dict:
 
 # --------------------------------------------------------------------------- finalize, discard
 
-def finalize(db: Session, plan: Plan) -> None:
-    for rm in _imported(db, plan, "workspaces"):
-        if rm.import_id == plan.import_id and rm.created:
-            ws = db.get(Workspace, rm.local_key)
-            if ws is not None:
-                ws.import_state = None
+def origin_chain(plan: Plan) -> tuple[list[dict], str]:
+    """The origin chain of an archive: every row of its append-only ledger families (for a selective
+    import, of the chosen workspaces), in family and archive order, with the hash of its archive line.
+    Returns the rows and the hash of the whole chain."""
+    out, h = [], hashlib.sha256()
+    for name in ORIGIN_CHAIN:
+        fam = BY_NAME[name]
+        if name not in plan.manifest["families"]:
+            continue
+        for _, key, row in archive_rows(plan, fam):
+            line_hash = hashlib.sha256(chunks.line(name, key, row)).hexdigest()
+            when = row.get("at") or row.get("retrieved_at") or row.get("created_at")
+            out.append({"family": name, "key": key, "hash": line_hash, "at": when})
+            h.update(f"{name}:{key}:{line_hash}\n".encode())
+    return out, h.hexdigest()
+
+
+def promote(db: Session, plan: Plan, staged: dict, actor: str, probe: Optional[Callable] = None) -> dict:
+    """Finalization: load the verified archive into the ACTIVE database, rebuild and reconcile there,
+    write the origin chain and its local ingestion event, and record the chain position — all in the
+    caller's single transaction. Raises (and the caller rolls back) unless the result equals the
+    staged reconciliation. `probe` lets a test look at the instance from outside before commit."""
+    plan.ingested_at = datetime.now(timezone.utc)
+    report = execute(db, plan, set(), lambda _s: None)
+    rebuilt = rebuild(db, plan)
+    rec = reconcile(db, plan, report["deferred"])
+    if not rec["passed"]:
+        raise ImportBlocked("the import reconciled in staging but not on promotion", "promotion_mismatch",
+                            {"families": {k: v for k, v in rec["families"].items() if not v["ok"]},
+                             "projections": {k: v for k, v in rec["projections"].items() if not v["ok"]}})
+    for name, fam in rec["families"].items():
+        if name in REFERENCE_ONLY:
+            continue                         # people are references, kept as known here; not compared
+        if staged.get("families", {}).get(name, {}).get("sha256") not in (None, fam["sha256"]):
+            raise ImportBlocked(f"{name} differs between staging and promotion", "promotion_mismatch")
+    chain, chain_sha = origin_chain(plan)
+    manifest_sha = plan.manifest_sha256
+    by_family: dict = defaultdict(int)
+    for r in chain:
+        by_family[r["family"]] += 1
+    ingestion = PortabilityEvent(subject_kind="import", subject_id=plan.import_id, kind="ingested", actor=actor,
+                                 detail={"origin_instance_id": plan.origin, "export_id": plan.manifest["export_id"],
+                                         "origin_checkpoint_hash": manifest_sha, "origin_chain_sha256": chain_sha,
+                                         "origin_rows": dict(by_family),
+                                         "watermark_vector_sha256": plan.manifest["watermark"]["vector_sha256"]},
+                                 at=plan.ingested_at)
+    db.add(ingestion)
+    db.flush()
+    maps = {(m.family, m.source_key): m.local_key for m in db.scalars(select(PortabilityRowMap).where(
+        PortabilityRowMap.origin == plan.origin, PortabilityRowMap.import_id == plan.import_id))}
+    for pos, r in enumerate(chain):
+        local = maps.get((r["family"], r["key"]))
+        if local is None:
+            continue                         # already here from an earlier import of this origin
+        db.add(PortabilityOriginRecord(
+            import_id=plan.import_id, origin_instance_id=plan.origin, origin_family=r["family"],
+            origin_sequence=r["key"], origin_recorded_at=from_json(BY_NAME["decisions"].model, "at", r["at"])
+            if isinstance(r["at"], str) else None, origin_event_hash=r["hash"], origin_checkpoint_hash=manifest_sha,
+            local_table=BY_NAME[r["family"]].table, local_key=local, local_ingested_at=plan.ingested_at,
+            local_ingestion_event_id=ingestion.seq, position=pos))
     position = db.scalar(select(func.coalesce(func.max(PortabilityChainLink.position), 0)).where(
         PortabilityChainLink.origin == plan.origin)) + 1
     db.add(PortabilityChainLink(origin=plan.origin, export_id=plan.manifest["export_id"], position=position,
-                                watermark_label=plan.manifest["watermark"]["label"], import_id=plan.import_id))
+                                watermark_label=plan.manifest["watermark"]["checkpoint_sequence"],
+                                vector_sha256=plan.manifest["watermark"]["vector_sha256"],
+                                manifest_sha256=manifest_sha, import_id=plan.import_id))
     db.flush()
+    if probe is not None:
+        probe()
+    rec["rebuild"] = rebuilt
+    rec["origin_chain"] = {"sha256": chain_sha, "rows": len(chain), "ingestion_event": ingestion.seq}
+    return rec
 
 
-def discard(db: Session, plan_origin: str, import_id: str) -> dict:
-    """Remove exactly what a staged import wrote, newest first, audit rows included (the sanctioned
-    purge), and the staged workspaces. Rows that were already here are untouched."""
-    from app.ledger.audit import allow_purge
-    allow_purge(db)
-    removed = 0
-    order = [f.name for g in reversed(GROUP_ORDER) for f in reversed(FAMILIES) if f.group == g]
-    maps = list(db.scalars(select(PortabilityRowMap).where(PortabilityRowMap.import_id == import_id)))
-    by_family: dict = defaultdict(list)
-    for rm in maps:
-        by_family[rm.family].append(rm)
-    with writing(db):
-        for name in order:
-            fam = BY_NAME[name]
-            for rm in sorted(by_family.get(name, []), key=lambda r: r.id, reverse=True):
-                if rm.created and name != "workspaces":
-                    local = _by_local_key(db, fam, rm.local_key)
-                    if local is not None:
-                        if name == "assets":
-                            local.merged_into_uid = None
-                        db.delete(local)
-                        removed += 1
-                db.delete(rm)
-            db.flush()
-        for rm in by_family.get("workspaces", []):
-            if rm.created:
-                ws = db.get(Workspace, rm.local_key)
-                if ws is not None and ws.import_state == "staging":
-                    _purge_workspace(db, ws.id)
-                    removed += 1
-    db.flush()
-    return {"removed": removed}
-
-
-def _purge_workspace(db: Session, ws: str) -> None:
-    """A staged workspace and what the rebuild derived inside it."""
-    from app.models.asset import Asset, Relation
-    db.execute(delete(Relation).where(Relation.workspace_id == ws))
-    db.execute(delete(Conflict).where(Conflict.workspace_id == ws))
-    uids = select(Asset.uid).where(Asset.workspace_id == ws)
-    from app.models.ledger import FactState
-    db.execute(delete(FactState).where(FactState.subject_uid.in_(uids)))
-    db.execute(delete(IdentityBinding).where(IdentityBinding.uid.in_(uids)))
-    for model in (ConflictEvent, StatusEvent, RecordEvent):
-        col = model.subject_uid if hasattr(model, "subject_uid") else model.uid
-        db.execute(delete(model).where(col.in_(uids)))
-    db.execute(delete(IdentityEvent).where(IdentityEvent.uid.in_(uids)))
-    db.execute(delete(Workspace).where(Workspace.id == ws))
-    db.flush()
+def verify_chain(db: Session, import_id: str) -> dict:
+    """Recompute the origin chain of a finalized import from the rows here: every imported ledger row
+    must still serialize to the archive line it came from, and the chain to its recorded hash."""
+    from app.models.portability import PortabilityImport
+    imp = db.get(PortabilityImport, import_id)
+    ingestion = db.scalar(select(PortabilityEvent).where(PortabilityEvent.subject_id == import_id,
+                                                         PortabilityEvent.kind == "ingested"))
+    if imp is None or ingestion is None:
+        return {"ok": False, "reason": "no ingestion recorded for this import"}
+    plan = Plan(import_id=import_id, origin=ingestion.detail["origin_instance_id"], mode=imp.mode,
+                checkpoint=Path("."), manifest=imp.manifest, blob_dir=Path("."), attachments_dir=Path("."),
+                decisions=imp.decisions or {})
+    bad = []
+    for rec in db.scalars(select(PortabilityOriginRecord).where(PortabilityOriginRecord.import_id == import_id)
+                          .order_by(PortabilityOriginRecord.position)):
+        fam = BY_NAME[rec.origin_family]
+        obj = _by_local_key(db, fam, rec.local_key)
+        if obj is None:
+            bad.append({"family": rec.origin_family, "key": rec.origin_sequence, "problem": "missing"})
+            continue
+        form = archive_form(plan, fam, obj, rec.origin_sequence)
+        if hashlib.sha256(chunks.line(fam.name, rec.origin_sequence, form)).hexdigest() != rec.origin_event_hash:
+            bad.append({"family": rec.origin_family, "key": rec.origin_sequence, "problem": "changed"})
+    return {"ok": not bad, "problems": bad[:50], "origin_chain_sha256": ingestion.detail["origin_chain_sha256"],
+            "ingestion_event": ingestion.seq}

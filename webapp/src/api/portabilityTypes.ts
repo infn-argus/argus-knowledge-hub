@@ -10,6 +10,22 @@ export interface PortabilityConfig {
   import_modes: string[];
   outcomes: string[];
   is_admin: boolean;
+  restricted_destinations: Record<string, string[]>;
+  encryption_recipients: string[];
+  identity_profiles: string[];
+  default_identity_profile: string;
+  blob_outcomes: string[];
+  step_up_seconds: number;
+}
+
+export interface BlobDecision {
+  id: string;
+  where: string;
+  status: "opaque" | "uninspectable" | "finding";
+  reason?: string | null;
+  findings: { where: string; kind: string; category?: string }[];
+  options: string[];
+  outcome: string | null;
 }
 
 export interface ArchiveLabels {
@@ -47,14 +63,18 @@ export interface ExportAnalysis {
   };
   restriction?: { included: string[]; excluded_classes: string[]; fields_hidden: boolean };
   estimate?: { records: number; tickets: number; claim_events: number; attachments: number; attachment_bytes: number };
+  blobs?: { inspected: number; secrets: { where: string; kind: string }[]; needs_decision: BlobDecision[];
+            excluded: { where: string; sha256: string; status: string }[]; missing: unknown[]; ready: boolean };
+  identity_profile?: string;
   ready?: boolean;
   warnings?: string[];
 }
 
 export interface Watermark {
-  label: number;
-  tables: Record<string, number>;
-  snapshot_at: string;
+  checkpoint_sequence: number;
+  vector: Record<string, number>;
+  vector_sha256: string;
+  snapshot_time: string;
 }
 
 export interface PortabilityError {
@@ -79,7 +99,8 @@ export interface ExportView {
   watermark: Watermark | null;
   manifest_sha256: string | null;
   git: { repository?: string; repository_id?: string; commit?: string; tag?: string; parent?: string | null;
-         previous_tag?: string | null; root_commit?: string };
+         previous_tag?: string | null; root_commit?: string; repository_bytes?: number; files_in_git?: number };
+  identity_profile?: string;
   error: PortabilityError | null;
   labels: ArchiveLabels;
   created_at: string | null;
@@ -90,7 +111,8 @@ export interface FamilyManifest {
   authoritative: boolean;
   rows: number;
   sha256: string;
-  chunks: { file: string; rows: number; first: string | null; last: string | null; bytes: number }[];
+  chunks: { file: string; rows: number; first: string | null; last: string | null; bytes: number;
+            storage?: "git" | "artifact"; locator?: string; encrypted?: boolean }[];
 }
 
 export interface ArchiveManifest {
@@ -104,7 +126,10 @@ export interface ArchiveManifest {
   base: { export_id: string; watermark: Watermark } | null;
   versions: Record<string, string | null>;
   families: Record<string, FamilyManifest>;
-  blobs: { count: number; bytes: number; manifest: string; stores: string[] };
+  blobs: { count: number; bytes: number; manifest: string; stores: string[]; excluded?: number;
+           inspection?: { ok: number; by_decision: number } };
+  identity?: { profile: string; identity_columns: string[]; actors_transformed: boolean; salt_key_id?: string };
+  encryption?: { algorithm: string; key_wrapping: string; recipients: { recipient: string; key_id: string }[] } | null;
   classifications: { included: string[]; excluded_classes: string[]; fields_hidden: boolean };
   closure: { dependencies: Dependency[]; automatic: { rule: string; outcome: string; detail: string }[];
              decisions: Record<string, string> };
@@ -144,13 +169,15 @@ export interface ImportView {
   approved_by: string | null;
   decisions: Record<string, unknown>;
   manifest: Pick<ArchiveManifest, "export_id" | "mode" | "workspaces" | "watermark" | "argus" | "labels" |
-    "classifications" | "base" | "blobs"> | null;
+    "classifications" | "base" | "blobs" | "identity"> | null;
+  staging?: { database?: string; created_at?: string };
   verification: {
     git?: { repository_id: string; root_commit: string; commit: string; tag: string | null; tag_object: string | null;
             signed_by: string; export_id: string; previous_tag: string | null; lfs_pointers: unknown[] };
     upload?: { bytes: number; sha256: string };
     checkpoint?: { files: number; chunks: number; rows: number; blobs: number; blob_bytes: number;
-                   signed_by: string | null; artifact_complete: boolean; manifest_sha256: string };
+                   signed_by: string | null; artifact_complete: boolean; manifest_sha256: string;
+                   external_chunks?: number; content_verified?: boolean; encrypted?: boolean };
   };
   dry_run: DryRunReport | Record<string, never>;
   checkpoints: { done: number };
@@ -181,10 +208,22 @@ export interface ReconciliationReport {
   invariants?: { ok: boolean | null; exported_ok: boolean | null; acceptable: boolean };
   deferred_references?: { family: string; key: string; missing: [string, string][]; row: string }[];
   rebuild?: { events_written_by_rebuild: Record<string, number> };
+  staged?: boolean;
+  origin_chain?: { sha256: string; rows?: number; ingestion_event?: number };
+  promotion?: { origin_chain: { sha256: string; rows: number; ingestion_event: number }; passed: boolean };
   signature?: { algorithm: string; key_id: string; principal: string };
 }
 
+export interface OriginChainCheck {
+  ok: boolean;
+  problems?: { family: string; key: string; problem: string }[];
+  origin_chain_sha256?: string;
+  ingestion_event?: number;
+  reason?: string;
+}
+
 export interface ProvenanceView {
+  origin_chain?: OriginChainCheck;
   git: ImportView["verification"]["git"] | null;
   origin: ArchiveManifest["argus"] | null;
   watermark: Watermark | null;

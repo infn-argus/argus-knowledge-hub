@@ -2394,6 +2394,17 @@
         "title": "DirectoryStatusOut",
         "type": "object"
       },
+      "DiscardIn": {
+        "properties": {
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "DiscardIn",
+        "type": "object"
+      },
       "DismissIn": {
         "properties": {
           "kind": {
@@ -3769,6 +3780,17 @@
           "decisions": {
             "title": "Decisions",
             "type": "object"
+          },
+          "identity_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Profile"
           },
           "mode": {
             "default": "workspace",
@@ -36665,6 +36687,84 @@
         ]
       }
     },
+    "/v1/portability/exports/{export_id}/archive": {
+      "get": {
+        "description": "The checkpoint's files as a tar, for the signed-in administrator: no capability in a URL.",
+        "operationId": "archive_v1_portability_exports__export_id__archive_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_id",
+            "required": true,
+            "schema": {
+              "title": "Export Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Archive",
+        "tags": [
+          "portability"
+        ]
+      }
+    },
     "/v1/portability/exports/{export_id}/decisions": {
       "post": {
         "operationId": "decide_export_v1_portability_exports__export_id__decisions_post",
@@ -36754,7 +36854,7 @@
     },
     "/v1/portability/exports/{export_id}/download": {
       "get": {
-        "description": "The checkpoint's files as a tar, for a short-lived token (no bearer header: a browser download).",
+        "description": "The checkpoint as a tar, for a single-use token — preferably in the `X-Download-Token` header;\nin the query it is redacted from access logs. Used once, then refused.",
         "operationId": "download_v1_portability_exports__export_id__download_get",
         "parameters": [
           {
@@ -36769,10 +36869,33 @@
           {
             "in": "query",
             "name": "token",
-            "required": true,
+            "required": false,
             "schema": {
-              "title": "Token",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-download-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Download-Token"
             }
           },
           {
@@ -36836,6 +36959,7 @@
     },
     "/v1/portability/exports/{export_id}/download-token": {
       "post": {
+        "description": "A single-use, five-minute token for an out-of-band download (an operator's tool). Prefer\n`GET /archive` with your own credentials.",
         "operationId": "download_token_v1_portability_exports__export_id__download_token_post",
         "parameters": [
           {
@@ -36906,6 +37030,83 @@
           }
         ],
         "summary": "Download Token",
+        "tags": [
+          "portability"
+        ]
+      }
+    },
+    "/v1/portability/exports/{export_id}/download-tokens/revoke": {
+      "post": {
+        "operationId": "revoke_tokens_v1_portability_exports__export_id__download_tokens_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_id",
+            "required": true,
+            "schema": {
+              "title": "Export Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Tokens",
         "tags": [
           "portability"
         ]
@@ -37529,7 +37730,8 @@
     },
     "/v1/portability/imports/{import_id}/discard": {
       "post": {
-        "operationId": "import_discard_v1_portability_imports__import_id__discard_post",
+        "description": "Abandon an import: its staging database and quarantine go; its audit trail stays.",
+        "operationId": "discard_v1_portability_imports__import_id__discard_post",
         "parameters": [
           {
             "in": "path",
@@ -37573,6 +37775,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DiscardIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -37598,7 +37817,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Import Discard",
+        "summary": "Discard",
         "tags": [
           "portability"
         ]
@@ -37693,6 +37912,83 @@
           }
         ],
         "summary": "Dry Run",
+        "tags": [
+          "portability"
+        ]
+      }
+    },
+    "/v1/portability/imports/{import_id}/evidence": {
+      "get": {
+        "operationId": "evidence_families_v1_portability_imports__import_id__evidence_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "title": "Import Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Evidence Families",
         "tags": [
           "portability"
         ]
@@ -38031,6 +38327,84 @@
           }
         ],
         "summary": "Import Finalize",
+        "tags": [
+          "portability"
+        ]
+      }
+    },
+    "/v1/portability/imports/{import_id}/origin-chain": {
+      "get": {
+        "description": "Recompute the origin chain of a finalized import from the rows here.",
+        "operationId": "origin_chain_v1_portability_imports__import_id__origin_chain_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "title": "Import Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Origin Chain",
         "tags": [
           "portability"
         ]

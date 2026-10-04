@@ -214,13 +214,16 @@ currently valid* revision rather than to an arbitrary PDF.
   [docs/beam-model.md](docs/beam-model.md); served
   by `/v1/beam-systems`, `/v1/beam-paths`, `/v1/beam-elements`, `/v1/diagnostics`, `/v1/observables`,
   `/v1/model-datasets`, `/v1/model-bindings` and `/v1/beam-model/import`.
-- **Portable archives (tested slice, not production-approved).** A workspace or the whole
-  instance exported at one ledger watermark as signed, immutable NDJSON chunks with a manifest and
-  JSON Schemas, published to a Git portability repository as a signed tag, with attachments as
-  content-addressed artifacts; fetched into quarantine, verified, dry-run, imported idempotently,
-  projections rebuilt and reconciled. See [docs/export-import-design.md](docs/export-import-design.md);
-  served by `/v1/portability/exports` and `/v1/portability/imports`, `python -m app.portability`, and
-  Administration → Portability in the web app.
+- **Portable archives (integration-tested slice; not production-approved).** A workspace or the whole
+  instance exported at one ledger watermark (a hashed vector) as signed, immutable chunks with a
+  manifest and JSON Schemas. People travel under an identity profile, and every attachment and source
+  content is inspected for secrets before anything is stored. Restricted classes go only encrypted, to
+  approved destinations. Bulk chunks and attachments are content-addressed artifacts; a Git portability
+  repository holds the signed tag, manifest and review files. Imports are verified in quarantine,
+  loaded and reconciled in an isolated staging database, and promoted in one transaction with a
+  verifiable origin chain; audit days already sealed never change. See
+  [docs/export-import-design.md](docs/export-import-design.md); served by `/v1/portability/…`,
+  `python -m app.portability` and Administration → Portability in the web app.
 - **Type catalogue.** Every object type a workspace can use, on one page: where it sits in the
   tree, what it is, its attributes (own and inherited), the names imports know it by, what its
   references mean in the graph, and how many records it has. The seeded types, ticket types and

@@ -3,6 +3,7 @@ import type {
   ArchiveManifest,
   ExportView,
   ImportView,
+  OriginChainCheck,
   PortabilityConfig,
   ProvenanceView,
   ReconciliationReport,
@@ -1475,6 +1476,7 @@ export const portabilityApi = {
   createExport: (body: {
     mode: string; workspaces: string[]; classifications: string[]; repository: string | null;
     artifact_store: string | null; decisions?: Record<string, string>; base_export_id?: string | null;
+    identity_profile?: string | null;
   }) => request<ExportView>(`${P}/exports`, { method: "POST", body: json(body) }),
   decideExport: (id: string, decisions: Record<string, string>) =>
     request<ExportView>(`${P}/exports/${encodeURIComponent(id)}/decisions`, { method: "POST", body: json({ decisions }) }),
@@ -1484,20 +1486,27 @@ export const portabilityApi = {
     request<ExportView>(`${P}/exports/${encodeURIComponent(id)}/revoke`, { method: "POST", body: json({ reason }) }),
   manifest: (id: string) =>
     request<{ manifest: ArchiveManifest; sha256: string }>(`${P}/exports/${encodeURIComponent(id)}/manifest`),
-  downloadUrl: async (id: string): Promise<string> => {
+  /** The checkpoint as a tar, fetched with the person's own credentials: no capability in a URL. */
+  downloadArchive: async (id: string): Promise<Blob> => {
     const session = await loadSession();
     if (!session) throw new Error("Not signed in");
-    const t = await request<{ token: string; expires: number }>(
-      `${P}/exports/${encodeURIComponent(id)}/download-token`, { method: "POST" });
-    return `${session.baseUrl}${P}/exports/${encodeURIComponent(id)}/download?token=${encodeURIComponent(t.token)}`;
+    const resp = await fetch(`${session.baseUrl}${P}/exports/${encodeURIComponent(id)}/archive`, {
+      headers: authHeaders(session), cache: "no-store", referrerPolicy: "no-referrer" });
+    if (!resp.ok) throw new ApiError(resp.status, await resp.json().catch(() => undefined));
+    return resp.blob();
   },
   imports: () => request<ImportView[]>(`${P}/imports`),
   getImport: (id: string) => request<ImportView>(`${P}/imports/${encodeURIComponent(id)}`),
   createImport: (body: { mode: string; repository: string | null; ref: string | null; expected_commit?: string | null;
                          decisions?: Record<string, unknown> }) =>
     request<ImportView>(`${P}/imports`, { method: "POST", body: json(body) }),
-  importStep: (id: string, step: "fetch-git" | "verify" | "approve" | "execute" | "resume" | "finalize" | "discard") =>
+  importStep: (id: string, step: "fetch-git" | "verify" | "approve" | "execute" | "resume" | "finalize") =>
     request<ImportView>(`${P}/imports/${encodeURIComponent(id)}/${step}`, { method: "POST" }),
+  discardImport: (id: string, reason: string) =>
+    request<ImportView>(`${P}/imports/${encodeURIComponent(id)}/discard`, { method: "POST", body: json({ reason }) }),
+  originChain: (id: string) => request<OriginChainCheck>(`${P}/imports/${encodeURIComponent(id)}/origin-chain`),
+  evidenceFamilies: (id: string) =>
+    request<{ family: string; visible_rows: number }[]>(`${P}/imports/${encodeURIComponent(id)}/evidence`),
   dryRun: (id: string, decisions?: Record<string, unknown>) =>
     request<ImportView>(`${P}/imports/${encodeURIComponent(id)}/dry-run`, {
       method: "POST", body: json({ decisions: decisions ?? {} }) }),

@@ -50,6 +50,7 @@ logging.basicConfig(level=logging.INFO)
 from app.auth import bind_grants  # noqa: E402
 import app.ledger.audit  # noqa: E402,F401  (append-only guards on create_all)
 from app import idempotency, problems  # noqa: E402
+from app import log_redaction  # noqa: E402,F401  (redacts capability tokens from access logs)
 from app.services import api_policy, legacy_hosts  # noqa: E402
 
 # Every request carries the viewer's restricted-class grants (I-ACL-1).

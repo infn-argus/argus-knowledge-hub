@@ -12,7 +12,7 @@ need an approver other than the requester. Every step is a state transition, aud
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -84,7 +84,8 @@ def portability_config(identity=Depends(get_identity)):
     """What a person can choose from: registered repositories and artifact stores (names only, never
     URLs or paths), whether signing and verification are set up, restricted classes, modes, outcomes."""
     _person(identity)
-    from app.portability import closure, exporter
+    from app.portability import closure, exporter, identity_policy
+    from app.portability.blob_scan import DECISIONS as BLOB_OUTCOMES
     from app.services.visibility import RESTRICTED_CLASSES
     cfg = service.config()
     return {"repositories": sorted(cfg.repositories), "artifact_stores": sorted(cfg.stores),
@@ -93,6 +94,11 @@ def portability_config(identity=Depends(get_identity)):
                         "principal": cfg.signer.principal if cfg.signer is not None else None},
             "trusted_keys": cfg.trusted is not None and cfg.trusted.exists(),
             "restricted_classes": list(RESTRICTED_CLASSES),
+            "restricted_destinations": {k: sorted(v) for k, v in cfg.restricted_destinations.items()
+                                        if k in cfg.repositories},
+            "encryption_recipients": sorted(k for k, v in cfg.recipients.items() if v.exists()),
+            "identity_profiles": list(identity_policy.PROFILES), "default_identity_profile": identity_policy.DEFAULT,
+            "blob_outcomes": list(BLOB_OUTCOMES), "step_up_seconds": cfg.step_up_seconds,
             "export_modes": [m for m in exporter.MODES if m != "backup-reference"],
             "import_modes": list(service.IMPORT_MODES), "outcomes": sorted(closure.OUTCOMES),
             "is_admin": bool(identity.user.is_admin)}
@@ -108,12 +114,21 @@ class ExportIn(BaseModel):
     artifact_store: Optional[str] = None
     decisions: dict = Field(default_factory=dict)
     base_export_id: Optional[str] = None
+    identity_profile: Optional[str] = None
+
+
+def _fresh(identity) -> bool:
+    return isinstance(identity, OidcIdentity) and service.fresh(identity.claims, service.config())
+
+
+NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff"}
 
 
 @exports_router.post("", status_code=201)
 def create_export(body: ExportIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
     person = _person(identity)
-    if body.mode in ("full",) or body.classifications:
+    if body.mode in ("full",) or body.classifications or body.identity_profile == "full_identity":
         _admin(identity)
     for ws in body.workspaces:
         if not resolve_permission(db, person.user, ws, "approve", "objects"):
@@ -123,7 +138,8 @@ def create_export(body: ExportIn, identity=Depends(get_identity), db: Session = 
     exp = _guard(lambda: service.create_export(
         db, actor_of(person), mode=body.mode, workspaces=body.workspaces, classifications=body.classifications,
         destination={"repository": body.repository, "artifact_store": body.artifact_store},
-        decisions=body.decisions, base_export_id=body.base_export_id, cfg=cfg))
+        decisions=body.decisions, base_export_id=body.base_export_id, identity_profile=body.identity_profile,
+        cfg=cfg))
     _guard(lambda: service.analyse_export(db, exp, actor_of(person)))
     return _commit(db, service.export_view(exp))
 
@@ -156,7 +172,8 @@ def decide_export(export_id: str, body: DecisionsIn, identity=Depends(get_identi
 @exports_router.post("/{export_id}/approve")
 def approve_export(export_id: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
     exp = _export(db, export_id, identity)
-    _guard(lambda: service.approve_export(db, exp, actor_of(identity), admin=_person(identity).user.is_admin))
+    _guard(lambda: service.approve_export(db, exp, actor_of(identity), admin=_person(identity).user.is_admin,
+                                          fresh_auth=_fresh(identity), cfg=service.config()))
     return _commit(db, service.export_view(exp))
 
 
@@ -164,7 +181,8 @@ def approve_export(export_id: str, identity=Depends(get_identity), db: Session =
 def generate_export(export_id: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
     _admin(identity)
     exp = _export(db, export_id, identity)
-    exp = _guard(lambda: service.generate_export(db_engine, db, exp, actor_of(identity), service.config()))
+    exp = _guard(lambda: service.generate_export(db_engine, db, exp, actor_of(identity), service.config(),
+                                                 fresh_auth=_fresh(identity)))
     return _commit(db, service.export_view(exp))
 
 
@@ -186,23 +204,46 @@ def export_manifest(export_id: str, identity=Depends(get_identity), db: Session 
 
 @exports_router.post("/{export_id}/download-token")
 def download_token(export_id: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """A single-use, five-minute token for an out-of-band download (an operator's tool). Prefer
+    `GET /archive` with your own credentials."""
     _admin(identity)
     exp = _export(db, export_id, identity)
     return _commit(db, _guard(lambda: service.download_token(db, exp, actor_of(identity))))
 
 
-@exports_router.get("/{export_id}/download")
-def download(export_id: str, token: str = Query(...), db: Session = Depends(get_db)):
-    """The checkpoint's files as a tar, for a short-lived token (no bearer header: a browser download)."""
+@exports_router.get("/{export_id}/archive")
+def archive(export_id: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """The checkpoint's files as a tar, for the signed-in administrator: no capability in a URL."""
     from app.portability.lifecycle import audit
+    _admin(identity)
+    exp = _export(db, export_id, identity)
+    if not exp.out_dir or exp.state not in ("ready_to_publish", "publishing", "published"):
+        raise HTTPException(status_code=409, detail={"error": "not generated", "code": "not_ready"})
+    audit(db, exp, "download", actor_of(identity), {"via": "session"})
+    db.commit()
+    return Response(service.archive_tar(exp), media_type="application/x-tar",
+                    headers={**NO_STORE, "Content-Disposition": f'attachment; filename="{exp.id}.tar"'})
+
+
+@exports_router.get("/{export_id}/download")
+def download(export_id: str, token: Optional[str] = Query(None), x_download_token: Optional[str] = Header(None),
+             db: Session = Depends(get_db)):
+    """The checkpoint as a tar, for a single-use token — preferably in the `X-Download-Token` header;
+    in the query it is redacted from access logs. Used once, then refused."""
     exp = db.get(PortabilityExport, export_id)
     if exp is None or not exp.out_dir:
         raise HTTPException(status_code=404, detail="Export not found")
-    actor = _guard(lambda: service.check_download_token(export_id, token))
-    audit(db, exp, "download", actor)
-    db.commit()
+    _guard(lambda: service.consume_download_token(db, exp, x_download_token or token or ""))
     return Response(service.archive_tar(exp), media_type="application/x-tar",
-                    headers={"Content-Disposition": f'attachment; filename="{exp.id}.tar"'})
+                    headers={**NO_STORE, "Content-Disposition": f'attachment; filename="{exp.id}.tar"'})
+
+
+@exports_router.post("/{export_id}/download-tokens/revoke")
+def revoke_tokens(export_id: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    _admin(identity)
+    exp = _export(db, export_id, identity)
+    n = service.revoke_download_tokens(db, exp, actor_of(identity))
+    return _commit(db, {"revoked": n})
 
 
 class RevokeIn(BaseModel):
@@ -260,16 +301,36 @@ def _step(name: str):
               "approve": lambda: service.approve_import(db, imp, actor),
               "execute": lambda: service.execute(db, imp, actor, cfg),
               "resume": lambda: service.execute(db, imp, actor, cfg),
-              "finalize": lambda: service.finalize(db, imp, actor, cfg),
-              "discard": lambda: service.discard(db, imp, actor, cfg)}[name]
+              "finalize": lambda: service.finalize(db, imp, actor, cfg)}[name]
         out = _guard(fn)
         return _commit(db, service.import_view(out))
     endpoint.__name__ = f"import_{name.replace('-', '_')}"
     return endpoint
 
 
-for _name in ("fetch-git", "verify", "approve", "execute", "resume", "finalize", "discard"):
+for _name in ("fetch-git", "verify", "approve", "execute", "resume", "finalize"):
     imports_router.add_api_route(f"/{{import_id}}/{_name}", _step(_name), methods=["POST"])
+
+
+class DiscardIn(BaseModel):
+    reason: str = ""
+
+
+@imports_router.post("/{import_id}/discard")
+def discard(import_id: str, body: Optional[DiscardIn] = None, identity=Depends(get_identity),
+            db: Session = Depends(get_db)):
+    """Abandon an import: its staging database and quarantine go; its audit trail stays."""
+    imp = _import(db, import_id, identity)
+    out = _guard(lambda: service.discard(db, imp, actor_of(identity), service.config(), body.reason if body else ""))
+    return _commit(db, service.import_view(out))
+
+
+@imports_router.get("/{import_id}/origin-chain")
+def origin_chain(import_id: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Recompute the origin chain of a finalized import from the rows here."""
+    from app.portability import importer
+    _import(db, import_id, identity)
+    return importer.verify_chain(db, import_id)
 
 
 class DryRunIn(BaseModel):
@@ -308,11 +369,20 @@ def provenance(import_id: str, identity=Depends(get_identity), db: Session = Dep
     return service.provenance(db, _import(db, import_id, identity))
 
 
+@imports_router.get("/{import_id}/evidence")
+def evidence_families(import_id: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    imp = _import(db, import_id, identity)
+    out = _guard(lambda: service.evidence_families(db, imp, service.config(), identity.user, actor_of(identity)))
+    return _commit(db, out)
+
+
 @imports_router.get("/{import_id}/evidence/{family}")
 def evidence(import_id: str, family: str, offset: int = 0, limit: int = Query(50, le=500),
              identity=Depends(get_identity), db: Session = Depends(get_db)):
     imp = _import(db, import_id, identity)
-    return _guard(lambda: service.evidence_rows(imp, service.config(), family, offset, limit))
+    out = _guard(lambda: service.evidence_rows(db, imp, service.config(), family, offset, limit,
+                                               viewer=identity.user, actor=actor_of(identity)))
+    return _commit(db, out)
 
 
 ROUTERS = (config_router, exports_router, imports_router)

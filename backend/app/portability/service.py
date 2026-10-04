@@ -2,40 +2,52 @@
 
 Configuration (environment; docs/operations.md):
 
-  ARGUS_PORTABILITY_ROOT              working area: checkpoints, quarantine, evidence, clones
-  ARGUS_PORTABILITY_REPOSITORIES      name=url,…  the only repositories ARGUS publishes to or fetches
-                                      from (an API caller names one; it never passes a URL)
-  ARGUS_PORTABILITY_ARTIFACT_STORES   name=/path,…  content-addressed artifact stores
-  ARGUS_PORTABILITY_SIGNING_KEY       the Ed25519 signing key (a mounted secret, never in a repository)
-  ARGUS_PORTABILITY_TRUSTED_KEYS      allowed-signers file of the keys an import trusts
-  ATTACHMENTS_DIR                     where imported files land
+  ARGUS_PORTABILITY_ROOT                  working area: checkpoints, quarantine, evidence, clones, staging files
+  ARGUS_PORTABILITY_REPOSITORIES          name=url,…  the only repositories ARGUS publishes to or fetches
+                                          from (an API caller names one; it never passes a URL)
+  ARGUS_PORTABILITY_ARTIFACT_STORES       name=/path,…  content-addressed artifact stores
+  ARGUS_PORTABILITY_SIGNING_KEY           the Ed25519 signing key (a mounted secret, never in a repository)
+  ARGUS_PORTABILITY_TRUSTED_KEYS          allowed-signers file of the keys an import trusts
+  ARGUS_PORTABILITY_RESTRICTED_DESTINATIONS  repository=class|class,…  repositories approved for restricted
+                                          classes; an export with restricted classes goes nowhere else
+  ARGUS_PORTABILITY_RECIPIENTS            repository=/path,…  recipient public keys (X25519) per destination
+  ARGUS_PORTABILITY_DECRYPTION_KEYS       a directory of recipient private keys, mounted for an import session only
+  ARGUS_PORTABILITY_EVIDENCE_READERS      user ids or e-mails allowed to read restricted rows of evidence archives
+  ARGUS_PORTABILITY_STEP_UP_SECONDS       how recent a sign-in must be for high-risk steps (default 300)
+  ARGUS_PORTABILITY_STAGING_URL           the server for staging databases (default: the active one)
+  ATTACHMENTS_DIR                         where imported files land
 """
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import io
 import json
 import os
+import secrets
 import shutil
 import tarfile
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.models.portability import PortabilityEvent, PortabilityExport, PortabilityImport, PortabilityTagSeen
-from app.portability import artifacts, chunks, closure, exporter, gitrepo, importer, signing, verify as verifier
+from app.models.portability import (PortabilityDownloadToken, PortabilityEvent, PortabilityExport, PortabilityImport,
+                                    PortabilityTagSeen)
+from app.portability import (artifacts, chunks, closure, envelope, exporter, gitrepo, identity_policy, importer,
+                             signing, staging)
+from app.portability import verify as verifier
+from app.portability.blob_scan import DECISIONS as BLOB_OUTCOMES
 from app.portability.families import Scope
 from app.portability.lifecycle import TransitionError, audit, expect, labels, move
 
 HIGH_RISK_MODES = ("full", "evidence-only")
+DOWNLOAD_TTL = timedelta(minutes=5)
 
 
 @dataclass
@@ -48,6 +60,11 @@ class Config:
     repositories: dict = field(default_factory=dict)
     limits: chunks.Limits = chunks.LIMITS
     publish_reconciliation: bool = False
+    restricted_destinations: dict = field(default_factory=dict)   # repository -> set of classes
+    recipients: dict = field(default_factory=dict)                # repository -> recipients file
+    decryption_keys: Optional[Path] = None
+    evidence_readers: set = field(default_factory=set)
+    step_up_seconds: int = 300
 
     def export_dir(self, export_id: str) -> Path:
         return self.root / "exports" / export_id
@@ -58,21 +75,39 @@ class Config:
     def evidence(self, import_id: str) -> Path:
         return self.root / "evidence" / import_id
 
+    def staged_files(self, import_id: str) -> Path:
+        return self.root / "staging" / import_id
+
     def work(self, repository: str) -> Path:
         return self.root / "work" / hashlib.sha256(repository.encode()).hexdigest()[:16]
 
+    def private_keys(self) -> list:
+        return envelope.load_private_keys(self.decryption_keys)
+
+
+def _pairs(name: str) -> dict:
+    out = {}
+    for item in filter(None, (os.environ.get(name) or "").split(",")):
+        k, _, v = item.partition("=")
+        out[k.strip()] = v.strip()
+    return out
+
 
 def config() -> Config:
-    repos = {}
-    for item in filter(None, (os.environ.get("ARGUS_PORTABILITY_REPOSITORIES") or "").split(",")):
-        name, _, url = item.partition("=")
-        repos[name.strip()] = url.strip()
     trusted = os.environ.get("ARGUS_PORTABILITY_TRUSTED_KEYS")
+    keys = os.environ.get("ARGUS_PORTABILITY_DECRYPTION_KEYS")
     return Config(root=Path(os.environ.get("ARGUS_PORTABILITY_ROOT", "/data/portability")),
                   attachments_dir=Path(os.environ.get("ATTACHMENTS_DIR", "/data/attachments")),
                   stores=artifacts.configured_stores(), signer=signing.configured_signer(),
-                  trusted=Path(trusted) if trusted else None, repositories=repos,
-                  publish_reconciliation=os.environ.get("ARGUS_PORTABILITY_PUBLISH_RECONCILIATION") == "1")
+                  trusted=Path(trusted) if trusted else None, repositories=_pairs("ARGUS_PORTABILITY_REPOSITORIES"),
+                  publish_reconciliation=os.environ.get("ARGUS_PORTABILITY_PUBLISH_RECONCILIATION") == "1",
+                  restricted_destinations={k: set(filter(None, v.split("|"))) for k, v in
+                                           _pairs("ARGUS_PORTABILITY_RESTRICTED_DESTINATIONS").items()},
+                  recipients={k: Path(v) for k, v in _pairs("ARGUS_PORTABILITY_RECIPIENTS").items()},
+                  decryption_keys=Path(keys) if keys else None,
+                  evidence_readers=set(filter(None, (os.environ.get("ARGUS_PORTABILITY_EVIDENCE_READERS") or "")
+                                              .replace(" ", "").split(","))),
+                  step_up_seconds=int(os.environ.get("ARGUS_PORTABILITY_STEP_UP_SECONDS", "300")))
 
 
 class ServiceError(ValueError):
@@ -93,34 +128,64 @@ def _fail(db: Session, subject, actor: str, exc: Exception, to: str = "failed") 
     db.commit()
 
 
+def fresh(claims: Optional[dict], cfg: Config) -> bool:
+    """Step-up: the person signed in (or re-authenticated) within the configured window."""
+    if not claims or not claims.get("auth_time"):
+        return False
+    return time.time() - float(claims["auth_time"]) <= cfg.step_up_seconds
+
+
 # =========================================================================== exports
+
+def _check_destination(mode: str, classifications: list[str], destination: dict, cfg: Config) -> None:
+    """Restricted classes go only to a destination approved for each of them, and only encrypted."""
+    if not classifications:
+        return
+    repo = destination.get("repository")
+    approved = cfg.restricted_destinations.get(repo or "", set())
+    missing = sorted(set(classifications) - approved)
+    if not repo or missing:
+        raise ServiceError(f"restricted classes {', '.join(missing or classifications)} may go only to a destination "
+                           "approved for them (ARGUS_PORTABILITY_RESTRICTED_DESTINATIONS)",
+                           "restricted_destination_required", 422)
+    if repo not in cfg.recipients or not cfg.recipients[repo].exists():
+        raise ServiceError(f"{repo} has no encryption recipients: an unencrypted restricted export is not available",
+                           "encryption_unavailable", 422)
+
 
 def create_export(db: Session, actor: str, *, mode: str, workspaces: list[str], classifications: list[str],
                   destination: dict, decisions: Optional[dict] = None, base_export_id: Optional[str] = None,
-                  cfg: Config) -> PortabilityExport:
+                  identity_profile: Optional[str] = None, cfg: Config) -> PortabilityExport:
     if mode not in exporter.MODES:
         raise ServiceError(f"unknown mode {mode!r}", "invalid", 422)
     if destination.get("repository") and destination["repository"] not in cfg.repositories:
         raise ServiceError(f"repository {destination['repository']!r} is not registered", "invalid", 422)
     if destination.get("artifact_store") and destination["artifact_store"] not in cfg.stores:
         raise ServiceError(f"artifact store {destination['artifact_store']!r} is not configured", "invalid", 422)
+    profile = identity_profile or identity_policy.DEFAULT
+    if profile not in identity_policy.PROFILES:
+        raise ServiceError(f"unknown identity profile {profile!r}", "invalid", 422)
     if mode == "incremental":
         base = db.get(PortabilityExport, base_export_id or "")
         if base is None or base.state != "published":
             raise ServiceError("an incremental export needs a published base export", "invalid", 422)
         workspaces = list(base.workspaces)
         classifications = list(base.classifications)
+        profile = (base.manifest or {}).get("identity", {}).get("profile", profile)
+        destination = {**base.destination, **{k: v for k, v in destination.items() if v}}
     if mode not in ("full", "incremental") and not workspaces:
         raise ServiceError("choose at least one workspace", "invalid", 422)
-    risk = "high" if mode in HIGH_RISK_MODES or classifications else "normal"
+    _check_destination(mode, classifications, destination, cfg)
+    risk = "high" if mode in HIGH_RISK_MODES or classifications or profile in identity_policy.HIGH_RISK else "normal"
     exp = PortabilityExport(id=f"exp-{time.strftime('%Y%m%d')}-{uuid.uuid4().hex[:8]}", mode=mode,
                             workspaces=sorted(workspaces), classifications=sorted(classifications),
-                            decisions=decisions or {}, destination=destination, state="requested", risk=risk,
-                            requested_by=actor, base_export_id=base_export_id)
+                            decisions={**(decisions or {}), "identity_profile": profile}, destination=destination,
+                            state="requested", risk=risk, requested_by=actor, base_export_id=base_export_id)
     db.add(exp)
     db.flush()
     audit(db, exp, "request", actor, {"mode": mode, "workspaces": exp.workspaces, "risk": risk,
-                                      "classifications": exp.classifications}, None, "requested")
+                                      "classifications": exp.classifications, "identity_profile": profile},
+          None, "requested")
     return exp
 
 
@@ -133,11 +198,13 @@ def analyse_export(db: Session, exp: PortabilityExport, actor: str) -> Portabili
     sc = Scope(workspaces=list(ws), watermark={})
     restriction = exporter.restrict(db, sc, exp.classifications)
     analysis = closure.resolve(db, sc, exp.decisions or {})
+    blobs = exporter.prescan(db, sc, exp.classifications, exp.decisions or {}, bool(exp.classifications))
     estimate = _estimate(db, sc)
-    exp.analysis = {"closure": analysis, "restriction": restriction, "estimate": estimate,
-                    "ready": not analysis["unresolved"] and not analysis["blocked"],
-                    "warnings": _warnings(exp, restriction, analysis)}
-    move(db, exp, "awaiting_approval", actor, "analysed", {"ready": exp.analysis["ready"]})
+    ready = not analysis["unresolved"] and not analysis["blocked"] and blobs["ready"]
+    exp.analysis = {"closure": analysis, "restriction": restriction, "estimate": estimate, "blobs": blobs,
+                    "identity_profile": (exp.decisions or {}).get("identity_profile"), "ready": ready,
+                    "warnings": _warnings(exp, restriction, analysis, blobs)}
+    move(db, exp, "awaiting_approval", actor, "analysed", {"ready": ready})
     return exp
 
 
@@ -158,7 +225,7 @@ def _estimate(db: Session, sc: Scope) -> dict:
                 Attachment.workspace_id.in_(sc.workspaces))) or 0)}
 
 
-def _warnings(exp: PortabilityExport, restriction: dict, analysis: dict) -> list[str]:
+def _warnings(exp: PortabilityExport, restriction: dict, analysis: dict, blobs: dict) -> list[str]:
     out = []
     if restriction["excluded_classes"]:
         out.append(f"restricted classes left out: {', '.join(restriction['excluded_classes'])} — the archive is "
@@ -166,10 +233,17 @@ def _warnings(exp: PortabilityExport, restriction: dict, analysis: dict) -> list
     if restriction["fields_hidden"]:
         out.append("restricted fields are hidden on some records — the archive is not complete")
     if exp.classifications:
-        out.append(f"restricted classes included: {', '.join(exp.classifications)} — every reader of the "
-                   "destination repository must hold them")
+        out.append(f"restricted classes included: {', '.join(exp.classifications)} — encrypted for the destination's "
+                   "recipients; every reader of the destination repository must hold them")
+    if (exp.decisions or {}).get("identity_profile") == "full_identity":
+        out.append("full identity: e-mail addresses, names and directory DNs leave ARGUS")
     if analysis["unresolved"]:
         out.append(f"{len(analysis['unresolved'])} dependencies need an outcome")
+    if blobs["secrets"]:
+        out.append(f"{len(blobs['secrets'])} secret(s) found inside attachments or source contents: the export is "
+                   "refused until the content is corrected")
+    if blobs["needs_decision"]:
+        out.append(f"{len(blobs['needs_decision'])} blob(s) could not be inspected or carry restricted markers")
     if analysis.get("workspaces") and sorted(analysis["workspaces"]) != sorted(exp.workspaces) and exp.mode != "full":
         out.append(f"the closure adds workspaces: {', '.join(sorted(set(analysis['workspaces']) - set(exp.workspaces)))}")
     return out
@@ -177,15 +251,27 @@ def _warnings(exp: PortabilityExport, restriction: dict, analysis: dict) -> list
 
 def set_export_decisions(db: Session, exp: PortabilityExport, decisions: dict, actor: str) -> PortabilityExport:
     expect(exp, "awaiting_approval", "failed")
-    bad = {k: v for k, v in decisions.items() if v not in closure.OUTCOMES}
+    bad = {}
+    for k, v in decisions.items():
+        if k == "identity_profile":
+            if v not in identity_policy.PROFILES:
+                bad[k] = v
+        elif k.startswith("blob:") or k in ("opaque_blobs", "classified_blobs"):
+            if v not in BLOB_OUTCOMES or (v == "classify_encrypt" and not exp.classifications):
+                bad[k] = v
+        elif v not in closure.OUTCOMES:
+            bad[k] = v
     if bad:
-        raise ServiceError(f"unknown outcomes {bad}", "invalid", 422)
+        raise ServiceError(f"unknown or unavailable outcomes {bad}", "invalid", 422)
+    if decisions.get("identity_profile") in identity_policy.HIGH_RISK:
+        exp.risk = "high"
     exp.decisions = {**(exp.decisions or {}), **decisions}
     audit(db, exp, "decide", actor, {"decisions": decisions})
     return analyse_export(db, exp, actor)
 
 
-def approve_export(db: Session, exp: PortabilityExport, actor: str, *, admin: bool) -> PortabilityExport:
+def approve_export(db: Session, exp: PortabilityExport, actor: str, *, admin: bool,
+                   fresh_auth: bool = False, cfg: Optional[Config] = None) -> PortabilityExport:
     if exp.state == "approved":
         return exp
     expect(exp, "awaiting_approval")
@@ -193,20 +279,33 @@ def approve_export(db: Session, exp: PortabilityExport, actor: str, *, admin: bo
         raise ServiceError("approving an export needs an instance administrator", "forbidden", 403)
     if exp.risk == "high" and actor == exp.requested_by:
         raise ServiceError("a high-risk export needs an approver other than its requester", "separation", 403)
+    if exp.risk == "high" and not fresh_auth:
+        raise ServiceError("approving a high-risk export needs a recent sign-in: sign in again", "step_up_required", 401)
     if not (exp.analysis or {}).get("ready"):
-        raise ServiceError("dependencies still need an outcome", "closure", 409,
-                           {"unresolved": exp.analysis.get("closure", {}).get("unresolved")})
+        raise ServiceError("dependencies or blobs still need an outcome", "closure", 409,
+                           {"unresolved": exp.analysis.get("closure", {}).get("unresolved"),
+                            "blobs": exp.analysis.get("blobs", {}).get("needs_decision")})
+    if cfg is not None:
+        _check_destination(exp.mode, exp.classifications, exp.destination or {}, cfg)
     exp.approved_by = actor
-    move(db, exp, "approved", actor, "approve", {"risk": exp.risk})
+    move(db, exp, "approved", actor, "approve", {"risk": exp.risk, "step_up": fresh_auth})
     return exp
 
 
-def generate_export(engine: Engine, db: Session, exp: PortabilityExport, actor: str, cfg: Config) -> PortabilityExport:
+def generate_export(engine: Engine, db: Session, exp: PortabilityExport, actor: str, cfg: Config,
+                    fresh_auth: bool = False) -> PortabilityExport:
     if exp.state in ("ready_to_publish", "published"):
         return exp
     expect(exp, "approved")
     if cfg.signer is None:
         raise ServiceError("no signing key is configured (ARGUS_PORTABILITY_SIGNING_KEY)", "no_signing_key", 409)
+    if exp.classifications and not fresh_auth:
+        raise ServiceError("generating a restricted export needs a recent sign-in: sign in again",
+                           "step_up_required", 401)
+    _check_destination(exp.mode, exp.classifications, exp.destination or {}, cfg)
+    env = None
+    if exp.classifications:
+        env = envelope.Envelope.new(envelope.load_recipients(cfg.recipients[exp.destination["repository"]]))
     move(db, exp, "generating", actor, "generate")
     db.commit()
     out = cfg.export_dir(exp.id)
@@ -217,18 +316,25 @@ def generate_export(engine: Engine, db: Session, exp: PortabilityExport, actor: 
         base = {**b.manifest, "_sha256": b.manifest_sha256}
     try:
         if out.exists():
-            shutil.rmtree(out)
+            exporter.secure_delete(out)
         manifest = exporter.generate(engine, export_id=exp.id, mode=exp.mode, workspaces=exp.workspaces, out_dir=out,
                                      store=store, signer=cfg.signer, requested_by=exp.requested_by,
                                      approved_by=exp.approved_by, classifications=exp.classifications,
                                      decisions=exp.decisions, base_manifest=base,
-                                     repository={"name": (exp.destination or {}).get("repository")})
+                                     repository={"name": (exp.destination or {}).get("repository")},
+                                     identity_profile=(exp.decisions or {}).get("identity_profile"), envelope=env)
         exp = db.get(PortabilityExport, exp.id)
-        move(db, exp, "verifying", actor, "generated", {"watermark": manifest["watermark"]["label"]})
-        blob_dir = cfg.root / "verify" / exp.id
-        checked = verifier.verify(out, trusted=cfg.trusted, stores=cfg.stores, blob_dir=blob_dir,
-                                  limits=cfg.limits)
-        shutil.rmtree(blob_dir, ignore_errors=True)
+        move(db, exp, "verifying", actor, "generated", {"checkpoint": manifest["watermark"]["checkpoint_sequence"],
+                                                        "vector_sha256": manifest["watermark"]["vector_sha256"]})
+        work = cfg.root / "verify" / exp.id
+        if work.exists():
+            shutil.rmtree(work)
+        shutil.copytree(out, work / "checkpoint")
+        for c in [c for f in manifest["families"].values() for c in f["chunks"] if c.get("storage") == "artifact"]:
+            (work / "checkpoint" / c["file"]).unlink()           # verified as a reader will: fetched by locator
+        checked = verifier.verify(work / "checkpoint", trusted=cfg.trusted, stores=cfg.stores, blob_dir=work / "blobs",
+                                  limits=cfg.limits, private_keys=None, plain_dir=work / "plain")
+        exporter.secure_delete(work)
         exp.manifest = {k: v for k, v in manifest.items() if k != "_sha256"}
         exp.manifest_sha256 = manifest["_sha256"]
         exp.watermark = manifest["watermark"]
@@ -236,7 +342,7 @@ def generate_export(engine: Engine, db: Session, exp: PortabilityExport, actor: 
         move(db, exp, "ready_to_publish", actor, "verified", {"report": checked["report"]})
         db.commit()
     except Exception as e:  # noqa: BLE001 — every failure is recorded on the export
-        shutil.rmtree(out, ignore_errors=True)
+        exporter.secure_delete(out)
         _fail(db, exp, actor, e)
         raise ServiceError(str(e), getattr(e, "code", "export_failed"), 409, getattr(e, "detail", None)) from e
     return exp
@@ -249,6 +355,8 @@ def publish_export(db: Session, exp: PortabilityExport, actor: str, cfg: Config)
     repo = (exp.destination or {}).get("repository")
     if repo not in cfg.repositories:
         raise ServiceError("this export has no registered destination repository", "invalid", 422)
+    if exp.classifications:
+        _check_destination(exp.mode, exp.classifications, exp.destination, cfg)
     move(db, exp, "publishing", actor, "publish", {"repository": repo})
     db.commit()
     previous = None
@@ -268,36 +376,66 @@ def publish_export(db: Session, exp: PortabilityExport, actor: str, cfg: Config)
     exp = db.get(PortabilityExport, exp.id)
     exp.git = {"repository": repo, "repository_id": pub.repository_id, "root_commit": pub.root_commit,
                "commit": pub.commit, "parent": pub.parent, "tag": pub.tag, "tag_object": pub.tag_object,
-               "previous_tag": pub.previous_tag}
+               "previous_tag": pub.previous_tag, "repository_bytes": pub.repository_bytes,
+               "files_in_git": len(pub.files)}
     move(db, exp, "published", actor, "published", exp.git)
     return exp
 
 
-def _token_key() -> bytes:
-    return (os.environ.get("TOKEN_PEPPER") or "argus-dev-pepper").encode()
+# --------------------------------------------------------------------------- downloads
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
-def download_token(db: Session, exp: PortabilityExport, actor: str, ttl: int = 600) -> dict:
+def download_token(db: Session, exp: PortabilityExport, actor: str) -> dict:
+    """A single-use token, valid for minutes, bound to this export, this actor and this exact archive
+    version. Only its hash is stored."""
     expect(exp, "ready_to_publish", "published")
-    expires = int(time.time()) + ttl
-    msg = f"{exp.id}:{expires}:{actor}"
-    sig = base64.urlsafe_b64encode(hmac.new(_token_key(), msg.encode(), hashlib.sha256).digest()).decode().rstrip("=")
-    token = base64.urlsafe_b64encode(msg.encode()).decode().rstrip("=") + "." + sig
-    audit(db, exp, "download_token", actor, {"expires": expires})
-    return {"token": token, "expires": expires}
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + DOWNLOAD_TTL
+    db.add(PortabilityDownloadToken(token_sha256=_token_hash(token), export_id=exp.id, actor=actor,
+                                    manifest_sha256=exp.manifest_sha256, expires_at=expires))
+    audit(db, exp, "download_token", actor, {"expires": expires.isoformat(), "token": _token_hash(token)[:12]})
+    return {"token": token, "expires": int(expires.timestamp())}
 
 
-def check_download_token(exp_id: str, token: str) -> str:
-    try:
-        body, sig = token.split(".", 1)
-        msg = base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)).decode()
-        export_id, expires, actor = msg.split(":", 2)
-    except Exception as e:  # noqa: BLE001
-        raise ServiceError("malformed download token", "forbidden", 403) from e
-    want = base64.urlsafe_b64encode(hmac.new(_token_key(), msg.encode(), hashlib.sha256).digest()).decode().rstrip("=")
-    if not hmac.compare_digest(want, sig) or export_id != exp_id or int(expires) < time.time():
-        raise ServiceError("the download token is not valid for this export, or has expired", "forbidden", 403)
-    return actor
+def consume_download_token(db: Session, exp: PortabilityExport, token: str) -> str:
+    """Use a token: once, before it expires, for the archive version it was issued for. The token is
+    consumed when the download starts; a broken transfer needs a new one."""
+    row = db.get(PortabilityDownloadToken, _token_hash(token or ""))
+    now = datetime.now(timezone.utc)
+    reason = None
+    if row is None or row.export_id != exp.id:
+        reason = "unknown"
+    elif row.revoked_at is not None:
+        reason = "revoked"
+    elif row.consumed_at is not None:
+        reason = "already used"
+    elif row.expires_at < now:
+        reason = "expired"
+    elif row.manifest_sha256 != exp.manifest_sha256:
+        reason = "issued for another archive version"
+    if reason:
+        audit(db, exp, "download_refused", row.actor if row else "unknown",
+              {"reason": reason, "token": _token_hash(token or "")[:12]})
+        db.commit()
+        raise ServiceError(f"the download token is not valid: {reason}", "forbidden", 403)
+    row.consumed_at = now
+    audit(db, exp, "download", row.actor, {"token": row.token_sha256[:12], "via": "token"})
+    db.commit()
+    return row.actor
+
+
+def revoke_download_tokens(db: Session, exp: PortabilityExport, actor: str) -> int:
+    n = 0
+    for row in db.scalars(select(PortabilityDownloadToken).where(PortabilityDownloadToken.export_id == exp.id,
+                                                                 PortabilityDownloadToken.consumed_at.is_(None),
+                                                                 PortabilityDownloadToken.revoked_at.is_(None))):
+        row.revoked_at = datetime.now(timezone.utc)
+        n += 1
+    audit(db, exp, "download_tokens_revoked", actor, {"count": n})
+    return n
 
 
 def archive_tar(exp: PortabilityExport) -> bytes:
@@ -310,6 +448,7 @@ def archive_tar(exp: PortabilityExport) -> bytes:
 
 def revoke_export(db: Session, exp: PortabilityExport, actor: str, reason: str) -> PortabilityExport:
     move(db, exp, "revoked", actor, "revoke", {"reason": reason})
+    revoke_download_tokens(db, exp, actor)
     return exp
 
 
@@ -319,6 +458,7 @@ def export_view(exp: PortabilityExport) -> dict:
             "destination": exp.destination, "decisions": exp.decisions, "requested_by": exp.requested_by,
             "approved_by": exp.approved_by, "analysis": exp.analysis, "watermark": exp.watermark,
             "manifest_sha256": exp.manifest_sha256, "git": exp.git, "error": exp.error,
+            "identity_profile": (exp.decisions or {}).get("identity_profile"),
             "labels": labels(exp.manifest, {"git_published": exp.state == "published",
                                             "verified": exp.state in ("ready_to_publish", "publishing", "published")}),
             "created_at": exp.created_at.isoformat() if exp.created_at else None}
@@ -425,8 +565,11 @@ def verify_import(db: Session, imp: PortabilityImport, actor: str, cfg: Config) 
     try:
         lfs = (imp.verification.get("git") or {}).get("lfs_pointers") or []
         checked = verifier.verify(q / "checkpoint", trusted=cfg.trusted, stores=cfg.stores, blob_dir=q / "blobs",
-                                  lfs=lfs, limits=cfg.limits)
-        _columns_known(q / "checkpoint", checked["manifest"], cfg.limits)
+                                  lfs=lfs, limits=cfg.limits, private_keys=cfg.private_keys(), plain_dir=q / "plain")
+        if not checked["report"]["content_verified"]:
+            raise ServiceError("the archive is encrypted and no recipient key for it is available to this import "
+                               "session (ARGUS_PORTABILITY_DECRYPTION_KEYS)", "decryption_key_required")
+        _columns_known(checked["plain"], checked["manifest"], cfg.limits)
         git = imp.verification.get("git") or {}
         if git and git.get("export_id") != checked["manifest"]["export_id"]:
             raise ServiceError("the tag names another export than the manifest", "mismatch")
@@ -435,16 +578,19 @@ def verify_import(db: Session, imp: PortabilityImport, actor: str, cfg: Config) 
         raise ServiceError(str(e), getattr(e, "code", "invalid"), 409, getattr(e, "detail", None)) from e
     imp = db.get(PortabilityImport, imp.id)
     imp.manifest = checked["manifest"]
-    imp.verification = {**imp.verification, "checkpoint": checked["report"]}
+    imp.verification = {**imp.verification, "checkpoint": checked["report"], "plain": str(checked["plain"])}
     move(db, imp, "dry_run_ready", actor, "verified", {"report": checked["report"]})
     return imp
+
+
+IDENTITY_EXTRA = {"actor_type", "issuer_hash"}
 
 
 def _columns_known(checkpoint: Path, manifest: dict, limits: chunks.Limits) -> None:
     """Every column in the archive is one this importer knows: nothing is dropped silently."""
     from app.portability.families import BY_NAME
     for name, fam in manifest["families"].items():
-        known = set(BY_NAME[name].columns)
+        known = set(BY_NAME[name].columns) | (IDENTITY_EXTRA if name == "identities" else set())
         for c in fam["chunks"][:1]:
             for _, row in chunks.read_chunk(checkpoint / c["file"], name, limits):
                 extra = set(row) - known
@@ -454,11 +600,14 @@ def _columns_known(checkpoint: Path, manifest: dict, limits: chunks.Limits) -> N
                 break
 
 
-def _plan(db: Session, imp: PortabilityImport, cfg: Config) -> importer.Plan:
+def _plan(imp: PortabilityImport, cfg: Config, *, staged: bool) -> importer.Plan:
     q = Path(imp.quarantine_dir)
+    plain = Path((imp.verification or {}).get("plain") or (q / "checkpoint"))
     return importer.Plan(import_id=imp.id, origin=imp.manifest["argus"]["instance_id"], mode=imp.mode,
-                         checkpoint=q / "checkpoint", manifest=imp.manifest, blob_dir=q / "blobs",
-                         attachments_dir=cfg.attachments_dir, decisions=imp.decisions or {})
+                         checkpoint=plain, manifest=imp.manifest, blob_dir=q / "blobs",
+                         attachments_dir=(cfg.staged_files(imp.id) / "attachments") if staged else cfg.attachments_dir,
+                         decisions=imp.decisions or {},
+                         manifest_sha256=((imp.verification or {}).get("checkpoint") or {}).get("manifest_sha256", ""))
 
 
 def dry_run(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
@@ -466,12 +615,22 @@ def dry_run(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
     expect(imp, "dry_run_ready", "awaiting_approval")
     if decisions:
         imp.decisions = {**(imp.decisions or {}), **decisions}
-    plan = _plan(db, imp, cfg)
+    plan = _plan(imp, cfg, staged=False)
     report = {"mode": imp.mode, "export_id": imp.manifest["export_id"], "labels": imp.manifest["labels"]} \
         if imp.mode == "evidence" else importer.dry_run(db, plan)
     if imp.mode == "evidence":
         report["ready"] = True
         report["note"] = "evidence-only: kept read-only, nothing loaded into active state"
+    if imp.mode == "selective" and not plan.selected:
+        report.setdefault("blocking", []).append({"family": "workspaces", "key": "-",
+                                                  "reason": "a selective import names the workspaces it takes "
+                                                            "(decision select_workspaces)"})
+        report["ready"] = False
+    if imp.mode == "restore" and imp.manifest.get("identity", {}).get("profile") != "full_identity":
+        report.setdefault("blocking", []).append({"family": "identities", "key": "-", "reason":
+                                                  "restore rebuilds the same instance and needs a full_identity "
+                                                  "archive; this one transformed its actors — use clone or merge"})
+        report["ready"] = False
     if imp.mode == "restore":
         from app.models.workspace import Workspace
         others = [w for w in db.scalars(select(Workspace.id).where(Workspace.import_state.is_(None)))
@@ -480,8 +639,6 @@ def dry_run(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
             report.setdefault("blocking", []).append({"family": "instance", "key": "-", "reason":
                                                       "restore needs an empty instance; use clone or merge"})
             report["ready"] = False
-    if imp.manifest["labels"].get("incremental") and imp.mode == "evidence":
-        report["note"] += "; an increment as evidence is read alone"
     imp.dry_run = report
     imp.state = "dry_run_ready" if imp.state == "awaiting_approval" else imp.state
     audit(db, imp, "dry_run", actor, {"ready": report.get("ready"), "blocking": len(report.get("blocking", []))})
@@ -504,6 +661,8 @@ def approve_import(db: Session, imp: PortabilityImport, actor: str) -> Portabili
 
 def execute(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
             stop_after: Optional[int] = None) -> PortabilityImport:
+    """Load, rebuild and reconcile the import in its own staging database. Nothing reaches the active
+    database here; `finalize` promotes it."""
     if imp.state in ("ready_to_finalize", "finalized"):
         return imp
     expect(imp, "approved", "importing", "failed")
@@ -511,17 +670,8 @@ def execute(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
         move(db, imp, "importing", actor, "execute" if imp.state == "approved" else "resume")
         db.commit()
     if imp.mode == "evidence":
-        dest = cfg.evidence(imp.id)
-        if not dest.exists():
-            shutil.copytree(Path(imp.quarantine_dir), dest, ignore=shutil.ignore_patterns("repo.git"))
-        move(db, imp, "rebuilding", actor, "evidence_stored", {"path": dest.name})
-        move(db, imp, "reconciling", actor, "no_projection")
-        imp.reconciliation = {"passed": True, "evidence_only": True, "export_id": imp.manifest["export_id"]}
-        _sign_report(imp, cfg)
-        move(db, imp, "ready_to_finalize", actor, "reconciled", {"passed": True})
-        db.commit()
-        return imp
-    plan = _plan(db, imp, cfg)
+        return _store_evidence(db, imp, actor, cfg)
+    plan = _plan(imp, cfg, staged=True)
     if importer.chain_status(db, plan).get("status") == "already_applied":
         imp.reconciliation = {"passed": True, "already_applied": True, "export_id": imp.manifest["export_id"]}
         _sign_report(imp, cfg)
@@ -530,18 +680,52 @@ def execute(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
         move(db, imp, "ready_to_finalize", actor, "reconciled", {"passed": True, "identical_history": True})
         db.commit()
         return imp
+    active_url = db.get_bind().url
+    try:
+        name = (imp.staging or {}).get("database") or staging.create(active_url, imp.id)
+        if not (imp.staging or {}).get("database"):
+            row = db.get(PortabilityImport, imp.id)
+            row.staging = {"database": name, "created_at": datetime.now(timezone.utc).isoformat()}
+            audit(db, row, "staging_created", actor, {"database": name})
+            db.commit()
+    except Exception as e:  # noqa: BLE001
+        _fail(db, imp, actor, e)
+        raise ServiceError(str(e), "staging_failed", 409) from e
+    stage_engine = staging.engine_for(active_url, name)
     done = set((imp.checkpoints or {}).get("done") or [])
     deferred = list((imp.checkpoints or {}).get("deferred") or [])
-
-    def save(steps: set):
-        row = db.get(PortabilityImport, imp.id)
-        row.checkpoints = {"done": sorted(steps), "deferred": deferred}
-        db.commit()
-
     try:
-        report = importer.execute(db, plan, done, save, stop_after=stop_after)
-        deferred += report["deferred"]
-        save(done)
+        with Session(stage_engine) as sdb:
+            if "seeded" not in done:
+                seeded = staging.seed(db, sdb, plan, importer.references(None, plan))
+                sdb.commit()
+                done.add("seeded")
+                _save(db, imp, done, deferred, {"seeded": seeded})
+
+            def save(steps: set):
+                sdb.commit()
+                _save(db, imp, steps, deferred)
+
+            plan.ingested_at = datetime.now(timezone.utc)
+            report = importer.execute(sdb, plan, done, save, stop_after=stop_after)
+            deferred += report["deferred"]
+            _save(db, imp, done, deferred)
+            imp = db.get(PortabilityImport, imp.id)
+            move(db, imp, "rebuilding", actor, "loaded", {"steps": len(done), "where": "staging"})
+            db.commit()
+            rebuilt = importer.rebuild(sdb, plan)
+            sdb.commit()
+            imp = db.get(PortabilityImport, imp.id)
+            move(db, imp, "reconciling", actor, "rebuilt", rebuilt)
+            rec = importer.reconcile(sdb, plan, deferred)
+            rec["rebuild"] = rebuilt
+            rec["git"] = (imp.verification or {}).get("git")
+            rec["staged"] = True
+            imp.reconciliation = rec
+            _sign_report(imp, cfg)
+            move(db, imp, "ready_to_finalize" if rec["passed"] else "failed", actor, "reconciled",
+                 {"passed": rec["passed"], "sha256": imp.reconciliation_sha256, "where": "staging"})
+            db.commit()
     except InterruptedError as e:
         db.rollback()
         row = db.get(PortabilityImport, imp.id)
@@ -552,23 +736,35 @@ def execute(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
     except Exception as e:  # noqa: BLE001
         _fail(db, imp, actor, e)
         raise ServiceError(str(e), getattr(e, "code", "import_failed"), 409, getattr(e, "detail", None)) from e
-    imp = db.get(PortabilityImport, imp.id)
-    move(db, imp, "rebuilding", actor, "loaded", {"steps": len(done)})
-    try:
-        rebuilt = importer.rebuild(db, plan)
-        imp = db.get(PortabilityImport, imp.id)
-        move(db, imp, "reconciling", actor, "rebuilt", rebuilt)
-        rec = importer.reconcile(db, plan, deferred)
-        rec["rebuild"] = rebuilt
-        rec["git"] = (imp.verification or {}).get("git")
-        imp.reconciliation = rec
-        _sign_report(imp, cfg)
-        move(db, imp, "ready_to_finalize" if rec["passed"] else "failed", actor, "reconciled",
-             {"passed": rec["passed"], "sha256": imp.reconciliation_sha256})
-        db.commit()
-    except Exception as e:  # noqa: BLE001
-        _fail(db, imp, actor, e)
-        raise ServiceError(str(e), getattr(e, "code", "import_failed"), 409, getattr(e, "detail", None)) from e
+    finally:
+        stage_engine.dispose()
+    return imp
+
+
+def _save(db: Session, imp: PortabilityImport, steps: set, deferred: list, extra: Optional[dict] = None) -> None:
+    row = db.get(PortabilityImport, imp.id)
+    row.checkpoints = {**(row.checkpoints or {}), "done": sorted(steps), "deferred": deferred, **(extra or {})}
+    db.commit()
+
+
+def _store_evidence(db: Session, imp: PortabilityImport, actor: str, cfg: Config) -> PortabilityImport:
+    """Keep the verified (decrypted) checkpoint read-only in the evidence store, with its origin chain
+    hash. Nothing is loaded into active state."""
+    dest = cfg.evidence(imp.id)
+    plan = _plan(imp, cfg, staged=True)
+    if not dest.exists():
+        (dest / "checkpoint").mkdir(parents=True)
+        for f in plan.checkpoint.iterdir():
+            if f.is_file():
+                shutil.copyfile(f, dest / "checkpoint" / f.name)
+    _, chain_sha = importer.origin_chain(plan)
+    move(db, imp, "rebuilding", actor, "evidence_stored", {"path": dest.name, "origin_chain_sha256": chain_sha})
+    move(db, imp, "reconciling", actor, "no_projection")
+    imp.reconciliation = {"passed": True, "evidence_only": True, "export_id": imp.manifest["export_id"],
+                          "origin_chain": {"sha256": chain_sha}}
+    _sign_report(imp, cfg)
+    move(db, imp, "ready_to_finalize", actor, "reconciled", {"passed": True})
+    db.commit()
     return imp
 
 
@@ -581,43 +777,75 @@ def _sign_report(imp: PortabilityImport, cfg: Config) -> None:
             cfg.signer, imp.reconciliation_sha256, manifest_sha)}
 
 
-def finalize(db: Session, imp: PortabilityImport, actor: str, cfg: Config) -> PortabilityImport:
+def finalize(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
+             probe: Optional[Callable] = None) -> PortabilityImport:
+    """Promote the staged import into the active database in one transaction: all of it becomes
+    visible at once, or — on any difference from the staged result — none of it."""
     if imp.state == "finalized":
         return imp
     expect(imp, "ready_to_finalize")
     if not (imp.reconciliation or {}).get("passed"):
         raise ServiceError("the reconciliation did not pass", "reconciliation_failed")
-    if imp.mode != "evidence" and not imp.reconciliation.get("already_applied"):
-        plan = _plan(db, imp, cfg)
-        importer.finalize(db, plan)
-        if imp.mode == "restore":
-            from app.models.app_setting import AppSetting
-            row = db.get(AppSetting, exporter.INSTANCE_KEY)
-            value = {"id": imp.manifest["argus"]["instance_id"], "name": imp.manifest["argus"].get("instance_name"),
-                     "restored_from": imp.manifest["export_id"]}
-            if row is None:
-                db.add(AppSetting(key=exporter.INSTANCE_KEY, value=value))
-            else:
-                row.value = value
-    git = (imp.verification or {}).get("git") or {}
-    if git.get("tag") and db.get(PortabilityTagSeen, (git["repository_id"], git["tag"])) is None:
-        db.add(PortabilityTagSeen(repository_id=git["repository_id"], tag=git["tag"], commit=git["commit"],
-                                  tag_object=git["tag_object"], import_id=imp.id))
-    move(db, imp, "finalized", actor, "finalize", {"reconciliation_sha256": imp.reconciliation_sha256})
-    if imp.mode != "evidence":
-        shutil.rmtree(Path(imp.quarantine_dir), ignore_errors=True)
+    plan = None
+    try:
+        promoted = None
+        if imp.mode != "evidence" and not imp.reconciliation.get("already_applied"):
+            plan = _plan(imp, cfg, staged=False)
+            promoted = importer.promote(db, plan, imp.reconciliation, actor, probe=probe)
+            if imp.mode == "restore":
+                from app.models.app_setting import AppSetting
+                row = db.get(AppSetting, exporter.INSTANCE_KEY)
+                value = {"id": imp.manifest["argus"]["instance_id"], "name": imp.manifest["argus"].get("instance_name"),
+                         "restored_from": imp.manifest["export_id"]}
+                if row is None:
+                    db.add(AppSetting(key=exporter.INSTANCE_KEY, value=value))
+                else:
+                    row.value = value
+        git = (imp.verification or {}).get("git") or {}
+        if git.get("tag") and db.get(PortabilityTagSeen, (git["repository_id"], git["tag"])) is None:
+            db.add(PortabilityTagSeen(repository_id=git["repository_id"], tag=git["tag"], commit=git["commit"],
+                                      tag_object=git["tag_object"], import_id=imp.id))
+        detail = {"reconciliation_sha256": imp.reconciliation_sha256}
+        if promoted is not None:
+            imp.reconciliation = {**imp.reconciliation, "promotion": {
+                k: promoted[k] for k in ("origin_chain", "rebuild", "passed")}}
+            detail["origin_chain_sha256"] = promoted["origin_chain"]["sha256"]
+        move(db, imp, "finalized", actor, "finalize", detail)
+        db.commit()
+    except Exception as e:  # noqa: BLE001 — nothing of the promotion was committed
+        db.rollback()
+        for f in (plan.created_files if plan is not None else []):
+            exporter.secure_delete(Path(f))
+        imp = db.get(PortabilityImport, imp.id)
+        imp.error = {"error": str(e), "code": getattr(e, "code", "promotion_failed"),
+                     **(getattr(e, "detail", None) or {})}
+        audit(db, imp, "promotion_failed", actor, {"code": imp.error["code"]})
+        db.commit()
+        raise ServiceError(str(e), getattr(e, "code", "promotion_failed"), 409, getattr(e, "detail", None)) from e
+    _cleanup(db, imp, cfg, keep_evidence=imp.mode == "evidence")
     return imp
 
 
-def discard(db: Session, imp: PortabilityImport, actor: str, cfg: Config) -> PortabilityImport:
+def _cleanup(db: Session, imp: PortabilityImport, cfg: Config, keep_evidence: bool) -> None:
+    """Remove what never became authoritative: the staging database, staged files, quarantine."""
+    staging.drop(db.get_bind().url, (imp.staging or {}).get("database"))
+    exporter.secure_delete(cfg.staged_files(imp.id))
+    if not keep_evidence:
+        exporter.secure_delete(Path(imp.quarantine_dir))
+
+
+def discard(db: Session, imp: PortabilityImport, actor: str, cfg: Config, reason: str = "") -> PortabilityImport:
+    """Abandon an import. The active database was never written to, so nothing there is deleted: the
+    staging database and the quarantine go; the import's audit trail stays, append-only."""
     if imp.state == "discarded":
         return imp
     if imp.state == "finalized":
         raise ServiceError("a finalized import is history: correct it with ledger decisions", "finalized")
-    origin = (imp.manifest or {}).get("argus", {}).get("instance_id", "")
-    result = importer.discard(db, origin, imp.id)
-    move(db, imp, "discarded", actor, "discard", result)
-    shutil.rmtree(Path(imp.quarantine_dir), ignore_errors=True)
+    db_name = (imp.staging or {}).get("database")
+    _cleanup(db, imp, cfg, keep_evidence=False)
+    exporter.secure_delete(cfg.evidence(imp.id))
+    move(db, imp, "discarded", actor, "discard", {"reason": reason or None, "staging_dropped": db_name,
+                                                  "checkpoints_done": len((imp.checkpoints or {}).get("done") or [])})
     return imp
 
 
@@ -627,9 +855,11 @@ def import_view(imp: PortabilityImport) -> dict:
     return {"id": imp.id, "mode": imp.mode, "state": imp.state, "source": imp.source, "commit": imp.commit,
             "requested_by": imp.requested_by, "approved_by": imp.approved_by, "decisions": imp.decisions,
             "manifest": {k: m.get(k) for k in ("export_id", "mode", "workspaces", "watermark", "argus", "labels",
-                                                 "classifications", "base", "blobs")} if m else None,
-            "verification": imp.verification, "dry_run": imp.dry_run,
+                                                 "classifications", "base", "blobs", "identity")} if m else None,
+            "verification": {k: v for k, v in (imp.verification or {}).items() if k != "plain"},
+            "dry_run": imp.dry_run,
             "checkpoints": {"done": len((imp.checkpoints or {}).get("done") or [])},
+            "staging": imp.staging,
             "reconciliation_passed": (imp.reconciliation or {}).get("passed"),
             "reconciliation_sha256": imp.reconciliation_sha256, "error": imp.error,
             "labels": labels(m, {"git_published": bool(git.get("tag")),
@@ -642,24 +872,91 @@ def provenance(db: Session, imp: PortabilityImport) -> dict:
     events = db.scalars(select(PortabilityEvent).where(PortabilityEvent.subject_kind == "import",
                                                        PortabilityEvent.subject_id == imp.id)
                         .order_by(PortabilityEvent.seq))
-    return {"import": import_view(imp), "git": (imp.verification or {}).get("git"),
-            "origin": (imp.manifest or {}).get("argus"), "watermark": (imp.manifest or {}).get("watermark"),
-            "reconciliation_sha256": imp.reconciliation_sha256,
-            "events": [{"seq": e.seq, "kind": e.kind, "from": e.from_state, "to": e.to_state, "actor": e.actor,
-                        "at": e.at.isoformat(), "detail": e.detail} for e in events]}
+    out = {"import": import_view(imp), "git": (imp.verification or {}).get("git"),
+           "origin": (imp.manifest or {}).get("argus"), "watermark": (imp.manifest or {}).get("watermark"),
+           "reconciliation_sha256": imp.reconciliation_sha256,
+           "events": [{"seq": e.seq, "kind": e.kind, "from": e.from_state, "to": e.to_state, "actor": e.actor,
+                       "at": e.at.isoformat(), "detail": e.detail} for e in events]}
+    if imp.state == "finalized" and imp.mode != "evidence":
+        out["origin_chain"] = importer.verify_chain(db, imp.id)
+    return out
 
 
-def evidence_rows(imp: PortabilityImport, cfg: Config, family: str, offset: int, limit: int) -> dict:
+# --------------------------------------------------------------------------- evidence
+
+def _reader(cfg: Config, viewer) -> bool:
+    """Whether a viewer may read restricted rows of evidence: an explicit institutional list, never
+    implied by being an administrator."""
+    return bool(cfg.evidence_readers & {getattr(viewer, "id", None), getattr(viewer, "email", None)})
+
+
+def _evidence_filter(imp: PortabilityImport, cfg: Config, full: bool):
+    """A predicate for rows a viewer without restricted grants may see: no restricted record, nothing
+    naming one, no personal identity data."""
+    from app.portability.families import BY_NAME
+    base = cfg.evidence(imp.id) / "checkpoint"
+    restricted: set = set()
+    for name in ("assets", "tickets"):
+        for c in (imp.manifest["families"].get(name) or {}).get("chunks", []):
+            for _, r in chunks.read_chunk(base / c["file"], name, cfg.limits):
+                cls = ((r.get("attributes") or {}).get("classification") or "")
+                if isinstance(cls, str) and cls.startswith("restricted:"):
+                    restricted.add(r["uid"])
+
+    def visible(family: str, row: dict) -> bool:
+        if full:
+            return True
+        if family == "identities" and imp.manifest.get("identity", {}).get("profile") == "full_identity":
+            return False
+        fam = BY_NAME.get(family)
+        for col in (fam.subjects if fam else ()):
+            if row.get(col) in restricted:
+                return False
+        return row.get("uid") not in restricted
+    return visible
+
+
+def evidence_families(db: Session, imp: PortabilityImport, cfg: Config, viewer, actor: str) -> list[dict]:
+    expect(imp, "finalized")
+    if imp.mode != "evidence":
+        raise ServiceError("only an evidence import is browsed from its archive", "invalid", 422)
+    full = _reader(cfg, viewer)
+    visible = _evidence_filter(imp, cfg, full)
+    out = []
+    for name, fam in imp.manifest["families"].items():
+        n = 0
+        for c in fam["chunks"]:
+            n += sum(1 for _, r in chunks.read_chunk(cfg.evidence(imp.id) / "checkpoint" / c["file"], name, cfg.limits)
+                     if visible(name, r))
+        if n or full:
+            out.append({"family": name, "visible_rows": n})
+    audit(db, imp, "evidence_list", actor, {"restricted_reader": full})
+    return out
+
+
+def evidence_rows(db: Session, imp: PortabilityImport, cfg: Config, family: str, offset: int, limit: int,
+                  viewer=None, actor: str = "system") -> dict:
+    """Browse an evidence archive. Restricted rows (and personal identity data under a full-identity
+    profile) are shown only to the institution's evidence readers; counts are of visible rows only.
+    Every read is audited. Evidence is browsed only: not searched, not indexed, not downloadable."""
     expect(imp, "finalized")
     if imp.mode != "evidence":
         raise ServiceError("only an evidence import is browsed from its archive", "invalid", 422)
     fam = (imp.manifest or {}).get("families", {}).get(family)
+    full = _reader(cfg, viewer)
+    visible = _evidence_filter(imp, cfg, full)
     if fam is None:
-        raise ServiceError(f"no family {family!r} in this archive", "not_found", 404)
+        raise ServiceError(f"no family {family!r}", "not_found", 404)
     rows, i = [], 0
     for c in fam["chunks"]:
         for key, row in chunks.read_chunk(cfg.evidence(imp.id) / "checkpoint" / c["file"], family, cfg.limits):
+            if not visible(family, row):
+                continue
             if i >= offset and len(rows) < limit:
                 rows.append({"key": key, "row": row})
             i += 1
-    return {"family": family, "total": fam["rows"], "offset": offset, "rows": rows}
+    if i == 0 and not full:
+        raise ServiceError(f"no family {family!r}", "not_found", 404)     # not even its existence
+    audit(db, imp, "evidence_read", actor, {"family": family, "offset": offset, "returned": len(rows),
+                                            "restricted_reader": full})
+    return {"family": family, "total": i, "offset": offset, "rows": rows}

@@ -16,7 +16,7 @@ what the rest of the application reads.
 """
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, String
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,12 @@ from app.models.mixins import utcnow
 
 
 # --------------------------------------------------------------------------- audit
+
+def _recorded_default(context):
+    """A native event is recorded when it happens: `recorded_at` is its `at`. An importer sets
+    `recorded_at` itself, to the ingestion time."""
+    return context.get_current_parameters().get("at") or utcnow()
+
 
 class LedgerStream(Base):
     """A source instance read repeatedly. Registering one changes the policy
@@ -89,6 +95,11 @@ class ClaimEvent(Base):
     evidence: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # When this row was written here. Equal to `at` for what happened here; for a row an import brought,
+    # `at` keeps its original time and this is the local ingestion time — what the daily audit digest
+    # seals by, so an import never changes a day already sealed (I-PORT-8).
+    recorded_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=_recorded_default,
+                                                server_default=func.now())
 
 
 class RevisionEvent(Base):
@@ -101,6 +112,11 @@ class RevisionEvent(Base):
     cause: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     detail: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # When this row was written here. Equal to `at` for what happened here; for a row an import brought,
+    # `at` keeps its original time and this is the local ingestion time — what the daily audit digest
+    # seals by, so an import never changes a day already sealed (I-PORT-8).
+    recorded_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=_recorded_default,
+                                                server_default=func.now())
 
 
 class Decision(Base):
@@ -123,6 +139,11 @@ class Decision(Base):
     reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     effective_at: Mapped[Optional[object]] = mapped_column(DateTime(timezone=True), nullable=True)
     at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # When this row was written here. Equal to `at` for what happened here; for a row an import brought,
+    # `at` keeps its original time and this is the local ingestion time — what the daily audit digest
+    # seals by, so an import never changes a day already sealed (I-PORT-8).
+    recorded_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=_recorded_default,
+                                                server_default=func.now())
 
 
 class StatusEvent(Base):
@@ -138,6 +159,11 @@ class StatusEvent(Base):
     cause: Mapped[str] = mapped_column(String)
     projector_version: Mapped[str] = mapped_column(String)
     at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # When this row was written here. Equal to `at` for what happened here; for a row an import brought,
+    # `at` keeps its original time and this is the local ingestion time — what the daily audit digest
+    # seals by, so an import never changes a day already sealed (I-PORT-8).
+    recorded_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=_recorded_default,
+                                                server_default=func.now())
 
 
 class IdentityEvent(Base):
@@ -149,6 +175,11 @@ class IdentityEvent(Base):
     kind: Mapped[str] = mapped_column(String)   # bound | unbound | rebound
     cause: Mapped[str] = mapped_column(String)
     at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # When this row was written here. Equal to `at` for what happened here; for a row an import brought,
+    # `at` keeps its original time and this is the local ingestion time — what the daily audit digest
+    # seals by, so an import never changes a day already sealed (I-PORT-8).
+    recorded_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=_recorded_default,
+                                                server_default=func.now())
 
 
 class RecordEvent(Base):
@@ -161,6 +192,11 @@ class RecordEvent(Base):
     after: Mapped[Optional[object]] = mapped_column(JSONB, nullable=True)
     cause: Mapped[str] = mapped_column(String)
     at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # When this row was written here. Equal to `at` for what happened here; for a row an import brought,
+    # `at` keeps its original time and this is the local ingestion time — what the daily audit digest
+    # seals by, so an import never changes a day already sealed (I-PORT-8).
+    recorded_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=_recorded_default,
+                                                server_default=func.now())
 
 
 class ConflictEvent(Base):
@@ -176,6 +212,11 @@ class ConflictEvent(Base):
     detail: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     cause: Mapped[str] = mapped_column(String)
     at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # When this row was written here. Equal to `at` for what happened here; for a row an import brought,
+    # `at` keeps its original time and this is the local ingestion time — what the daily audit digest
+    # seals by, so an import never changes a day already sealed (I-PORT-8).
+    recorded_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=_recorded_default,
+                                                server_default=func.now())
 
 
 class LedgerPolicy(Base):

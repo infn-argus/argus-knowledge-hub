@@ -79,9 +79,12 @@ def restore_drill(cfg: service.Config, repository: str, database_url: str, prefi
             service.approve_import(db, imp, "restore-drill")   # a clone into a scratch database
             db.commit()
             service.execute(db, imp, "restore-drill", drill_cfg)
-            report.update({"passed": bool((imp.reconciliation or {}).get("passed")), "commit": imp.commit,
-                           "export_id": imp.manifest["export_id"],
-                           "watermark": imp.manifest["watermark"]["label"],
+            if imp.state == "ready_to_finalize":
+                service.finalize(db, imp, "restore-drill", drill_cfg)     # promotion into the scratch database
+            report.update({"passed": imp.state == "finalized" and bool((imp.reconciliation or {}).get("passed")),
+                           "commit": imp.commit, "export_id": imp.manifest["export_id"],
+                           "checkpoint": imp.manifest["watermark"]["checkpoint_sequence"],
+                           "vector_sha256": imp.manifest["watermark"]["vector_sha256"],
                            "reconciliation_sha256": imp.reconciliation_sha256,
                            "families": {k: v["ok"] for k, v in imp.reconciliation["families"].items()},
                            "projections": {k: v["ok"] for k, v in imp.reconciliation["projections"].items()}})
@@ -133,6 +136,7 @@ def main(argv=None) -> int:
     e.add_argument("--store")
     e.add_argument("--base")
     e.add_argument("--decide", action="append", default=[])
+    e.add_argument("--identity-profile")
     e.add_argument("--by", required=True)
     for name in ("approve", "generate", "publish"):
         p = sub.add_parser(name)
@@ -148,10 +152,14 @@ def main(argv=None) -> int:
     s.add_argument("import_id")
     s.add_argument("step", choices=["fetch", "verify", "dry-run", "approve", "execute", "finalize", "discard"])
     s.add_argument("--by", required=True)
+    s.add_argument("--reason", default="")
     d = sub.add_parser("drill")
     d.add_argument("--repository", required=True)
     d.add_argument("--prefix", default="export/full/")
     sub.add_parser("dev-setup", help="development only: a throwaway key, a local bare repository, an artifact store")
+    rk = sub.add_parser("recipient-key", help="an X25519 recipient key pair: private key to a file, public line printed")
+    rk.add_argument("--name", required=True)
+    rk.add_argument("--out", required=True)
     sc = sub.add_parser("schemas")
     sc.add_argument("--out", required=True)
     a = ap.parse_args(argv)
@@ -162,6 +170,10 @@ def main(argv=None) -> int:
         for rel, body in exporter.json_schemas().items():
             (out / rel).parent.mkdir(parents=True, exist_ok=True)
             (out / rel).write_text(json.dumps(body, indent=1, sort_keys=True) + "\n")
+        return 0
+    if a.cmd == "recipient-key":
+        from app.portability import envelope
+        print(envelope.new_recipient_key(Path(a.out), a.name), end="")
         return 0
     if a.cmd == "dev-setup":
         _print(dev_setup())
@@ -177,16 +189,18 @@ def main(argv=None) -> int:
             exp = service.create_export(db, a.by, mode=a.mode, workspaces=a.workspace,
                                         classifications=a.classification,
                                         destination={"repository": a.repository, "artifact_store": a.store},
-                                        decisions=decisions, base_export_id=a.base, cfg=cfg)
+                                        decisions=decisions, base_export_id=a.base,
+                                        identity_profile=a.identity_profile, cfg=cfg)
             service.analyse_export(db, exp, a.by)
             db.commit()
             _print(service.export_view(exp))
         elif a.cmd in ("approve", "generate", "publish"):
             exp = db.get(PortabilityExport, a.export_id)
+            # The operator CLI runs with host-level access to ARGUS: that is its step-up (audited as such).
             if a.cmd == "approve":
-                service.approve_export(db, exp, a.by, admin=True)
+                service.approve_export(db, exp, a.by, admin=True, fresh_auth=True, cfg=cfg)
             elif a.cmd == "generate":
-                service.generate_export(engine, db, exp, a.by, cfg)
+                service.generate_export(engine, db, exp, a.by, cfg, fresh_auth=True)
             else:
                 service.publish_export(db, exp, a.by, cfg)
             db.commit()
@@ -205,7 +219,7 @@ def main(argv=None) -> int:
                   "approve": lambda: service.approve_import(db, imp, a.by),
                   "execute": lambda: service.execute(db, imp, a.by, cfg),
                   "finalize": lambda: service.finalize(db, imp, a.by, cfg),
-                  "discard": lambda: service.discard(db, imp, a.by, cfg)}[a.step]
+                  "discard": lambda: service.discard(db, imp, a.by, cfg, a.reason)}[a.step]
             out = fn()
             db.commit()
             _print({**service.import_view(out), "dry_run": out.dry_run})

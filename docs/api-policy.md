@@ -178,34 +178,50 @@ Unfinished uploads expire like idempotency keys.
 
 ## Archive format: `argus-archive/1`
 
-Portable archives (export-import-design.md) have their own version, independent of the API's.
+Portable archives (export-import-design.md) are versioned independently of the API.
 
-*Status: these guarantees describe the tested slice. They become binding when the portable archive
-is production-approved (export-import-design §0).*
+*Status: these guarantees describe the integration-tested slice. They become binding when the
+portable archive is production-approved (export-import-design §0).*
 
 - **Identification.** Every manifest names `format` (`argus-archive/1`) and `format_major` (1). The
-  JSON Schemas are published in every portability repository (`format/`) and generated from the
-  same table definitions the exporter reads (`python -m app.portability schemas --out DIR`).
+  JSON Schemas are published in every portability repository (`format/`). They are generated from
+  the same table definitions the exporter reads (`python -m app.portability schemas --out DIR`).
+- **Capabilities.** `manifest.importer.requires` lists what an importer must support. An importer
+  lacking one refuses with `incompatible`.
+
+  | Capability | Meaning |
+  |---|---|
+  | `argus-archive/1`, `zstd`, `ed25519`, `ledger-replay/1` | the base format |
+  | `watermark-vector/1` | the watermark is a vector of per-table high-water marks, with its canonical SHA-256 and a checkpoint sequence; `importer.sequenced_families` names the tables |
+  | `external-chunks/1` | a chunk may live in Git (`storage: git`) or as a content-addressed artifact (`storage: artifact`, `locator`, `sha256`, `bytes`) |
+  | `envelope/1` | the archive is encrypted (`manifest.encryption`: AES-256-GCM, per-recipient X25519 key wrapping); decrypting needs a recipient key |
+
 - **Within a major version, changes are additive only:** new families, new optional columns, new
-  manifest fields, new labels. An importer of the same major version must load an archive that
-  lacks a column it knows (the column's default applies).
-- **What an importer refuses.** It refuses an archive carrying a family or a column it does not
-  know (`incompatible`), rather than drop data silently. Within a major version, archives are
-  therefore read by an ARGUS at least as new as the one that wrote them.
-- **Capabilities.** `manifest.importer.requires` lists what an importer must support
-  (`argus-archive/1`, `zstd`, `ed25519`, `ledger-replay/1`). An importer that lacks one refuses
-  with `incompatible`.
+  manifest fields, new labels, new capabilities. An importer of the same major version loads an
+  archive that lacks a column it knows; the column's default applies.
+- **What is not additive.** Adding a **sequenced** family (a new append-only event table) changes
+  the watermark vector's keys. That is a new capability version and, until an importer supports it,
+  `incompatible`: a verifier refuses a vector whose keys differ from the tables it knows.
+- **What an importer refuses.** An archive carrying a family or a column it does not know
+  (`incompatible`), rather than drop data silently. Within a major version, archives are therefore
+  read by an ARGUS at least as new as the one that wrote them.
+- **Identity profiles.** `manifest.identity.profile` names how people travel. The identities
+  family's columns depend on it; `actor_type` and `issuer_hash` are allowed in addition to the
+  table's columns.
 - **A new major version** comes with a deterministic migration from the previous one
   (`app/portability/verify.py`, `MIGRATIONS`), applied in quarantine before anything is loaded.
-  ARGUS keeps reading archives of every major version it has ever written for as long as it
-  runs: an escape hatch that newer software cannot open is no escape hatch.
+  ARGUS keeps reading archives of every major version it has ever written, for as long as it runs:
+  an escape hatch that newer software cannot open is no escape hatch.
 - **Supported versions.**
-  - Importing: archives written by this ARGUS release and by every earlier release of the same
-    major version.
+  - Importing: archives written by this ARGUS release and by every earlier release of the same major
+    version.
   - Exporting: the current major version only.
-- **The database schema** of the exporting instance (its migration head) is recorded in the
-  manifest for diagnosis. It is not a compatibility gate: the families and columns are.
+- **The database schema** of the exporting instance (its migration head) is recorded in the manifest
+  for diagnosis. It is not a compatibility gate: the families, columns and capabilities are.
 - **Repository tools.** The standalone tools in a portability repository (`tools/validate`,
-  `tools/inspect`) read their own major version without ARGUS, needing only Python 3.9 and,
-  for signatures, `cryptography`.
-- **Endpoints.** The endpoints under `/v1/portability/` follow the API policy above.
+  `tools/inspect`) read their own major version without ARGUS. They need Python 3.9, and
+  `cryptography` for signatures; `validate` checks an encrypted archive as stored, without
+  decrypting it.
+- **Endpoints.** The endpoints under `/v1/portability/` follow the API policy above. A download
+  capability is never a long-lived URL: use `GET …/archive` with your credentials, or a single-use
+  token in the `X-Download-Token` header.

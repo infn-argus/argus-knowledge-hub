@@ -3148,84 +3148,103 @@ notification about a record they may not read is never sent.
 
 ## 25. Export, import and portability
 
-*Normative. The design, its status and its tests are in [`export-import-design.md`](export-import-design.md).
-Status of this section: the rules are decided; their implementation is tested as a vertical slice and
-not production-approved (export-import-design §0, §19).*
+*Normative. The design, its status per capability and its tests are in
+[`export-import-design.md`](export-import-design.md). The rules below are decided. Their
+implementation is integration-tested as a vertical slice; nothing is tested at production scale or
+production-approved yet (export-import-design §0, §19).*
 
 ### 25.1 Rules
 
-1. **Authority.** The append-only ledger (§7) and the immutable domain history (record events,
-   ticket and document history, revisions, approvals) are authoritative. Projections, indexes and
-   derived edges are rebuilt, never imported over (I-PROJ-1).
-2. **Four mechanisms, kept apart:** disaster-recovery backup (§19 item 10); the full portable
-   archive; the selective workspace package; the Git portability project. Only the last three use
-   the archive format, and only the last uses Git.
-3. **Git distributes and reviews.** It is never the database, the backup or the system of record.
-4. **Determinism.** ARGUS-to-ARGUS import is deterministic and uses no LLM. AI assists only in
-   mapping a foreign or legacy schema (§23.17).
-5. **Nothing silent.** An import never overwrites history, never activates a policy it was not
-   told to, never resolves a conflict by itself. An export never chooses a dependency's outcome
-   by itself and never discloses what its scope excludes.
+1. **Authority.** The append-only ledger (§7) and the immutable domain history are authoritative.
+   Projections, indexes and derived edges are rebuilt, never imported over (I-PROJ-1).
+2. **Four mechanisms, kept apart:**
+   * disaster-recovery backup (§19 item 10);
+   * the full portable archive;
+   * the selective workspace package;
+   * the Git portability project.
+
+   Only the last three use the archive format, and only the last uses Git.
+3. **Git distributes and reviews.** It holds small, reviewable files and signed pointers. Bulk data
+   chunks and blobs are content-addressed artifacts.
+4. **Determinism.** ARGUS-to-ARGUS import uses no LLM; AI assists only in mapping a foreign or
+   legacy schema (§23.17).
+5. **Nothing silent.** An import never overwrites history, never activates a policy it was not told
+   to, never resolves a conflict by itself. An export never chooses a dependency's or a blob's
+   outcome by itself and never discloses what its scope excludes.
 
 ### 25.2 The archive
 
-* The format is `argus-archive/1`: a manifest, NDJSON envelopes in zstd chunks, a blob manifest,
-  checksums and an Ed25519 signature. JSON Schemas are published for the manifest and every family.
-* Every export is taken at one consistent ledger watermark `W`. Nothing committed after `W` is in
-  it.
-* Families are an allow-list. Credentials, tokens, keys, sessions, devices, push tokens, upload
-  sessions, caches, indexes and queues have none. Every row is scanned for secrets before
-  anything is published.
-* People travel as historical identity references (uid, issuer and subject, display data), never
-  as credentials.
-* Restricted classes and fields not included in an export are left out together with every row
-  that names them, and the manifest records only which classes were left out.
-* Blobs are content-addressed artifacts outside Git. The repository holds their digest, size,
-  type, classification, encryption, retention class, locator and recipients.
+* **Format.** `argus-archive/1`: a manifest, NDJSON envelopes in zstd chunks, a blob manifest,
+  checksums and an Ed25519 signature, with JSON Schemas for the manifest and every family. A chunk
+  is stored in Git or as an artifact, and the manifest says which.
+* **Watermark.** Every export is taken at one consistent watermark: the full vector of per-table
+  high-water marks, identified by the SHA-256 of its canonical serialization, plus a checkpoint
+  number from a sequence that is never purged. A sum is never an identity.
+* **What never leaves.** Families are an allow-list: credentials, tokens, keys, sessions, devices,
+  push tokens, upload sessions, caches, indexes and queues have none. Rows and committed files are
+  scanned for secrets.
+* **Blobs.** Every blob is inspected before it is stored anywhere. A secret refuses the export.
+  Classification markers, opaque and uninspectable content each need a decision. Nothing is stored
+  or published until every check has passed.
+* **People** travel under an identity profile. The default is `institutional_reference`; every
+  profile keeps stable actor references. `full_identity` is high-risk.
+* **Restricted classes** not included are left out, together with every row naming them. Included
+  ones go only to a destination approved for each class, only encrypted for that destination's
+  recipients, and only with two-person approval and step-up.
 
 ### 25.3 The Git portability project
 
-* An export is identified by a commit and a signed annotated tag (`export/full/…`,
-  `export/workspace/…`, `export/increment/…`), never by a branch.
-* Checkpoints are immutable. Increments add, never rewrite, and form an ordered chain. Applied out
-  of order or with a gap, an increment is refused.
-* Importers accept only a signed tag or a signed commit named by its hash, from a registered
-  repository, after verifying signatures, identity, checksums and artifacts in quarantine.
+* An export is identified by a commit and a signed annotated tag naming its checkpoint and vector
+  hash, never by a branch.
+* Checkpoints are immutable. Increments add, never rewrite, and form an ordered chain matched by the
+  exact base vector and manifest hash.
+* Importers accept only a signed tag or signed commit from a registered repository, after verifying
+  signatures, identity, checksums, external chunks and artifacts in quarantine.
 * Repository content is untrusted data. Nothing from it is executed.
-* Restricted and unrestricted exports share a repository only if every reader may see both.
-* Catalogue, policy, workflow and mapping changes are reviewed as code before activation.
+* Restricted content is published only to repositories approved for it, and encrypted.
 
 ### 25.4 Import
 
-* Imports are staged, idempotent and resumable, and finalized only when the reconciliation passes:
-  * authoritative rows equal to the archive, row by row;
-  * every projection rebuilt here equal to the one exported;
-  * invariants no worse than at the source.
-* A discarded import leaves active state as it was.
-* Modes are `restore`, `clone`, `merge`, `selective` and `evidence`. Merge outcomes are fixed
-  (export-import-design §11): identical → skip; new → create; divergent uid → block; matching
-  immutable external identifier → identity candidate (§10), never a merge; differing type
-  definition → catalogue review, never an overwrite; missing dependency → an explicit decision.
+* **Isolation.** An import is loaded, rebuilt and reconciled in its own staging database. Nothing
+  of it is visible in the active instance until finalization.
+* **Promotion.** Finalization promotes it in one transaction, committed only if the result equals
+  the staged reconciliation. Readers see all of it or none of it.
+* **What an import may write in the active database:** new workspaces, workspaces of the same
+  origin (increments), shared catalogue rows, and people as references. A workspace with
+  independent local history is never partially modified.
+* **Discard and failure** leave active data unchanged. Staging is dropped. The import's audit
+  trail stays append-only. No audit purge is used.
+* **Imported history** keeps its original time (`at`) and is recorded locally at ingestion time
+  (`recorded_at`). Local audit days are sealed by `recorded_at`, so an import never changes a
+  sealed day. One local ingestion event, sealed like any other, records the origin chain hash, and
+  each imported ledger row records its origin identifiers and line hash.
+* **Modes:** `restore` (empty instance, full-identity archive, origin identity adopted), `clone`,
+  `merge`, `selective` and `evidence`. The merge outcomes are fixed (export-import-design §11).
 
 ### 25.5 Authorization and audit
 
-* Only people export or import: API tokens cannot.
-* High-risk exports (full, evidence-only, with restricted classes) and merge or restore imports
-  need two people.
-* Every transition is audited in an append-only table, sealed in the audit digest chain (§19
-  item 2).
-* Step-up authentication for high-risk exports is required before production (export-import-design
-  §15).
+* Only people export or import; API tokens cannot.
+* These need two people: a high-risk export (full, evidence-only, restricted classes,
+  `full_identity`), and a merge, restore or restricted import. A high-risk approval and a
+  restricted generation need step-up.
+* Evidence restricted rows are readable only by named evidence readers, never by virtue of being an
+  administrator. Every evidence read is audited.
+* Downloads use the caller's credentials, or a single-use, hashed, short-lived token bound to the
+  export, the actor and the archive version.
+* Every transition is audited in an append-only table sealed in the digest chain (§19 item 2).
 
 ### 25.6 Invariants
 
 | Id | Invariant |
 |---|---|
 | **I-PORT-1** | an import never writes a projection from an archive; projections are rebuilt and compared |
-| **I-PORT-2** | an import never replaces a row whose content differs and that this origin did not write |
+| **I-PORT-2** | an import never replaces a row whose content differs and that this origin did not write, or that changed here since |
 | **I-PORT-3** | importing the same export twice changes nothing |
-| **I-PORT-4** | no credential, token, private key or excluded restricted record (or its existence, count or relations) is in an archive or a portability repository |
-| **I-PORT-5** | an increment applies only directly after its base, from the same origin |
+| **I-PORT-4** | no credential, token, private key, excluded restricted record (or its existence, count or relations), or unapproved personal identity data is in an archive or a portability repository |
+| **I-PORT-5** | an increment applies only directly after its base, from the same origin, with the exact base vector |
 | **I-PORT-6** | an import is executed only from a verified, signed tag or commit; never from a branch, never by running repository content |
-| **I-PORT-7** | a discarded or failed import leaves every active table as it was |
-
+| **I-PORT-7** | until finalization commits, no row of an import is in the active database; a discarded or failed import leaves every active table byte-for-byte as it was, and its audit trail remains |
+| **I-PORT-8** | importing historical data never changes a previously sealed local audit digest |
+| **I-PORT-9** | no blob is stored or published before its content has been inspected and every finding decided; a secret is never published |
+| **I-PORT-10** | restricted classes leave ARGUS only encrypted, to a destination approved for them |
+| **I-PORT-11** | a watermark is identified by its whole vector; a checkpoint number never repeats or moves backwards |

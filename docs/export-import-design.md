@@ -1,67 +1,78 @@
 # Export, import and the Git portability project
 
 ARGUS is becoming the system of record for assets, documents and tickets. This document designs
-its **institutional escape hatch**: a way to rebuild the authoritative information somewhere else,
-without the original deployment, with ledger history, provenance, catalogue versions, permissions,
-classifications and attachments intact. It also says, for every part, how far it has got.
+its **institutional escape hatch**: a way to rebuild the authoritative information elsewhere, without
+the original deployment, with ledger history, provenance, catalogue versions, permissions,
+classifications and attachments intact. It also states how far each part has got.
 
-The normative rules are in [`asset-model-revision.md`](asset-model-revision.md) §25. Operating
-procedures are in [`operations.md`](operations.md) ("Portable exports and the Git portability
-project"). Compatibility guarantees are in [`api-policy.md`](api-policy.md) ("Archive format").
+* The normative rules are in [`asset-model-revision.md`](asset-model-revision.md) §25.
+* Operating procedures are in [`operations.md`](operations.md) ("Portable exports and the Git
+  portability project").
+* Compatibility guarantees are in [`api-policy.md`](api-policy.md) ("Archive format").
 
 ## 0. Status
 
-Each capability is one of:
+Each capability has one of these levels:
 
 * **Proposed** — designed here, not built.
-* **Implemented** — in the code (`backend/app/portability/`), not yet covered by an automated test.
-* **Tested** — implemented, and covered by `backend/tests/test_portability.py`.
-* **Production-approved** — tested, and approved for production use by the institution.
+* **Implemented** — in the code (`backend/app/portability/`), without an automated test of its own.
+* **Integration-tested** — implemented and covered by `backend/tests/test_portability.py`. Those tests
+  use small fixtures, two or more fresh PostgreSQL databases at the migration head, a real bare Git
+  repository and real keys.
+* **Partially tested** — some paths are integration-tested, others are not (the cell says which).
+* **Tested at production scale** — exercised on production-sized data, with timings recorded.
+* **Production-approved** — the institution has approved it for production use.
 
-**Nothing in this document is production-approved yet.** §19 lists what must happen first.
+**Nothing below is tested at production scale or production-approved.** §19 lists what must happen
+first.
 
 | Capability | Status |
 |---|---|
-| `argus-archive/1` format: manifest, NDJSON+zstd chunks, blob manifest, checksums, Ed25519 signature | Tested |
-| JSON Schemas of the manifest, envelope, blob manifest and every family | Tested (generated, published) |
-| Consistent ledger watermark (lock, exported snapshot) | Tested (A27) |
-| Export modes `workspace`, `full`, `incremental`, `evidence-only` | Tested |
+| `argus-archive/1`: manifest, NDJSON+zstd chunks, blob manifest, checksums, Ed25519 signature, JSON Schemas | Integration-tested |
+| Watermark: per-table vector, canonical SHA-256, never-purged checkpoint sequence (§3) | Integration-tested (R17, A27) |
+| Export modes `workspace`, `full`, `incremental`, `evidence-only` | Integration-tested |
 | Export mode `backup-reference` | Proposed (refused with `not_generated`) |
-| Dependency closure with explicit outcomes | Tested (A25) |
-| Restricted classes and fields left out, leak-free manifest | Tested (A18) |
-| Secret scanning of rows and committed files | Tested (A19, A20) |
-| Content-addressed artifact store, directory backend | Tested (A3, A4) |
-| S3-compatible and OCI-artifact stores | Proposed |
-| Encryption of chunks and blobs per recipient | Proposed |
-| Git publication: signed commit, signed annotated tag, no force push | Tested |
-| Quarantine fetch: signed tag or signed commit only, hostile-tree checks, no checkout | Tested (A5, A7, A21) |
-| Moved-tag detection | Tested (A5) |
-| Git LFS pointers resolved only from an independent store | Tested (A29) |
-| Verification (checksums, signature, chunks, blobs, limits) | Tested (A6, A22) |
-| Import modes `clone`, `merge`, `evidence`; `restore` (empty instance, identity adopted) | Tested (`restore`: dry-run gate only) |
-| Import mode `selective` | Implemented (loads the archive's workspaces; choosing a subset is proposed) |
-| Dry run with merge outcomes | Tested (A12–A14) |
-| Staged, idempotent, resumable load; exact discard | Tested (A8, A9, A23) |
-| Rebuild of projections from the ledger, and comparison with the exported ones | Tested (A2) |
-| Signed reconciliation report | Tested |
-| Committing reconciliation reports to the repository | Proposed (setting reserved) |
-| Increments: chain, order, equality with a checkpoint | Tested (A10, A11) |
-| Periodic restore drill | Tested (A30); its schedule is operations' |
-| API with state machines, audit, separation of duties | Tested |
-| Web user interface (Administration → Portability) | Implemented; checked by hand in a browser (export, publish, evidence import, blocked clone, discard), no automated UI test |
-| Step-up authentication for high-risk exports | Proposed (§15) |
-| Foreign and legacy schemas through AI-assisted mapping | Proposed (§11) |
-| Catalogue and policy changes reviewed in Git, then activated | Proposed (the repository shows them; activation from Git is not built) |
-| Merge into an instance whose audit days are already sealed | Proposed (§19, blocker) |
+| Dependency closure with explicit outcomes | Integration-tested (A25) |
+| Restricted classes and fields left out, leak-free manifest | Integration-tested (A18) |
+| Secret scanning of rows and of committed files | Integration-tested (A19, A20) |
+| Content inspection of every blob before it is stored (§5.2) | Integration-tested (R1–R4): text, YAML, opaque images. PDF, Office, e-mail and archive readers are implemented, without fixtures of their own |
+| Identity profiles (§5.1) | Integration-tested (R12, R13) |
+| Data chunks as content-addressed artifacts; small review chunks in Git (§4, §9) | Integration-tested (R14–R16) |
+| Envelope encryption of restricted exports (§7.1) | Integration-tested (R19, R20: one recipient, X25519 + AES-256-GCM) |
+| Destinations approved per restricted class; unencrypted restricted export unavailable | Integration-tested (R19) |
+| Step-up authentication (recent `auth_time`) for high-risk approval and restricted generation | Integration-tested through the API (R19); depends on the identity provider sending `auth_time` |
+| Directory artifact store, read-only content-addressed files | Integration-tested |
+| S3 (Object Lock) and OCI artifact stores | Proposed |
+| Git publication: signed commit and annotated tag, no force push; repository size measured | Integration-tested |
+| Quarantine fetch: signed tag or commit only; hostile-tree checks; no checkout | Integration-tested (A5, A7, A21) |
+| Moved-tag detection; Git LFS pointers resolved only from an independent store | Integration-tested (A5, A29) |
+| Isolated staging database per import; per-chunk resume (§10.1) | Integration-tested (R22, A9) |
+| Atomic promotion at finalization (§10.1) | Integration-tested (R23, R5) |
+| Discard without touching active data or audit; audit of the attempt kept | Integration-tested (R6–R8) |
+| Origin chain and local ingestion event (§10.2) | Integration-tested (R9–R11) |
+| Import mode `clone` | Integration-tested end to end (A1) |
+| Import mode `merge` | Integration-tested end to end (R5, R24, R10) |
+| Import mode `restore` (empty instance, full-identity archive) | Integration-tested end to end (R24) |
+| Import mode `selective` (chosen workspaces) | Integration-tested end to end (R24) |
+| Import mode `evidence` | Integration-tested end to end (A24, R20) |
+| Increments: chain by vector and manifest hash; equality with a checkpoint | Integration-tested (A10, A11, R18) |
+| Evidence browsing by classification, counts of visible rows, audited reads | Integration-tested (R20) |
+| Single-use, hashed, actor- and version-bound download tokens; no-store; log redaction | Integration-tested (R21) |
+| Restore drill | Integration-tested (A30); its schedule is operations' |
+| Web pages (Administration → Portability) | Implemented; checked by hand in a browser; no automated UI test |
+| Committing reconciliation reports to the repository | Proposed |
+| Foreign and legacy schemas through AI-assisted mapping | Proposed (§16) |
+| Catalogue and policy changes reviewed in Git, then activated | Proposed |
+| Legal holds | Proposed (not modelled in ARGUS) |
 
 ## 1. Principles
 
 1. The append-only ledger and the immutable domain history are authoritative.
 2. Projections, indexes and derived graph edges can be rebuilt; they travel only to be compared.
-3. Import and export never silently overwrite history, never bypass authority policies, and
-   never disclose restricted information.
-4. Git versions, reviews and distributes. It is not the database, not the operational backup, and
-   not the system of record.
+3. Import and export never silently overwrite history, never bypass authority policies, never
+   disclose restricted information.
+4. Git versions, reviews and distributes. It is not the database, the operational backup, or the
+   system of record.
 5. ARGUS-to-ARGUS restoration is deterministic and needs no LLM.
 6. AI may help only to map a foreign or legacy schema, under the AI Intake rules.
 
@@ -69,609 +80,606 @@ Each capability is one of:
 
 | | Disaster-recovery backup | Full portable archive | Selective workspace package | Git portability project |
 |---|---|---|---|---|
-| What | `pg_dump`, WAL archive, attachments tarball | `argus-archive/1`, mode `full` | `argus-archive/1`, mode `workspace` | a repository of manifests, schemas, catalogue and governance views, immutable chunks, checksums, signatures |
-| Restores | the same deployment, to a moment | ARGUS on another compatible deployment | chosen workspaces and their decided dependencies | nothing by itself: it carries archives for review and distribution |
-| Format | infrastructure-specific | open, documented, versioned | the same | Git |
-| In Git | never | its manifest and chunks, yes; its blobs, as references | yes | — |
+| What | `pg_dump`, WAL archive, attachments | `argus-archive/1`, mode `full` | `argus-archive/1`, mode `workspace` | manifests, schemas, review views, signatures, small chunks; data as artifact pointers |
+| Restores | the same deployment, to a moment | ARGUS on another compatible deployment | chosen workspaces and decided dependencies | nothing by itself: it carries archives for review and distribution |
+| Format | infrastructure-specific | open, documented, versioned | the same | Git plus content-addressed artifacts |
+| In Git | never | its manifest and small review chunks; data chunks and blobs as artifacts | the same | — |
 | Code | `app.ledger.ops` | `app.portability` | `app.portability` | `app.portability.gitrepo` |
-| Doc | operations.md, "Point-in-time recovery" | this document | this document | this document, §9 |
 
-The older `argus-export/1` bundle (`app.ledger.portability`, `/v1/export`) stays. It is an
-open-format view of what a viewer may see. It is not an archive: it carries no watermark,
-signature or claims, and its projections are not compared.
+The older `argus-export/1` bundle (`/v1/export`) stays. It is a viewer-filtered open-format view,
+not an archive.
 
-## 3. Export modes
+## 3. Export modes and the watermark
 
 | Mode | Scope | Labels |
 |---|---|---|
-| `full` | every workspace not being staged by an import | complete when no restricted class or field is left out |
+| `full` | every workspace | complete when nothing restricted or excluded is left out |
 | `workspace` | chosen workspaces plus the decided closure (§8) | selective |
-| `incremental` | the base export's scope; ledger rows of the window `(base W, W]`; record state at `W` | incremental (selective when its base is) |
+| `incremental` | the base export's scope: ledger rows of `(base vector, vector]`; record state at the new watermark | incremental |
 | `evidence-only` | as `workspace`, meant to be read, not activated | selective, evidence-only |
-| `backup-reference` | names a disaster-recovery backup (its manifest hash and location) | *proposed* |
+| `backup-reference` | names a disaster-recovery backup | *proposed* |
 
-**The watermark.** A short transaction takes `SHARE` locks on the ledger's sequenced tables.
-This waits for every transaction already writing to them and holds new writers back for
-milliseconds. It then reads each table's highest `seq` and exports its snapshot. A read-only
-`REPEATABLE READ` transaction imports that snapshot, and the lock is released. As a result:
+**How the watermark is taken.** A short transaction:
 
-* every row with `seq <= W` is committed and visible;
-* no later transaction can take a `seq <= W`;
-* records (assets, tickets, documents) are read at the same instant.
+1. takes `SHARE` locks on the ledger's sequenced tables, which waits for in-flight writers;
+2. reads each table's highest `seq`;
+3. allocates the next value of `portability_checkpoint_seq`, which is never purged or reset;
+4. exports its snapshot.
 
-`W` is recorded per table, together with the time. Its label is the sum of the per-table
-high-water marks, which is monotonic as long as no workspace is purged.
+The export then reads everything in a read-only transaction that imports that snapshot, and the
+lock is released.
+
+**The watermark is the full vector of per-table high-water marks:**
+
+```json
+"watermark": {"checkpoint_sequence": 184,
+              "vector": {"ledger_claim_events": 49120, "ledger_decisions": 8217, "...": 0},
+              "vector_sha256": "…", "snapshot_time": "…"}
+```
+
+* Its identity is the SHA-256 of the canonical vector, with sorted keys, integer values and no
+  whitespace. It is never a sum: two vectors with the same sum are different checkpoints (R17).
+* Tags carry the checkpoint number and a short form of the vector hash.
+* Increments carry their base's exact vector, its hash and its manifest hash, and are refused on
+  any mismatch (R18).
+* The set of sequenced tables is part of the format: `importer.sequenced_families` in the manifest,
+  and the capability `watermark-vector/1`. Adding a sequenced table is an explicit format change: a
+  verifier refuses a vector with other keys.
+* Rolled-back or discarded imports never touch the active ledger. So nothing makes a watermark or
+  the checkpoint sequence move backwards (R8).
 
 ## 4. The archive format, `argus-archive/1`
 
-A checkpoint is a directory:
-
 ```
 <export-id>/
-  manifest.json                       the manifest (§4.2)
-  workspaces.ndjson                   the workspaces in scope (ids), for a reader without zstd
-  catalogue-types-000001.ndjson.zst   one or more chunks per family: <group>-<family>-<n>
-  identity-identities-000001.ndjson.zst
-  access-…  governance-…  records-…  ledger-…  projection-…
-  blobs.manifest.ndjson               one line per blob (§7)
-  relation-registry.json              the relation registry and semantics, stable form
-  reconciliation.json                 the exporter's counts, hashes and invariant summary
-  checksums.sha256                    sha256sum format, every file above
-  signature.json                      Ed25519 over the checksums and the manifest
+  manifest.json                      the manifest
+  checksums.sha256                   every file below (encrypted bytes for an encrypted export)
+  signature.json                     Ed25519 over the checksums and the manifest
+  blobs.manifest.ndjson              one line per blob (encrypted for an encrypted export)
+  workspaces.ndjson                  the workspaces in scope
+  relation-registry.json             the relation registry and semantics, in stable form
+  reconciliation.json                the exporter's counts, hashes and invariant summary
+  <group>-<family>-<n>.ndjson.zst    chunks; most are artifacts, not files in Git (§9)
 ```
 
-The layout sketched in the request (`records-000001.ndjson.zst`, `ledger-000001-010000.ndjson.zst`,
-`provenance-000001.ndjson.zst`, `identities.ndjson`) maps onto this. Each family has its own
-chunks, named by group and family. The sequence range of a ledger chunk is in the manifest
-(`first`, `last`) rather than in its name. Provenance is the ledger group.
+Each chunk line is an envelope, `{"f": family, "k": key, "d": row}`. It is JSON with sorted keys,
+in UTF-8, compressed with zstd at level 10 in a single thread, so it is deterministic. A chunk holds
+at most 50 000 rows.
 
-### 4.1 Chunks
+Each chunk in the manifest records where it lives:
 
-Each line of a chunk is an envelope, `{"f": <family>, "k": <key>, "d": <row>}`:
+```json
+{"file": "ledger-claim_events-000001.ndjson.zst", "storage": "artifact",
+ "locator": "argus-artifacts://escrow/sha256/9f…", "sha256": "9f…", "bytes": 123456789,
+ "content_sha256": "…", "rows": 50000, "encrypted": false}
+{"file": "catalogue-types-000001.ndjson.zst", "storage": "git", "path": "catalogue-types-000001.ndjson.zst",
+ "sha256": "…", "bytes": 4321, "content_sha256": "…", "rows": 146}
+```
 
-* JSON with sorted keys and no insignificant whitespace;
-* UTF-8;
-* compressed with zstd at level 10, in a single thread.
+* **Where chunks live.** Only chunks of the catalogue, governance and access groups, of at most
+  256 KiB, live in Git (`GIT_CHUNK_LIMIT`), and only for unencrypted exports. Every other chunk —
+  identities, records, ledger, projections — is a content-addressed artifact.
+* **What is signed.** The checksums cover every chunk wherever it lives, and the signature covers
+  the checksums and the manifest. A missing or changed external chunk blocks verification (R15).
+* **Families** are an allow-list, loaded in this order:
 
-The same rows therefore always give the same bytes. `k` is the row's natural key, or the exporting
-instance's `seq` for sequenced families. A chunk holds at most 50 000 rows. A file is written once
-and never rewritten.
+  | Group | Families |
+  |---|---|
+  | catalogue | types, icons |
+  | identity | identities, as limited by the profile (§5.1) |
+  | access | workspaces, roles, memberships, role bindings |
+  | governance | policies, rulesets |
+  | records | assets in every status, asserted relations, record subresources, tickets and their comments, history, links and watchers, documents and revisions, attachments, workflows, migration domains |
+  | ledger | streams, source revisions, claims, every append-only event table, the migration map, reconciliation reports |
+  | projection | not authoritative: compared, never loaded |
 
-### 4.2 The manifest
+* **Local columns are never exported.** The only one is `recorded_at` (§10.2).
 
-`format/manifest.schema.json` defines the manifest. It records:
+## 5. What never leaves, and what is checked
 
-* the format and its major version;
-* the export id and mode;
-* labels: `complete`, `selective`, `incremental`, `evidence_only`, `signed`, `encrypted` and
-  `artifact_complete`;
-* the ARGUS application version, the database schema (the alembic head) and the exporting
-  instance's identity;
-* the repository name, as `repository`;
-* the workspaces;
-* the watermark (per table, label, time);
-* the base export and its watermark, for an increment;
-* versions: the active policy, the rules lock hash, the relation registry hash and the workflows
-  hash;
-* the creation time, the requester and the approver;
-* per family: group, authoritative or not, row count, SHA-256 and chunks;
-* blob count and total size;
-* included and excluded classifications;
-* dependencies and their outcomes;
-* an invariants summary;
-* encryption (none yet);
-* the signature key id;
-* the capabilities an importer needs.
-
-**What the manifest cannot hold.** The commit and tag that publish a checkpoint can't be inside
-it, because a commit cannot contain its own hash. They are recorded in three places instead:
-
-* the signed tag names the commit;
-* the tag message names the manifest's path and SHA-256, the export id and the previous tag;
-* ARGUS records commit, tag, tag object and repository identity on the export and on every import
-  (`/provenance`).
-
-### 4.3 Record families
-
-Families are an allow-list (`app/portability/families.py`). Load order: catalogue, identity,
-access, governance, records, ledger.
-
-| Group | Families | Notes |
-|---|---|---|
-| catalogue | `types`, `icons` | the scope's own types, the shared types its records use, and their ancestors |
-| identity | `identities` | uid, OIDC subject, directory DN, e-mail, display name, source, active. Never credentials |
-| access | `workspaces`, `roles`, `memberships`, `role_bindings` | ownership, default access, visibility |
-| governance | `policies`, `rulesets` | authority policies and the protected predicates they name; rule sets |
-| records | `assets` (Positions, Equipment, Installations, Product Models, Locations, …, in every status, tombstones included), `relations` (asserted only), `asset_comments`, `asset_history`, `asset_labels`, `asset_tickets`, `tickets`, `ticket_comments`, `ticket_history`, `ticket_links`, `ticket_watchers`, `documents`, `document_revisions` (approvals, supersession), `document_relations`, `attachments`, `workflows`, `migration_domains` | |
-| ledger | `streams`, `source_revisions` (content as a blob), `claims`, `claim_events`, `revision_events`, `decisions`, `status_events`, `identity_events`, `record_events`, `conflict_events`, `migration_map`, `reconciliation_reports` | the authority |
-| projection | `p_fact_state`, `p_identity_bindings`, `p_conflicts`, `p_derived_relations`, `p_ticket_links`, `p_stream_heads` | **not authoritative**: compared after rebuild, never loaded |
-
-Jira and Insight keys, ids and URLs are attributes and source references (`argus_source_key`,
-`argus_source_url`, `insight:object:…`). They travel as they are.
-
-## 5. What never leaves ARGUS
-
-The following have no family, so they cannot be selected:
+**Never selected.** These have no family:
 
 * passwords;
 * access, refresh and identity tokens;
-* personal access tokens and API keys (`api_tokens`);
-* model-provider and import credentials (`llm_configs`, `import_configs`);
+* API keys;
+* model-provider and import credentials;
 * application settings;
-* field-client devices and their push tokens;
+* devices and push tokens;
 * sessions;
 * idempotency keys;
 * upload sessions;
-* notifications, escalations, caches, search and knowledge indexes, queues and locks.
+* notifications, caches, indexes and queues.
 
-On top of the allow-list, every row is scanned for credential formats and for credential-named
-fields holding credential-like values (`secret_scan.py`). A finding fails the export before anything
-is written to Git. The report says where, never the value. Every text file is scanned again before
-the commit.
+**Rows** are scanned for credential formats and for credential-named fields holding credential-like
+values. **Committed files** are scanned again before the commit. Findings stop the export and are
+reported by kind and location, never by value.
+
+### 5.1 People: the identity profile
+
+Historical attribution survives; personal data travels only as far as the profile allows. The
+profile keeps three things apart:
+
+* the **historical actor** (a stable actor reference, its type, and every reference to it from
+  claims, decisions and records);
+* **contact** data (e-mail, display name, username);
+* **directory** data (DN, OIDC subject, source).
+
+| Profile | Identities columns | Actor strings |
+|---|---|---|
+| `institutional_reference` (**default**) | user uid, OIDC subject, source, active | an e-mail of a known person becomes their uid; an unknown e-mail becomes a pseudonym |
+| `pseudonymized` | a salted institutional pseudonym, a salted issuer hash | every person becomes their pseudonym (salt: `ARGUS_PORTABILITY_PSEUDONYM_SALT`, an institutional secret; the manifest records only its key id) |
+| `anonymous_historical_actor` | a pseudonym from a per-export salt that is not kept | as pseudonymized; nothing links to a person outside the archive |
+| `full_identity` | uid, subject, DN, e-mail, name, username | unchanged. **High-risk**: needs a second approver and step-up |
+
+How the transform is applied:
+
+* Except under `full_identity`, it is applied the same way to every string of every row,
+  projections included: actor fields, person stream ids `person:<e-mail>@<ws>`, and free text. The
+  archive therefore stays consistent with itself, and a person's actions stay grouped (R12).
+* The manifest records the profile.
+* On import, people arrive as historical references. Columns the profile did not export get
+  placeholders (`<uid>@historical.invalid`).
+* `restore` requires a `full_identity` archive, because it rebuilds the same instance.
+
+**Limitation.** The *content* of blobs (a scanned form, a PDF) is not transformed. A selective
+export of documents that name people still carries those names. The profile governs ARGUS's own
+records, not the documents it holds.
+
+### 5.2 Blobs: content inspection
+
+Every blob is read and inspected before it is stored anywhere (`blob_scan.py`). That covers
+source-revision contents, attachments, document files and icons.
+
+* **What is read.** Readers are bounded and execute nothing: no macros, no scripts, no external
+  entities or DTDs, no URL fetching.
+  * text, JSON, YAML, XML and configuration files: as UTF-8;
+  * e-mail: headers and parts, recursively;
+  * PDF: the text layer and metadata (encrypted PDFs are uninspectable);
+  * Office (docx, xlsx, pptx, odt): their XML parts, with macro projects detected and not run;
+  * zip and tar archives: depth ≤ 2, ≤ 2000 entries, member and ratio limits;
+  * legacy binary Office: not read (uninspectable).
+* **What is found.** Secrets (the same detectors, plus `key = value` credentials in configuration
+  text) and classification markers (confidential, personal data, export control, macros).
+* **Outcomes.**
+  * *Secret:* always refused. There is no override; correct the content at the source (R1, R2).
+  * *Classification marker:* the content is treated as restricted and needs a decision:
+    `accept_classified`, `exclude`, `classify_encrypt` (encrypted exports only) or `block`.
+  * *Opaque* (images, unsupported binaries) or *uninspectable*: fails closed. It needs
+    `approve_opaque`, `exclude`, `classify_encrypt` or `block` (R3). Decisions are per blob
+    (`blob:<sha256>`) or for all opaque blobs (`opaque_blobs`).
+* **Ordering.** Blobs pass inspection into a local staging area. Chunks and blobs are copied to the
+  destination store only after every row, blob and file check has passed. A failure securely
+  removes the staging area and the checkpoint directory, and nothing reaches Git or the artifact
+  store (R4). Secure removal overwrites files before unlinking; on copy-on-write or flash storage
+  that is best effort, and volume encryption is the real protection.
+* **Before approval.** The approver sees the same inspection: findings, the decisions needed, and
+  exclusions.
 
 ## 6. Restricted information
 
-* An export names the restricted classes it includes. Including any makes the export high-risk
-  (§15).
-* A record whose class is not included is left out entirely. So is every row that names it:
-  claims and claim events about it, decisions, status, identity and record events, relations,
-  comments, attachments, fact state. Fields restricted for a type are removed from included
-  records, along with claims, decisions and fact state on those predicates.
-* Rows naming a left-out record form one dependency, `restricted_reference`, whose only outcomes
-  are `exclude_referrers` and `block`. It is never decided silently. In the manifest, which every
-  repository reader sees, it appears without counts or examples (A18).
-* The manifest states which classes were left out, and labels the archive not `complete`.
-* **Git has repository-level access, not record-level access.** Restricted and unrestricted
-  exports must not share a repository unless every reader is entitled to everything in it. Highly
-  restricted material belongs in a separate repository, or in encrypted artifacts (proposed, §7).
-  Removing a file from a later commit does not remove it from history.
+* An export names the restricted classes it includes. A record of a class not included is left
+  out, together with every row naming it, and restricted fields are hidden.
+* Rows naming a left-out record form the dependency `restricted_reference`, which needs the outcome
+  `exclude_referrers` or `block`. In the manifest it carries neither count nor example (A18).
+* **Including a restricted class has these requirements and effects:**
+  * the destination repository is approved for that class (`ARGUS_PORTABILITY_RESTRICTED_DESTINATIONS`);
+  * the destination has encryption recipients;
+  * an approver other than the requester approves;
+  * the approval and the generation have step-up;
+  * the export is encrypted (§7.1).
+* **Unavailable:** an unencrypted restricted export, and a restricted export to a general
+  repository. ARGUS refuses both at request time (R19).
+* Git has repository-level access only. A repository approved for a class must be readable only by
+  people entitled to it. Removing a file from a later commit does not remove it from history.
 
-## 7. Blobs and artifacts
+## 7. Artifacts
 
-Attachments, icons and source-revision contents are stored as content-addressed artifacts:
+Every artifact is stored by its SHA-256 (`argus-artifacts://<store>/sha256/<digest>`):
 
-```
-sha256:<digest>  →  argus-artifacts://<store>/sha256/<digest>
-```
+* data chunks;
+* blobs;
+* for an encrypted export, the ciphertext of both.
 
-A row holds `"sha256:<digest>"` in place of its path or bytes. `blobs.manifest.ndjson` records,
-for each blob:
+The **directory store** is implemented. It writes each file once and read-only (`0444`), and a
+fetch verifies the size and the digest. *Proposed:* S3-compatible storage with Object Lock in
+compliance mode for immutability, and signed OCI artifacts. Git LFS is never relied on: an LFS
+pointer is resolved only from an artifact store that has the object, and verification fails
+otherwise (A29).
 
-* the digest and size;
-* the MIME type;
-* the classification;
-* encryption (none yet), recipients and the retention class;
-* the locator;
-* every row that references it.
+Cloning the repository and fetching every locator the manifest names is sufficient to verify
+(`tools/validate --artifacts store=/path`) and to rebuild (A28, R14).
 
-The **directory store** is implemented: a mounted institutional volume, or a staging area that
-operations synchronizes to object storage. Artifacts are written once (mode `0444`) and verified on
-every fetch.
+### 7.1 Envelope encryption
 
-*Proposed:*
-* an S3-compatible store (presigned, short-lived read URLs; Object Lock for retention);
-* signed OCI artifacts (an `oras` push of the checkpoint's blobs, with a signature, e.g. cosign);
-* per-recipient encryption (age or OpenPGP), with the recipients and key ids in the blob manifest.
-
-Signed OCI or encrypted archive artifacts are preferred over Git LFS. LFS is accepted only for a
-file whose object is independently recoverable: the verifier resolves an LFS pointer from a
-configured artifact store by its SHA-256, and fails with `missing_lfs_object` otherwise (A29).
-
-Cloning the repository and fetching every locator the blob manifest names is sufficient to verify
-and rebuild a checkpoint (A28).
+* A new 256-bit data-encryption key per export.
+* Every data chunk, every blob and the blob manifest are encrypted with AES-256-GCM. Each file gets
+  a random 96-bit nonce, and its name (or digest) is the associated data.
+* The key is wrapped per recipient, with X25519 (ephemeral) → HKDF-SHA256 → AES-256-GCM.
+* The manifest records the algorithms, each recipient's name and key id, the ephemeral public key,
+  the nonce and the wrapped key.
+* The checksums are over the encrypted bytes. The signature covers the checksums and the manifest,
+  so it covers the encryption metadata too.
+* ARGUS holds recipients' *public* keys only. Private keys belong to their holders and are mounted
+  only for an import session (`ARGUS_PORTABILITY_DECRYPTION_KEYS`); they are never stored in
+  ARGUS, Git or the archive. An import without a recipient key stops at verification
+  (`decryption_key_required`).
+* The manifest of an encrypted archive still shows family names, row counts and plaintext content
+  hashes. That metadata is visible to every reader of the destination repository; only approved
+  repositories hold such archives.
+* **Revocation is not cryptographic.** Revoking an export or its download tokens stops ARGUS from
+  serving it. It does not stop anyone who already holds a copy and a recipient key. Removing a
+  recipient affects later exports only.
 
 ## 8. Dependency closure
 
-Each reference from the scope to something outside it is a dependency. Dependencies are grouped by
-rule and by the workspace holding the target:
+Each reference from the scope to something outside it is a dependency, grouped by rule and by the
+workspace holding the target. The rules:
 
-| Rule | Example |
+| Rule | What refers outside the scope |
 |---|---|
-| `merge_survivor` | a tombstone needs its survivor |
-| `relation_endpoint` | an asserted relation needs both endpoints |
-| `derived_endpoint` | an Installation's edges need its Position and Equipment |
-| `ticket_subject`, `ticket_involves`, `ticket_link` | a ticket needs its subject |
-| `document_subject`, `document_relation` | a document's subject and links |
-| `claim_subject` | a claim of an exported stream about a record elsewhere |
-| `foreign_claims` | another workspace's stream asserts facts about an exported record |
-| `restricted_reference` | §6 |
+| `merge_survivor` | a merged record, to its survivor |
+| `relation_endpoint` | an asserted relation, to an endpoint |
+| `derived_endpoint` | a derived relation, to an endpoint |
+| `ticket_subject`, `ticket_involves`, `ticket_link` | a ticket, to its subject, involved records or linked tickets |
+| `document_subject`, `document_relation` | a document, to its subject or related records |
+| `claim_subject` | an exported stream's claim, to its subject |
+| `foreign_claims` | another stream's claims, to an exported subject |
+| `restricted_reference` | a row, to a left-out restricted record (§6) |
 
-The outcomes are `include_workspace`, `external_reference`, `exclude_referrers` (restricted only)
-and `block`. Generation refuses while any dependency has no outcome, an invalid outcome, or
-`block`. `include_workspace` adds the workspace and computes its closure in turn, until it settles.
-
-These are applied automatically and recorded in the manifest:
-
-* `catalogue`: types and their ancestors;
-* `actor`: people named by rows travel as historical identity references;
-* `subject_decisions`: decisions about an exported record, wherever recorded.
-
-Proposed refinements:
-
-* an anonymized-actor outcome, which replaces a person's display data with a pseudonym while
-  keeping the uid;
-* `include` at record rather than workspace granularity.
+The outcomes are `include_workspace`, `external_reference`, `exclude_referrers` and `block`.
+Nothing is decided silently. The catalogue, actors and subject decisions are included
+automatically, and the manifest records that it did so.
 
 ## 9. The Git portability project
 
 ```
 argus-portability/
-  README.md  VERSION  .argus-portability.json        (repository id, layout, creating instance)
+  README.md  VERSION  .argus-portability.json
   format/      manifest.schema.json  record.schema.json  ledger.schema.json  blob-manifest.schema.json
                families/<family>.schema.json
   catalogue/   types.yaml  attributes.yaml  units.yaml  enumerations.yaml  relations.yaml
   governance/  authority-policy.yaml  workflows.yaml  retention-policies.yaml
   mappings/    jira-insight/  legacy-inventory/  foreign-schemas/
-  exports/checkpoints/<export-id>/   (§4)
+  exports/checkpoints/<export-id>/   manifest.json  checksums.sha256  signature.json
+                                     blobs.manifest.ndjson  workspaces.ndjson  relation-registry.json
+                                     reconciliation.json  (+ small review chunks)
   tools/       validate  inspect  dry-run  import  reconcile
 ```
 
-`catalogue/` and `governance/` are reviewable views regenerated from each checkpoint. Changing them
-activates nothing (activation from Git is proposed). The tools:
+**What goes in Git** is small and reviewable: schemas, views, manifests, checksums, signatures and
+reports, plus catalogue, governance and access chunks of at most 256 KiB. Bulk data stays in the
+artifact store, so repeated full checkpoints add kilobytes to Git history, not data volume (R16).
+Each publication records the repository's size (`git count-objects`) and the number of files it
+added, so growth can be measured and governed. An encrypted export puts no derived views in Git.
 
-* `validate` and `inspect` verify a checkpoint without ARGUS;
-* `dry-run`, `import` and `reconcile` only point to ARGUS's own commands;
-* ARGUS never runs anything from a repository.
+**Tags** name a checkpoint by number and vector hash, never by a branch:
 
-**Rules.**
+```
+export/full/<date>@cp<n>-<vector-hash-12>
+export/workspace/<workspace>[+k]/<date>@cp<n>-<vector-hash-12>
+export/increment/<full|workspace>/<date>@cp<n>-<vector-hash-12>
+```
 
-* **Identifying an export.** An export is identified by a commit and a signed annotated tag, never
-  by a branch:
+**Rules:**
 
-  ```
-  export/full/<date>@ledger-<W>
-  export/workspace/<workspace>[+n]/<date>@ledger-<W>
-  export/increment/<full|workspace>/<date>@ledger-<W>
-  ```
-
-  Increments have their own prefix because an increment and a checkpoint can share a watermark.
-* **Signing.** One commit per export. It is SSH-signed (Ed25519) with the same key as
-  `signature.json`, and pushed without force.
-* **Immutability.** A checkpoint directory that already exists is refused (`immutable`). Increments
-  add new directories and never rewrite old ones. A periodic full checkpoint is just another
-  directory, and the chain before it stays.
-* **Incremental chains.** Each increment names its base and watermark in the manifest, and its
-  previous tag in the tag message. The importer refuses an increment whose base is not the last
-  export applied here from the same origin (`out_of_order`), and one whose previous tag is not an
-  ancestor of its commit (`missing_commit`).
-* **No Git merges.** Ordinary Git merges never resolve ledger or identity conflicts; ARGUS's dry run
-  does.
-* **What import accepts.** Only a signed export tag, or a signed commit named by its full hash
-  (A7).
-* **Protecting the repository.** These are settings of the Git server (operations.md):
-  * protected tags `export/*`, which cannot be deleted or moved;
-  * a protected `main` with no force push;
-  * reviewers for `catalogue/`, `governance/` and `mappings/` through code owners;
-  * short-lived credentials.
-* **Moved tags.** ARGUS remembers the commit and tag object of every tag it imported, and refuses
-  the tag if it has moved (`moved_tag`, A5).
-* **Continuous integration.** *Proposed:* CI on the repository would run `tools/validate` on new
-  checkpoints, check schemas, manifests, checksums, signatures, closure and mapping-profile
-  compatibility, and reject unsigned tags.
-
-**What goes in Git.** Schemas and documentation; catalogue, attribute, enumeration, unit and
-relation definitions; policies and workflows; mapping profiles; manifests, checksums and
-signatures; reconciliation and invariant reports; compressed immutable NDJSON chunks; references
-to blobs.
-
-**What never goes in Git.** Database backups and WAL; photos, videos, PDFs and document packages;
-object-storage contents; secrets, tokens, credentials and private keys; temporary uploads, caches,
-indexes and queues.
+* Each publication is one SSH-signed commit and one signed annotated tag, pushed without force.
+* An existing checkpoint directory is never rewritten (`immutable`).
+* Increments name their base, and their tag names the previous tag. An increment out of order, or
+  with a gap, is refused.
+* No Git merge resolves ledger conflicts.
+* Import accepts only a signed tag or a signed commit named by its hash.
+* Protected tags, no force push, code owners and short-lived credentials are server settings
+  (operations.md).
+* ARGUS refuses a tag that moved after it imported it.
+* *Proposed:* CI on the repository.
 
 ## 10. The import pipeline
 
-| # | Step | Where | Status |
-|---|---|---|---|
-| 1 | Register repository and ref (a registered name; never a URL from the caller) | `create_import` | Tested |
-| 2 | Fetch into quarantine with read-only credentials | `fetch_into_quarantine`, a bare repository, no checkout | Tested; credential injection proposed |
-| 3 | Reject unsigned, lightweight, branch or unexpected input | `fetch_into_quarantine` | Tested |
-| 4 | Verify repository identity, commit and tag signatures | `verify-tag`, `verify-commit` against allowed signers; identity file and root commit | Tested |
-| 5 | Parse and validate the manifest | `verify.verify` | Tested |
-| 6 | Retrieve artifacts into quarantine | `DirectoryStore.fetch` | Tested |
-| 7 | Verify checksums, sizes and signatures | `verify.verify` | Tested |
-| 8 | Decrypt under an authorized session | — | Proposed |
-| 9 | Format and importer compatibility | required capabilities; unknown families or columns refused | Tested |
-| 10 | Deterministic archive-format migrations | `verify.MIGRATIONS` (empty: format 1 is the first) | Implemented |
-| 11 | Validate catalogue, policies, workflows, relations | dry run: type conflicts; governance gated in merge | Tested |
-| 12 | Calculate dependency closure | dry run: references neither here nor in the archive | Tested |
-| 13 | Complete dry-run report | `importer.dry_run` | Tested |
-| 14 | Approvals | `approve_import`; a second person for merge, restore and restricted content | Tested |
-| 15 | Load catalogue and governance | `importer.execute` | Tested |
-| 16 | Workspace and identity mapping | `decisions.workspace_map`; known people kept as they are | Implemented (map), tested (identities) |
-| 17 | Load ledger rows idempotently | the row map, by origin, family and source key | Tested |
-| 18 | Import blobs through quarantine | blobs copied from quarantine, content-addressed | Tested |
-| 19 | Attach blobs atomically | written before the row that names them | Tested |
-| 20 | Rebuild projections, derivations, indexes | `importer.rebuild` (bindings, heads, `engine.rebuild`, event-sourced conflicts) | Tested; the knowledge index (RAG) is rebuilt by its own job |
-| 21 | Run all invariants | `invariants.report` | Tested |
-| 22 | Compare counts and hashes with the manifest | `importer.reconcile`, row by row | Tested |
-| 23 | Produce and sign the reconciliation report | `_sign_report` | Tested |
-| 24 | Commit the report to an approved location | — | Proposed |
-| 25 | Finalize or discard | `finalize`, `discard` | Tested |
+| # | Step | Status |
+|---|---|---|
+| 1 | Register: a registered repository name, never a URL from the caller | Integration-tested |
+| 2 | Fetch into quarantine (a bare repository, no checkout, no hooks) | Integration-tested; short-lived credential injection proposed |
+| 3–4 | Refuse unsigned, lightweight, branch or unexpected input; verify identity and signatures | Integration-tested |
+| 5–7 | Manifest, external chunks fetched by locator, checksums, signature, artifacts | Integration-tested |
+| 8 | Decrypt for this import session (recipient keys mounted for it) | Integration-tested |
+| 9–10 | Format and capability compatibility; format migrations (none needed yet) | Integration-tested / Implemented |
+| 11–13 | Catalogue, governance, closure, dry run | Integration-tested |
+| 14 | Approvals: a second person for merge, restore and restricted content | Integration-tested |
+| 15–21 | Load, blobs, rebuild, invariants — **in the import's staging database** (§10.1) | Integration-tested |
+| 22–23 | Reconcile with the manifest; sign the report | Integration-tested |
+| 24 | Commit the report to the repository | Proposed |
+| 25 | Finalize: **one-transaction promotion into the active database** — or discard | Integration-tested |
 
-**Staging.**
-* Workspaces an import creates carry `import_state = staging`. Nobody can open them,
-  administrators included, until finalization.
-* Shared types whose owner the target lacks get a stub owner workspace, staged the same way.
-* Merging into an existing workspace is visible while staged. It is undone exactly by a discard.
+### 10.1 The isolation boundary
 
-**Resumption.** Each chunk is one step. A finished step is committed with the import's checkpoint
-list, so an interrupted import resumes from there (A9). Replaying a step changes nothing, because
-rows are found through the row map or by their key.
+Each import gets its own staging database, `argus_stage_<import>`, on the active server or on
+`ARGUS_PORTABILITY_STAGING_URL`, migrated to the current head (`staging.py`).
 
-**Discarding.** A discard removes exactly what this import wrote, newest first, audit rows included
-(the sanctioned purge), then its staged workspaces. Active state is left as it was (A23).
+1. **Seed.** The staging database receives a copy of the active rows the import is reconciled
+   against. That is every row of the active workspaces the archive touches (for an increment, the
+   chain's earlier state), the same origin's row map and chain, and every row these and the archive
+   refer to, recursively.
+2. **Load, rebuild, reconcile in staging.** This happens per chunk, with each finished step
+   committed to staging and recorded on the import. An interrupted import resumes there (R22).
+3. **Promotion.** At finalization ARGUS loads the same verified archive into the active database
+   inside one transaction, rebuilds and reconciles there, writes the origin chain (§10.2), records
+   the chain position, and commits — only if the result equals the staged reconciliation.
+   * **Readers see all or nothing.** APIs, search, graph, AI retrieval, projectors and
+     notifications read the active database, which holds nothing of the import until that commit
+     (R5, R23).
+   * **Concurrent exports** take their watermark lock before reading, so they wait for the
+     promotion to commit or roll back.
+   * **If promotion fails** (any difference from staging, any error), the transaction rolls back,
+     and files it copied into the attachments store are removed. Active tables are byte-for-byte
+     what they were (R6), and the import can be retried or discarded.
+4. **Discard.** The staging database is dropped, and the staged files and quarantine are securely
+   removed. Nothing in the active database is deleted, because nothing there was written. The
+   append-only audit of the attempt stays (R7): requester, approvers, source repository, commit and
+   tag, manifest hash, verification and dry-run results, checkpoints, the failure, the discard, its
+   reason, who discarded it, and when. The audit purge (`allow_purge`) is not used by portability
+   at all.
+
+**What an import may write in the active database.**
+
+* A workspace that is new here, or one this same origin wrote earlier (an increment). A workspace
+  with independent local history is refused; map the archive's workspace to another id. No active
+  workspace is ever partially modified.
+* Shared catalogue rows, and people as references.
+
+**Operational requirement.** The ARGUS database role needs `CREATEDB` on the staging server.
+
+### 10.2 The origin chain
+
+Imported history is never inserted into a local audit day that is already sealed.
+
+* Every ledger event table has `recorded_at`: when the row was written *here*. For local events it
+  equals `at`. For imported rows, `at` keeps the origin's time and `recorded_at` is the local
+  ingestion time.
+* The daily digest seals by `recorded_at` (and still hashes `at`). An import therefore lands in the
+  day it arrives, and a previously sealed day never changes (R9, invariant I-PORT-8). A schema
+  migration back-filled `recorded_at = at` for existing rows. That is the only write to existing
+  audit rows, and it leaves sealed digests unchanged.
+* At promotion ARGUS writes one append-only **local ingestion event** (`portability_events`, kind
+  `ingested`). It records the origin instance, the export id, the origin checkpoint (manifest)
+  hash, the **origin chain hash**, the per-family row counts and the watermark vector hash. The
+  daily digest covers it.
+* Every imported append-only ledger row gets an append-only `portability_origin_records` row:
+
+  | Field | Meaning |
+  |---|---|
+  | `origin_instance_id` | the exporting instance |
+  | `origin_family` | the family the row came from |
+  | `origin_sequence` | the origin's `seq`, or the key for id-keyed rows |
+  | `origin_recorded_at` | the origin's record time |
+  | `origin_event_hash` | the SHA-256 of the row's exact archive line |
+  | `origin_checkpoint_hash` | the manifest hash |
+  | `local_table`, `local_key` | where the row lives here |
+  | `local_ingested_at` | when it arrived here |
+  | `local_ingestion_event_id` | the ingestion event that brought it |
+  | `position` | its place in the chain |
+
+  Sequence translation is deterministic: rows are loaded in archive order, so local sequences
+  follow origin order. Claims, decisions, source revisions and conflicts keep their stable ids;
+  local decisions refer to imported facts through those.
+* `GET …/origin-chain` (`importer.verify_chain`) recomputes every imported row's archive line from
+  the row here and compares it with its recorded hash. A changed row is found (R10, R11).
+* By mode:
+  * `restore` adopts the origin's instance identity in an empty deployment.
+  * `clone` and `merge` keep their own identity, and give imported rows new local sequences.
+  * `evidence` keeps the verified chain, and its hash, without activating anything.
 
 ## 11. Import modes and merge outcomes
 
 | Mode | What it does |
 |---|---|
-| `restore` | into an empty instance (the dry run refuses otherwise); every uid and the history kept; the instance adopts the archive's instance identity at finalization |
-| `clone` | uids and provenance kept; this instance keeps its own identity |
-| `merge` | into an instance with its own data; never replaces; governance families are loaded only by decision (`governance: load`) |
-| `selective` | the archive's workspaces into an instance that has other work. Choosing a subset of an archive's workspaces is proposed |
-| `evidence` | verified and kept read-only in the evidence store; rows browsed from the archive (`/evidence/{family}`); no projection, no active record (A24) |
-
-Merge outcomes:
+| `restore` | an empty instance and a `full_identity` archive: it becomes the exporting instance (identity adopted) |
+| `clone` | uids and provenance kept; own identity |
+| `merge` | into an instance with its own work, in new workspaces or this origin's own; governance families only by decision |
+| `selective` | only the workspaces chosen (`select_workspaces`); the catalogue comes as context (shared types may create a stub owner workspace with no records); references outside the selection follow `unresolved_references`; projections that derive from unselected records are left out of the comparison and counted |
+| `evidence` | verified (and decrypted for the session) and kept read-only in the evidence store; nothing loaded |
 
 | Situation | Outcome |
 |---|---|
-| identical row | skip, recorded in the row map |
-| export already applied from this origin | the whole import is recognized as identical history and changes nothing (A8) |
-| next increment of the chain | resume the chain |
+| identical row | skip |
+| export already applied from this origin | identical history: nothing changes (A8) |
+| next increment, exact base vector and manifest | resume the chain |
 | new row | create |
 | same key and origin, unchanged here since the last import | update (an increment) |
 | same uid, divergent content | block (A12) |
-| the same immutable external identifier (serial, MAC, source key) on another record | an identity candidate in the dry run; after import the identity engine opens a candidate, never a merge (A13) |
-| same type id, same definition | reuse |
-| same type id, another definition | a catalogue conflict to review; never overwritten (A14). Proposing a new type version is proposed |
-| reference neither here nor in the archive | block; by decision `unresolved_references: defer`, left unresolved (nullable) or left out (not nullable), and listed in the reconciliation |
-| person not known here | created as a historical reference; actor strings in the ledger are kept verbatim (A26) |
-| person known here | kept as is |
+| matching immutable external identifier | identity candidate; never a merge (A13) |
+| same type id, other definition | a catalogue conflict to review; never overwritten (A14) |
+| missing reference | block, or `defer` by decision (listed in the reconciliation) |
+| unknown person | a historical reference |
+
+### 11.1 Evidence: who reads what
+
+Evidence archives may hold identities and restricted history. Access works as follows:
+
+* Being an instance administrator gives access to the evidence import. It does **not** give access
+  to its restricted rows.
+* Restricted rows, rows naming a restricted record, and, under a `full_identity` archive, the
+  identities family are shown only to the institution's **evidence readers**
+  (`ARGUS_PORTABILITY_EVIDENCE_READERS`, an explicit list, R20).
+* Counts are of the rows the viewer may see. A family with nothing visible is not listed, and
+  asking for it answers "no family".
+* Every list and read is audited (`evidence_list`, `evidence_read`), with the family, the position
+  and the number of rows returned.
+* Evidence is **browsed only**: not searched, not indexed, not downloadable.
+* Retention and legal holds of the evidence store follow the institution's records policy (§19).
+  The store is a directory under `ARGUS_PORTABILITY_ROOT/evidence/<import>`.
 
 ## 12. Projections
 
-The ledger is the portable authority. After loading, the importer:
+The importer never loads a projection. In staging and again at promotion it:
 
-* replays identity bindings from identity events and stream heads from revision events;
-* runs the engine's own rebuild (fact state, managed attributes, record status, derived relations,
-  conflicts, identity candidates);
-* replays the conflicts the engine keeps only as events;
-* restores record timestamps, which are not ledger state.
+1. replays identity bindings and stream heads from events;
+2. runs the engine's rebuild;
+3. replays event-sourced conflicts;
+4. restores record timestamps;
+5. compares every exported projection with what it rebuilt.
 
-It then compares every projection family the export carried with what it rebuilt, ignoring when
-a projection row was derived. Finalization is blocked on any difference. A projection from the
-archive is never written to the target.
-
-Two observations from building this:
-
-* The engine's rebuild re-detects identity candidates, and so writes new conflict events. The
-  reconciliation reports them as `events_written_by_rebuild`.
-* A ticket's record links and its occurrence-source attribute are derived (`app.ledger.tickets`).
-  The ticket links travel as the projection `p_ticket_links`. A ticket written without the derive
-  step makes the comparison fail, which is the intended signal: the source's projection was stale.
+Finalization is blocked on any difference. The rebuild's own new events (identity candidates) are
+reported.
 
 ## 13. Increments
 
-* An increment states the ledger as a strict delta. Sequenced rows in `(base W, W]`; claims and
-  source revisions are first referenced in that window.
-* An increment states records as their state at `W`. Rows of the same origin are updated when
-  nobody here has changed them since. Set-valued families (memberships, role bindings, asserted
-  relations, ticket links and watchers, document relations) are restated whole, and what the same
-  origin wrote earlier and is now absent is removed. Deletion in the ledger is always an event
-  (retirement, withdrawal, supersession).
-* Applying the complete chain gives the same authoritative state as a checkpoint at the final
-  watermark (A10).
-* *Proposed:* record deltas by modification time, to make increments smaller.
+* An increment states the ledger as a strict delta over its base vector.
+* It states records as their state at the new watermark. Same-origin rows are updated only when
+  unchanged here since they were imported, judged against the row map's hash of the row as the
+  import left it.
+* Set-valued families are restated whole, and same-origin rows absent from them are removed.
+* Applying the chain equals a checkpoint at the final watermark (A10).
 
 ## 14. API and state machines
 
-Under `/v1/portability/`. The request sketched `/v1/exports` and `/v1/imports`, but `/v1/imports`
-already belongs to the Jira, Insight and Git import jobs.
+The API is under `/v1/portability/`, because `/v1/imports` belongs to the Jira, Insight and Git import
+jobs.
 
 ```
-POST /v1/portability/exports                      request (and analyse)
+POST /v1/portability/exports                      request and analyse (closure, content inspection)
 GET  /v1/portability/exports[/{id}]
-POST /v1/portability/exports/{id}/decisions       dependency outcomes; analyses again
-POST /v1/portability/exports/{id}/approve
-POST /v1/portability/exports/{id}/generate
+POST /v1/portability/exports/{id}/decisions       dependency, blob and identity-profile decisions
+POST /v1/portability/exports/{id}/approve         step-up for high-risk
+POST /v1/portability/exports/{id}/generate        step-up for restricted
 POST /v1/portability/exports/{id}/publish-git
 GET  /v1/portability/exports/{id}/manifest
-POST /v1/portability/exports/{id}/download-token  10 minutes, HMAC, audited
-GET  /v1/portability/exports/{id}/download?token= the checkpoint as a tar, audited
+GET  /v1/portability/exports/{id}/archive         the tar, with the caller's own credentials (preferred)
+POST /v1/portability/exports/{id}/download-token  single use, 5 minutes, stored as a hash
+GET  /v1/portability/exports/{id}/download        X-Download-Token header (or ?token=, redacted from logs)
+POST /v1/portability/exports/{id}/download-tokens/revoke
 POST /v1/portability/exports/{id}/revoke
 
-POST /v1/portability/imports                      register (repository name, ref, expected commit)
-GET  /v1/portability/imports[/{id}]
+POST /v1/portability/imports
 POST /v1/portability/imports/{id}/fetch-git | upload | verify | dry-run | approve
-POST /v1/portability/imports/{id}/execute | resume | finalize | discard
-GET  /v1/portability/imports/{id}/reconciliation | provenance | evidence/{family}
+POST /v1/portability/imports/{id}/execute | resume       in staging
+POST /v1/portability/imports/{id}/finalize               atomic promotion
+POST /v1/portability/imports/{id}/discard                {"reason": …}
+GET  /v1/portability/imports/{id}/reconciliation | provenance | origin-chain
+GET  /v1/portability/imports/{id}/evidence[/{family}]
+GET  /v1/portability/config
 ```
 
-```
-Export:  requested → analysing → awaiting_approval → approved → generating → verifying
-         → ready_to_publish → publishing → published → expired | failed | revoked
-Import:  created → fetching → quarantined → verifying → invalid | awaiting_mapping | dry_run_ready
-         → awaiting_approval → approved → importing → rebuilding → reconciling → ready_to_finalize
-         → finalized | failed | discarded
-```
+The state machines are those of [`lifecycle.py`](../backend/app/portability/lifecycle.py).
+`importing`, `rebuilding` and `reconciling` now happen in staging, and `finalized` is the
+promotion.
 
-* Every transition is checked against the table and audited in `portability_events`. That table is
-  append-only through the ledger's database guard and sealed in the daily digest chain, so there is
-  no second audit system.
-* Every transition is idempotent: repeating a transition already made returns the current state
-  and writes nothing. The `Idempotency-Key` middleware replays stored answers.
-* Errors use the one problem shape, with codes such as:
-  `separation`, `closure`, `secret_found`, `blob_missing`, `not_a_tag`, `unsigned`,
-  `bad_signature`, `moved_tag`, `missing_commit`, `unsafe_repository`, `checksum_mismatch`,
-  `missing_artifact`, `missing_lfs_object`, `incompatible`, `divergent`, `unresolved_reference`,
-  `invalid_transition`.
-* `awaiting_mapping` is reserved for foreign schemas (§16).
-* `expired` has no job yet (proposed: an export's artifacts expire with its retention class).
-
-The CLI `python -m app.portability` runs the same lifecycles: export, approve, generate, publish,
-import, step, drill and schemas.
+* Every transition is checked, audited in the append-only `portability_events`, sealed in the
+  digest chain, and idempotent.
+* Errors use the one problem shape. Codes include `step_up_required`,
+  `restricted_destination_required`, `encryption_unavailable`, `blob_review`, `secret_found`,
+  `decryption_key_required`, `promotion_mismatch`, `missing_chunk` and `staging_failed`.
 
 ## 15. Security and key management
 
-* **People only.**
-  * API tokens can't request, approve, generate, publish or import.
-  * A workspace export needs the `approve` right on each workspace.
-  * Full and restricted exports, approval, generation, publication, download tokens and every
-    import step need an instance administrator.
-* **Separation of duties.**
-  * A high-risk export (full, evidence-only, or including restricted classes) needs an approver
-    other than its requester.
-  * So do merge and restore imports, and imports of archives with restricted classes.
-* **Step-up authentication** is *proposed*. ARGUS keeps no `auth_time` or `acr` from the identity
-  provider today. The intended rule is a re-authentication younger than 5 minutes (`max_age`, or
-  `acr` at the institution's MFA level) for approving and generating high-risk exports.
-* **Signing key.**
-  * An Ed25519 private key in OpenSSH format, mounted from the institution's secret store and named
-    by `ARGUS_PORTABILITY_SIGNING_KEY`.
-  * It is never in the database or a repository.
-  * One key signs checkpoints, commits and tags; rotation adds the new public key to the allowed
-    signers before the old one is retired.
-  * Verifiers trust an allowed-signers file (`ARGUS_PORTABILITY_TRUSTED_KEYS`). The public key
-    inside `signature.json` is informative only.
-* **Repository credentials.**
-  * Repositories are registered by name (`ARGUS_PORTABILITY_REPOSITORIES`); callers never give
-    URLs.
-  * Credentials are not stored in a manifest.
-  * *Proposed:* short-lived deploy tokens injected per operation (`GIT_ASKPASS`), read-only for
-    fetching.
-* **Untrusted Git content.** ARGUS treats everything fetched from Git as hostile:
-  * no checkout, hooks disabled, no submodules, `transfer.fsckObjects`;
-  * symbolic links, gitlinks, `.gitmodules`, unsafe paths, executables outside `tools/` and
-    oversized objects are refused;
-  * chunk reads are bounded in size, ratio and line length;
-  * envelopes are validated;
-  * nothing from a repository is executed.
-* **Audit.** Request, analysis, decisions, approval, generation, verification, publication,
-  download token, download, import steps, interruption, discard and finalization are all audited.
-* **Retention and legal holds** of Git history and artifacts are institutional decisions
-  (operations.md, §19).
+* **Who may act.** Only people: API tokens are refused. Administrators are needed for imports and
+  for high-impact export steps.
+* **Separation of duties.** A high-risk export, or a merge, restore or restricted import, needs a
+  second person. High-risk exports are full, evidence-only, restricted-class and `full_identity`.
+* **Step-up.** Approving a high-risk export, and generating a restricted one, needs a token whose
+  `auth_time` is within `ARGUS_PORTABILITY_STEP_UP_SECONDS` (300 by default). The identity provider
+  must send `auth_time`; ask for it with `max_age` or a dedicated re-authentication. The operator
+  CLI runs with host access and counts as stepped-up; the audit records that.
+* **Signing and verification keys.** One Ed25519 key, mounted from the secret store, signs
+  checkpoints, commits and tags. Importers trust an allowed-signers file.
+* **Encryption keys.** Recipients' X25519 public keys live in a file per destination
+  (`ARGUS_PORTABILITY_RECIPIENTS`). Private keys are mounted only for import sessions.
+* **Repositories** are registered by name. Credentials are never in a manifest. *Proposed:*
+  short-lived tokens per operation.
+* **Downloads.** Prefer `GET …/archive` with your own credentials. A download token is:
+  * random, stored only as a SHA-256;
+  * single use, and consumed when the download starts (a broken transfer needs a new token);
+  * five minutes long;
+  * bound to the export, the issuing actor and the exact manifest hash.
+
+  Responses carry `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. ARGUS redacts
+  `token=` from its access logs; proxies must do the same (operations.md). Issuance, use, refusals
+  (unknown, used, expired, revoked, another version) and revocation are audited.
+* **Untrusted Git content.** No checkout, hooks off, no submodules, `transfer.fsckObjects`.
+  Symbolic links, gitlinks, unsafe paths, executables outside `tools/` and oversized objects are
+  refused. Reads are bounded, and nothing from a repository is executed.
 
 ## 16. Foreign and legacy schemas (proposed)
 
-An exact ARGUS export is always imported deterministically. A repository holding a foreign or
-legacy schema, under `mappings/foreign-schemas/` or with a manifest that is not `argus-archive/*`,
-goes to `awaiting_mapping` and then through the governed path of `asset-model-revision.md` §23.17:
-
-* AI may propose type, attribute, enumeration, unit and relation mappings, under the AI Intake rules
-  (the requesting user's permissions, untrusted content, server-side only).
-* Deterministic validation and authorized reviewers approve the mapping. Catalogue extensions need
-  the catalogue curator.
-* Identity merges, Installations, retirement and protected predicates need explicit
-  authorization.
-* The approved mapping profile, the model profile and the source commit are kept separately in
-  provenance. A change of model never redefines an approved mapping rule.
-
-ARGUS already has the parts this reuses: AI Intake, catalogue mapping with AI passes, record
-mapping and legacy migration plans. Wiring them to `awaiting_mapping` is not built.
+An exact ARGUS export is imported deterministically. A foreign or legacy schema goes to
+`awaiting_mapping` and through the governed path of `asset-model-revision.md` §23.17. Not built.
 
 ## 17. User experience
 
-The API returns, for each export and import, the labels a page must show:
+**Administration → Portability** (implemented, checked by hand) shows, for each export and import:
 
-* complete or selective;
-* full or incremental;
-* signed;
-* encrypted;
-* Git-published;
-* artifact-complete;
-* verified;
-* restorable;
-* evidence-only.
+* labels: complete or selective, full or incremental, signed, encrypted, Git-published,
+  artifact-complete, verified, restorable, evidence-only;
+* the dependency and content-inspection reports, with their decisions;
+* the identity profile;
+* the vector watermark;
+* the Git tag, the repository size and what Git holds;
+* the manifest;
+* staging status, the dry run (with workspace selection for selective imports), the reconciliation
+  and the origin-chain check;
+* evidence browsing with visible counts;
+* the audit timeline.
 
-It also returns the dependency report and its outcomes, size estimates, the manifest, verification
-results, the dry-run report (catalogue, identity and merge conflicts, unresolved references,
-chain), checkpoints, the reconciliation and the provenance.
-
-**Administration → Portability** (`webapp/src/pages/admin/portability/`, implemented) shows them:
-
-* **Exports.** A list with state and labels. "New export" chooses the scope (workspaces, everything, an
-  increment of a published export, evidence only), the registered repository and artifact store, and
-  the restricted classes to include, and warns when the export is high-risk. Its page shows:
-  * the lifecycle as steps;
-  * the estimate and warnings;
-  * every dependency with a choice of outcome, analysed again on saving;
-  * approval, refused to the requester of a high-risk export;
-  * generation, publication to Git with a confirmation, a download, and revocation with a reason;
-  * the watermark, the Git tag and commit, and the manifest (summary by group, or raw JSON).
-* **Imports.** "New import" takes a registered repository and a signed tag or commit (with an
-  optional expected commit), or an uploaded checkpoint, and a mode. Its page shows:
-  * the source and signature, and the verification results;
-  * the archive;
-  * decisions for the dry run: workspace mapping, unresolved references, loading governance;
-  * the dry-run report per family and outcome, with blocking items, catalogue conflicts, identity
-    candidates, unresolved references and the chain;
-  * approval, refused to the requester when a second person is needed;
-  * execute and resume, with the number of finished steps; finalize; discard;
-  * the reconciliation: authoritative families row by row, projections rebuilt against exported,
-    and events the rebuild wrote;
-  * an evidence browser for evidence imports, and the provenance and audit timeline.
-* Labels are shown only once a checkpoint is verified. Confirmations are inline, never browser
-  dialogs.
-
-*Still proposed:* live progress while a long generation or import runs (the request waits for the
-step to finish today), and showing the analysis of a selective export before it is requested.
+Downloads use the caller's own credentials. *Proposed:* live progress for long steps, which still
+hold the request today.
 
 ## 18. Acceptance tests
 
-`backend/tests/test_portability.py`. Every test uses two fresh databases at the migration head:
+`backend/tests/test_portability.py`, 27 tests. A1–A30 are the original acceptance tests; R1–R24 are
+the additional requirements of the second revision.
 
-| # | Test |
+| Tests | Covering |
 |---|---|
-| A1–A3, A15–A17, A26, A28 | `test_A1_A2_A3_A28_a_signed_git_checkpoint_rebuilds_the_same_state_in_an_empty_instance` |
-| A4, A5, A7 | `test_A4_A5_A7_missing_commits_moved_and_unsigned_tags_and_branches_are_refused` |
-| A4 (artifact), A6, A29 | `test_A6_A29_a_modified_file_or_a_missing_lfs_object_fails_verification` |
-| A8, A10, A11 | `test_A8_A10_A11_increments_in_order_equal_a_full_export_and_out_of_order_is_refused` |
-| A9, A23 | `test_A9_A23_an_interrupted_import_resumes_without_duplicates_and_a_discard_leaves_nothing` |
-| A12–A14 | `test_A12_A13_A14_merge_blocks_divergent_uids_proposes_candidates_and_never_overwrites_types`, `test_A13_a_candidate_is_opened_never_merged` |
-| A18–A20 | `test_A18_A19_A20_restricted_records_and_secrets_never_reach_git_or_the_archive` |
-| A21 | `test_A21_malicious_paths_links_submodules_hooks_and_executables_are_refused` (4 cases) |
-| A22 | `test_A22_decompression_bombs_oversized_and_malformed_lines_are_rejected` |
-| A24 | `test_A24_an_evidence_import_creates_no_active_projection` |
-| A25 | `test_A25_a_selective_export_includes_or_explicitly_resolves_every_dependency` |
-| A27 | `test_A27_an_export_at_W_excludes_later_transactions` |
-| A30 | `test_A30_the_restore_drill_verifies_the_latest_signed_full_checkpoint` |
-| API | `test_the_api_enforces_people_administrators_separation_and_idempotent_transitions` |
+| `test_A1_A2_A3_A28_…` | clone end to end; A15–A17 and A26 under the default profile |
+| `test_A4_A5_A7_…`, `test_A6_A29_…`, `test_A21_…` (4 cases), `test_A22_…` | Git, tampering, LFS, hostile trees, decompression |
+| `test_A8_A10_A11_…` | chains and increments |
+| `test_A9_A23_R6_R7_R8_R22_…` | resume in staging; discard leaves active state byte-for-byte; the audit stays; watermarks and digests |
+| `test_A12_A13_A14_…`, `test_A13_…` | merge outcomes |
+| `test_A18_A19_A20_…` | restricted rows, secrets, no artifacts on failure |
+| `test_A24_…`, `test_A25_…`, `test_A27_…`, `test_A30_…` | evidence, closure, watermark, drill |
+| `test_R1_R4_…`, `test_R2_R3_…` | secrets and markers inside blobs; opaque content |
+| `test_R5_R23_…` | invisibility before promotion; atomic promotion |
+| `test_R9_R10_R11_…` | sealed days unchanged; the origin chain after clone and merge |
+| `test_R12_R13_…` | identity profiles |
+| `test_R14_R15_R16_…` | external chunks; nothing bulky in Git |
+| `test_R17_…`, `test_R18_…` | watermark identity; wrong base vector |
+| `test_R19_R21_…` (API) | destinations, encryption, step-up, single-use downloads, evidence classification (R20) |
+| `test_R24_…` | restore, merge and selective end to end |
 
 ## 19. Limits, open decisions and blockers
 
 **Compatibility limits.**
-* An importer accepts only archives whose families and columns it knows. An archive from a newer
-  ARGUS with new columns is refused (`incompatible`) until a format migration exists.
-* An older archive missing a column loads with the column's default.
-* Reference-typed attribute values that name another record by uid are carried as values. They
-  are not dependencies.
-* Restore adopts the archive's instance identity; clone does not.
-* The knowledge index (RAG) and search are rebuilt by their own jobs after finalization.
-* Imported events keep their original timestamps. Merging them into an instance whose audit days
-  are already sealed would change those days' digests, so **merge into a sealed instance is a
-  blocker**. Two options: digests sealed by ingestion time, or imported events kept in a separate
-  sealed chain.
+
+* An importer refuses unknown families, unknown columns and an unknown set of sequenced tables.
+* Attribute values naming other records are values, not dependencies.
+* Blob content is not transformed by identity profiles.
+* The knowledge index and search are rebuilt by their own jobs after promotion.
+* Chunks are built in memory per family; a streaming writer is needed for very large families.
+* Promotion re-runs the load in one transaction. For very large imports that transaction is long,
+  and its size and lock duration must be measured.
 
 **Decisions for stakeholders.**
-1. The retention of portable archives, Git history and artifacts, and legal holds (asset-model
-   U1). Legal holds are not modelled in ARGUS yet.
-2. Who holds the signing key, who approves full exports, and the second approver for imports.
-3. Which Git server and object storage hold escrow. Whether a third party holds an escrow copy.
-4. Which classes may go to which repository, and whether restricted exports are ever produced
-   without encryption.
-5. The restore-drill cadence and who signs off its evidence.
-6. Whether reconciliation reports are committed back to the portability repository.
+
+1. Retention and legal holds for archives, Git history, artifacts and the evidence store.
+2. Custody of the signing key and of recipient keys; who approves.
+3. Which Git server and which object storage (with Object Lock) hold escrow.
+4. Which classes may go to which approved destination; who the recipients are; who the evidence
+   readers are.
+5. The default identity profile per purpose (escrow may need `full_identity`), and whether
+   pseudonymization's institutional salt is permitted.
+6. Policy on opaque and classified content: which may be approved, and by whom.
+7. The restore-drill cadence and who signs off its evidence.
 
 **Blockers before production activation.**
-1. Step-up authentication (§15).
-2. Encryption of restricted chunks and blobs, if decision 4 needs it.
-3. An S3 or OCI artifact backend, unless a mounted volume is accepted.
-4. Git-server protections in place and tested: protected tags, no force push, code owners.
-5. The signing key in the secret store, with a rotation procedure.
-6. Short-lived repository credentials.
-7. The merge-into-sealed-instance audit question.
-8. The web page is implemented but has no automated UI test, and long steps block the request
-   (no background job or live progress yet).
-9. A restore drill on production-sized data, with timings.
-10. The full export of production rehearsed; its memory and time measured. Chunks are written in
-    memory per family today, and a streaming writer is needed for large families.
+
+1. The identity provider sends `auth_time`, and step-up is tested with it.
+2. An S3/OCI artifact backend with immutability, unless a mounted volume is accepted.
+3. Git-server protections in place and tested.
+4. Signing and recipient keys in the secret store, with a rotation procedure.
+5. Short-lived repository credentials.
+6. `CREATEDB` on the staging server, or a dedicated staging server, and the staging database's own
+   backup exclusion.
+7. A full export, import and promotion at production size: memory, time and the length of the
+   promotion transaction.
+8. Fixtures for the PDF, Office, e-mail and archive readers, and a review of their limits.
+9. Proxy log redaction confirmed for `token=`.
+10. The web pages: an automated test, and progress reporting for long steps.

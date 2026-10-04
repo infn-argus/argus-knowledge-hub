@@ -13,7 +13,7 @@ system of record (asset-model-revision §19).
 | weekly | `python -m app.ledger verify-audit` | recomputes the chain; a non-zero exit names the first altered day |
 | daily | `python -m app.ledger backup --out /backups` | base backup: `pg_dump`, the attachments, and a manifest with checksums and row counts |
 | quarterly (at least) | `python -m app.ledger rehearse-restore /backups/argus-….manifest.json` | restores into a scratch database, checks counts and the audit chain, drops it. Keep the JSON report as evidence |
-| monthly (proposed), and after every upgrade | `python -m app.portability drill --repository escrow` | imports the newest signed full checkpoint into a scratch database, reconciles, drops it. Keep the JSON report as evidence (see "Restore drills" below) |
+| monthly (proposed), and after every upgrade | `python -m app.portability drill --repository escrow` | imports the newest signed full checkpoint into a scratch database through staging and promotion, reconciles, drops it. Keep the JSON report as evidence (see "Restore drills" below) |
 
 E-mail: `SMTP_HOST`, `SMTP_PORT` (25), `SMTP_FROM`, and `ARGUS_URL` for links.
 Notifications are always stored in-app; e-mail is a delivery channel.
@@ -70,131 +70,163 @@ migrated database and compares a fingerprint of everything.
 
 ## Portable exports and the Git portability project
 
-*Status: tested as a vertical slice, not production-approved. See
-[`export-import-design.md`](export-import-design.md) §0 and §19 for what is still proposed and what
-blocks production.*
+*Status: integration-tested as a vertical slice; not tested at production scale; not
+production-approved. [`export-import-design.md`](export-import-design.md) §0 and §19 list what is
+still proposed and what blocks production.*
 
 ### Backup versus portable export
 
 | | Backup (above) | Portable export |
 |---|---|---|
 | For | recovering **this** deployment to a moment | rebuilding ARGUS **elsewhere**: escrow, preservation, a new deployment, a test environment, a domain transfer |
-| Contains | the database as it is, WAL, the attachments directory | the ledger, domain records and their history, catalogue, governance, identities as references, blobs; projections only for comparison |
+| Contains | the database as it is, WAL, the attachments directory | the ledger, domain records and their history, catalogue, governance, people as references, blobs; projections only for comparison |
 | Format | `pg_dump`, Postgres WAL | `argus-archive/1`, open and versioned |
-| In Git | never | manifests, schemas, chunks and signatures; blobs as artifacts outside Git |
-| Restores with | `pg_restore`, PITR | `python -m app.portability import …`, with a dry run and reconciliation |
+| In Git | never | manifests, schemas, signatures and small review files; data chunks and blobs as content-addressed artifacts |
+| Restores with | `pg_restore`, PITR | `python -m app.portability import …`: quarantine, dry run, staging, atomic promotion |
 
-Keep both. A portable export does not give a 15-minute RPO, and a backup cannot be read without
-this exact deployment.
+Keep both. A portable export gives no 15-minute RPO, and a backup cannot be read without this
+deployment.
 
 ### Configuration
 
 | Variable | Meaning |
 |---|---|
-| `ARGUS_PORTABILITY_ROOT` | working area: `exports/`, `quarantine/`, `evidence/`, `work/`, `drills/` (default `/data/portability`) |
-| `ARGUS_PORTABILITY_REPOSITORIES` | `name=url,…`, the only repositories ARGUS publishes to or fetches from |
-| `ARGUS_PORTABILITY_ARTIFACT_STORES` | `name=/path,…`, content-addressed artifact stores (mounted volumes) |
-| `ARGUS_PORTABILITY_SIGNING_KEY` | path of the Ed25519 signing key (OpenSSH format), mounted from the secret store |
-| `ARGUS_PORTABILITY_SIGNER` | the principal written in signatures and in the allowed-signers file |
-| `ARGUS_PORTABILITY_TRUSTED_KEYS` | an OpenSSH allowed-signers file: the keys an import trusts |
+| `ARGUS_PORTABILITY_ROOT` | working area: `exports/`, `quarantine/`, `staging/`, `evidence/`, `work/`, `drills/` (default `/data/portability`) |
+| `ARGUS_PORTABILITY_REPOSITORIES` | `name=url,…`: the only repositories ARGUS publishes to or fetches from |
+| `ARGUS_PORTABILITY_ARTIFACT_STORES` | `name=/path,…`: content-addressed artifact stores (mounted volumes) |
+| `ARGUS_PORTABILITY_SIGNING_KEY` | the Ed25519 signing key (OpenSSH format), mounted from the secret store |
+| `ARGUS_PORTABILITY_SIGNER` | the principal written in signatures and allowed-signers files |
+| `ARGUS_PORTABILITY_TRUSTED_KEYS` | the allowed-signers file of keys an import trusts |
+| `ARGUS_PORTABILITY_RESTRICTED_DESTINATIONS` | `repository=class\|class,…`: repositories approved for restricted classes |
+| `ARGUS_PORTABILITY_RECIPIENTS` | `repository=/path,…`: the X25519 recipient public keys of each approved destination |
+| `ARGUS_PORTABILITY_DECRYPTION_KEYS` | a directory of recipient private keys, mounted **only for an import session** |
+| `ARGUS_PORTABILITY_PSEUDONYM_SALT` | the institutional secret of the `pseudonymized` identity profile |
+| `ARGUS_PORTABILITY_EVIDENCE_READERS` | the user ids or e-mails that may read restricted rows of evidence archives |
+| `ARGUS_PORTABILITY_STEP_UP_SECONDS` | how recent a sign-in must be for high-risk approval and restricted generation (300) |
+| `ARGUS_PORTABILITY_STAGING_URL` | the PostgreSQL server for staging databases (default: the active one) |
 | `ARGUS_PORTABILITY_GIT_NAME`, `ARGUS_PORTABILITY_GIT_EMAIL` | the committer of export commits (a service identity) |
 | `ARGUS_INSTANCE_NAME` | this deployment's name in manifests |
 
 The API image includes `git` and `openssh-client`. Nothing from Git is checked out or executed.
 
+**The database role** needs `CREATEDB` on the staging server. Each import creates
+`argus_stage_<import>`, migrates it to the current head, and drops it at finalization or discard.
+Exclude `argus_stage_*` from backups.
+
+### In the web application
+
+**Administration → Portability** runs the same lifecycles:
+
+* **Exports.** Request with a scope, destination, identity profile and any restricted classes (only
+  towards approved destinations). Then give dependencies and blobs their outcome, approve (another
+  administrator, signed in recently, for high-risk exports), generate, publish to Git, download
+  with your own credentials, or revoke.
+* **Imports.** Register a tag or upload a checkpoint, then fetch, verify, dry run (with decisions:
+  workspace mapping, workspace selection for selective imports, unresolved references,
+  governance), approve, execute or resume in staging, and finalize (atomic promotion) or discard
+  with a reason.
+
+For a development instance, `docker compose exec api python -m app.portability dev-setup` creates a
+throwaway signing key, its allowed-signers file, a local bare repository `escrow-dev` and an artifact
+store `vault-dev` under the `portability` volume. Never use that key for anything real.
+
 ### Setting up the repository and its protection
 
-1. **Create an empty repository on the institutional Git server**, e.g. `argus-portability`.
-   * Use one repository per audience. Restricted exports go only to a repository whose every
-     reader may see them.
-   * Highly restricted material goes to a separate repository, or waits for encrypted artifacts.
-2. **Protect it on the server.**
+1. **Create the repositories on the institutional Git server**, one per audience:
+   * a general one;
+   * a separate one for each set of restricted classes it is approved for.
+2. **Protect them on the server.**
    * Protected tags `export/*`: cannot be deleted, moved or re-created.
-   * Protected branch `main`: no force push, no deletion.
-   * Code owners for `catalogue/`, `governance/` and `mappings/`, so changes there need review.
-   * A deploy key or token per ARGUS instance, write access for exporting instances only,
-     read-only for importing instances. Prefer short-lived tokens.
-3. **Register it in ARGUS**: `ARGUS_PORTABILITY_REPOSITORIES=escrow=ssh://git@git.example/argus/argus-portability.git`.
-4. **Set the service identity** used for export commits. Placeholders:
+   * Protected `main`: no force push.
+   * Code owners for `catalogue/`, `governance/` and `mappings/`.
+   * Deploy credentials: write access for exporting instances, read-only for importing ones,
+     short-lived where the server allows it.
+3. **Register them**:
+   `ARGUS_PORTABILITY_REPOSITORIES=escrow=ssh://git@git.example/argus/escrow.git,escrow-costs=ssh://…`,
+   and approve the restricted one with `ARGUS_PORTABILITY_RESTRICTED_DESTINATIONS=escrow-costs=costs|personnel`.
+4. **Set the service identity of export commits** (placeholders):
    ```
    ARGUS_PORTABILITY_GIT_NAME="[IL_TUO_NOME]"
    ARGUS_PORTABILITY_GIT_EMAIL="[Inserisci Qui La Tua Email]"
    ```
-5. **Record the retention and legal-hold policy** for both the repository's history and the
-   artifact store. Removing a file from a later commit does not remove it from history.
-6. **Optional CI** on the repository: run `tools/validate` on every new checkpoint, and refuse
-   unsigned tags.
+5. **Record the retention and legal-hold policy** for the repository's history, the artifact store
+   and the evidence store. Removing a file from a later commit does not remove it from history.
+6. **Watch growth.** Each publication records the repository size (`git count-objects`) and how many
+   files it added, on the export (`git.repository_bytes`, `git.files_in_git`). Bulk chunks and
+   blobs never go into Git.
 
 ### Key management
 
-* **Generate the signing key once**, on an operator workstation or in the secret store:
+* **Signing key.** Generate it once, in the secret store:
   `ssh-keygen -t ed25519 -N '' -C argus-portability -f argus-portability`.
-* **Store the private key** in the institution's secret store, mounted into the API container at
-  the path given by `ARGUS_PORTABILITY_SIGNING_KEY` (mode 0600). It never goes into a repository,
-  an image or the database.
-* **Distribute the public key** in an allowed-signers file, one line per key:
-  `argus-portability namespaces="git,argus-archive" ssh-ed25519 AAAA…`. It goes to every importing
-  instance (`ARGUS_PORTABILITY_TRUSTED_KEYS`) and to every independent verifier.
-* **Rotate** by adding the new key to every allowed-signers file first, then switching
-  `ARGUS_PORTABILITY_SIGNING_KEY`, then removing the old key after its last checkpoint has
-  expired.
-* **Encryption keys are not used yet.** Encrypted artifacts are proposed (export-import-design §7).
+  * Mount the private key into the API container (`ARGUS_PORTABILITY_SIGNING_KEY`, mode 0600). It
+    never goes into a repository, an image or the database.
+  * Distribute the public key as an allowed-signers line
+    (`argus-portability namespaces="git,argus-archive" ssh-ed25519 AAAA…`) to every importing
+    instance and independent verifier.
+  * Rotate by adding the new key everywhere first, then switching, then removing the old key after
+    its last checkpoint expires.
+* **Recipient keys (encryption).** Each person or system entitled to decrypt a restricted
+  destination's exports holds an X25519 key pair. Create one with
+  `python -m app.portability recipient-key --name escrow-officer --out ./escrow-officer.key`, on the
+  holder's machine, not on the ARGUS host. Put the printed public line in the destination's
+  recipients file (`ARGUS_PORTABILITY_RECIPIENTS`). The private key stays with its holder, and is
+  mounted into `ARGUS_PORTABILITY_DECRYPTION_KEYS` only for the duration of an import that needs it.
+  * **Revocation is not cryptographic.** Revoking an export or its download tokens stops ARGUS
+    serving it. It does not stop anyone who already holds a copy and a recipient key. Removing a
+    recipient affects later exports only.
+* **Pseudonym salt.** `ARGUS_PORTABILITY_PSEUDONYM_SALT` is an institutional secret; changing it
+  changes every pseudonym in later exports.
 
 ### External artifacts
 
-* Blobs (attachments, icons, source-revision contents) are written to the artifact store named in
-  the export, by SHA-256, read-only.
-* Publish the store to institutional object storage or an archive by copying
-  `sha256/<aa>/<digest>` files as they are. They are immutable and named by content.
-* Keep the store as long as the repository's history that references it.
-
-### In the web application
-
-**Administration → Portability** runs the same lifecycles (export-import-design §17):
-* Exports: request, give dependencies their outcome, approve (another administrator for high-risk
-  ones), generate, publish to Git, download, revoke.
-* Imports: register a tag (or upload a checkpoint), fetch, verify, dry run with decisions, approve,
-  execute or resume, finalize or discard.
-
-For a development instance, `docker compose exec api python -m app.portability dev-setup` creates a
-throwaway signing key, the allowed-signers file, a local bare repository `escrow-dev` and an artifact
-store `vault-dev` under the `portability` volume (the variables are set in `docker-compose.yml`).
-Never use that key for anything real.
+* Data chunks and blobs are written to the artifact store named in the export, by SHA-256, and are
+  read-only.
+* They are written **only after the export has passed every check**: rows and files scanned,
+  every blob inspected and decided, and no file missing. A refused export leaves nothing in the
+  store.
+* Publish the store to institutional object storage (S3 with Object Lock in compliance mode) or an
+  archive by copying the `sha256/<aa>/<digest>` files unchanged. They are immutable and named by
+  content.
+* Keep the store as long as the repository history that references it.
 
 ### A full export, and increments
 
 ```
-python -m app.portability export --mode full --repository escrow --store vault --by alice@example.org
+python -m app.portability export --mode full --repository escrow --store vault --by alice@example.org \
+       [--identity-profile institutional_reference|pseudonymized|anonymous_historical_actor|full_identity]
 python -m app.portability approve  exp-… --by bob@example.org          # another person: full is high-risk
 python -m app.portability generate exp-… --by bob@example.org
 python -m app.portability publish  exp-… --by bob@example.org
 ```
 
-* The same steps exist in the API (`/v1/portability/exports`).
-* A **workspace** export takes `--mode workspace --workspace W …`. The analysis lists dependencies
-  outside the scope; give each one an outcome with `--decide <dependency>=<outcome>`
-  (`include_workspace`, `external_reference`, `exclude_referrers`, `block`). Nothing is decided for
-  you.
-* An **increment** takes `--mode incremental --base exp-…` (a published export). It contains the
-  ledger since the base's watermark and the records' state now, and its tag names the base's tag.
-  Run increments in order. Produce a new full checkpoint periodically: it does not remove the
-  chain.
-* A failed generation leaves nothing behind. On a `secret_found` failure, the report names the
-  family and key; correct the data in ARGUS and request a new export.
+* **Workspace exports.** The analysis lists dependencies outside the scope and blobs that need a
+  decision. Give each an outcome with `--decide <id>=<outcome>`:
+  * dependencies: `include_workspace`, `external_reference`, `exclude_referrers` or `block`;
+  * blobs (`blob:<sha256>`, or `opaque_blobs` / `classified_blobs` for all of a kind):
+    `approve_opaque`, `accept_classified`, `exclude`, `classify_encrypt` (encrypted exports only)
+    or `block`.
+
+  A secret found inside a file is never overridable: correct the content in ARGUS and request a
+  new export.
+* **Restricted classes** (`--classification costs`) are accepted only towards a destination approved
+  for them, with recipients configured; the export is then encrypted.
+* **Identity profile.** The default, `institutional_reference`, exports user uids and subjects and
+  no e-mail, DN or names. `full_identity` is high-risk, and is needed for a `restore`.
+* **Increments** take `--mode incremental --base exp-…`. They carry the base's exact watermark
+  vector, and their tag names the base's tag. Run them in order. A periodic new full checkpoint
+  does not remove the chain.
 
 ### Signed tags
 
 * Each publication is one signed commit and one signed annotated tag:
-  * `export/full/<date>@ledger-<W>`
-  * `export/workspace/<workspace>/<date>@ledger-<W>`
+  * `export/full/<date>@cp<n>-<vector hash>`
+  * `export/workspace/<ws>/<date>@cp<n>-<vector hash>`
   * `export/increment/…`
-* Check a tag yourself with
-  `git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=allowed_signers verify-tag <tag>`.
+* Check a tag with `git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=allowed_signers verify-tag <tag>`.
 * Never move or delete one. ARGUS refuses a tag that moved after it imported it.
 
 ### Verification without ARGUS
-
-From any clone:
 
 ```
 git clone --branch <tag> <repository> argus-portability
@@ -203,58 +235,101 @@ argus-portability/tools/validate argus-portability/exports/checkpoints/<export-i
 argus-portability/tools/inspect argus-portability/exports/checkpoints/<export-id>
 ```
 
+`validate` fetches every external chunk and blob from the given stores, and checks them against the
+signed checksums. An encrypted archive is verified as stored, without decrypting it.
+
+### Downloads
+
+* Prefer **Download** on the export page (or `GET …/archive`). It uses your own credentials and
+  puts no capability in a URL.
+* For an out-of-band tool, `POST …/download-token` gives a token that is:
+  * single use (consumed when the download starts; a broken transfer needs a new token);
+  * valid for five minutes;
+  * bound to the export, the issuer and the archive version;
+  * stored only as a hash.
+
+  Send it as the `X-Download-Token` header.
+* ARGUS redacts `token=` from its own access logs. **Configure the reverse proxy to do the same**
+  (for nginx, log `$uri` rather than `$request_uri` for `/v1/portability/`), and never log request
+  headers.
+* `POST …/download-tokens/revoke` revokes the unused tokens of an export. Issuance, use, refusals
+  and revocation are all audited.
+
 ### Restore drills
 
 `python -m app.portability drill --repository escrow` does the following:
+
 1. fetches the newest `export/full/*` tag;
 2. creates a scratch database at the current schema;
-3. imports the checkpoint, rebuilds projections and reconciles;
-4. drops the scratch database.
+3. imports, stages, reconciles and promotes into it;
+4. drops it.
 
-Exit status 0 means it passed. Keep the printed JSON (tag, commit, watermark, reconciliation hash)
-as evidence. Run it **at least monthly**, and after every upgrade of ARGUS, alongside the quarterly
-point-in-time restore rehearsal. The cadence is an open decision (export-import-design §19).
+Exit status 0 means it passed. Keep the printed JSON (tag, commit, checkpoint, vector hash,
+reconciliation hash) as evidence. Run it at least monthly and after every upgrade. The cadence is
+an open decision.
 
-### Importing: dry run, execution, resumption, reconciliation, finalization
+### Importing: dry run, staging, promotion
 
 ```
-python -m app.portability import --mode clone --repository escrow --ref export/full/2026-10-03@ledger-81234 --by carol@example.org
+python -m app.portability import --mode clone --repository escrow --ref export/full/2026-10-03@cp184-1a2b3c4d5e6f --by carol@example.org
 python -m app.portability step imp-… fetch    --by carol@example.org   # quarantine: signed tag, safe tree
-python -m app.portability step imp-… verify   --by carol@example.org   # checksums, signature, chunks, blobs
+python -m app.portability step imp-… verify   --by carol@example.org   # checksums, signature, external chunks, blobs
 python -m app.portability step imp-… dry-run  --by carol@example.org   # what would happen, row by row
 python -m app.portability step imp-… approve  --by dave@example.org    # merge, restore, restricted: another person
-python -m app.portability step imp-… execute  --by dave@example.org
-python -m app.portability step imp-… finalize --by dave@example.org
+python -m app.portability step imp-… execute  --by dave@example.org    # in the staging database
+python -m app.portability step imp-… finalize --by dave@example.org    # one-transaction promotion
 ```
 
-* **Modes.**
-  * `restore`: an empty instance; it takes the archive's identity.
-  * `clone`: uids kept, own identity.
-  * `merge`: an instance with its own data; never replaces.
-  * `selective`.
-  * `evidence`: read-only, nothing loaded.
-* **The dry run** lists, per family, what would be created, skipped as identical, updated (an
-  increment) or blocked as divergent. It also lists catalogue conflicts, identity candidates,
-  unresolved references, governance not loaded in merge, and the chain position. Decisions
-  (`workspace_map`, `unresolved_references: defer`, `governance: load`) are passed with the
-  dry run and recorded.
-* **Execution** stages workspaces (nobody can open them), loads chunk by chunk, rebuilds
-  projections from the ledger and reconciles. A run that stops resumes from its last finished
-  chunk with `execute` (or API `resume`); nothing is loaded twice.
-* **Finalize** only when the reconciliation passed. It unhides the workspaces, records the chain
-  position and remembers the tag.
-* Read the reconciliation with `GET /v1/portability/imports/{id}/reconciliation`. It is signed.
+**Modes.**
 
-### Cleaning up a failed import
+| Mode | Use |
+|---|---|
+| `restore` | an empty instance and a `full_identity` archive; the instance takes the archive's identity |
+| `clone` | uids kept; this instance keeps its own identity |
+| `merge` | alongside this instance's own work: new workspaces, or this origin's own |
+| `selective` | choose the archive's workspaces in the dry run |
+| `evidence` | read-only; nothing loaded |
 
-`python -m app.portability step imp-… discard --by dave@example.org` removes exactly what the
-import wrote: rows, audit rows (the sanctioned purge), staged workspaces and files in quarantine.
-Active data is untouched. A finalized import cannot be discarded: correct it with ledger
-decisions.
+**Encrypted archives.** Mount a recipient key into `ARGUS_PORTABILITY_DECRYPTION_KEYS` before
+`verify`, and remove it after `finalize`.
 
-Old quarantine and verification directories under `ARGUS_PORTABILITY_ROOT` can be deleted once
-their import is finalized or discarded. Keep `exports/<id>` until the checkpoint is published and
-verified elsewhere.
+**Execution** happens entirely in the import's staging database. It is loaded per chunk, then
+rebuilt and reconciled. An interrupted run resumes there with `execute` (or API `resume`). The
+active instance sees nothing of it: not its users, search, graph, AI retrieval, notifications nor
+exports.
+
+**Finalization** promotes the import in one transaction. ARGUS loads it into the active database,
+rebuilds and reconciles there, writes the origin chain and one local ingestion event, and commits
+only if the result equals the staged reconciliation. On any difference or error nothing is
+committed, and the import stays `ready_to_finalize` with the error, to retry or discard.
+
+**After finalization**, `GET …/origin-chain` recomputes every imported ledger row against its origin
+hash.
+
+**Imported history.** Imported events keep their original `at` and are recorded here at ingestion
+time (`recorded_at`). The daily digest seals by `recorded_at`, so `verify-audit` stays green: no
+sealed day changes.
+
+### Discarding or cleaning up an import
+
+```
+python -m app.portability step imp-… discard --by dave@example.org --reason "wrong checkpoint"
+```
+
+A discard does the following:
+
+* drops the staging database;
+* securely removes staged files, quarantine and any evidence copy;
+* marks the import `discarded`.
+
+**The active database is not touched, because nothing there was written. The import's audit trail
+stays, append-only.** No audit purge is used. A finalized import cannot be discarded: correct it
+with ledger decisions.
+
+If a staging database outlives its import (a crash during finalization), drop it with
+`DROP DATABASE argus_stage_… WITH (FORCE)` once the import is `finalized` or `discarded`. Old
+`quarantine/`, `staging/` and `verify/` directories under `ARGUS_PORTABILITY_ROOT` can be removed
+the same way.
 
 ## Performance targets
 
