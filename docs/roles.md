@@ -14,7 +14,10 @@ groups. Everything a person may do is held in ARGUS and granted there.
 | **Group** | People granted together; synchronised from the directory | the workspace's *Access* page, *Directory* (`POST /v1/directory/sync`) |
 | **Workspace defaults** | What anyone signed in may do in a workspace where they hold no grant at all | the workspace's settings (`default_can_…`) |
 
-A person can hold different roles in different workspaces: owner of SPARC, viewer of BTF.
+A person can hold **several roles**, in the same workspace and in different ones: owner of SPARC and
+viewer of BTF, or both reporter and approver in SPARC. Their permissions add up, with those of every
+group they are in; a role never takes anything away. The same role cannot be granted twice to the
+same person in the same workspace.
 
 ## What a permission is
 
