@@ -71,7 +71,9 @@ def check_it_workspace(db: Session, identity, it_workspace: str) -> None:
 
 
 def actor_name(identity) -> str:
-    return "api-token" if isinstance(identity, PatIdentity) else identity.user.email
+    if isinstance(identity, PatIdentity):
+        return f"robot:{identity.name}" if identity.name else "api-token"
+    return identity.user.email
 
 
 @router.post("", response_model=ImportJobOut, status_code=201)

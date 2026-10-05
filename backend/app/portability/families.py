@@ -45,6 +45,10 @@ from app.models.ledger import (Claim, ClaimEvent, Conflict, ConflictEvent, Decis
                                IdentityEvent, LedgerDomain, LedgerPolicy, LedgerRuleset, LedgerStream, MigrationMap,
                                RecordEvent, ReconciliationReport, RevisionEvent, SourceRevision, StatusEvent,
                                StreamHead, TicketLink)
+from app.models.beam_model import BeamAssetBinding, BeamModelDocument, BeamModelValue
+from app.models.equipment_class import EquipmentClass, EquipmentClassReview
+from app.models.global_value import GlobalValue
+from app.models.group import Group, GroupMember
 from app.models.membership import Membership
 from app.models.role import Role, RoleBinding
 from app.models.schema import Schema
@@ -210,10 +214,18 @@ def _users(db, sc):
     ids |= set(db.scalars(select(RoleBinding.subject_id).where(RoleBinding.workspace_id.in_(sc.workspaces),
                                                                 RoleBinding.subject_type == "user")))
     ids |= {u for u in db.scalars(select(Document.owner_user_id).where(Document.workspace_id.in_(sc.workspaces))) if u}
+    ids |= set(db.scalars(select(GroupMember.user_id).where(GroupMember.group_uid.in_(
+        _groups(db, sc).with_only_columns(Group.uid)))))
     for col in ("authored_by", "approved_by"):
         ids |= {u for u in db.scalars(select(getattr(DocumentRevision, col)).where(
             DocumentRevision.document_uid.in_(sc.documents()))) if u}
     return select(User).where(User.id.in_(ids)).order_by(User.id)
+
+
+def _groups(db, sc):
+    """The groups the scope grants roles to (a grant to a group needs the group, and its members)."""
+    return select(Group).where(Group.uid.in_(select(RoleBinding.subject_id).where(
+        RoleBinding.workspace_id.in_(sc.workspaces), RoleBinding.subject_type == "group"))).order_by(Group.uid)
 
 
 def _roles(db, sc):
@@ -230,6 +242,11 @@ FAMILIES: list[Family] = [
     # catalogue
     Family("icons", "catalogue", Icon, ("uid",), _icons, blobs={"storage_path": "file"}),
     Family("types", "catalogue", Schema, ("uid",), _schemas, deferred=("parent_schema_uid",)),
+    # The installation's vocabulary for equipment with no type of its own, and its promotion reviews.
+    Family("equipment_classes", "catalogue", EquipmentClass, ("name",),
+           lambda db, sc: select(EquipmentClass).order_by(EquipmentClass.name)),
+    Family("equipment_class_reviews", "catalogue", EquipmentClassReview, ("class_name", "opened_at"),
+           lambda db, sc: select(EquipmentClassReview).order_by(EquipmentClassReview.id), exclude=("id",)),
     # identity: never credentials
     Family("identities", "identity", User, ("id",), _users,
            exclude=("last_login_at", "synced_at", "is_admin")),
@@ -238,6 +255,13 @@ FAMILIES: list[Family] = [
            lambda db, sc: select(Workspace).where(Workspace.id.in_(sc.workspaces)).order_by(Workspace.id),
            exclude=("import_state",)),
     Family("roles", "access", Role, ("id",), _roles),
+    Family("groups", "access", Group, ("uid",), _groups),
+    Family("group_members", "access", GroupMember, ("group_uid", "user_id"),
+           lambda db, sc: select(GroupMember).where(GroupMember.group_uid.in_(
+               _groups(db, sc).with_only_columns(Group.uid))).order_by(GroupMember.id),
+           exclude=("id",), replace_set=True),
+    # Shared value lists (statuses, priorities…) per workspace.
+    Family("global_values", "access", GlobalValue, ("uid",), _ws(GlobalValue, (GlobalValue.uid,))),
     Family("memberships", "access", Membership, ("workspace_id", "user_id"), _ws(Membership, (Membership.id,)),
            exclude=("id",), replace_set=True),
     Family("role_bindings", "access", RoleBinding, ("workspace_id", "subject_type", "subject_id", "role_id"),
@@ -290,6 +314,15 @@ FAMILIES: list[Family] = [
            blobs={"storage_path": "file"}, exclude=("backend_id", "backend_url"),
            subjects=("asset_uid", "issue_uid")),
     Family("migration_domains", "records", LedgerDomain, ("id",), _ws(LedgerDomain, (LedgerDomain.id,))),
+    # The beam model (docs/beam-model.md): its documents (layout, definitions, datasets), the values along its
+    # paths, and its components' bindings to assets. The beam elements themselves are assets, loaded before.
+    Family("beam_model_documents", "records", BeamModelDocument, ("workspace_id", "model_id", "revision"),
+           _ws(BeamModelDocument, (BeamModelDocument.id,)), exclude=("id",)),
+    Family("beam_model_values", "records", BeamModelValue, ("dataset_uid", "subject_uid", "path_uid"),
+           _ws(BeamModelValue, (BeamModelValue.id,)), exclude=("id",), subjects=("subject_uid",)),
+    Family("beam_asset_bindings", "records", BeamAssetBinding, ("workspace_id", "model_id", "component_id",
+                                                                "relation", "asset_uid"),
+           _ws(BeamAssetBinding, (BeamAssetBinding.id,)), exclude=("id",), subjects=("asset_uid",)),
     # ledger: the authority
     Family("streams", "ledger", LedgerStream, ("id",), _ws(LedgerStream, (LedgerStream.id,))),
     Family("source_revisions", "ledger", SourceRevision, ("id",), _revisions, blobs={"content": "bytes"}),

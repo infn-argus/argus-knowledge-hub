@@ -161,3 +161,36 @@ def test_a_changed_source_is_reindexed_and_a_removed_one_dropped(world):
     result = run(world)
     assert result["indexed"] == 1 and result["removed"] == 1
     assert "bakeout" in find(world, "bakeout heaters")["results"][0]["excerpt"]
+
+
+
+def test_a_reranker_orders_the_passages_found(world, monkeypatch):
+    """With a re-ranker, a wider pool is gathered and the re-ranker's order decides; if it fails, the search's own
+    order stands."""
+    run(world)
+    calls = []
+
+    def fake_rerank(endpoint, query, documents):
+        calls.append(len(documents))
+        # Prefer whatever mentions the HV cable.
+        return sorted([(i, 1.0 if "HV cable" in d else 0.1) for i, d in enumerate(documents)], key=lambda x: -x[1])
+    monkeypatch.setattr(ki, "rerank", fake_rerank)
+    ep = Endpoint("https://x/v1", "m", embedding_model="fake-64", rerank_model="bge-reranker")
+    db = SessionLocal()
+    try:
+        found = ki.search(db, world["ws"], ep, "ion pump", limit=2)
+    finally:
+        db.close()
+    assert found["reranked"] and calls and calls[0] > 2                  # a wider pool than the 2 asked for
+    assert "HV cable" in found["results"][0]["excerpt"] and "rerank_score" in found["results"][0]
+    assert len(found["results"]) == 2
+
+    def broken(endpoint, query, documents):
+        raise ki.LLMError("down")
+    monkeypatch.setattr(ki, "rerank", broken)
+    db = SessionLocal()
+    try:
+        plain = ki.search(db, world["ws"], ep, "ion pump", limit=2)
+    finally:
+        db.close()
+    assert not plain["reranked"] and len(plain["results"]) == 2

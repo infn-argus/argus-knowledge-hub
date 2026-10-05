@@ -38,6 +38,9 @@ class LLMConfig(Base, TimestampMixin):
     # transcriber lists them as two different models, and picking the wrong
     # one fails at the microphone rather than at configuration time.
     asr_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Orders the passages written-knowledge search found by how well they answer the question (a cross-encoder,
+    # served at the endpoint's /rerank). Optional: without it the search's own ranking stands.
+    rerank_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     tts_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # Fernet-encrypted, never returned to the client — the same handling the
     # import configurations give a source PAT. Nullable: some endpoints on

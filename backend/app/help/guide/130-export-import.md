@@ -39,14 +39,19 @@ same store name**); and the exporter's public key among its trusted keys.
 
 ## What an export carries, and what it does not
 
-**Carried:** the types and their icons; people (as the identity profile allows); the workspaces, their
-roles and who holds them; authority policies; assets with their relations, comments, history and
-labels; tickets with their comments, history, links and watchers; documents with their revisions and
-relations; attachments; ticket workflows; and the fact ledger with its full audit.
+**Carried:** the types and their icons; the equipment classes; people (as the identity profile allows); the
+workspaces, their roles, who holds them, and the groups roles are granted to, with their members; global
+values; authority policies; assets with their relations, comments, history and labels; tickets with their
+comments, history, links and watchers; documents with their revisions and relations; attachments; ticket
+workflows; **beam models** (their documents, the values along their paths and their components' bindings to
+assets); and the fact ledger with its full audit.
 
-**Not carried**, to set up again on the other installation: **global values**, the **AI endpoint**
-settings, saved **import configurations** (and their tokens), **API tokens**, **beam models**, and Ask
-ARGUS conversations.
+**Not carried**, to set up again on the other installation: the **AI endpoint** settings and model profiles,
+saved **import configurations** (and their tokens and history), **API tokens**, field devices, Ask ARGUS
+conversations, and the **written-knowledge index** (rebuild it on *AI endpoint → Build the index*).
+
+An archive made before a kind of data was carried simply lacks it: export again and import the new archive on
+top. Everything already imported is found identical and left as it is; only what is new is created.
 
 ## Words you will see
 
@@ -229,8 +234,8 @@ data in the repository, copy `/data/portability/dev/escrow.git` into production'
 (`kubectl -n argus cp escrow.git <api pod>:/data/portability/escrow-local.git`), and register it on
 production with the address `/data/portability/escrow-local.git`.
 
-Then set up on production what an export does not carry: the AI endpoint (*AI endpoint*), import
-configurations (*Imports*), global values and beam models (upload the model files again). The local
+Then set up on production what an export does not carry: the AI endpoint (*AI endpoint*, then *Build the
+index*) and import configurations (*Imports*). The local
 installation's test users come along with *Everything*; remove or deactivate the ones you do not want
 afterwards (*Administration → Users*).
 

@@ -65,6 +65,7 @@ def endpoint_for(config: LLMConfig) -> Endpoint:
         vision_model=config.vision_model,
         asr_model=config.asr_model,
         tts_model=config.tts_model,
+        rerank_model=config.rerank_model,
         api_key=decrypt_secret(config.encrypted_secret) if config.encrypted_secret else None,
         max_output_tokens=config.max_output_tokens,
     )
@@ -79,6 +80,7 @@ def _out(config: LLMConfig) -> LLMConfigOut:
         vision_model=config.vision_model,
         asr_model=config.asr_model,
         tts_model=config.tts_model,
+        rerank_model=config.rerank_model,
         has_api_key=bool(config.encrypted_secret),
         enabled=config.enabled,
         allow_confidential=config.allow_confidential,
@@ -107,9 +109,14 @@ def put_config(
     workspace_id: str = Depends(require_permission("modify")),
     db: Session = Depends(get_db),
 ):
-    config = _get(db, workspace_id)
+    return _save(db, workspace_id, body)
+
+
+def _save(db: Session, key: str, body: LLMConfigIn) -> LLMConfigOut:
+    """Settings for a workspace, or (key INSTALLATION) for the installation."""
+    config = _get(db, key)
     if config is None:
-        config = LLMConfig(workspace_id=workspace_id, base_url="", model="")
+        config = LLMConfig(workspace_id=key, base_url="", model="")
         db.add(config)
 
     config.base_url = body.base_url.strip()
@@ -118,6 +125,7 @@ def put_config(
     config.vision_model = (body.vision_model or "").strip() or None
     config.asr_model = (body.asr_model or "").strip() or None
     config.tts_model = (body.tts_model or "").strip() or None
+    config.rerank_model = (body.rerank_model or "").strip() or None
     config.enabled = body.enabled
     config.allow_confidential = body.allow_confidential
     config.max_output_tokens = body.max_output_tokens
@@ -152,7 +160,11 @@ def check_config(
     workspace_id: str = Depends(require_permission("modify")), db: Session = Depends(get_db)
 ):
     """Ask the endpoint whether it can do what it has been configured for."""
-    config = _get(db, workspace_id)
+    return _check(db, workspace_id)
+
+
+def _check(db: Session, key: str) -> LLMCheckResult:
+    config = _get(db, key)
     if config is None:
         raise HTTPException(status_code=404, detail="No AI endpoint is configured")
 
@@ -186,10 +198,13 @@ def status(
     shape = dict(
         model=config.model,
         has_embeddings=bool(config.embedding_model),
+        has_rerank=bool(config.rerank_model),
         has_vision=bool(config.vision_model),
         has_asr=bool(config.asr_model),
         has_tts=bool(config.tts_model),
-        inherited_from=inherited_from,
+        # Shown as "using the shared default from …": the installation's own settings read as such.
+        inherited_from=("the installation (Administration → AI)" if inherited_from == "__installation__"
+                        else inherited_from),
     )
     if not config.enabled:
         return AIStatus(
@@ -715,3 +730,45 @@ def knowledge_reindex(
         raise HTTPException(status_code=409, detail="An indexing run is already going.")
     background.add_task(_index_in_background, workspace_id)
     return {"started": True}
+
+
+# --------------------------------------------------------------------------- the installation's settings
+
+admin_router = APIRouter(prefix="/v1/admin/ai", tags=["ai"])
+
+
+def _administrator(identity=Depends(get_identity)):
+    from app.auth import OidcIdentity
+    if not isinstance(identity, OidcIdentity) or not identity.user.is_admin:
+        raise HTTPException(status_code=403, detail="Only administrators set the installation's AI settings")
+    return identity
+
+
+@admin_router.get("/config", response_model=Optional[LLMConfigOut])
+def get_installation_config(_admin=Depends(_administrator), db: Session = Depends(get_db)):
+    """The AI settings every workspace without its own uses (Administration → AI)."""
+    from app.services.ai_config import INSTALLATION
+    config = _get(db, INSTALLATION)
+    return _out(config) if config else None
+
+
+@admin_router.put("/config", response_model=LLMConfigOut)
+def put_installation_config(body: LLMConfigIn, _admin=Depends(_administrator), db: Session = Depends(get_db)):
+    """Set the installation's AI settings. "Send confidential documents" is never inherited, so it is not set here."""
+    from app.services.ai_config import INSTALLATION
+    return _save(db, INSTALLATION, body.model_copy(update={"allow_confidential": False}))
+
+
+@admin_router.delete("/config", status_code=204)
+def delete_installation_config(_admin=Depends(_administrator), db: Session = Depends(get_db)):
+    from app.services.ai_config import INSTALLATION
+    config = _get(db, INSTALLATION)
+    if config is not None:
+        db.delete(config)
+        db.commit()
+
+
+@admin_router.post("/config/check", response_model=LLMCheckResult)
+def check_installation_config(_admin=Depends(_administrator), db: Session = Depends(get_db)):
+    from app.services.ai_config import INSTALLATION
+    return _check(db, INSTALLATION)

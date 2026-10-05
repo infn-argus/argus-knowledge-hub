@@ -36,7 +36,7 @@ from app.models.asset_subresources import AssetComment
 from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRevision
 from app.models.issue import Issue, IssueComment
-from app.services.llm import Endpoint, LLMError, embed
+from app.services.llm import Endpoint, LLMError, embed, rerank
 
 CHUNK_CHARS = 1200
 OVERLAP_CHARS = 150
@@ -448,6 +448,10 @@ def search(db: Session, workspace_id: str, endpoint: Endpoint, query: str, kinds
             "ORDER BY ts_rank(tsv, websearch_to_tsquery('simple', :q)) DESC LIMIT 60"), {**params, "q": q}).mappings()):
         rows[row["id"]] = dict(row)
         ranked[row["id"]] = ranked.get(row["id"], 0) + 1 / (60 + rank)
+    wanted = max(1, min(limit, 20))
+    # With a re-ranker, a wider pool is gathered first and the re-ranker orders it by how well each passage
+    # answers the question; the hybrid ranking only chooses which passages it sees.
+    pool = min(40, wanted * 4) if endpoint.rerank_model else wanted
     results, per_source, said = [], {}, set()
     for cid in sorted(ranked, key=ranked.get, reverse=True):
         row = rows[cid]
@@ -463,9 +467,18 @@ def search(db: Session, workspace_id: str, endpoint: Endpoint, query: str, kinds
         said.add(text_key)
         results.append({"kind": row["source_kind"], "title": row["title"], "where": row["locator"],
                         "excerpt": row["body"][:1200], "record": record, "score": round(ranked[cid], 4)})
-        if len(results) >= max(1, min(limit, 20)):
+        if len(results) >= pool:
             break
-    return {"available": True, "results": results}
+    reranked = False
+    if endpoint.rerank_model and len(results) > 1:
+        try:
+            order = rerank(endpoint, q, [f"{r['title']}\n{r['excerpt']}" for r in results])
+            if order:
+                picked = [dict(results[i], rerank_score=round(score, 4)) for i, score in order if 0 <= i < len(results)]
+                results, reranked = picked, True
+        except LLMError:
+            pass                                    # the search's own order stands
+    return {"available": True, "results": results[:wanted], "reranked": reranked}
 
 
 # --------------------------------------------------------------------------- the command line

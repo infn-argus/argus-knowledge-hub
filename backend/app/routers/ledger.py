@@ -27,7 +27,9 @@ access_points_router = APIRouter(prefix="/v1/access-points", tags=["access point
 def actor_of(identity) -> str:
     if isinstance(identity, OidcIdentity):
         return identity.user.email or identity.user.id
-    return "api-token"
+    # A robot token is named in the audit by its name, so a facility's uploader is told apart from a script.
+    name = getattr(identity, "name", None)
+    return f"robot:{name}" if name else "api-token"
 
 
 def _fail(db: Session, exc: Exception, workspace_id: Optional[str] = None, actor: str = "",
@@ -679,7 +681,10 @@ class ReplaceIn(BaseModel):
 
 
 def _can(db: Session, identity, workspace_id: str, action: str, resource: str = "objects") -> bool:
-    from app.auth import PatIdentity, resolve_permission
+    from app.auth import PatIdentity, resolve_permission, token_scope
+    scope = token_scope(identity)
+    if scope is not None and not scope.may(action, resource):
+        return False
     return isinstance(identity, PatIdentity) or bool(resolve_permission(db, identity.user, workspace_id, action,
                                                                          resource))
 

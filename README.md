@@ -218,7 +218,14 @@ currently valid* revision rather than to an arbitrary PDF.
   runs it through the same code as the forms, with their permissions and in their name in the ledger.
   Only people who could make the change by hand are offered this, and the MCP tools stay read-only.
   Served by `/v1/ai/conversations/{id}/actions` (`/apply`, `/discard`).
-- **AI settings.** *Workspace → AI* holds the endpoint, its models and an **output-token limit**:
+- **My account and API tokens.** *My account* shows the account, the sign-in, groups and what each
+  workspace's roles allow. **Personal access tokens** call the API as their owner, with chosen scopes
+  and expiry. **Robot tokens** belong to a workspace, for machines such as a facility's daily-logbook
+  uploader. The mobile app signs in with OIDC and PKCE as `argus-mobile` (see `docs/operations.md`).
+- **AI settings.** *Administration → AI* sets the endpoint and models for the whole installation; every
+  workspace without settings of its own uses them, and a workspace can switch to its own and back. A
+  **re-ranker model** orders the passages Ask ARGUS's written-knowledge search finds by relevance (the
+  endpoint's `/rerank`). *Workspace → AI* holds a workspace's own endpoint, its models and an **output-token limit**:
   empty (the default) means no limit, a number caps every reply, for a gateway that bills or
   throttles by token. Reasoning models (Qwen, DeepSeek…) are asked not to think before a structured
   answer such as a form suggestion, where thinking only spends the budget; a reply cut off before

@@ -69,7 +69,9 @@ def _can_approve(workspace_id: str, identity: Identity, db: Session) -> bool:
     """Approval authority, resolved the same way as everything else — so the
     Approver role grants it, not only a legacy membership flag."""
     if isinstance(identity, PatIdentity):
-        return True
+        return identity.may("approve", "documents")
+    if identity.token is not None and not identity.token.may("approve", "documents"):
+        return False
     return has_permission(db, identity.user, workspace_id, "approve", "documents")
 
 
@@ -77,7 +79,9 @@ def _check_confidentiality(doc: Document, workspace_id: str, identity: Identity,
     if doc.confidentiality != "riservato":
         return
     if isinstance(identity, PatIdentity):
-        return
+        if identity.may("approve", "documents"):
+            return
+        raise HTTPException(status_code=404, detail="Document not found")
     if identity.user.is_admin or identity.user.id == doc.owner_user_id:
         return
     if _can_approve(workspace_id, identity, db):

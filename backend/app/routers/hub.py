@@ -35,7 +35,8 @@ def scope(
     x_workspace_id: Optional[str] = Header(default=None, alias="X-Workspace-Id"),
 ) -> _Scope:
     if isinstance(identity, PatIdentity):
-        return _Scope(identity.workspace_id, hub.Access(True, True, True), None)
+        return _Scope(identity.workspace_id, hub.Access(identity.may("read", "objects"), identity.may("read", "tickets"),
+                                                        identity.may("read", "documents")), None)
     if not x_workspace_id:
         raise HTTPException(status_code=400, detail="Missing X-Workspace-Id header")
     user = identity.user

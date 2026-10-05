@@ -113,9 +113,12 @@ def _require_owner_or_admin(workspace_id: str, identity: Identity, db: Session) 
     role, by is_admin, or by a legacy membership with full rights (which is
     what this check used to look for directly)."""
     if isinstance(identity, PatIdentity):
-        if identity.workspace_id != workspace_id:
+        if identity.workspace_id != workspace_id or not identity.may("admin"):
             raise HTTPException(status_code=403, detail="Not permitted")
         return
+    if identity.token is not None and (not identity.token.may("admin") or
+                                       identity.token.workspace_id not in (None, workspace_id)):
+        raise HTTPException(status_code=403, detail="This token may not administer the workspace")
     if identity.user.is_admin:
         return
     if not has_permission(db, identity.user, workspace_id, "manage_members", "workspace"):

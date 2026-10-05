@@ -29,9 +29,14 @@ def _only_this_tests_global_workspace():
     db.query(Workspace).filter(Workspace.is_global.is_(True)).update(
         {Workspace.is_global: False}, synchronize_session=False
     )
+    db.query(LLMConfig).filter(LLMConfig.workspace_id == "__installation__").delete()
     db.commit()
     db.close()
     yield
+    db = SessionLocal()
+    db.query(LLMConfig).filter(LLMConfig.workspace_id == "__installation__").delete()
+    db.commit()
+    db.close()
 
 
 def make(is_global=False, **config):
@@ -123,3 +128,79 @@ def test_with_no_global_workspace_there_is_simply_nothing():
     db = SessionLocal()
     assert resolve(db, beamline) == (None, None)
     db.close()
+
+
+
+# --- the installation's own settings (Administration → AI) -------------------------------------------
+
+def test_the_installation_settings_are_what_every_workspace_without_its_own_uses():
+    from fastapi.testclient import TestClient
+    from app.auth import OidcIdentity, get_identity
+    from app.main import app
+    from app.models.user import User
+    from app.routers.ai import endpoint_for
+    client = TestClient(app)
+    admin = User(id=f"adm-{secrets.token_hex(3)}", email="adm@argus.test", is_admin=True)
+    plain = User(id=f"usr-{secrets.token_hex(3)}", email="usr@argus.test", is_admin=False)
+    body = {"base_url": "https://gw.infn.it/v1", "model": "qwen36-27b", "embedding_model": "qwen3-embedding-8b",
+            "rerank_model": "bge-reranker-v2-m3", "enabled": True, "allow_confidential": True}
+    try:
+        app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=plain)
+        assert client.put("/v1/admin/ai/config", json=body).status_code == 403
+        app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=admin)
+        saved = client.put("/v1/admin/ai/config", json=body).json()
+        assert saved["rerank_model"] == "bge-reranker-v2-m3" and saved["allow_confidential"] is False
+        db = SessionLocal()
+        db.get(LLMConfig, "__installation__").last_check_ok = True          # as a passed check leaves it
+        db.commit()
+        beamline = make()
+        config, inherited_from = resolve(db, beamline)
+        assert inherited_from == "__installation__" and config.model == "qwen36-27b"
+        assert config.allow_confidential is False                      # never inherited
+        assert endpoint_for(config).rerank_model == "bge-reranker-v2-m3"
+        # Its own settings come first; removing them goes back to the installation's.
+        own = make(base_url="https://own/v1", model="own-model")
+        assert resolve(db, own) == (db.get(LLMConfig, own), None)
+        db.delete(db.get(LLMConfig, own))
+        db.commit()
+        assert resolve(db, own)[1] == "__installation__"
+        db.close()
+    finally:
+        app.dependency_overrides.pop(get_identity, None)
+
+
+def test_the_installation_settings_come_before_a_global_workspaces():
+    make(is_global=True, base_url="https://old-global/v1", model="old")
+    db = SessionLocal()
+    db.add(LLMConfig(workspace_id="__installation__", base_url="https://installation/v1", model="new",
+                     enabled=True, last_check_ok=True))
+    db.commit()
+    config, inherited_from = resolve(db, make())
+    assert config.base_url == "https://installation/v1" and inherited_from == "__installation__"
+    db.close()
+
+
+def test_a_reranker_orders_by_relevance_and_falls_back_to_v1(monkeypatch):
+    from app.services import llm
+    seen = []
+
+    class R:
+        def __init__(self, status, body):
+            self.status_code, self._b, self.text = status, body, ""
+
+        def json(self):
+            return self._b
+
+    def post(url, headers=None, json=None, timeout=None):
+        seen.append(url)
+        if url.endswith("/v1/rerank") and not url.endswith("/v1/v1/rerank") and "gw2" in url:
+            return R(200, {"results": [{"index": 1, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.2}]})
+        if "gw2" in url:
+            return R(404, {})
+        return R(200, {"results": [{"index": 0, "relevance_score": 0.1}, {"index": 1, "relevance_score": 0.8}]})
+    monkeypatch.setattr(llm.requests, "post", post)
+    ep = llm.Endpoint("https://gw/v1", "m", rerank_model="bge")
+    assert llm.rerank(ep, "q", ["a", "b"]) == [(1, 0.8), (0, 0.1)]
+    ep2 = llm.Endpoint("https://gw2", "m", rerank_model="bge")      # no /rerank at the root: /v1/rerank
+    assert llm.rerank(ep2, "q", ["a", "b"])[0] == (1, 0.9) and seen[-1] == "https://gw2/v1/rerank"
+    assert llm.rerank(llm.Endpoint("https://gw/v1", "m"), "q", ["a", "b"]) == [(0, 0.0), (1, 0.0)]  # none set

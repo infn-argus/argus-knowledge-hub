@@ -12,9 +12,29 @@ import { aiApi } from "../../api/client";
  * values file or a chat window to get there.
  */
 export function WorkspaceAI() {
+  return <AIEndpointSettings scope="workspace" />;
+}
+
+/** Administration → AI: the settings every workspace without its own uses. */
+export function InstallationAI() {
+  return <AIEndpointSettings scope="installation" />;
+}
+
+const API = {
+  workspace: { key: "ai-config", get: aiApi.getConfig, save: aiApi.saveConfig, check: aiApi.check, remove: aiApi.deleteConfig },
+  installation: { key: "ai-installation-config", get: aiApi.getInstallationConfig, save: aiApi.saveInstallationConfig,
+                  check: aiApi.checkInstallationConfig, remove: aiApi.deleteInstallationConfig },
+};
+
+function AIEndpointSettings({ scope }: { scope: "workspace" | "installation" }) {
+  const api = API[scope];
+  const workspace = scope === "workspace";
   const queryClient = useQueryClient();
-  const config = useQuery({ queryKey: ["ai-config"], queryFn: aiApi.getConfig });
-  const status = useQuery({ queryKey: ["ai-status"], queryFn: aiApi.status });
+  const config = useQuery({ queryKey: [api.key], queryFn: api.get });
+  const status = useQuery({ queryKey: ["ai-status"], queryFn: aiApi.status, enabled: workspace });
+  // A workspace with no settings of its own uses the installation's (or a global workspace's): the form only
+  // opens when somebody chooses to give it its own.
+  const [ownForm, setOwnForm] = useState(false);
 
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
@@ -22,6 +42,7 @@ export function WorkspaceAI() {
   const [visionModel, setVisionModel] = useState("");
   const [asrModel, setAsrModel] = useState("");
   const [ttsModel, setTtsModel] = useState("");
+  const [rerankModel, setRerankModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [enabled, setEnabled] = useState(false);
   const [allowConfidential, setAllowConfidential] = useState(false);
@@ -38,6 +59,7 @@ export function WorkspaceAI() {
       setVisionModel(c.vision_model ?? "");
       setAsrModel(c.asr_model ?? "");
       setTtsModel(c.tts_model ?? "");
+      setRerankModel(c.rerank_model ?? "");
       setEnabled(c.enabled);
       setAllowConfidential(c.allow_confidential);
       setMaxOutputTokens(c.max_output_tokens ? String(c.max_output_tokens) : "");
@@ -47,13 +69,14 @@ export function WorkspaceAI() {
 
   const save = useMutation({
     mutationFn: () =>
-      aiApi.saveConfig({
+      api.save({
         base_url: baseUrl.trim(),
         model: model.trim(),
         embedding_model: embeddingModel.trim() || null,
         vision_model: visionModel.trim() || null,
         asr_model: asrModel.trim() || null,
         tts_model: ttsModel.trim() || null,
+        rerank_model: rerankModel.trim() || null,
         // Left out entirely when untouched, so saving a model change does
         // not wipe the stored key.
         ...(apiKey ? { api_key: apiKey } : {}),
@@ -63,42 +86,79 @@ export function WorkspaceAI() {
       }),
     onSuccess: () => {
       setApiKey("");
-      queryClient.invalidateQueries({ queryKey: ["ai-config"] });
+      queryClient.invalidateQueries({ queryKey: [api.key] });
       queryClient.invalidateQueries({ queryKey: ["ai-status"] });
     },
   });
 
   const check = useMutation({
-    mutationFn: aiApi.check,
+    mutationFn: api.check,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["ai-config"] });
+      queryClient.invalidateQueries({ queryKey: [api.key] });
       queryClient.invalidateQueries({ queryKey: ["ai-status"] });
     },
   });
 
   const saved = config.data;
   const checkResult = check.data;
+  const inheriting = workspace && !saved && !config.isLoading;
+  const showForm = !inheriting || ownForm;
+  const backToShared = useMutation({
+    mutationFn: api.remove,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.key] });
+      queryClient.invalidateQueries({ queryKey: ["ai-status"] });
+      setLoaded(false);
+      setOwnForm(false);
+    },
+  });
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-2xl font-semibold text-slate-900">AI endpoint</h1>
+      <h1 className="text-2xl font-semibold text-slate-900">{workspace ? "AI endpoint" : "AI settings for the installation"}</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Any OpenAI-compatible endpoint. AI features stay unavailable until a check against
-        this endpoint passes, so a gateway whose key has since been rotated reads as
-        unavailable rather than quietly failing.
+        {workspace ? <>Any OpenAI-compatible endpoint. AI features stay unavailable until a check against
+          this endpoint passes, so a gateway whose key has since been rotated reads as unavailable rather than
+          quietly failing.</>
+          : <>The endpoint and models every workspace uses unless it sets its own on its <i>AI endpoint</i> page.
+            Checked like a workspace's; until the check passes, workspaces have no shared AI. Confidential documents
+            are never sent on these settings: each workspace decides that for itself.</>}
       </p>
 
-      {status.data?.inherited_from && (
-        <div className="mt-4 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-          This workspace has no endpoint of its own and is using the shared default from{" "}
-          <span className="font-medium">{status.data.inherited_from}</span>
-          {status.data.model && <> — {status.data.model}</>}. Filling this form in gives the
-          workspace its own settings instead. Confidential documents are never sent on the
-          shared default: that permission has to be granted here.
+      {inheriting && (
+        <div className="mt-4 space-y-2 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+          {status.data?.inherited_from ? (
+            <p>
+              This workspace uses the shared AI settings of{" "}
+              <span className="font-medium">{status.data.inherited_from}</span>
+              {status.data.model && <> — {status.data.model}</>}
+              {status.data.has_rerank && <>, with a re-ranker</>}. Confidential documents are never sent on shared
+              settings.
+            </p>
+          ) : (
+            <p>This workspace has no AI settings of its own, and the installation has none to share
+              (Administration → AI).</p>
+          )}
+          {!ownForm && (
+            <button type="button" onClick={() => setOwnForm(true)}
+                    className="rounded border border-sky-300 bg-white px-3 py-1 text-xs hover:bg-sky-100">
+              Give this workspace settings of its own
+            </button>
+          )}
+        </div>
+      )}
+      {workspace && saved && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+          This workspace uses settings of its own.
+          <button type="button" disabled={backToShared.isPending}
+                  onClick={() => { if (confirm("Remove this workspace's own AI settings and use the installation's?")) backToShared.mutate(); }}
+                  className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-50">
+            Use the installation's settings instead
+          </button>
         </div>
       )}
 
-      <div className="mt-6 space-y-4">
+      {showForm && (<div className="mt-6 space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700">Endpoint URL</label>
           <input
@@ -148,6 +208,21 @@ export function WorkspaceAI() {
             Optional, and usually a different model from the one above: a chat model
             answers “not a multimodal model” when shown a photograph. Needed to identify
             equipment from a picture.
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Re-ranker model</label>
+          <input
+            value={rerankModel}
+            onChange={(e) => setRerankModel(e.target.value)}
+            placeholder="bge-reranker-v2-m3"
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Optional. Used by Ask ARGUS's search of what is written: the passages found by meaning and by words are
+            put in order by how well each answers the question (served at the endpoint's /rerank). Without it, the
+            search's own order stands.
           </p>
         </div>
 
@@ -222,7 +297,7 @@ export function WorkspaceAI() {
             className="mt-0.5"
           />
           <span>
-            Offer AI features in this workspace
+            {workspace ? "Offer AI features in this workspace" : "Offer AI features to the workspaces that use these settings"}
             <span className="block text-xs text-slate-500">
               Suggestions are always proposals — nothing is written to a record without
               somebody accepting it.
@@ -230,9 +305,11 @@ export function WorkspaceAI() {
           </span>
         </label>
 
+        {workspace && (
         <label className="flex items-start gap-2 text-sm text-slate-700">
           <input
             type="checkbox"
+            disabled={!workspace}
             checked={allowConfidential}
             onChange={(e) => setAllowConfidential(e.target.checked)}
             className="mt-0.5"
@@ -245,6 +322,7 @@ export function WorkspaceAI() {
             </span>
           </span>
         </label>
+        )}
 
         <div className="flex items-center gap-3">
           <button
@@ -264,9 +342,10 @@ export function WorkspaceAI() {
           {saved && (
             <button
               onClick={() => {
-                if (confirm("Remove this AI endpoint? AI features will stop being offered."))
-                  aiApi.deleteConfig().then(() => {
-                    queryClient.invalidateQueries({ queryKey: ["ai-config"] });
+                if (confirm(workspace ? "Remove this workspace's own AI settings? It then uses the installation's."
+                  : "Remove the installation's AI settings? Workspaces without their own lose AI."))
+                  api.remove().then(() => {
+                    queryClient.invalidateQueries({ queryKey: [api.key] });
                     queryClient.invalidateQueries({ queryKey: ["ai-status"] });
                     setLoaded(false);
                   });
@@ -322,9 +401,9 @@ export function WorkspaceAI() {
               : "Not checked since it was last changed."}
           </p>
         )}
-      </div>
-      <KnowledgeIndex />
-      <IntakeProfiles />
+      </div>)}
+      {workspace && <KnowledgeIndex />}
+      {workspace && <IntakeProfiles />}
     </div>
   );
 }

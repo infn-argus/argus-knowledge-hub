@@ -11,6 +11,7 @@ class LLMConfigIn(BaseModel):
     vision_model: Optional[str] = None
     asr_model: Optional[str] = None
     tts_model: Optional[str] = None
+    rerank_model: Optional[str] = None
     # Left out on an update, the stored key is kept. Sent empty, it is
     # cleared — for an endpoint that takes none.
     api_key: Optional[str] = None
@@ -33,6 +34,7 @@ class LLMConfigOut(BaseModel):
     vision_model: Optional[str]
     asr_model: Optional[str]
     tts_model: Optional[str]
+    rerank_model: Optional[str] = None
     has_api_key: bool
     enabled: bool
     allow_confidential: bool
@@ -59,6 +61,7 @@ class AIStatus(BaseModel):
     validated: bool
     model: Optional[str] = None
     has_embeddings: bool = False
+    has_rerank: bool = False
     has_vision: bool = False
     has_asr: bool = False
     has_tts: bool = False

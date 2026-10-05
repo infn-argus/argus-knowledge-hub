@@ -1003,6 +1003,12 @@ export const aiApi = {
     request<LLMConfig>("/v1/ai/config", { method: "PUT", body: json(input) }),
   deleteConfig: () => request<void>("/v1/ai/config", { method: "DELETE" }),
   check: () => request<LLMCheckResult>("/v1/ai/config/check", { method: "POST" }),
+  /** The installation's settings (Administration → AI): what every workspace without its own uses. */
+  getInstallationConfig: () => request<LLMConfig | null>("/v1/admin/ai/config"),
+  saveInstallationConfig: (input: LLMConfigInput) =>
+    request<LLMConfig>("/v1/admin/ai/config", { method: "PUT", body: json(input) }),
+  deleteInstallationConfig: () => request<void>("/v1/admin/ai/config", { method: "DELETE" }),
+  checkInstallationConfig: () => request<LLMCheckResult>("/v1/admin/ai/config/check", { method: "POST" }),
   /** What the application asks before offering an AI action. */
   status: () => request<AIStatus>("/v1/ai/status"),
 
@@ -1621,4 +1627,86 @@ export function problemText(e: unknown): string {
     return `Request failed (${e.status})`;
   }
   return e instanceof Error ? e.message : String(e);
+}
+
+// --------------------------------------------------------------------------- who am I, and API tokens
+
+export type TokenScope = "read" | "create" | "modify" | "delete" | "approve" | "admin";
+export type TokenResource = "objects" | "tickets" | "documents";
+
+export interface ApiTokenInfo {
+  id: number;
+  kind: "personal" | "robot";
+  name: string | null;
+  prefix: string | null;
+  workspace_id: string | null;
+  user_id: string | null;
+  owner_email: string | null;
+  scopes: TokenScope[];
+  resources: TokenResource[];
+  restricted_grants: string[];
+  created_by: string | null;
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  status: "active" | "expired" | "revoked";
+}
+
+export interface ApiTokenCreated extends ApiTokenInfo {
+  /** Shown this once: it is never stored. */
+  token: string;
+}
+
+export interface ApiTokenInput {
+  name: string;
+  scopes: TokenScope[];
+  resources?: TokenResource[];
+  workspace_id?: string | null;
+  expires_in_days: number | null;
+  restricted_grants?: string[];
+}
+
+export interface MyProfile {
+  auth_type: "oidc" | "personal_token" | "robot_token";
+  user: {
+    id: string; email: string; name: string | null; username: string | null; is_admin: boolean;
+    acting_as_admin: boolean; source: string; active: boolean; directory_dn: string | null;
+    oidc_subject: string | null; created_at: string; last_login_at: string | null; synced_at: string | null;
+  } | null;
+  session: {
+    issuer?: string | null; subject?: string | null; client?: string | null; auth_time?: number | null;
+    expires?: number | null; identity_provider?: string | null; scopes?: string | null; realm_roles?: string[];
+    workspace_id?: string;
+  };
+  token: ApiTokenInfo | null;
+  groups: { uid: string; name: string; source: string; email: string | null; member_since: string | null }[];
+  workspaces: {
+    id: string; name: string; is_global: boolean;
+    roles: { id: string; name: string; via: string }[];
+    permissions: Record<string, string[]>;
+  }[];
+  counts: { personal_tokens?: number; devices?: number };
+}
+
+export const tokensApi = {
+  profile: () => request<MyProfile>("/v1/me/profile"),
+  mine: () => request<ApiTokenInfo[]>("/v1/me/tokens"),
+  makeMine: (input: ApiTokenInput) =>
+    request<ApiTokenCreated>("/v1/me/tokens", { method: "POST", body: json(input) }),
+  revokeMine: (id: number) => request<void>(`/v1/me/tokens/${id}`, { method: "DELETE" }),
+  robots: (ws: string) => request<ApiTokenInfo[]>(`/v1/workspaces/${encodeURIComponent(ws)}/robot-tokens`),
+  makeRobot: (ws: string, input: ApiTokenInput) =>
+    request<ApiTokenCreated>(`/v1/workspaces/${encodeURIComponent(ws)}/robot-tokens`, {
+      method: "POST", body: json(input),
+    }),
+  revokeRobot: (ws: string, id: number) =>
+    request<void>(`/v1/workspaces/${encodeURIComponent(ws)}/robot-tokens/${id}`, { method: "DELETE" }),
+  all: () => request<ApiTokenInfo[]>("/v1/admin/tokens"),
+  revokeAny: (id: number) => request<void>(`/v1/admin/tokens/${id}`, { method: "DELETE" }),
+};
+
+/** The API's address, for the examples a page shows. */
+export async function apiBaseUrl(): Promise<string> {
+  return (await loadSession())?.baseUrl ?? "";
 }

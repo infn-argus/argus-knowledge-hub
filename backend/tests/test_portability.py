@@ -1439,3 +1439,84 @@ def test_a_background_step_reports_how_far_it_has_got():
     assert job["metrics"]["progress"] == {**job["metrics"]["progress"], "stage": "checking assets", "done": 100,
                                           "total": 100, "percent": 100.0}
     jobs.report("outside a job", 1, 2)             # a step run synchronously reports nowhere, and does not fail
+
+
+def test_beam_models_global_values_groups_and_equipment_classes_travel(dbs, env):
+    """The first local-to-production import left the beam model's layout and element data, the global values,
+    the groups granted roles and the equipment classes behind: the archive did not carry them."""
+    from app.models.beam_model import BeamAssetBinding, BeamModelDocument, BeamModelValue
+    from app.models.equipment_class import EquipmentClass, EquipmentClassReview
+    from app.models.global_value import GlobalValue
+    from app.models.group import Group, GroupMember
+    from app.models.role import RoleBinding
+    from app.services.roles import ensure_system_roles
+    src, dst = dbs(), dbs()
+    s = populate(src, env.tmp)
+    t = datetime.now(timezone.utc)
+    with Session(src) as db:
+        ensure_system_roles(db)
+        a, b, c = db.scalars(select(Asset.uid).where(Asset.workspace_id == s.ws).order_by(Asset.uid).limit(3)).all()
+        db.add(BeamModelDocument(workspace_id=s.ws, model_id="ring", revision="r1", current=True,
+                                 document={"schema": "argus.beam-model/2", "layout": {"x": [0, 1]}}, report={},
+                                 imported_by="rossi@example.org", imported_at=t))
+        db.add(BeamModelValue(workspace_id=s.ws, dataset_uid=a, subject_uid=b, path_uid=c, s=1.5, x=0.1,
+                              optics={"beta_x": 3.2}))
+        db.add(BeamAssetBinding(workspace_id=s.ws, model_id="ring", component_id="QF1", component_uid=b,
+                                relation="implemented_by", asset_uid=c, status="confirmed", authority="person",
+                                confidence=0.9, evidence=[], method="manual", created_at=t, updated_at=t))
+        db.add(GlobalValue(uid=f"gv-{s.ws}", workspace_id=s.ws, name="Status", key="status", type="enumeration",
+                           options=[{"id": "ok", "label": "OK"}]))
+        db.add(EquipmentClass(name=f"Crate {s.ws}", status="active", added_by="rossi@example.org", added_at=t))
+        db.add(EquipmentClassReview(class_name=f"Crate {s.ws}", triggers={"count": 12}, status="open", opened_at=t))
+        db.add(Group(uid=f"g-{s.ws}", name="Vacuum team", source="directory"))
+        db.flush()
+        db.add(GroupMember(group_uid=f"g-{s.ws}", user_id="u-rossi", source="directory", created_at=t))
+        db.add(RoleBinding(workspace_id=s.ws, subject_type="group", subject_id=f"g-{s.ws}", role_id="viewer",
+                           created_at=t))
+        db.commit()
+    with Session(dst) as db:
+        ensure_system_roles(db)
+        db.commit()
+    view, manifest = run_export(src, env, s)
+    for fam in ("beam_model_documents", "beam_model_values", "beam_asset_bindings", "global_values",
+                "equipment_classes", "equipment_class_reviews", "groups", "group_members"):
+        assert manifest["families"][fam]["rows"] >= 1, fam
+    _, reconciliation = run_import(dst, env, view["git"]["tag"])
+    assert reconciliation["passed"], {k: v["mismatches"][:2] for k, v in reconciliation["families"].items() if not v["ok"]}
+    with Session(dst) as db:
+        doc = db.scalar(select(BeamModelDocument).where(BeamModelDocument.model_id == "ring"))
+        assert doc.document["layout"] == {"x": [0, 1]} and doc.current
+        assert db.scalar(select(BeamModelValue).where(BeamModelValue.subject_uid == b)).optics == {"beta_x": 3.2}
+        assert db.scalar(select(BeamAssetBinding).where(BeamAssetBinding.component_id == "QF1")).status == "confirmed"
+        assert db.get(GlobalValue, f"gv-{s.ws}").options[0]["label"] == "OK"
+        assert db.get(EquipmentClass, f"Crate {s.ws}") is not None
+        assert db.scalar(select(GroupMember).where(GroupMember.group_uid == f"g-{s.ws}")).user_id == "u-rossi"
+
+
+def test_a_second_full_export_fills_in_what_the_first_import_lacked(dbs, env):
+    """Production already holds the first import: a new full export from the same installation imports on top,
+    finding everything already there identical and creating only what is new (the beam model)."""
+    from app.models.beam_model import BeamModelDocument
+    from app.services.roles import ensure_system_roles
+    src, dst = dbs(), dbs()
+    s = populate(src, env.tmp)
+    for eng in (src, dst):
+        with Session(eng) as db:
+            ensure_system_roles(db)
+            db.commit()
+    first, _ = run_export(src, env, s)
+    run_import(dst, env, first["git"]["tag"])
+    with Session(src) as db:
+        db.add(BeamModelDocument(workspace_id=s.ws, model_id="linac", revision="r1", current=True,
+                                 document={"layout": {}}, report={}, imported_by="rossi@example.org",
+                                 imported_at=datetime.now(timezone.utc)))
+        db.commit()
+    second, _ = run_export(src, env, s)
+    _, report = run_import(dst, env, second["git"]["tag"], expect_ready=False)
+    assert report["ready"], (report.get("blocking"), report.get("chain"))
+    assert report["families"]["beam_model_documents"]["create"] == 1
+    assert report["families"]["assets"].get("identical", 0) > 0 and not report["families"]["assets"].get("create")
+    _, reconciliation = run_import(dst, env, second["git"]["tag"])
+    assert reconciliation["passed"]
+    with Session(dst) as db:
+        assert db.scalar(select(BeamModelDocument).where(BeamModelDocument.model_id == "linac")) is not None

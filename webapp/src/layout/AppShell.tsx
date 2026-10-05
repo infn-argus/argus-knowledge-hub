@@ -359,6 +359,9 @@ export function AppShell() {
           <NavLink to="/about" className="rounded px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700">
             About
           </NavLink>
+          <NavLink to="/account" className="rounded px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700">
+            My account
+          </NavLink>
           <button
             onClick={() => void signOut()}
             className="ml-auto rounded px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"

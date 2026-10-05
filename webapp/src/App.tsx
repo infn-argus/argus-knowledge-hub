@@ -51,7 +51,7 @@ import { LinkRedirect } from "./pages/lookup/LinkRedirect";
 import { SchemaDetail } from "./pages/schemas/Detail";
 import { IconLibrary } from "./pages/icons/List";
 import { SchemaForm } from "./pages/schemas/Form";
-import { WorkspaceAI } from "./pages/workspace/AI";
+import { InstallationAI, WorkspaceAI } from "./pages/workspace/AI";
 import { WorkspaceAccess } from "./pages/workspace/Access";
 import { WorkspaceMembers } from "./pages/workspace/Members";
 import { WorkspaceIntegrity } from "./pages/workspace/Integrity";
@@ -61,6 +61,9 @@ import { EquipmentClassesPage } from "./pages/catalogue/EquipmentClasses";
 import { WorkspaceTransfer } from "./pages/workspace/Transfer";
 import { TransferList } from "./pages/workspace/TransferList";
 import { TransferStatus } from "./pages/workspace/TransferStatus";
+import { AccountPage } from "./pages/account/Account";
+import { RobotTokensPage } from "./pages/workspace/RobotTokens";
+import { AdminTokensPage } from "./pages/admin/Tokens";
 
 /** Sends /imports/... to the workspace-scoped equivalent, keeping whatever
  * came after it. */
@@ -122,6 +125,7 @@ export function App() {
           <Route path="/control-bindings" element={<ControlBindingsPage />} />
           <Route path="/catalogue/types" element={<TypeCataloguePage />} />
           <Route path="/about" element={<AboutPage />} />
+          <Route path="/account" element={<AccountPage />} />
           <Route path="/migration/catalogue/:id" element={<CatalogueMappingReview />} />
           <Route path="/bulk-changes" element={<BulkChangesPage />} />
           <Route path="/catalogue/equipment-classes" element={<EquipmentClassesPage />} />
@@ -151,6 +155,7 @@ export function App() {
           />
           <Route path="/workspaces/:workspaceId/imports/:uid" element={<ImportStatus />} />
           <Route path="/workspaces/:workspaceId/ai" element={<WorkspaceAI />} />
+          <Route path="/workspaces/:workspaceId/robot-tokens" element={<RobotTokensPage />} />
           <Route path="/workspaces/:workspaceId/access" element={<WorkspaceAccess />} />
           <Route path="/workspaces/:workspaceId/access-reviews" element={<AccessReviews />} />
           <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembers />} />
@@ -164,6 +169,8 @@ export function App() {
           <Route path="/admin/new-workspace" element={<NewWorkspace />} />
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
+          <Route path="/admin/ai" element={<InstallationAI />} />
+          <Route path="/admin/tokens" element={<AdminTokensPage />} />
           <Route path="/admin/portability" element={<PortabilityPage />} />
           <Route path="/admin/portability/exports/:id" element={<ExportDetailPage />} />
           <Route path="/admin/portability/imports/:id" element={<ImportDetailPage />} />

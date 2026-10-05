@@ -423,6 +423,56 @@ If a staging database outlives its import (a crash during finalization), drop it
 `quarantine/`, `staging/` and `verify/` directories under `ARGUS_PORTABILITY_ROOT` can be removed
 the same way.
 
+## API tokens
+
+ARGUS has two kinds of token, both made in the web application. Only a person signed in can make one;
+a token can never make another.
+
+- **Personal access tokens** are made on *My account*. They act as their owner, narrowed by their scopes
+  (read, create, modify, delete, approve, admin) and optionally by kind of record and workspace. They
+  expire within a year. They never exceed the owner's roles, and they carry administrator rights only
+  with the `admin` scope.
+- **Robot tokens** are made on a workspace's *Robot tokens* page by its owners. They belong to the
+  workspace, are named in the history as `robot:<name>`, and expire within two years or never.
+
+Tokens start `argus_pat_` or `argus_bot_`, so secret scanners can recognise them. Only their peppered
+SHA-256 is stored. Revoked and expired tokens answer 401. A token without a write scope can only `GET`.
+*Administration → API tokens* lists and revokes them all.
+
+Tokens made with `scripts/create_token.py` or `argus_admin.py`, and those made before this change, are
+robot tokens with every scope: what they always could do.
+
+## The mobile app's sign-in client
+
+The ARGUS Field app signs in with OpenID Connect and PKCE as the public client `argus-mobile`, and sends
+its **access token**. The API accepts only tokens addressed to its audience (`OIDC_AUDIENCE`, the web
+client's id), so the client needs an audience mapper. The chart's realm includes it, but Keycloak
+imports the realm only on its first start. On an installation set up before, add it once in the
+Keycloak admin console (realm `argus`):
+
+1. *Clients → Create client*: OpenID Connect, client id `argus-mobile`, name *ARGUS Field (mobile)*.
+   *Client authentication* off (public), only *Standard flow* on.
+2. *Valid redirect URIs*: `it.infn.argus.field:/oauthredirect` (and the web app's
+   `https://<web host>/auth/mobile` for app links). *Advanced → Proof Key for Code Exchange*: `S256`.
+   *Access token lifespan*: 10 minutes.
+3. *Client scopes → argus-mobile-dedicated → Configure a new mapper → Audience*: name *ARGUS API
+   audience*, *Included client audience* `argus-webapp`, *Add to access token* on.
+
+Or with `kcadm.sh` inside the Keycloak pod:
+
+```bash
+kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin   # asks for the password
+kcadm.sh create clients -r argus -s clientId=argus-mobile -s publicClient=true \
+  -s standardFlowEnabled=true -s directAccessGrantsEnabled=false \
+  -s 'redirectUris=["it.infn.argus.field:/oauthredirect"]' \
+  -s 'attributes={"pkce.code.challenge.method":"S256","access.token.lifespan":"600"}' \
+  -s 'protocolMappers=[{"name":"ARGUS API audience","protocol":"openid-connect","protocolMapper":"oidc-audience-mapper","config":{"included.client.audience":"argus-webapp","access.token.claim":"true"}}]'
+```
+
+Build the app against production with `--dart-define=ARGUS_ENV=production
+--dart-define=ARGUS_API_BASE=https://<api host> --dart-define=OIDC_ISSUER=https://<keycloak host>/realms/argus`
+(the variables are in `mobile/app/lib/core/config.dart`).
+
 ## Performance targets
 
 ```

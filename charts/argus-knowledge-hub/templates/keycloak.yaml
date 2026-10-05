@@ -1,6 +1,7 @@
 {{- if .Values.keycloak.enabled }}
 # A Keycloak for sign-in until the hub uses INFN's: the realm below is imported on its first start (an
-# existing realm is left as it is), with no users. People are added in its admin console, as the admin
+# existing realm is left as it is), with no users. Two clients: the web app, and argus-mobile for the ARGUS Field
+# app (PKCE, its access token addressed to the API by an audience mapper). People are added in its admin console, as the admin
 # whose password is in the Secret. Its data is in Postgres (database keycloak), so a restart keeps them.
 apiVersion: v1
 kind: ConfigMap
@@ -37,6 +38,36 @@ data:
             "post.logout.redirect.uris": "https://{{ .Values.hosts.web }}/*"
           },
           "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"]
+        },
+        {
+          "clientId": "argus-mobile",
+          "name": "ARGUS Field (mobile)",
+          "enabled": true,
+          "publicClient": true,
+          "protocol": "openid-connect",
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": false,
+          "redirectUris": ["it.infn.argus.field:/oauthredirect", "https://{{ .Values.hosts.web }}/auth/mobile"],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "access.token.lifespan": "600",
+            "use.refresh.tokens": "true"
+          },
+          "protocolMappers": [
+            {
+              "name": "ARGUS API audience",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "config": {
+                "included.client.audience": {{ .Values.keycloak.clientId | quote }},
+                "access.token.claim": "true",
+                "id.token.claim": "false"
+              }
+            }
+          ],
+          "defaultClientScopes": ["acr", "profile", "roles", "email"]
         }
       ]
     }

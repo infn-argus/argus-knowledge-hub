@@ -871,6 +871,7 @@ export interface LLMConfig {
   vision_model: string | null;
   asr_model: string | null;
   tts_model: string | null;
+  rerank_model?: string | null;
   /** The key itself is never sent back — only whether one is stored. */
   has_api_key: boolean;
   enabled: boolean;
@@ -889,6 +890,7 @@ export interface LLMConfigInput {
   vision_model?: string | null;
   asr_model?: string | null;
   tts_model?: string | null;
+  rerank_model?: string | null;
   /** Omitted keeps the stored key; "" clears it. */
   api_key?: string;
   enabled: boolean;
@@ -909,6 +911,7 @@ export interface AIStatus {
   validated: boolean;
   model: string | null;
   has_embeddings: boolean;
+  has_rerank?: boolean;
   has_vision: boolean;
   has_asr: boolean;
   has_tts: boolean;

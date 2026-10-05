@@ -29,6 +29,7 @@ class Endpoint:
     vision_model: Optional[str] = None
     asr_model: Optional[str] = None
     tts_model: Optional[str] = None
+    rerank_model: Optional[str] = None
     api_key: Optional[str] = None
     # The workspace's cap on a reply's length (AI settings); None: no limit, and no max_tokens is sent.
     max_output_tokens: Optional[int] = None
@@ -110,6 +111,13 @@ def check(endpoint: Endpoint) -> tuple[bool, Optional[str], list[str]]:
             f"This endpoint does not serve the speech-to-text model “{endpoint.asr_model}”.",
             models,
         )
+    if endpoint.rerank_model:
+        try:
+            order = rerank(endpoint, "accelerator vacuum", ["ion pump pressure", "a recipe for bread"])
+        except LLMError as e:
+            return False, f"The re-ranker model “{endpoint.rerank_model}” did not answer: {e}", models
+        if not order:
+            return False, f"The re-ranker model “{endpoint.rerank_model}” returned no ranking.", models
     if endpoint.tts_model and endpoint.tts_model not in models:
         return (
             False,
@@ -208,6 +216,35 @@ def complete_structured(endpoint: Endpoint, system: str, user: str) -> str:
                        "reasoning model that kept thinking): nothing to read. Raise or clear the output-token "
                        "limit in the AI settings.")
     return content or ""
+
+
+def rerank(endpoint: Endpoint, query: str, documents: list[str]) -> list[tuple[int, float]]:
+    """(index, score) of the documents, most relevant first, from the endpoint's re-ranker: the /rerank API
+    that vLLM, Infinity, Jina and Cohere-style gateways serve ({model, query, documents} → results[index,
+    relevance_score])."""
+    if not endpoint.rerank_model or not documents:
+        return [(i, 0.0) for i in range(len(documents))]
+    body = {"model": endpoint.rerank_model, "query": query, "documents": documents, "top_n": len(documents)}
+    last = None
+    # Gateways expose it at /rerank or, beside the OpenAI routes, at /v1/rerank.
+    roots = [endpoint.root] + ([endpoint.root + "/v1"] if not endpoint.root.endswith("/v1") else [])
+    for root in roots:
+        try:
+            resp = requests.post(f"{root}/rerank", headers=endpoint.headers(), json=body, timeout=TIMEOUT_SECONDS * 6)
+        except requests.RequestException as e:
+            raise LLMError(f"Could not reach {endpoint.root}: {e}") from e
+        if resp.status_code == 404:
+            last = resp
+            continue
+        if resp.status_code >= 400:
+            raise LLMError(f"The re-ranker answered {resp.status_code}: {(resp.text or '')[:200]}")
+        try:
+            results = resp.json().get("results") or resp.json().get("data") or []
+            ranked = [(int(r["index"]), float(r.get("relevance_score", r.get("score", 0.0)))) for r in results]
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            raise LLMError("The re-ranker's reply was not in the expected shape.") from e
+        return sorted(ranked, key=lambda x: -x[1])
+    raise LLMError(f"This endpoint serves no /rerank route (answered {last.status_code if last else '?'})")
 
 
 def converse(endpoint: Endpoint, messages: list[dict], tools: Optional[list[dict]] = None) -> dict:

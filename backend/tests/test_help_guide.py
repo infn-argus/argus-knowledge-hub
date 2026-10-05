@@ -49,7 +49,10 @@ def test_the_guide_names_only_pages_that_exist():
                   "Administration → Portability", "Download checkpoint (.tar)", "Fetch into quarantine",
                   "Output-token limit", "Check endpoint", "Build the index", "Add a repository",
                   "Make a signing key", "Trust it", "Confirm the fingerprints", "Read and write",
-                  "In the repository, with the archive", "Change address or provider", "Artifact stores"):
+                  "In the repository, with the archive", "Change address or provider", "Artifact stores",
+                  "Re-ranker model", "Give this workspace settings of its own", "Use the installation's settings instead",
+                  "My account", "Robot tokens", "Generate token", "Generate robot token", "Daily logbook upload",
+                  "Read and write", "Administration → API tokens"):
         assert label in body, label
 
 
@@ -79,3 +82,9 @@ def test_ask_and_mcp_clients_can_read_it():
     assert topic["found"] and "Verify" in topic["body"]
     missing = json.loads(mcp_tools.call(None, "any", "read_help", {"topic": "nope"}))
     assert not missing["found"] and missing["topics"]
+
+
+
+def test_the_guide_answers_how_a_facility_uploads_its_logbook():
+    found = guide.search("robot token to upload the daily logbook")
+    assert found[0]["topic"] == "account-and-api-tokens"

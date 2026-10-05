@@ -2,8 +2,9 @@
 
 With a workspace per beamline, configuring the same gateway eight times is
 eight chances to get it wrong and eight places to rotate a key. So a
-workspace with no endpoint of its own falls back to the one configured in
-the global workspace.
+workspace with no endpoint of its own falls back to the installation's: the
+settings an administrator makes on Administration → AI (the row INSTALLATION),
+or, where there are none, the ones configured in a global workspace.
 
 Two things deliberately do not inherit:
 
@@ -24,6 +25,14 @@ from app.models.llm_config import LLMConfig
 from app.models.workspace import Workspace
 
 
+# The installation's own settings: an llm_configs row no workspace can be named after.
+INSTALLATION = "__installation__"
+
+
+def installation_config(db: Session) -> Optional[LLMConfig]:
+    return db.get(LLMConfig, INSTALLATION)
+
+
 def own_config(db: Session, workspace_id: str) -> Optional[LLMConfig]:
     """This workspace's own settings, inherited or not."""
     return db.get(LLMConfig, workspace_id)
@@ -35,8 +44,12 @@ def default_config(db: Session) -> Optional[LLMConfig]:
     There is one global workspace in practice. Where there are several, the
     first *that has a usable endpoint* wins, by id — taking the first global
     workspace and giving up when it happens to have no AI configured would
-    make the shared default depend on a name.
+    make the shared default depend on a name. The installation's own settings
+    (Administration → AI), when usable, come before any of them.
     """
+    mine = installation_config(db)
+    if mine is not None and mine.enabled and mine.last_check_ok:
+        return mine
     for workspace in db.scalars(
         select(Workspace).where(Workspace.is_global.is_(True)).order_by(Workspace.id)
     ):
@@ -74,6 +87,7 @@ def resolve(db: Session, workspace_id: str) -> tuple[Optional[LLMConfig], Option
         vision_model=shared.vision_model,
         asr_model=shared.asr_model,
         tts_model=shared.tts_model,
+        rerank_model=shared.rerank_model,
         encrypted_secret=shared.encrypted_secret,
         enabled=shared.enabled,
         allow_confidential=False,

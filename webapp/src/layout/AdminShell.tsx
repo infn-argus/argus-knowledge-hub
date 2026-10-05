@@ -15,11 +15,14 @@ export function AdminShell() {
     items.push({ to: `/workspaces/${currentWorkspaceId}/icons`, label: "Icon library" });
     items.push({ to: `/workspaces/${currentWorkspaceId}/transfer`, label: "Transfer" });
     items.push({ to: `/workspaces/${currentWorkspaceId}/ai`, label: "AI endpoint" });
+    items.push({ to: `/workspaces/${currentWorkspaceId}/robot-tokens`, label: "Robot tokens" });
   }
   if (me.data?.is_admin) {
     items.push({ to: "/admin/workspaces", label: "Workspaces" });
     items.push({ to: "/admin/users", label: "Users" });
     items.push({ to: "/admin/settings", label: "Settings" });
+    items.push({ to: "/admin/ai", label: "AI" });
+    items.push({ to: "/admin/tokens", label: "API tokens" });
     items.push({ to: "/admin/portability", label: "Portability" });
   }
 

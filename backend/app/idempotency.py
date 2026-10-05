@@ -56,9 +56,8 @@ def principal_of(db, authorization: Optional[str]) -> Optional[str]:
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     raw = authorization.split(" ", 1)[1].strip()
-    from app.auth import hash_token
-    from app.models.api_token import ApiToken
-    token = db.scalar(select(ApiToken).where(ApiToken.token_hash == hash_token(raw), ApiToken.revoked_at.is_(None)))
+    from app.auth import find_token
+    token = find_token(db, raw)
     if token is not None:
         return f"pat:{token.id}"
     from app.auth_oidc import oidc_configured, verify_oidc_token

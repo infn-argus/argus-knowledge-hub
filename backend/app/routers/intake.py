@@ -189,7 +189,13 @@ async def assist_asset_photo(file: UploadFile = File(...), text: str = Form(""),
 def _allowed(db: Session, identity, x_workspace_id: Optional[str], action: str, resource: str) -> str:
     from app.auth import PatIdentity, resolve_permission
     if isinstance(identity, PatIdentity):
+        if not identity.may(action, resource):
+            raise HTTPException(status_code=403, detail=f"This token may not {action} {resource}")
         return identity.workspace_id
+    if identity.token is not None:
+        if not identity.token.may(action, resource):
+            raise HTTPException(status_code=403, detail=f"This token may not {action} {resource}")
+        x_workspace_id = identity.token.workspace_id or x_workspace_id
     if not x_workspace_id:
         raise HTTPException(status_code=400, detail="Missing X-Workspace-Id header")
     if not resolve_permission(db, identity.user, x_workspace_id, action, resource):
@@ -331,8 +337,12 @@ def record_outcome(run_id: str, body: OutcomeIn, identity=Depends(get_identity),
         raise HTTPException(status_code=404, detail="No such intake run")
     # Recording the outcome needs the right to create what the run was for.
     from app.auth import PatIdentity, resolve_permission
-    if not isinstance(identity, PatIdentity) and not resolve_permission(
-            db, identity.user, workspace_id, "create", RESOURCE[run.kind]):
+    if isinstance(identity, PatIdentity):
+        allowed = identity.may("create", RESOURCE[run.kind])
+    else:
+        allowed = resolve_permission(db, identity.user, workspace_id, "create", RESOURCE[run.kind]) and (
+            identity.token is None or identity.token.may("create", RESOURCE[run.kind]))
+    if not allowed:
         raise HTTPException(status_code=403, detail="Not permitted")
     try:
         out = outcome.record(db, workspace_id, actor_of(identity), run_id, body.record_uid, body.final)
