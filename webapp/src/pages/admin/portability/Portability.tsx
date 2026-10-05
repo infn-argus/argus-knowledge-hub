@@ -3,14 +3,17 @@ import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { portabilityApi, problemText, workspacesApi } from "../../../api/client";
 import type { PortabilityConfig } from "../../../api/portabilityTypes";
+import { Setup } from "./Setup";
 import { Labels, StateBadge, when } from "./shared";
 
 /** Administration → Portability: portable exports to a Git portability repository, and imports from
  *  one (docs/export-import-design.md). Each export or import has its own page with its steps. */
 export function PortabilityPage() {
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") === "imports" ? "imports" : "exports";
   const config = useQuery({ queryKey: ["portability-config"], queryFn: portabilityApi.config });
+  const wanted = params.get("tab");
+  const tab = wanted === "imports" ? "imports" : wanted === "setup" && config.data?.is_admin ? "setup" : "exports";
+  const tabs = config.data?.is_admin ? (["exports", "imports", "setup"] as const) : (["exports", "imports"] as const);
 
   return (
     <div className="max-w-6xl space-y-4">
@@ -25,25 +28,27 @@ export function PortabilityPage() {
       {config.data && <ConfigNotes c={config.data} />}
       {config.isError && <p className="text-sm text-rose-700">{problemText(config.error)}</p>}
       <div className="flex gap-1 border-b border-slate-200">
-        {(["exports", "imports"] as const).map((t) => (
+        {tabs.map((t) => (
           <button key={t} type="button" onClick={() => setParams({ tab: t })}
                   className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === t
                     ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
-            {t === "exports" ? "Exports" : "Imports"}
+            {t === "exports" ? "Exports" : t === "imports" ? "Imports" : "Set-up"}
           </button>
         ))}
       </div>
-      {config.data && (tab === "exports" ? <Exports c={config.data} /> : <Imports c={config.data} />)}
+      {config.data && (tab === "exports" ? <Exports c={config.data} /> : tab === "imports" ? <Imports c={config.data} />
+        : <Setup c={config.data} />)}
     </div>
   );
 }
 
 function ConfigNotes({ c }: { c: PortabilityConfig }) {
   const notes = [];
-  if (!c.signing.configured) notes.push("No signing key is configured (ARGUS_PORTABILITY_SIGNING_KEY): exports cannot be generated.");
-  if (!c.trusted_keys) notes.push("No trusted keys are configured (ARGUS_PORTABILITY_TRUSTED_KEYS): imports cannot be verified.");
-  if (c.repositories.length === 0) notes.push("No portability repository is registered (ARGUS_PORTABILITY_REPOSITORIES).");
-  if (c.artifact_stores.length === 0) notes.push("No artifact store is configured (ARGUS_PORTABILITY_ARTIFACT_STORES): attachments cannot be exported.");
+  const where = c.ui_config?.enabled ? "add one under Set-up" : "set in the deployment";
+  if (!c.signing.configured) notes.push(`No signing key: exports cannot be generated (${where}).`);
+  if (!c.trusted_keys) notes.push(`No trusted keys: imports cannot be verified (${where}).`);
+  if (c.repositories.length === 0) notes.push(`No portability repository is registered (${where}).`);
+  if (c.artifact_stores.length === 0 && c.repositories.length === 0) notes.push(`No artifact store or repository: an export has nowhere to put its data (${where}).`);
   return (
     <div className="flex flex-wrap items-start gap-4 rounded border border-slate-200 bg-white p-3 text-xs text-slate-600">
       <span>Repositories: <b>{c.repositories.join(", ") || "none"}</b></span>
@@ -113,7 +118,9 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
   const [chosen, setChosen] = useState<string[]>([]);
   const [classes, setClasses] = useState<string[]>([]);
   const [repository, setRepository] = useState(c.repositories[0] ?? "");
-  const [store, setStore] = useState(c.artifact_stores[0] ?? "");
+  // With no store of its own, an export keeps its data in the repository it is published to.
+  const inRepo = c.repository_store ?? "@repository";
+  const [store, setStore] = useState(c.artifact_stores[0] ?? (c.repositories[0] ? inRepo : ""));
   const [base, setBase] = useState("");
   const [profile, setProfile] = useState(c.default_identity_profile);
   const [purpose, setPurpose] = useState("");
@@ -166,7 +173,10 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
         ) : <div />}
         <label className="text-sm">
           <span className="block text-xs font-medium text-slate-600">Git portability repository</span>
-          <select value={repository} onChange={(e) => { setRepository(e.target.value); setClasses([]); setRecipients([]); }}
+          <select value={repository} onChange={(e) => {
+                    setRepository(e.target.value); setClasses([]); setRecipients([]);
+                    if (!e.target.value && store === inRepo) setStore(c.artifact_stores[0] ?? "");
+                  }}
                   className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
             <option value="">None (generate only)</option>
             {c.repositories.map((r) => (
@@ -175,11 +185,16 @@ function NewExport({ c, exports }: { c: PortabilityConfig; exports: { id: string
           </select>
         </label>
         <label className="text-sm">
-          <span className="block text-xs font-medium text-slate-600">Artifact store for attachments</span>
+          <span className="block text-xs font-medium text-slate-600">Where the data goes (records, attachments)</span>
           <select value={store} onChange={(e) => setStore(e.target.value)} className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5">
-            <option value="">None</option>
-            {c.artifact_stores.map((r) => <option key={r} value={r}>{r}</option>)}
+            {!store && <option value="">Choose…</option>}
+            {repository && <option value={inRepo}>In the repository, with the archive</option>}
+            {c.artifact_stores.map((r) => <option key={r} value={r}>artifact store {r}</option>)}
           </select>
+          <span className="mt-1 block text-xs text-slate-500">
+            {store === inRepo ? "Committed with the archive: the importing installation needs only the repository. Each file must stay under the provider's size limit (100 MB on GitHub)."
+              : "A separate store: the importing installation needs a copy of it, under the same name."}
+          </span>
         </label>
       </div>
       {needsWorkspaces && (

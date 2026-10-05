@@ -4,7 +4,7 @@ import type {
   ExportView,
   ImportView,
   OriginChainCheck,
-  PortabilityConfig, PortabilityJob,
+  PortabilityConfig, PortabilityJob, PortabilitySetup, SetupRepository,
   ProvenanceView,
   ReconciliationReport,
 } from "./portabilityTypes";
@@ -1505,6 +1505,42 @@ const P = "/v1/portability";
 /** Portable exports and imports (docs/export-import-design.md §14). */
 export const portabilityApi = {
   config: () => request<PortabilityConfig>(`${P}/config`),
+  setup: () => request<PortabilitySetup>(`${P}/setup`),
+  addRepository: (body: { name: string; url: string; provider?: string | null; token?: string | null }) =>
+    request<SetupRepository>(`${P}/setup/repositories`, { method: "POST", body: json({ ...body, confirm: true }) }),
+  updateRepository: (name: string, body: { url?: string; provider?: string }) =>
+    request<SetupRepository>(`${P}/setup/repositories/${encodeURIComponent(name)}`,
+      { method: "POST", body: json({ ...body, confirm: true }) }),
+  addStore: (name: string, note: string) =>
+    request<{ name: string }>(`${P}/setup/stores`, { method: "POST", body: json({ name, note, confirm: true }) }),
+  removeStore: (name: string) =>
+    request<void>(`${P}/setup/stores/${encodeURIComponent(name)}/remove`, { method: "POST", body: json({ confirm: true }) }),
+  noteTrustedKey: (id: string, note: string) =>
+    request<{ note: string | null }>(`${P}/setup/trusted-keys/${encodeURIComponent(id)}/note`,
+      { method: "POST", body: json({ note, confirm: true }) }),
+  readHostKeys: (name: string) =>
+    request<SetupRepository>(`${P}/setup/repositories/${encodeURIComponent(name)}/host-keys/read`, { method: "POST" }),
+  confirmHostKeys: (name: string, fingerprints: string[]) =>
+    request<SetupRepository>(`${P}/setup/repositories/${encodeURIComponent(name)}/host-keys/confirm`,
+      { method: "POST", body: json({ fingerprints, confirm: true }) }),
+  replaceToken: (name: string, token: string) =>
+    request<SetupRepository>(`${P}/setup/repositories/${encodeURIComponent(name)}/token`,
+      { method: "POST", body: json({ token, confirm: true }) }),
+  testRepository: (name: string, write: boolean) =>
+    request<SetupRepository>(`${P}/setup/repositories/${encodeURIComponent(name)}/test`,
+      { method: "POST", body: json({ write }) }),
+  removeRepository: (name: string) =>
+    request<void>(`${P}/setup/repositories/${encodeURIComponent(name)}/remove`,
+      { method: "POST", body: json({ confirm: true }) }),
+  addTrustedKey: (line: string, note: string) =>
+    request<{ id: string }>(`${P}/setup/trusted-keys`, { method: "POST", body: json({ line, note, confirm: true }) }),
+  removeTrustedKey: (id: string) =>
+    request<void>(`${P}/setup/trusted-keys/${encodeURIComponent(id)}/remove`,
+      { method: "POST", body: json({ confirm: true }) }),
+  generateSigningKey: (principal: string) =>
+    request<{ public_line: string }>(`${P}/setup/signing-key`, { method: "POST", body: json({ principal, confirm: true }) }),
+  approveSetup: (kind: "repository" | "trusted_key" | "signing_key" | "store", id: string) =>
+    request<{ status: string }>(`${P}/setup/approve`, { method: "POST", body: json({ kind, id, confirm: true }) }),
   exports: () => request<ExportView[]>(`${P}/exports`),
   getExport: (id: string) => request<ExportView>(`${P}/exports/${encodeURIComponent(id)}`),
   createExport: (body: {

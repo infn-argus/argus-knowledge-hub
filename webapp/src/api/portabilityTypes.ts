@@ -1,10 +1,46 @@
 /** Portable exports and imports (docs/export-import-design.md). */
 
+/** Portability set-up made in the web app (app/portability/ui_config.py); secrets are never sent. */
+export interface SetupRepository {
+  name: string;
+  url: string;
+  provider: "github" | "gitlab" | "other" | "local";
+  auth: "ssh" | "https" | "none" | "local";
+  source: "web";
+  public_key: string | null;
+  has_token: boolean;
+  host_keys: { type: string; fingerprint: string }[];
+  host_keys_confirmed: boolean;
+  status: "pending" | "active";
+  usable: boolean;
+  created_by: string;
+  created_at: string | null;
+  approved_by: string | null;
+  last_test: { at: string; read: boolean; write: boolean | null; error: string | null } | null;
+}
+
+export interface PortabilitySetup {
+  enabled: boolean;
+  separation_of_duties: boolean;
+  deployment: { repositories: string[]; stores: string[]; signing_key: boolean; trusted_keys: boolean };
+  stores: { name: string; note: string | null; status: "pending" | "active"; path: string; created_by: string;
+            created_at: string | null; approved_by: string | null }[];
+  repositories: SetupRepository[];
+  trusted_keys: { id: string; principal: string; key_id: string; note: string | null; line: string;
+                  status: "pending" | "active"; created_by: string; created_at: string | null; approved_by: string | null }[];
+  signing_keys: { id: string; principal: string; key_id: string; public_line: string; status: "pending" | "active";
+                  created_by: string; created_at: string | null; approved_by: string | null }[];
+}
+
 export interface PortabilityConfig {
   repositories: string[];
   artifact_stores: string[];
+  /** The value that keeps an export's data in its repository, with the archive. */
+  repository_store?: string;
   signing: { configured: boolean; key_id: string | null; principal: string | null };
   trusted_keys: boolean;
+  ui_config?: { enabled: boolean; sources: { repositories: Record<string, "deployment" | "web">;
+                signing_key: "deployment" | "web" | null; trusted_keys: "deployment" | "web" | "both" | null } };
   restricted_classes: string[];
   export_modes: string[];
   import_modes: string[];

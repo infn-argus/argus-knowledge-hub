@@ -49,6 +49,9 @@ from app.portability.families import Scope
 from app.portability.lifecycle import TransitionError, audit, expect, labels, move
 
 HIGH_RISK_MODES = ("full", "evidence-only")
+# The artifact store "in the repository": the export's data files are committed with its checkpoint, in the
+# destination repository, instead of a separate store (gitrepo.publish; artifacts.GitTreeStore on import).
+REPOSITORY_STORE = "@repository"
 DOWNLOAD_TTL = timedelta(minutes=5)
 
 
@@ -70,15 +73,23 @@ class Config:
     policy: Policy = field(default_factory=Policy.trusted)
     repository_keys: dict = field(default_factory=dict)      # repository -> SSH deploy key file
     repository_tokens: dict = field(default_factory=dict)    # repository -> token file
+    repository_known_hosts: dict = field(default_factory=dict)  # repository -> known_hosts (web app set-up)
+    # Where each repository, signing key and trusted key came from: "deployment" or "web".
+    sources: dict = field(default_factory=dict)
 
     def git_env(self, repository: Optional[str]) -> Optional[dict]:
         key, token = self.repository_keys.get(repository or ""), self.repository_tokens.get(repository or "")
         if key is None and token is None:
             return None
-        return gitrepo.credentials_env(key, token, self.root / "git-askpass")
+        return gitrepo.credentials_env(key, token, self.root / "git-askpass",
+                                       known_hosts=self.repository_known_hosts.get(repository or ""))
 
     def export_dir(self, export_id: str) -> Path:
         return self.root / "exports" / export_id
+
+    def repository_store(self, export_id: str, repository: str) -> artifacts.DirectoryStore:
+        """Where an export's data files wait to be committed with it: named after its repository."""
+        return artifacts.DirectoryStore(repository, self.root / "repository-stores" / export_id)
 
     def quarantine(self, import_id: str) -> Path:
         return self.root / "quarantine" / import_id
@@ -105,6 +116,13 @@ def _pairs(name: str) -> dict:
 
 
 def config() -> Config:
+    """The deployment's set-up, with what administrators registered in the web app added to it (when that is
+    switched on: app/portability/ui_config.py)."""
+    from app.portability import ui_config
+    return ui_config.merged(_deployment_config())
+
+
+def _deployment_config() -> Config:
     trusted = os.environ.get("ARGUS_PORTABILITY_TRUSTED_KEYS")
     keys = os.environ.get("ARGUS_PORTABILITY_DECRYPTION_KEYS")
     return Config(root=Path(os.environ.get("ARGUS_PORTABILITY_ROOT", "/data/portability")),
@@ -207,7 +225,10 @@ def create_export(db: Session, actor: str, *, mode: str, workspaces: list[str], 
         raise ServiceError(f"unknown mode {mode!r}", "invalid", 422)
     if destination.get("repository") and destination["repository"] not in cfg.repositories:
         raise ServiceError(f"repository {destination['repository']!r} is not registered", "invalid", 422)
-    if destination.get("artifact_store") and destination["artifact_store"] not in cfg.stores:
+    if destination.get("artifact_store") == REPOSITORY_STORE:
+        if not destination.get("repository"):
+            raise ServiceError("data kept in the repository needs a destination repository", "invalid", 422)
+    elif destination.get("artifact_store") and destination["artifact_store"] not in cfg.stores:
         raise ServiceError(f"artifact store {destination['artifact_store']!r} is not configured", "invalid", 422)
     if purpose is not None and purpose not in policy_mod.PURPOSES:
         raise ServiceError(f"unknown purpose {purpose!r}; one of {', '.join(policy_mod.PURPOSES)}", "invalid", 422)
@@ -379,7 +400,9 @@ def generate_export(engine: Engine, db: Session, exp: PortabilityExport, actor: 
     move(db, exp, "generating", actor, "generate")
     db.commit()
     out = cfg.export_dir(exp.id)
-    store = cfg.stores.get((exp.destination or {}).get("artifact_store") or "")
+    chosen = (exp.destination or {}).get("artifact_store") or ""
+    store = (cfg.repository_store(exp.id, exp.destination["repository"]) if chosen == REPOSITORY_STORE
+             else cfg.stores.get(chosen))
     base = None
     if exp.mode == "incremental":
         b = db.get(PortabilityExport, exp.base_export_id)
@@ -403,7 +426,8 @@ def generate_export(engine: Engine, db: Session, exp: PortabilityExport, actor: 
         shutil.copytree(out, work / "checkpoint")
         for c in [c for f in manifest["families"].values() for c in f["chunks"] if c.get("storage") == "artifact"]:
             (work / "checkpoint" / c["file"]).unlink()           # verified as a reader will: fetched by locator
-        checked = verifier.verify(work / "checkpoint", trusted=cfg.trusted, stores=cfg.stores, blob_dir=work / "blobs",
+        stores = {**cfg.stores, store.name: store} if chosen == REPOSITORY_STORE else cfg.stores
+        checked = verifier.verify(work / "checkpoint", trusted=cfg.trusted, stores=stores, blob_dir=work / "blobs",
                                   limits=cfg.limits, private_keys=None, plain_dir=work / "plain")
         exporter.secure_delete(work)
         exp.manifest = {k: v for k, v in manifest.items() if k != "_sha256"}
@@ -439,9 +463,11 @@ def publish_export(db: Session, exp: PortabilityExport, actor: str, cfg: Config)
         previous = (db.get(PortabilityExport, exp.base_export_id).git or {}).get("tag")
     manifest = {**exp.manifest, "_sha256": exp.manifest_sha256}
     try:
+        in_repository = (exp.destination or {}).get("artifact_store") == REPOSITORY_STORE
         pub = gitrepo.publish(Path(exp.out_dir), manifest, remote=cfg.repositories[repo], work=cfg.work(repo),
                               signer=cfg.signer, schemas=exporter.json_schemas(), previous_tag=previous,
-                              credentials=cfg.git_env(repo))
+                              credentials=cfg.git_env(repo),
+                              artifacts=cfg.repository_store(exp.id, repo).root if in_repository else None)
     except Exception as e:  # noqa: BLE001
         db.rollback()
         exp = db.get(PortabilityExport, exp.id)
@@ -600,7 +626,10 @@ def fetch_git(db: Session, imp: PortabilityImport, actor: str, cfg: Config) -> P
     imp.verification = {"git": {"repository_id": got.repository_id, "root_commit": got.root_commit,
                                 "commit": got.commit, "tag": got.tag, "tag_object": got.tag_object,
                                 "signed_by": got.signer, "export_id": got.export_id,
-                                "previous_tag": got.previous_tag, "lfs_pointers": got.lfs}}
+                                "previous_tag": got.previous_tag, "lfs_pointers": got.lfs,
+                                # Data files committed with the checkpoint (the "in the repository" store).
+                                "artifacts_in_repository": any(e["path"].startswith(artifacts.REPOSITORY_ARTIFACTS + "/")
+                                                               for e in got.tree)}}
     move(db, imp, "quarantined", actor, "fetched", imp.verification["git"])
     return imp
 
@@ -643,8 +672,11 @@ def verify_import(db: Session, imp: PortabilityImport, actor: str, cfg: Config) 
     db.commit()
     q = Path(imp.quarantine_dir)
     try:
-        lfs = (imp.verification.get("git") or {}).get("lfs_pointers") or []
-        checked = verifier.verify(q / "checkpoint", trusted=cfg.trusted, stores=cfg.stores, blob_dir=q / "blobs",
+        git_info = imp.verification.get("git") or {}
+        lfs = git_info.get("lfs_pointers") or []
+        stores = (artifacts.StoresWithRepository(cfg.stores, q / "repo.git", git_info["commit"])
+                  if git_info.get("artifacts_in_repository") else cfg.stores)
+        checked = verifier.verify(q / "checkpoint", trusted=cfg.trusted, stores=stores, blob_dir=q / "blobs",
                                   lfs=lfs, limits=cfg.limits, private_keys=cfg.private_keys(), plain_dir=q / "plain")
         if not checked["report"]["content_verified"]:
             raise ServiceError("the archive is encrypted and no recipient key for it is available to this import "
@@ -1112,6 +1144,9 @@ def cleanup(db: Session, cfg: Config, actor: str = "retention", now: Optional[da
             continue
         if exp.out_dir:
             exporter.secure_delete(Path(exp.out_dir))
+        staged = cfg.root / "repository-stores" / exp.id      # data waiting to be committed with it
+        if staged.exists():
+            exporter.secure_delete(staged)
         if exp.state in ("published", "ready_to_publish"):
             move(db, exp, "expired", actor, "expire", {"retention_days": cfg.policy.retention_days})
         exp.purged_at = now

@@ -12,6 +12,12 @@ export function InfnCallback() {
   useEffect(() => {
     completeInfnLogin()
       .then((user) => {
+        const state = user.state as { stepUp?: boolean; returnTo?: string } | undefined;
+        if (state?.stepUp && state.returnTo?.startsWith("/")) {
+          // A step-up: the same person, signed in again just now; back to where they were.
+          window.location.replace(state.returnTo);
+          return;
+        }
         const who = user.profile.email ?? user.profile.preferred_username ?? user.profile.sub;
         addOidcProfile(who, defaultApiBaseUrl(), "infn");
         window.location.replace("/");

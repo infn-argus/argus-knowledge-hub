@@ -96,7 +96,10 @@ that node, which leaves every image a container uses. To run one now:
 
 ## Portable exports and imports
 
-Settings go in `api.env` in `values-production.yaml` (`docs/operations.md`, "Configuration"), keys in
+Repositories, trusted keys and the signing key can be registered by an administrator in the web app,
+*Administration → Portability → Set-up* (on by default; `ARGUS_PORTABILITY_UI_CONFIG: "off"` under
+`api.env` switches it off). They can also be set here, in the deployment, which then comes first:
+settings go in `api.env` in `values-production.yaml` (`docs/operations.md`, "Configuration"), keys in
 the Secret `argus-portability`, mounted at `/etc/argus/portability` when it exists
 ([`portability-secret.example.yaml`](portability-secret.example.yaml) shows its keys; it is a template,
 never applied). Scheduled work is in the chart: a daily cleanup, which removes the files of finished

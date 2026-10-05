@@ -36,6 +36,9 @@ api:
     # databases, evidence copies) after one day: the disks are small. Records, audit and Git history stay;
     # one still in progress is never touched.
     ARGUS_PORTABILITY_POLICY_RETENTION_DAYS: "1"
+    # Administrators register repositories, trusted keys and the signing key in the web app
+    # (Administration → Portability → Set-up). "off": only what this file and the Secret set.
+    ARGUS_PORTABILITY_UI_CONFIG: "on"
 web:
   nodeSelector:
     kubernetes.io/hostname: vnode-1

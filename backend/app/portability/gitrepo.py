@@ -217,7 +217,7 @@ def views(checkpoint: Path) -> dict[str, str]:
 
 
 def credentials_env(ssh_key: Optional[Path] = None, token_file: Optional[Path] = None,
-                    askpass_dir: Optional[Path] = None) -> dict:
+                    askpass_dir: Optional[Path] = None, known_hosts: Optional[Path] = None) -> dict:
     """Git environment for one repository's deploy credential, read from a mounted secret: an SSH
     deploy key, or a token file answered through GIT_ASKPASS. Never written into a manifest, a
     repository or a log."""
@@ -225,7 +225,8 @@ def credentials_env(ssh_key: Optional[Path] = None, token_file: Optional[Path] =
     if ssh_key is not None:
         # The server's host key is pinned: ARGUS_PORTABILITY_SSH_KNOWN_HOSTS names a known_hosts file
         # mounted with the deploy key (an unknown or changed host key is refused).
-        known = os.environ.get("ARGUS_PORTABILITY_SSH_KNOWN_HOSTS")
+        # A repository registered in the web app brings its own, confirmed host keys.
+        known = str(known_hosts) if known_hosts else os.environ.get("ARGUS_PORTABILITY_SSH_KNOWN_HOSTS")
         env["GIT_SSH_COMMAND"] = (f"ssh -i {ssh_key} -o IdentitiesOnly=yes -o BatchMode=yes "
                                   "-o StrictHostKeyChecking=yes"
                                   + (f" -o UserKnownHostsFile={known}" if known else ""))
@@ -241,8 +242,11 @@ def credentials_env(ssh_key: Optional[Path] = None, token_file: Optional[Path] =
 
 
 def publish(checkpoint: Path, manifest: dict, *, remote: str, work: Path, signer: Signer,
-            schemas: dict, previous_tag: Optional[str] = None, credentials: Optional[dict] = None) -> Published:
-    """Commit and tag a checkpoint in the portability repository and push both."""
+            schemas: dict, previous_tag: Optional[str] = None, credentials: Optional[dict] = None,
+            artifacts: Optional[Path] = None) -> Published:
+    """Commit and tag a checkpoint in the portability repository and push both. With `artifacts` (a directory
+    store's root: sha256/<aa>/<digest>), the export's data files are committed too, under artifacts/, in the
+    same signed commit; an artifact already there is the same file (named by its content) and stays."""
     work.parent.mkdir(parents=True, exist_ok=True)
     if not (work / ".git").exists():
         r = git(["clone", "--no-checkout", "--no-recurse-submodules", remote, str(work)], cwd=work.parent, check=False,
@@ -273,11 +277,18 @@ def publish(checkpoint: Path, manifest: dict, *, remote: str, work: Path, signer
     if not manifest.get("encryption"):
         for rel, body in views(checkpoint).items():
             (work / rel).write_text(body)
+    if artifacts is not None and (artifacts / "sha256").is_dir():
+        for src in (artifacts / "sha256").glob("*/*"):
+            target = work / "artifacts" / "sha256" / src.parent.name / src.name
+            if not target.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, target)
     git(["add", "-A"], cwd=work)
     staged = [p for p in git(["diff", "--cached", "--name-only", "-z"], cwd=work).stdout.split("\0") if p]
     for rel in staged:
         path = work / rel
-        if path.is_file() and not rel.endswith(".zst"):
+        # Artifacts were inspected for secrets when the export was generated, and are binary as often as not.
+        if path.is_file() and not rel.endswith(".zst") and not rel.startswith("artifacts/"):
             found = secret_scan.scan_text(path.read_text(errors="replace"), rel)
             if found:
                 git(["reset", "-q"], cwd=work, check=False)

@@ -111,6 +111,67 @@ class DirectoryStore:
             raise ArtifactError(f"artifact sha256:{digest} does not match its content")
 
 
+REPOSITORY_ARTIFACTS = "artifacts"     # where the "in the repository" store keeps them in the Git tree
+
+
+class GitTreeStore:
+    """Artifacts committed with the checkpoint, read from the quarantined, signature-checked commit
+    (`artifacts/sha256/<aa>/<digest>`): the store an export chose when its data travels in the repository.
+    Answers for any store name, since the exporting installation named it after its own repository."""
+    scheme = DirectoryStore.scheme
+
+    def __init__(self, name: str, repo: Path, commit: str):
+        self.name, self.repo, self.commit = name, Path(repo), commit
+
+    def _rel(self, digest: str) -> str:
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ArtifactError(f"not a SHA-256 digest: {digest!r}")
+        return f"{REPOSITORY_ARTIFACTS}/sha256/{digest[:2]}/{digest}"
+
+    def locator(self, digest: str) -> str:
+        return f"{self.scheme}://{self.name}/sha256/{digest}"
+
+    def has(self, digest: str) -> bool:
+        import subprocess
+        r = subprocess.run(["git", "--git-dir", str(self.repo), "cat-file", "-e", f"{self.commit}:{self._rel(digest)}"],
+                           capture_output=True)
+        return r.returncode == 0
+
+    def fetch(self, digest: str, size: Optional[int], dest: Path) -> None:
+        import subprocess
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(dest, "wb") as out:
+            r = subprocess.run(["git", "--git-dir", str(self.repo), "cat-file", "blob",
+                                f"{self.commit}:{self._rel(digest)}"], stdout=out, stderr=subprocess.PIPE)
+        if r.returncode != 0:
+            dest.unlink(missing_ok=True)
+            raise ArtifactError(f"artifact sha256:{digest} is not in the repository's commit")
+        actual = dest.stat().st_size
+        if actual > LIMITS.max_blob_bytes or (size is not None and actual != size):
+            dest.unlink()
+            raise ArtifactError(f"artifact sha256:{digest}: {actual} bytes, the manifest says {size}")
+        if _hash_file(dest) != digest:
+            dest.unlink()
+            raise ArtifactError(f"artifact sha256:{digest} does not match its content")
+
+
+class StoresWithRepository(dict):
+    """The configured stores, and for any other name the artifacts carried in the fetched commit."""
+
+    def __init__(self, stores: dict, repo: Path, commit: str):
+        super().__init__(stores)
+        self.repo, self.commit = repo, commit
+
+    def __contains__(self, name) -> bool:
+        return True
+
+    def __bool__(self) -> bool:          # present even when no store is configured here (`stores or {}`)
+        return True
+
+    def __missing__(self, name: str) -> GitTreeStore:
+        return GitTreeStore(name, self.repo, self.commit)
+
+
 def _hash_file(p: Path) -> str:
     h = hashlib.sha256()
     with open(p, "rb") as f:

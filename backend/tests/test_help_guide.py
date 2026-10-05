@@ -47,7 +47,9 @@ def test_the_guide_names_only_pages_that_exist():
     for label in ("Browse & search", "Type catalogue", "Labels & QR codes", "Bulk changes", "Channels ↔ hardware",
                   "Map imported records", "Review queue", "Knowledge graph", "Ask ARGUS", "AI endpoint",
                   "Administration → Portability", "Download checkpoint (.tar)", "Fetch into quarantine",
-                  "Output-token limit", "Check endpoint", "Build the index"):
+                  "Output-token limit", "Check endpoint", "Build the index", "Add a repository",
+                  "Make a signing key", "Trust it", "Confirm the fingerprints", "Read and write",
+                  "In the repository, with the archive", "Change address or provider", "Artifact stores"):
         assert label in body, label
 
 

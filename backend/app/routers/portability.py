@@ -40,6 +40,8 @@ exports_router = APIRouter(prefix="/v1/portability/exports", tags=["portability"
 imports_router = APIRouter(prefix="/v1/portability/imports", tags=["portability"])
 config_router = APIRouter(prefix="/v1/portability", tags=["portability"])
 
+from app.portability import ui_config  # noqa: E402
+
 
 def _person(identity) -> OidcIdentity:
     if not isinstance(identity, OidcIdentity):
@@ -132,6 +134,8 @@ def portability_config(identity=Depends(get_identity)):
     from app.services.visibility import RESTRICTED_CLASSES
     cfg = service.config()
     return {"repositories": sorted(cfg.repositories), "artifact_stores": sorted(cfg.stores),
+            # Chosen as the artifact store: the data is committed with the checkpoint in its repository.
+            "repository_store": service.REPOSITORY_STORE,
             "signing": {"configured": cfg.signer is not None and cfg.signer.key_path.exists(),
                         "key_id": cfg.signer.key_id if cfg.signer is not None and cfg.signer.key_path.exists() else None,
                         "principal": cfg.signer.principal if cfg.signer is not None else None},
@@ -148,7 +152,204 @@ def portability_config(identity=Depends(get_identity)):
             "policy": cfg.policy.describe(),
             "export_modes": [m for m in exporter.MODES if m != "backup-reference"],
             "import_modes": list(service.IMPORT_MODES), "outcomes": sorted(closure.OUTCOMES),
-            "is_admin": bool(identity.user.is_admin)}
+            "is_admin": bool(identity.user.is_admin),
+            "ui_config": {"enabled": ui_config.enabled(),
+                          "sources": {"repositories": (cfg.sources or {}).get("repositories", {}),
+                                      "signing_key": "web" if (cfg.sources or {}).get("signing_key") == "web"
+                                      else ("deployment" if cfg.signer is not None else None),
+                                      "trusted_keys": (cfg.sources or {}).get("trusted_keys")
+                                      or ("deployment" if cfg.trusted is not None else None)}}}
+
+
+# --------------------------------------------------------------------------- set-up from the web app
+
+class RepositoryIn(BaseModel):
+    name: str
+    url: str
+    provider: Optional[str] = None
+    token: Optional[str] = None
+    confirm: bool = False
+
+
+class FingerprintsIn(BaseModel):
+    fingerprints: list[str] = Field(default_factory=list)
+    confirm: bool = False
+
+
+class TokenIn(BaseModel):
+    token: str
+    confirm: bool = False
+
+
+class TestIn(BaseModel):
+    write: bool = False
+
+
+class TrustedKeyIn(BaseModel):
+    line: str
+    note: Optional[str] = None
+    confirm: bool = False
+
+
+class SigningKeyIn(BaseModel):
+    principal: Optional[str] = None
+    confirm: bool = False
+
+
+class RepositoryUpdateIn(BaseModel):
+    url: Optional[str] = None
+    provider: Optional[str] = None
+    confirm: bool = False
+
+
+class NoteIn(BaseModel):
+    note: Optional[str] = None
+    confirm: bool = False
+
+
+class StoreIn(BaseModel):
+    name: str
+    note: Optional[str] = None
+    confirm: bool = False
+
+
+class SetupConfirmIn(BaseModel):
+    confirm: bool = False
+
+
+class ApproveIn(BaseModel):
+    kind: str
+    id: str
+    confirm: bool = False
+
+
+def _setup(identity, confirm: Optional[bool]) -> tuple[str, "service.Config"]:
+    """An administrator, signed in recently or confirming it (the step-up exports use), for any change to
+    where archives go and which keys are trusted."""
+    person = _admin(identity)
+    if confirm is not None:
+        ok, how = _step_up(person, confirm)
+        if not ok:
+            raise HTTPException(status_code=401, detail={"error": f"confirm it is you before changing the set-up "
+                                                                  f"({how})", "code": "step_up_required"})
+    return actor_of(person), service.config()
+
+
+def _ui(fn):
+    try:
+        return fn()
+    except ui_config.ConfigError as e:
+        raise HTTPException(status_code=e.status, detail={"error": str(e), "code": e.code}) from e
+
+
+@config_router.get("/setup")
+def portability_setup(identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """The set-up administrators manage here: repositories, trusted keys, signing keys (no secrets), next to
+    what the deployment configures (names only), and whether this is switched on."""
+    _admin(identity)
+    return ui_config.view(db, service.config())
+
+
+@config_router.post("/setup/repositories", status_code=201)
+def add_repository(body: RepositoryIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Register a repository. For SSH, ARGUS makes the deploy key and returns only its public half, with the
+    server's host-key fingerprints to confirm; for https, the token is kept encrypted and never shown."""
+    actor, cfg = _setup(identity, body.confirm)
+    return _commit(db, _ui(lambda: ui_config.add_repository(db, cfg, actor, name=body.name, url=body.url,
+                                                            provider=body.provider, token=body.token)))
+
+
+@config_router.post("/setup/repositories/{name}")
+def update_repository(name: str, body: RepositoryUpdateIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Change a registered repository's address or provider."""
+    actor, cfg = _setup(identity, body.confirm)
+    return _commit(db, _ui(lambda: ui_config.update_repository(db, cfg, actor, name, url=body.url,
+                                                               provider=body.provider)))
+
+
+@config_router.post("/setup/stores", status_code=201)
+def add_store(body: StoreIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Register an artifact store: a directory in the portability area."""
+    actor, cfg = _setup(identity, body.confirm)
+    return _commit(db, _ui(lambda: ui_config.add_store(db, cfg, actor, body.name, body.note)))
+
+
+@config_router.post("/setup/stores/{name}/remove", status_code=204)
+def remove_store(name: str, body: Optional[SetupConfirmIn] = None, identity=Depends(get_identity),
+                 db: Session = Depends(get_db)):
+    actor, cfg = _setup(identity, bool(body and body.confirm))
+    _ui(lambda: ui_config.remove_store(db, cfg, actor, name))
+    db.commit()
+
+
+@config_router.post("/setup/trusted-keys/{key_id}/note")
+def note_trusted_key(key_id: str, body: NoteIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    actor, cfg = _setup(identity, body.confirm)
+    return _commit(db, _ui(lambda: ui_config.update_trusted_key(db, cfg, actor, key_id, body.note)))
+
+
+@config_router.post("/setup/repositories/{name}/host-keys/read")
+def read_host_keys(name: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    actor, cfg = _setup(identity, None)
+    return _commit(db, _ui(lambda: ui_config.rescan_host_keys(db, cfg, actor, name)))
+
+
+@config_router.post("/setup/repositories/{name}/host-keys/confirm")
+def confirm_host_keys(name: str, body: FingerprintsIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    actor, cfg = _setup(identity, body.confirm)
+    return _commit(db, _ui(lambda: ui_config.confirm_host_keys(db, cfg, actor, name, body.fingerprints)))
+
+
+@config_router.post("/setup/repositories/{name}/token")
+def replace_token(name: str, body: TokenIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    actor, cfg = _setup(identity, body.confirm)
+    return _commit(db, _ui(lambda: ui_config.set_token(db, cfg, actor, name, body.token)))
+
+
+@config_router.post("/setup/repositories/{name}/test")
+def test_repository(name: str, body: Optional[TestIn] = None, identity=Depends(get_identity),
+                    db: Session = Depends(get_db)):
+    """Read the repository (and, with `write`, push and delete a test branch): before using it."""
+    actor, cfg = _setup(identity, None)
+    return _commit(db, _ui(lambda: ui_config.test_repository(db, cfg, actor, name, write=bool(body and body.write))))
+
+
+@config_router.post("/setup/repositories/{name}/remove", status_code=204)
+def remove_repository(name: str, body: Optional[SetupConfirmIn] = None, identity=Depends(get_identity),
+                      db: Session = Depends(get_db)):
+    actor, cfg = _setup(identity, bool(body and body.confirm))
+    _ui(lambda: ui_config.remove_repository(db, cfg, actor, name))
+    db.commit()
+
+
+@config_router.post("/setup/trusted-keys", status_code=201)
+def add_trusted_key(body: TrustedKeyIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Trust another installation's exports: paste its allowed-signers line."""
+    actor, cfg = _setup(identity, body.confirm)
+    return _commit(db, _ui(lambda: ui_config.add_trusted_key(db, cfg, actor, body.line, body.note)))
+
+
+@config_router.post("/setup/trusted-keys/{key_id}/remove", status_code=204)
+def remove_trusted_key(key_id: str, body: Optional[SetupConfirmIn] = None, identity=Depends(get_identity),
+                       db: Session = Depends(get_db)):
+    actor, cfg = _setup(identity, bool(body and body.confirm))
+    _ui(lambda: ui_config.remove_trusted_key(db, cfg, actor, key_id))
+    db.commit()
+
+
+@config_router.post("/setup/signing-key", status_code=201)
+def generate_signing_key(body: SigningKeyIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Make this installation's signing key (when the deployment configures none); returns the public line to
+    give to the installations that import from this one."""
+    actor, cfg = _setup(identity, body.confirm)
+    return _commit(db, _ui(lambda: ui_config.generate_signing_key(db, cfg, actor, body.principal)))
+
+
+@config_router.post("/setup/approve")
+def approve_setup(body: ApproveIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Another administrator activates a registration (policies with separation of duties)."""
+    actor, cfg = _setup(identity, body.confirm)
+    return _commit(db, _ui(lambda: ui_config.approve(db, cfg, actor, body.kind, body.id)))
 
 
 @config_router.get("/jobs/{job_id}")

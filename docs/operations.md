@@ -91,6 +91,7 @@ deployment.
 
 | Variable | Meaning |
 |---|---|
+| `ARGUS_PORTABILITY_UI_CONFIG` | `on` (default) or `off`: whether administrators may register repositories, trusted keys and the signing key in the web app (*Administration → Portability → Set-up*). What the variables below set always comes first and is read-only there; off, what was registered in the web app is kept but not used |
 | `ARGUS_PORTABILITY_ROOT` | working area: `exports/`, `quarantine/`, `staging/`, `evidence/`, `work/`, `drills/` (default `/data/portability`) |
 | `ARGUS_PORTABILITY_REPOSITORIES` | `name=url,…`: the only repositories ARGUS publishes to or fetches from |
 | `ARGUS_PORTABILITY_ARTIFACT_STORES` | `name=/path,…`: content-addressed artifact stores (mounted volumes) |

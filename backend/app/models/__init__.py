@@ -70,3 +70,4 @@ from app.models import device  # noqa: F401,E402
 from app.models import ask_conversation  # noqa: F401,E402
 from app.models import beam_model  # noqa: F401,E402
 from app.models import portability  # noqa: F401,E402
+from app.models import portability_config  # noqa: F401,E402

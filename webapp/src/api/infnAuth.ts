@@ -44,6 +44,13 @@ export async function startInfnLogin(): Promise<void> {
   await getManager().signinRedirect();
 }
 
+/** Signing in again, now, to prove it is still you before a sensitive change (step-up): the provider is asked
+ * for a fresh sign-in (`prompt=login`, `max_age=0`), so the new token's `auth_time` is recent, and the
+ * browser comes back to `returnTo`. The session and its workspace stay as they were. */
+export async function startStepUp(returnTo: string): Promise<void> {
+  await getManager().signinRedirect({ prompt: "login", max_age: 0, state: { stepUp: true, returnTo } });
+}
+
 // React's StrictMode runs an effect twice in development, and the provider's
 // answer (a one-time code) can be exchanged only once. Both runs share this.
 let callback: Promise<User> | null = null;

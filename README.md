@@ -256,7 +256,13 @@ currently valid* revision rather than to an arbitrary PDF.
   loaded and reconciled in an isolated staging database, and promoted in one transaction with a
   verifiable origin chain; audit days already sealed never change. See
   [docs/export-import-design.md](docs/export-import-design.md); served by `/v1/portability/…`,
-  `python -m app.portability` and Administration → Portability in the web app.
+  `python -m app.portability` and Administration → Portability in the web app. Administrators register
+  GitHub, GitLab or other Git repositories there (*Set-up*): ARGUS makes the SSH deploy key and shows only
+  its public half, pins the server's host keys once confirmed, keeps tokens encrypted, tests read and
+  write access, manages artifact stores, the signing key and trusted keys, and lets what was registered be
+  changed. Setting up from the web app is switched off with `ARGUS_PORTABILITY_UI_CONFIG=off`, when only
+  the deployment's settings apply. An export can also keep its data in the repository itself, committed
+  with the archive, so an import needs nothing but the repository.
 - **Type catalogue.** Every object type a workspace can use, on one page: where it sits in the
   tree, what it is, its attributes (own and inherited), the names imports know it by, what its
   references mean in the graph, and how many records it has. The seeded types, ticket types and
