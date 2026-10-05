@@ -79,3 +79,15 @@ portabilityJobs:
     suspend: true
     schedule: "0 3 1 1,7 *"
     repository: escrow
+
+# Removing container images no container uses, on each node: every release pulls new ones, and the node
+# disks are small. Kubernetes only collects images past ~85% full, too late for local-path volumes on the
+# same disk. One CronJob per node (a pod runs on one node), with the node's root mounted to reach containerd.
+imagePrune:
+  enabled: false
+  schedule: "0 4 */2 * *"        # every two days, 04:00; each further node 10 minutes later
+  nodes: []                      # node names, e.g. [vnode-0, vnode-1, vnode-2]
+  image: busybox:1.36
+  # RKE2's crictl and containerd socket, as paths on the node.
+  crictl: /var/lib/rancher/rke2/bin/crictl
+  socket: unix:///run/k3s/containerd/containerd.sock

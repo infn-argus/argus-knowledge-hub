@@ -1,0 +1,51 @@
+{{- if .Values.imagePrune.enabled }}
+{{- $root := . -}}
+{{- range $i, $node := .Values.imagePrune.nodes }}
+---
+# Removes the images no container on {{ $node }} uses (crictl rmi --prune): what is running keeps its image,
+# and an image needed again is pulled again. Privileged, with the node's root at /host, to reach containerd.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: argus-image-prune-{{ $node }}
+  labels: {{- include "argus.labels" $root | nindent 4 }}
+spec:
+  # Staggered by ten minutes per node, so the nodes are not all busy at once.
+  schedule: {{ $root.Values.imagePrune.schedule | replace "0 4" (printf "%d 4" (mul $i 10)) | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels: {app: argus-image-prune}
+        spec:
+          restartPolicy: Never
+          nodeSelector:
+            kubernetes.io/hostname: {{ $node }}
+          tolerations:
+            - operator: Exists
+          containers:
+            - name: prune
+              image: {{ $root.Values.imagePrune.image }}
+              # A slow, nearly full disk makes each removal take longer than crictl's 2 s default.
+              command: [chroot, /host, {{ $root.Values.imagePrune.crictl | quote }},
+                        --runtime-endpoint, {{ $root.Values.imagePrune.socket | quote }},
+                        --timeout, 10m, rmi, --prune]
+              securityContext:
+                privileged: true
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - {name: host, mountPath: /host}
+          volumes:
+            - name: host
+              hostPath: {path: /, type: Directory}
+{{- end }}
+{{- end }}

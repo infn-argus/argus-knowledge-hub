@@ -54,6 +54,12 @@ Check the free space before a large import:
 `$KC get --raw /api/v1/nodes/vnode-2/proxy/stats/summary | jq '.node.fs.availableBytes/1e9'`.
 More room needs bigger node disks or a network storage class.
 
+Container images share those disks, and every release pulls new ones; Kubernetes only removes unused
+ones once a disk is about 85% full. So the chart removes them itself: `argus-image-prune-<node>`, one
+CronJob per node (`imagePrune.nodes`), every two days from 04:00, runs RKE2's `crictl rmi --prune` on
+that node, which leaves every image a container uses. To run one now:
+`$KC -n argus create job --from=cronjob/argus-image-prune-vnode-2 prune-now`.
+
 ## Setting it up, once
 
 1. **The packages accept the workflow.** On GitHub, for each of `argus-knowledge-hub-backend` and

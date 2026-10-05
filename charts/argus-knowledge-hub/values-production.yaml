@@ -42,3 +42,6 @@ web:
 keycloak:
   nodeSelector:
     kubernetes.io/hostname: vnode-1
+imagePrune:
+  enabled: true
+  nodes: [vnode-0, vnode-1, vnode-2]
