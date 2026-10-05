@@ -37,7 +37,7 @@ export interface PortabilityConfig {
   artifact_stores: string[];
   /** The value that keeps an export's data in its repository, with the archive. */
   repository_store?: string;
-  signing: { configured: boolean; key_id: string | null; principal: string | null };
+  signing: { configured: boolean; key_id: string | null; principal: string | null; public_line?: string | null };
   trusted_keys: boolean;
   ui_config?: { enabled: boolean; sources: { repositories: Record<string, "deployment" | "web">;
                 signing_key: "deployment" | "web" | null; trusted_keys: "deployment" | "web" | "both" | null } };
@@ -90,7 +90,9 @@ export interface PortabilityJob {
   started_at: string | null;
   finished_at: string | null;
   error: { error: string; code: string } | null;
-  metrics: { seconds?: number; process_peak_memory_mb?: number };
+  metrics: { seconds?: number; process_peak_memory_mb?: number;
+             /** What a running step is doing and how far it has got. */
+             progress?: { stage: string; done: number | null; total: number | null; percent: number | null; at: string } | null };
 }
 
 export interface LegalHold {

@@ -92,8 +92,12 @@ ARGUS conversations.
    - **Fetch into quarantine** (Git) — or the upload lands there.
    - **Verify**: signature, checksums, every data file in the artifact store. A failure says what is
      wrong and nothing is loaded.
-   - **Dry run**: what would happen, row by row, per workspace. In *selective* mode, choose the
-     workspaces here, and their ids here if they should differ. Run it again after any change.
+   - **Dry run**: what would happen, row by row, per workspace. On a full archive it takes minutes; a
+     progress bar shows which part it is checking and how many rows it has gone through, and you can leave
+     the page meanwhile. If it is **blocked**, *Next step* says why and what to do: usually set
+     *References the archive and this instance both lack* to *leave unresolved and list them in the
+     reconciliation* under *Decisions for the dry run*, and run it again. In *selective* mode, choose the
+     workspaces there too, and their ids if they should differ.
    - **Approve**: as shown by the dry run. Under a stricter policy, or for *merge* and *restore*,
      another administrator approves.
    - **Execute**: loads it into the **staging** database and checks it there. Nothing in the real
@@ -243,6 +247,8 @@ afterwards (*Administration → Users*).
 | *push refused* mentioning a file size | a data file is above the provider's limit (100 MB on GitHub): use an artifact store for that export |
 | Verify fails on the signature | the exporter's public key is not in this installation's trusted keys, or the archive was changed |
 | *another administrator must approve* | the policy wants two people: ask a second administrator |
+| Dry run blocked: *same key, different content, not from this chain* | records with the same id already exist here, made here and different: ARGUS never overwrites them. Change or remove them here first, or discard the import |
+| Dry run blocked: unresolved references | the archive refers to records neither side has (for example deleted ones): choose *leave unresolved and list them in the reconciliation* and run the dry run again |
 | Execute stopped half way | **Resume in staging**; nothing reached the real database |
 | Finalize reports a difference | nothing was committed; read the reconciliation, then retry or Discard |
 | Not enough space | an import needs room for the files in quarantine and the staging database; ask for disk space first |

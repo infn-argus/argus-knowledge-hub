@@ -7,10 +7,12 @@ step it runs is the same service function, audited the same way. A job still `ru
 process starts again was interrupted: it is marked failed (`interrupted`), and the step can be run
 again — every step is idempotent, and an interrupted import resumes from its staging checkpoints.
 
-Not provided yet: live progress within a step, cancellation, and a separate worker pool.
+A running step reports its progress with `report(stage, done, total)`: what it is doing and how far it has got,
+shown by the page as a bar (`metrics.progress`). Not provided yet: cancellation, and a separate worker pool.
 """
 from __future__ import annotations
 
+import contextvars
 import threading
 import time
 import uuid
@@ -24,6 +26,31 @@ from app.models.portability import PortabilityJob
 
 _LOCK = threading.Lock()
 _RUNNING: dict[tuple, str] = {}       # (subject_kind, subject_id) -> job id: one job per subject at a time
+# The job a step runs in, for its progress reports; none when the step runs synchronously (API, CLI, tests).
+_CURRENT: contextvars.ContextVar = contextvars.ContextVar("portability_job", default=None)
+_LAST_REPORT: dict[str, float] = {}
+
+
+def report(stage: str, done: Optional[int] = None, total: Optional[int] = None, force: bool = False) -> None:
+    """What the running step is doing, and how far it has got (at most once a second, unless `force`)."""
+    current = _CURRENT.get()
+    if current is None:
+        return
+    factory, job_id = current
+    t = time.monotonic()
+    if not force and t - _LAST_REPORT.get(job_id, 0) < 1.0:
+        return
+    _LAST_REPORT[job_id] = t
+    try:
+        with factory() as db:
+            job = db.get(PortabilityJob, job_id)
+            job.metrics = {**(job.metrics or {}), "progress": {
+                "stage": stage, "done": done, "total": total,
+                "percent": round(100 * done / total, 1) if done is not None and total else None,
+                "at": now().isoformat()}}
+            db.commit()
+    except Exception:  # noqa: BLE001 — a progress note must never fail the step
+        pass
 
 
 def now() -> datetime:
@@ -72,9 +99,14 @@ def _run(factory: sessionmaker, job_id: str, subject_kind: str, subject_id: str,
             job = db.get(PortabilityJob, job_id)
             job.state, job.started_at = "running", now()
             db.commit()
-        with factory() as db:
-            fn(db)
-            db.commit()
+        token = _CURRENT.set((factory, job_id))
+        try:
+            with factory() as db:
+                fn(db)
+                db.commit()
+        finally:
+            _CURRENT.reset(token)
+            _LAST_REPORT.pop(job_id, None)
         state, error = "completed", None
     except Exception as e:  # noqa: BLE001 — the job records why
         state = "failed"
@@ -87,7 +119,8 @@ def _run(factory: sessionmaker, job_id: str, subject_kind: str, subject_id: str,
     with factory() as db:
         job = db.get(PortabilityJob, job_id)
         job.state, job.finished_at, job.error = state, now(), error
-        job.metrics = {"seconds": round(time.monotonic() - started, 2),
+        job.metrics = {"progress": (job.metrics or {}).get("progress"),
+                       "seconds": round(time.monotonic() - started, 2),
                        "process_peak_memory_mb": round(peak / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)}
         db.commit()
 

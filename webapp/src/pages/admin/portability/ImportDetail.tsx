@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { portabilityApi, problemText, workspacesApi } from "../../../api/client";
 import type { DryRunReport, ImportView, ReconciliationReport } from "../../../api/portabilityTypes";
-import { ActionButton, bytes, Empty, ErrorBox, IMPORT_STEPS, JobsPanel, KV, Labels, LegalHold, Mono, PolicySummary, Section,
-  StateBadge, Steps, UninspectedList, useJob, when } from "./shared";
+import { ActionButton, bytes, Empty, ErrorBox, IMPORT_STEPS, JobProgress, JobsPanel, KV, Labels, LegalHold, Mono, PolicySummary,
+  Section, StateBadge, Steps, UninspectedList, useJob, when } from "./shared";
 
 type Step = "fetch-git" | "verify" | "approve" | "execute" | "resume" | "finalize";
 
@@ -33,6 +33,13 @@ export function ImportDetailPage() {
     }
   }, [qc, id]);
   const { job, setJob, running } = useJob(reload);
+  // Coming back to the page while a step still runs: follow it again.
+  useEffect(() => {
+    portabilityApi.jobs(id).then((js) => {
+      const live = js.find((j) => j.state === "queued" || j.state === "running");
+      if (live) setJob(live);
+    }).catch(() => undefined);
+  }, [id, setJob]);
   // Approving is quick; fetching, verifying, executing and finalizing run as background jobs the page polls.
   const step = useMutation({
     mutationFn: async (s: Step) => {
@@ -53,15 +60,20 @@ export function ImportDetailPage() {
   const chain = useQuery({ queryKey: ["portability-origin-chain", id], queryFn: () => portabilityApi.originChain(id),
                            enabled: imp.data?.state === "finalized" && imp.data?.mode !== "evidence", retry: false });
   const dry = useMutation({
-    mutationFn: (decisions: Record<string, unknown>) => portabilityApi.dryRun(id, decisions),
-    onSuccess: (v) => { setError(null); refresh(v); },
+    // A background job the page follows: on a full archive the dry run checks every row and takes minutes.
+    mutationFn: async (decisions: Record<string, unknown>) => {
+      const { job: started } = await portabilityApi.dryRunJob(id, decisions);
+      setJob(started);
+    },
+    onSuccess: () => { setError(null); refresh(); },
     onError: (e) => { setError(problemText(e)); refresh(); },
   });
 
   if (imp.isError) return <p className="text-sm text-rose-700">{problemText(imp.error)}</p>;
   if (!imp.data) return <p className="text-sm text-slate-500">Loading…</p>;
   const i = imp.data;
-  const busy = step.isPending ? step.variables : dry.isPending ? "dry-run" : null;
+  const dryRunning = dry.isPending || (running && job?.action === "dry-run");
+  const busy = step.isPending ? step.variables : dryRunning ? "dry-run" : null;
   const report = i.dry_run as DryRunReport;
   const hasDryRun = !!report && "ready" in report;
   const policy = cfg.data?.policy;
@@ -94,6 +106,10 @@ export function ImportDetailPage() {
 
       <Section title="Next step">
         <div className="flex flex-wrap items-center gap-3">
+          {running && job && <JobProgress job={job} />}
+          {!running && hasDryRun && !report.ready && (i.state === "dry_run_ready" || i.state === "awaiting_approval") && (
+            <Blocked report={report} />
+          )}
           {i.state === "created" && i.source.repository && (
             <ActionButton label="Fetch into quarantine" busy={stepBusy("fetch-git")} disabled={running} onClick={() => step.mutate("fetch-git")} />
           )}
@@ -103,7 +119,7 @@ export function ImportDetailPage() {
           )}
           {(i.state === "dry_run_ready" || i.state === "awaiting_approval") && (
             <ActionButton label={hasDryRun ? "Run the dry run again" : "Dry run"} busy={busy === "dry-run"}
-                          onClick={() => dry.mutate({})} />
+                          disabled={running} onClick={() => dry.mutate({})} />
           )}
           {i.state === "awaiting_approval" && (
             <>
@@ -200,7 +216,7 @@ export function ImportDetailPage() {
       {uninspected && uninspected.items.length > 0 && <UninspectedList items={uninspected.items} total={uninspected.count} />}
 
       {(i.state === "dry_run_ready" || i.state === "awaiting_approval") && i.mode !== "evidence" && (
-        <DecisionsForm i={i} running={dry.isPending} onRun={(d) => dry.mutate(d)} />
+        <DecisionsForm i={i} running={dryRunning || running} onRun={(d) => dry.mutate(d)} />
       )}
       {hasDryRun && <DryRun r={report} />}
       {rec.data && <Reconciliation r={rec.data.report} sha={rec.data.sha256} />}
@@ -442,5 +458,42 @@ function Evidence({ id }: { id: string }) {
         </div>
       )}
     </Section>
+  );
+}
+
+/** Why the dry run is blocked, and what to do about each kind of problem. */
+function Blocked({ report }: { report: DryRunReport }) {
+  const unresolved = (report.unresolved_reference_count ?? 0) > 0 && report.unresolved_references_outcome !== "defer";
+  const byFamily = new Map<string, number>();
+  for (const b of report.blocking ?? []) byFamily.set(b.family, (byFamily.get(b.family) ?? 0) + 1);
+  const divergent = (report.blocking ?? []).filter((b) => b.reason.startsWith("same key, different content"));
+  const other = (report.blocking ?? []).filter((b) => !b.reason.startsWith("same key, different content"));
+  return (
+    <div className="w-full rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+      <p className="font-medium">The dry run found what stops this import. To go on:</p>
+      <ol className="mt-1 list-decimal space-y-1 pl-5">
+        {unresolved && (
+          <li>
+            <b>{report.unresolved_reference_count} reference(s)</b> point to records neither the archive nor this installation
+            has. Below, under <i>Decisions for the dry run</i>, set <i>References the archive and this instance both lack</i> to
+            <b> leave unresolved and list them in the reconciliation</b>, then <b>Run the dry run with these decisions</b>.
+          </li>
+        )}
+        {divergent.length > 0 && (
+          <li>
+            <b>{divergent.length} record(s)</b> ({[...new Set(divergent.map((d) => d.family))].join(", ")}) already exist here
+            with different content, made here rather than by this archive's origin. ARGUS never overwrites them: change or
+            remove them here first, or discard this import. They are listed under <i>Blocking</i> in the dry run below.
+          </li>
+        )}
+        {other.map((b, n) => <li key={n}>{b.family}: {b.reason}</li>)}
+        {(report.catalogue_conflicts ?? []).length > 0 && (
+          <li><b>{report.catalogue_conflicts!.length} type(s)</b> exist here with a different definition: listed in the dry run below.</li>
+        )}
+        {!unresolved && byFamily.size === 0 && (report.catalogue_conflicts ?? []).length === 0 && (
+          <li>See the dry run below for what it reports.</li>
+        )}
+      </ol>
+    </div>
   );
 }

@@ -96,9 +96,10 @@ export function ErrorBox({ error }: { error: PortabilityError | string | null | 
   );
 }
 
-export function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
+export function Section({ title, children, right, id }: { title: string; children: React.ReactNode; right?: React.ReactNode;
+                                                          id?: string }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4">
+    <section id={id} className="scroll-mt-4 rounded-lg border border-slate-200 bg-white p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
         {right}
@@ -210,6 +211,49 @@ export function useJob(onDone: () => void) {
     return () => window.clearTimeout(t);
   }, [job, onDone]);
   return { job, setJob, running: !!job && (job.state === "queued" || job.state === "running") };
+}
+
+const STEP_WORDS: Record<string, string> = {
+  "fetch-git": "Fetching from Git into quarantine", verify: "Verifying the signature, checksums and every data file",
+  "dry-run": "Dry run: checking every row of the archive against this installation", execute: "Loading into staging",
+  resume: "Loading into staging", finalize: "Moving it into the real database", generate: "Generating the archive",
+  "publish-git": "Committing and pushing to Git",
+};
+
+/** A running job, as it goes: what it is doing, how far it has got, and for how long. */
+export function JobProgress({ job }: { job: PortabilityJob }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  const p = job.metrics?.progress;
+  const since = job.started_at ? Math.max(0, Math.round((now - new Date(job.started_at).getTime()) / 1000)) : 0;
+  const elapsed = since >= 60 ? `${Math.floor(since / 60)} min ${since % 60} s` : `${since} s`;
+  return (
+    <div className="w-full space-y-1 rounded border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="font-medium">{STEP_WORDS[job.action] ?? job.action}{job.state === "queued" ? " — queued" : "…"}</span>
+        <span className="text-xs">{elapsed}</span>
+      </div>
+      {p && (
+        <>
+          <div className="h-2 w-full overflow-hidden rounded bg-indigo-100">
+            <div className={`h-2 rounded bg-indigo-500 transition-all ${p.percent == null ? "w-1/3 animate-pulse" : ""}`}
+                 style={p.percent != null ? { width: `${Math.min(100, p.percent)}%` } : undefined} />
+          </div>
+          <div className="flex flex-wrap justify-between gap-2 text-xs">
+            <span>{p.stage.replace(/_/g, " ")}</span>
+            {p.done != null && p.total != null && (
+              <span>{p.done.toLocaleString()} of {p.total.toLocaleString()}{p.percent != null ? ` · ${p.percent}%` : ""}</span>
+            )}
+          </div>
+        </>
+      )}
+      {!p && <div className="h-2 w-1/3 animate-pulse rounded bg-indigo-300" />}
+      <p className="text-xs text-indigo-700">You can leave this page: the step goes on, and its result shows when you come back.</p>
+    </div>
+  );
 }
 
 /** The jobs of an export or import: queued, running, completed or failed, refreshed by polling. */

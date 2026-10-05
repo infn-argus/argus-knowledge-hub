@@ -39980,6 +39980,7 @@
     },
     "/v1/portability/imports/{import_id}/dry-run": {
       "post": {
+        "description": "What executing would do, row by row. With `background`, a job the page follows, reporting the family it\nis checking and how many rows of the archive it has gone through.",
         "operationId": "dry_run_v1_portability_imports__import_id__dry_run_post",
         "parameters": [
           {
@@ -39989,6 +39990,16 @@
             "schema": {
               "title": "Import Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "background",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Background",
+              "type": "boolean"
             }
           },
           {

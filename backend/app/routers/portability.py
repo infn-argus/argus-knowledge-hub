@@ -40,7 +40,7 @@ exports_router = APIRouter(prefix="/v1/portability/exports", tags=["portability"
 imports_router = APIRouter(prefix="/v1/portability/imports", tags=["portability"])
 config_router = APIRouter(prefix="/v1/portability", tags=["portability"])
 
-from app.portability import ui_config  # noqa: E402
+from app.portability import signing, ui_config  # noqa: E402
 
 
 def _person(identity) -> OidcIdentity:
@@ -138,7 +138,10 @@ def portability_config(identity=Depends(get_identity)):
             "repository_store": service.REPOSITORY_STORE,
             "signing": {"configured": cfg.signer is not None and cfg.signer.key_path.exists(),
                         "key_id": cfg.signer.key_id if cfg.signer is not None and cfg.signer.key_path.exists() else None,
-                        "principal": cfg.signer.principal if cfg.signer is not None else None},
+                        "principal": cfg.signer.principal if cfg.signer is not None else None,
+                        # Public: what another installation pastes into its trusted keys to accept these exports.
+                        "public_line": (signing.allowed_signers_line(cfg.signer).strip()
+                                        if cfg.signer is not None and cfg.signer.key_path.exists() else None)},
             "trusted_keys": cfg.trusted is not None and cfg.trusted.exists(),
             "restricted_classes": list(RESTRICTED_CLASSES),
             "restricted_destinations": {k: sorted(v) for k, v in cfg.restricted_destinations.items()
@@ -685,11 +688,19 @@ class DryRunIn(BaseModel):
 
 
 @imports_router.post("/{import_id}/dry-run")
-def dry_run(import_id: str, body: Optional[DryRunIn] = None, identity=Depends(get_identity),
-            db: Session = Depends(get_db)):
+def dry_run(import_id: str, body: Optional[DryRunIn] = None, background: bool = False,
+            identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """What executing would do, row by row. With `background`, a job the page follows, reporting the family it
+    is checking and how many rows of the archive it has gone through."""
     imp = _import(db, import_id, identity)
-    out = _guard(lambda: service.dry_run(db, imp, actor_of(identity), service.config(),
-                                         (body.decisions if body else None)))
+    actor, decisions = actor_of(identity), (body.decisions if body else None)
+    if background:
+        from app.models.portability import PortabilityImport as _Imp
+
+        def run(s):
+            return service.dry_run(s, s.get(_Imp, import_id), actor, service.config(), decisions)
+        return _background("import", import_id, "dry-run", actor, run)
+    out = _guard(lambda: service.dry_run(db, imp, actor, service.config(), decisions))
     return _commit(db, {**service.import_view(out), "dry_run": out.dry_run})
 
 

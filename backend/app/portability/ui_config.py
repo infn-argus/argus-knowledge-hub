@@ -389,6 +389,10 @@ def test_repository(db: Session, cfg, actor: str, name: str, write: bool = False
 def _parse_allowed_signer(line: str) -> tuple[str, str, str]:
     """(principal, normalized allowed-signers line, key id) for one line another installation gave."""
     parts = (line or "").strip().split()
+    if "ssh-ed25519" not in parts and "SHA256:" in (line or ""):
+        raise ConfigError("that is the key's fingerprint, not the key: on the other installation, Set-up → its signing "
+                          "key → Copy gives the whole line, 'argus-portability namespaces=\"git,argus-archive\" "
+                          "ssh-ed25519 AAAA…'")
     if "ssh-ed25519" not in parts or parts.index("ssh-ed25519") == 0 or parts.index("ssh-ed25519") + 1 >= len(parts):
         raise ConfigError("paste the other installation's allowed-signers line: "
                           "<principal> [namespaces=\"…\"] ssh-ed25519 AAAA…")

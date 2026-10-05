@@ -8,10 +8,32 @@ import { ActionButton, bytes, Empty, ErrorBox, EXPORT_STEPS, JobsPanel, KV, Labe
 
 const OUTCOME_HELP: Record<string, string> = {
   include_workspace: "add that workspace to the export",
-  external_reference: "keep the reference as a uid; the importer resolves it or decides",
+  external_reference: "keep the reference as an id; the importer resolves it or leaves it as a reference",
   exclude_referrers: "leave out the rows that name restricted records",
   block: "do not run this export",
 };
+
+/** What each kind of dependency is, in words: the export names something it does not carry. */
+const RULE_HELP: Record<string, string> = {
+  claim_subject: "history (ledger claims) about records",
+  relation_endpoint: "relations to records",
+  derived_endpoint: "relations derived by the ledger to records",
+  merge_survivor: "merged records pointing to the record they became",
+  ticket_subject: "tickets about records",
+  ticket_link: "links between tickets",
+  ticket_involves: "tickets involving records",
+  document_subject: "documents about records",
+  document_relation: "documents related to other records",
+  foreign_claims: "history recorded by another workspace's sources about exported records",
+  restricted_reference: "references to restricted records left out",
+};
+
+/** The outcome to suggest: a target that no longer exists here can only stay a reference. */
+function recommended(d: Dependency): string | null {
+  if (!d.workspace && d.options.includes("external_reference")) return "external_reference";
+  if (d.workspace && d.options.includes("include_workspace")) return "include_workspace";
+  return null;
+}
 
 export function ExportDetailPage() {
   const { id = "" } = useParams();
@@ -106,7 +128,15 @@ export function ExportDetailPage() {
                             disabled={!e.analysis.ready || selfApproval}
                             title={selfApproval ? "A high-risk export needs another approver" : undefined}
                             confirm={`Approve this ${e.risk === "high" ? "high-risk " : ""}export?`} />
-              {!e.analysis.ready && <span className="text-sm text-amber-800">Give every dependency an outcome first.</span>}
+              {!e.analysis.ready && (
+                <ol className="w-full list-decimal space-y-0.5 pl-5 text-sm text-amber-900">
+                  <li>Below, under <a href="#dependencies" className="underline">Dependencies</a>, choose an outcome for each
+                    highlighted row (the recommended one is marked ★).</li>
+                  <li>Press <b>Save outcomes and analyse again</b> (at the top right of that section).</li>
+                  <li>Then {needsConfirm ? <>tick <i>I confirm this high-risk approval</i> and </> : ""}press <b>Approve</b> here;
+                    next come <b>Generate</b> and {e.destination.repository ? <b>Publish to Git</b> : <b>Download</b>}.</li>
+                </ol>
+              )}
               {selfApproval && <span className="text-sm text-amber-800">You requested it: another administrator must approve.</span>}
               {uninspected.length > 0 && <span className="text-sm text-amber-800">{uninspected.length} file(s) will travel uninspected.</span>}
             </>
@@ -149,7 +179,8 @@ export function ExportDetailPage() {
         <Section title="Request">
           <KV rows={[
             ["Requested by", e.requested_by], ["Approved by", e.approved_by ?? "—"], ["Created", when(e.created_at)],
-            ["Repository", e.destination.repository ?? "none"], ["Artifact store", e.destination.artifact_store ?? "none"],
+            ["Repository", e.destination.repository ?? "none"], ["Data", e.destination.artifact_store === (cfg.data?.repository_store ?? "@repository")
+                ? "in the repository, with the archive" : e.destination.artifact_store ? `artifact store ${e.destination.artifact_store}` : "none"],
             ["Restricted classes included", e.classifications.length ? `${e.classifications.join(", ")} (encrypted)` : "none"],
             ["Purpose", e.decisions.purpose?.replace(/_/g, " ")],
             ["People", e.identity_profile?.replace(/_/g, " ")],
@@ -162,7 +193,9 @@ export function ExportDetailPage() {
             <KV rows={[
               ["Records", e.analysis.estimate.records], ["Tickets", e.analysis.estimate.tickets],
               ["Ledger claim events", e.analysis.estimate.claim_events],
-              ["Attachments", `${e.analysis.estimate.attachments} (${bytes(e.analysis.estimate.attachment_bytes)}, outside Git)`],
+              ["Attachments", `${e.analysis.estimate.attachments} (${bytes(e.analysis.estimate.attachment_bytes)}, ${
+                e.destination.artifact_store === (cfg.data?.repository_store ?? "@repository") ? "committed in the repository"
+                  : "in the artifact store, outside Git"})`],
               ["Workspaces after closure", e.analysis.closure?.workspaces?.join(", ")],
             ]} />
           ) : <Empty>Not analysed yet.</Empty>}
@@ -224,12 +257,18 @@ function Dependencies({ e, onSaved, onError }: { e: ExportView; onSaved: (v: Exp
   useEffect(() => setDraft({}), [e.id, e.state]);
   const save = useMutation({ mutationFn: () => portabilityApi.decideExport(e.id, draft), onSuccess: onSaved, onError });
   return (
-    <Section title="Dependencies"
+    <Section title="Dependencies" id="dependencies"
              right={editable && Object.keys(draft).length > 0 && (
                <button type="button" onClick={() => save.mutate()} disabled={save.isPending}
                        className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
                  {save.isPending ? "Analysing…" : "Save outcomes and analyse again"}
                </button>)}>
+      {deps.length > 0 && editable && (
+        <p className="mb-2 text-xs text-slate-500">
+          What is exported refers to things it does not carry: say what to do with each, then save. <i>Not found here</i>{" "}
+          means the target no longer exists on this installation (deleted or merged): keep it as a reference.
+        </p>
+      )}
       {deps.length === 0 ? <Empty>Nothing outside the scope is referenced.</Empty> : (
         <table className="w-full text-sm">
           <thead className="text-left text-xs text-slate-500">
@@ -241,7 +280,7 @@ function Dependencies({ e, onSaved, onError }: { e: ExportView; onSaved: (v: Exp
               return (
                 <tr key={d.id} className="border-t border-slate-100 align-top">
                   <td className="py-2">
-                    <div className="font-medium">{d.rule.replace(/_/g, " ")}</div>
+                    <div className="font-medium">{RULE_HELP[d.rule] ?? d.rule.replace(/_/g, " ")}</div>
                     <div className="text-xs text-slate-500">{d.workspace ? `in ${d.workspace}` : d.rule === "restricted_reference" ? "restricted records left out" : "not found here"}</div>
                   </td>
                   <td className="py-2">{d.count ?? "—"}</td>
@@ -253,7 +292,11 @@ function Dependencies({ e, onSaved, onError }: { e: ExportView; onSaved: (v: Exp
                       <select value={value} onChange={(ev) => setDraft({ ...draft, [d.id]: ev.target.value })}
                               className={`w-full rounded border px-2 py-1 text-sm ${value ? "border-slate-300" : "border-amber-400 bg-amber-50"}`}>
                         <option value="">Choose an outcome…</option>
-                        {d.options.map((o) => <option key={o} value={o}>{o.replace(/_/g, " ")} — {OUTCOME_HELP[o]}</option>)}
+                        {d.options.map((o) => (
+                          <option key={o} value={o}>
+                            {o === recommended(d) ? "★ recommended: " : ""}{o.replace(/_/g, " ")} — {OUTCOME_HELP[o]}
+                          </option>
+                        ))}
                       </select>
                     ) : <span>{d.outcome?.replace(/_/g, " ") ?? "—"}</span>}
                     {d.problem && <div className="mt-1 text-xs text-rose-700">{d.problem}</div>}

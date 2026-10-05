@@ -1591,6 +1591,10 @@ export const portabilityApi = {
   originChain: (id: string) => request<OriginChainCheck>(`${P}/imports/${encodeURIComponent(id)}/origin-chain`),
   evidenceFamilies: (id: string) =>
     request<{ family: string; visible_rows: number }[]>(`${P}/imports/${encodeURIComponent(id)}/evidence`),
+  /** The dry run as a background job the page follows, with its progress. */
+  dryRunJob: (id: string, decisions?: Record<string, unknown>) =>
+    request<{ job: PortabilityJob }>(`${P}/imports/${encodeURIComponent(id)}/dry-run?background=true`, {
+      method: "POST", body: json({ decisions: decisions ?? {} }) }),
   dryRun: (id: string, decisions?: Record<string, unknown>) =>
     request<ImportView>(`${P}/imports/${encodeURIComponent(id)}/dry-run`, {
       method: "POST", body: json({ decisions: decisions ?? {} }) }),

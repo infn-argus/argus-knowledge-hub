@@ -1390,3 +1390,41 @@ def test_R24_restore_merge_and_selective_run_end_to_end(dbs, env):
         assert db.scalar(select(func.count()).select_from(Asset).where(Asset.workspace_id == s.ws)) == 0
         from app.models.ledger import LedgerStream
         assert db.scalar(select(func.count()).select_from(LedgerStream).where(LedgerStream.workspace_id == s.ws)) == 0
+
+
+def test_built_in_roles_made_by_each_installation_never_block_an_import(dbs, env):
+    """Both installations make the built-in roles themselves, at different times: the same role is not
+    'divergent' because its timestamps differ (the first local-to-production import was blocked by it)."""
+    from app.models.role import Role, RoleBinding
+    from app.services.roles import ensure_system_roles
+    src, dst = dbs(), dbs()
+    s = populate(src, env.tmp)
+    with Session(src) as db:
+        ensure_system_roles(db)
+        db.add(RoleBinding(workspace_id=s.ws, subject_type="user", subject_id="u-rossi", role_id="viewer",
+                           created_at=datetime.now(timezone.utc)))
+        db.commit()
+    with Session(dst) as db:
+        ensure_system_roles(db)
+        db.query(Role).filter(Role.is_system.is_(True)).update(
+            {Role.created_at: datetime(2030, 1, 1, tzinfo=timezone.utc), Role.updated_at: datetime(2030, 1, 1, tzinfo=timezone.utc)})
+        db.commit()
+    view, manifest = run_export(src, env, s)
+    assert manifest["families"]["roles"]["rows"] >= 1
+    _, report = run_import(dst, env, view["git"]["tag"], expect_ready=False)
+    assert report["ready"], report.get("blocking")
+    assert report["families"]["roles"].get("identical", 0) >= 1 and not report["families"]["roles"].get("divergent")
+
+
+def test_a_background_step_reports_how_far_it_has_got():
+    from app.db import SessionLocal
+    from app.portability import jobs
+
+    def step(db):
+        for n in (0, 50, 100):
+            jobs.report("checking assets", n, 100, force=True)
+    job = jobs.start(SessionLocal, "import", f"imp-progress-{uuid.uuid4().hex[:6]}", "dry-run", "tester", step, wait=True)
+    assert job["state"] == "completed"
+    assert job["metrics"]["progress"] == {**job["metrics"]["progress"], "stage": "checking assets", "done": 100,
+                                          "total": 100, "percent": 100.0}
+    jobs.report("outside a job", 1, 2)             # a step run synchronously reports nowhere, and does not fail

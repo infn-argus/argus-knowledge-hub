@@ -298,6 +298,12 @@ def _missing_refs(db: Session, fam: Family, values: dict, pending: dict) -> list
     return out
 
 
+def _installation_defined(fam: Family, local, row: dict) -> bool:
+    """A built-in role (viewer, owner…) is made by every installation and kept current by each release: the same
+    role on both sides, whatever its timestamps say. The local one stands; it is never divergent."""
+    return fam.name == "roles" and bool(getattr(local, "is_system", False)) and bool(row.get("is_system"))
+
+
 # --------------------------------------------------------------------------- dry run
 
 def dry_run(db: Session, plan: Plan) -> dict:
@@ -309,8 +315,15 @@ def dry_run(db: Session, plan: Plan) -> dict:
     refs: list = []
     identity_notes: list = []
     pending = _pending_keys(plan)
+    from app.portability import jobs
+    total = sum((plan.manifest["families"].get(f.name) or {}).get("rows") or 0 for f in plan.families()) or None
+    seen = 0
     for fam in plan.families():
+        jobs.report(f"checking {fam.name}", seen, total, force=True)
         for _, key, row in archive_rows(plan, fam):
+            seen += 1
+            if seen % 200 == 0:
+                jobs.report(f"checking {fam.name}", seen, total)
             local, rm = find_local(db, plan, fam, key, row)
             if local is None:
                 missing = _missing_refs(db, fam, _values_for_check(plan, fam, row), pending)
@@ -322,7 +335,7 @@ def dry_run(db: Session, plan: Plan) -> dict:
                 if fam.name == "assets":
                     candidates += _candidates(db, row)
                 continue
-            if archive_form(plan, fam, local, key) == row:
+            if archive_form(plan, fam, local, key) == row or _installation_defined(fam, local, row):
                 counts[fam.name]["identical"] += 1
                 continue
             if fam.name in REFERENCE_ONLY:
@@ -467,10 +480,14 @@ def execute(db: Session, plan: Plan, done: set, save: Callable[[set], None],
     pending = _pending_keys(plan)
     steps = 0
 
+    from app.portability import jobs
+    planned = sum(len(plan.manifest["families"][f.name]["chunks"]) + (1 if f.deferred else 0) for f in plan.families())
+
     def step(name: str, fn):
         nonlocal steps
         if name in done:
             return
+        jobs.report(f"loading {name.split(':')[0]}", len(done), planned, force=True)
         if stop_after is not None and steps >= stop_after:
             raise InterruptedError(f"stopped before {name}")
         with writing(db):
@@ -516,7 +533,7 @@ def _load_chunk(db: Session, plan: Plan, fam: Family, chunk: dict, pending: dict
         local, rm = find_local(db, plan, fam, key, row)
         if local is not None:
             form = archive_form(plan, fam, local, key)
-            if form == row or fam.name in REFERENCE_ONLY:
+            if form == row or fam.name in REFERENCE_ONLY or _installation_defined(fam, local, row):
                 if rm is None:
                     _remember(db, plan, fam, key, _local_key(fam, local), False, form)
                 report["identical"] += 1

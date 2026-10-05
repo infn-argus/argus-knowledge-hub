@@ -125,6 +125,10 @@ def test_trusted_keys_and_a_signing_key_made_here_are_used(setup, tmp_path):
     other.principal = "argus-dev"
     line = signing.allowed_signers_line(other).strip()
     assert client.post("/v1/portability/setup/trusted-keys", json={"line": "nonsense", "confirm": True}).status_code == 422
+    fingerprint = client.post("/v1/portability/setup/trusted-keys", json={
+        "line": f"Set by the deployment: argus-portability · {other.key_id} (read-only here).", "confirm": True})
+    assert fingerprint.status_code == 422 and "fingerprint, not the key" in fingerprint.json()["detail"]["error"]
+    assert client.get("/v1/portability/config").json()["signing"]["public_line"] is None   # none configured here
     added = client.post("/v1/portability/setup/trusted-keys",
                         json={"line": line, "note": "my laptop", "confirm": True}).json()
     assert added["principal"] == "argus-dev" and added["key_id"] == other.key_id

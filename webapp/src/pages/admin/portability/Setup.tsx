@@ -396,9 +396,17 @@ function SigningKey({ s, c }: { s: PortabilitySetup; c: PortabilityConfig }) {
       intro="Every export is signed with it. Give its public line to the installations that import from this one: they add it to their trusted keys."
     >
       {s.deployment.signing_key ? (
-        <p className="text-sm text-slate-600">
-          Set by the deployment: <b>{c.signing.principal}</b> · <code>{c.signing.key_id}</code> (read-only here).
-        </p>
+        <div className="space-y-1 text-sm">
+          <p className="text-slate-600">
+            Set by the deployment: <b>{c.signing.principal}</b> · <code>{c.signing.key_id}</code> (read-only here).
+          </p>
+          {c.signing.public_line && (
+            <>
+              <p className="text-xs text-slate-500">Its public line, for the trusted keys of the installations that import from this one:</p>
+              <Copy text={c.signing.public_line} />
+            </>
+          )}
+        </div>
       ) : (
         <div className="space-y-3 text-sm">
           {active ? (
@@ -463,7 +471,7 @@ function TrustedKeys({ s, c }: { s: PortabilitySetup; c: PortabilityConfig }) {
       {s.enabled && (
         <div className="mt-3 space-y-2 border-t border-slate-100 pt-3 text-sm">
           <textarea value={line} onChange={(e) => setLine(e.target.value)} rows={2}
-                    placeholder={'The other installation\'s public line: argus-dev namespaces="git,argus-archive" ssh-ed25519 AAAA…'}
+                    placeholder={'The other installation\'s public line (its Set-up → signing key → Copy): argus-dev namespaces="git,argus-archive" ssh-ed25519 AAAA…'}
                     className="w-full rounded border border-slate-300 px-2 py-1 font-mono text-xs" />
           <div className="flex flex-wrap items-center gap-2">
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note, e.g. my laptop's ARGUS"
