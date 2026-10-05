@@ -126,7 +126,8 @@ currently valid* revision rather than to an arbitrary PDF.
   review snapshots every grant in a workspace: people directly and through groups, API
   tokens, open defaults and administrators. It shows what changed since the last review and
   is complete once enough distinct owners have signed it. *Access → access review*; served
-  by `/v1/access-reviews`.
+  by `/v1/access-reviews`. What each role allows, and how access is worked out:
+  [docs/roles.md](docs/roles.md).
 - **Legacy migration (§12).** Records the old importer inferred are classified by their
   evidence: serials and who wrote them, labels, inventory links, photos, edits, tickets and
   history. Each becomes a Position, Equipment or an Installation, or is retired or blocked.
