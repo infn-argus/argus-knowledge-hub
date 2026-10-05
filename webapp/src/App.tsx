@@ -21,6 +21,7 @@ import { DocumentSearch } from "./pages/documents/Search";
 import { DocumentSuggestions } from "./pages/documents/Suggestions";
 import { GlobalValueForm } from "./pages/globalvalues/Form";
 import { Ask } from "./pages/ai/Ask";
+import { HelpPage } from "./pages/help/Help";
 import { GraphExplorer } from "./pages/graph/Explorer";
 import { BeamModelPage } from "./pages/beam/BeamModel";
 import { BeamModelEditorPage } from "./pages/beam/BeamModelEditor";
@@ -84,6 +85,8 @@ export function App() {
           <Route path="/" element={<Dashboard />} />
 
           <Route path="/ask" element={<Ask />} />
+          <Route path="/help" element={<HelpPage />} />
+          <Route path="/help/:slug" element={<HelpPage />} />
 
           <Route path="/schemas/new" element={<SchemaForm />} />
           <Route path="/schemas/:uid" element={<SchemaDetail />} />

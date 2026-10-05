@@ -36,6 +36,8 @@ const TOOL_WORDS: Record<string, string> = {
   root_cause_from_alarms: "Looking for the cause of the alarms",
   single_points_of_failure: "Looking for single points of failure",
   knowledge_summary: "Counting what this workspace holds",
+  search_help: "Reading the user guide",
+  read_help: "Opening a guide topic",
   propose_create_record: "Proposing a new record",
   propose_update_record: "Proposing a change",
   propose_relation: "Proposing a relation",
@@ -306,7 +308,8 @@ export function Ask() {
   const status = useQuery({ queryKey: ["ai-status"], queryFn: aiApi.status });
   const conversations = useQuery({ queryKey: ["ask-conversations"], queryFn: aiApi.conversations });
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [draft, setDraft] = useState("");
+  // `/ask?draft=…` (from the Help pages) starts with the question typed, not sent.
+  const [draft, setDraft] = useState(() => params.get("draft") ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);

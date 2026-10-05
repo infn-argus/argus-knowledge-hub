@@ -182,6 +182,9 @@ app.include_router(catalogue.types_router)
 for _r in beam_model.ROUTERS:
     app.include_router(_r)
 from app.routers import portability as portability_router  # noqa: E402
+from app.routers import help as help_router  # noqa: E402
+
+app.include_router(help_router.router)
 for _r in portability_router.ROUTERS:
     app.include_router(_r)
 

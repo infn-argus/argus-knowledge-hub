@@ -72,6 +72,10 @@ SYSTEM = (
     "For anything that spans records — what has failed before, what a procedure "
     "covers, what depends on what — use graph_neighbours. Searching text alone will "
     "miss it, because the answer is in no single record.\n\n"
+    "For how to use ARGUS itself — how do I create a workspace, import, export, give a role, what does a "
+    "screen do — use search_help, then read_help for the whole topic, and answer from the guide: give the "
+    "steps in order with the exact names of the pages and buttons it uses, and offer to go through them one "
+    "at a time. Do not make up menus or buttons the guide does not name.\n\n"
     "Cite what you used: write the key or code of each record the answer rests on. "
     "Never invent a key, a code or a value; if the records do not say, say that they "
     "do not, and say what you looked at. An answer that sounds right and is not in "
@@ -152,6 +156,8 @@ def _summary(name: str, text: str, error: Optional[str]) -> str:
         return ""
     if data.get("available") is False:
         return "not available here"
+    if data.get("body") and data.get("slug"):
+        return "1 guide topic"
     if isinstance(data.get("results"), list):
         return f"{len(data['results'])} passages"
     if isinstance(data.get("total"), int):

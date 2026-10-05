@@ -85,6 +85,9 @@ import type {
   AskResult,
   AskConversation,
   AskAction,
+  HelpHit,
+  HelpTopic,
+  HelpTopicSummary,
   AskConversationDetail,
   ChatEvent,
   KnowledgeStatus,
@@ -573,6 +576,13 @@ export const importConfigsApi = {
   delete: (uid: string) => request<void>(`/v1/import-configs/${uid}`, { method: "DELETE" }),
   run: (uid: string) =>
     request<ImportConfig>(`/v1/import-configs/${uid}/run`, { method: "POST" }),
+};
+
+/** The user guide (backend/app/help/guide). */
+export const helpApi = {
+  topics: () => request<HelpTopicSummary[]>("/v1/help"),
+  topic: (slug: string) => request<HelpTopic>(`/v1/help/${encodeURIComponent(slug)}`),
+  search: (q: string) => request<HelpHit[]>(`/v1/help/search?q=${encodeURIComponent(q)}`),
 };
 
 export const workspacesApi = {

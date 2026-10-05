@@ -1329,6 +1329,29 @@ export interface AskConversationDetail extends AskConversation {
 }
 
 /** One server-sent event of a chat turn (POST /v1/ai/chat). */
+/** The user guide. */
+export interface HelpTopicSummary {
+  slug: string;
+  title: string;
+  summary: string;
+  keywords: string[];
+  sections: { heading: string; anchor: string }[];
+}
+export interface HelpTopic {
+  slug: string;
+  title: string;
+  summary: string;
+  keywords: string[];
+  body: string;
+}
+export interface HelpHit {
+  topic: string;
+  title: string;
+  section: string;
+  anchor: string;
+  text: string;
+}
+
 /** A change the assistant proposed: nothing is changed until the person applies it. */
 export interface AskAction {
   id: string;

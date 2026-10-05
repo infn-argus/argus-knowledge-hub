@@ -521,6 +521,23 @@ def knowledge_summary(db: Session, workspace_id: str) -> dict:
 
 # --- the catalogue ------------------------------------------------------
 
+def search_help(db: Session, workspace_id: str, query: str, limit: int = 6) -> dict:
+    """The user guide's sections that match a question (app/help): how to do things in ARGUS."""
+    from app import help as guide
+    hits = guide.search(query, max(1, min(int(limit or 6), 12)))
+    return {"total": len(hits), "results": hits,
+            "topics": [{"slug": t["slug"], "title": t["title"]} for t in guide.index()] if not hits else []}
+
+
+def read_help(db: Session, workspace_id: str, topic: str) -> dict:
+    """One topic of the user guide, whole."""
+    from app import help as guide
+    t = guide.topic(str(topic or "").strip())
+    if t is None:
+        return {"found": False, "topics": [{"slug": x["slug"], "title": x["title"]} for x in guide.index()]}
+    return {"found": True, "slug": t.slug, "title": t.title, "body": t.body}
+
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "search_objects",
@@ -746,6 +763,34 @@ TOOLS: list[dict[str, Any]] = [
                 "limit": {"type": "integer", "description": "Passages to return; default 8, at most 20"},
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "search_help",
+        "description": "Search the ARGUS user guide: how to do things in ARGUS itself, step by step (sign in, "
+                       "create a workspace, give roles, register equipment, import EPIK8s or Jira, review "
+                       "proposals, write documents, configure AI, export and import between installations "
+                       "with GitHub/GitLab, …). Use it for 'how do I…', 'where is…', 'what does … mean' "
+                       "questions about the application, not about the machine's records.",
+        "handler": search_help,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The question, in words"},
+                "limit": {"type": "integer", "description": "Sections to return; default 6"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "read_help",
+        "description": "Read one topic of the ARGUS user guide whole, by its slug (from search_help), to walk "
+                       "the person through a procedure step by step.",
+        "handler": read_help,
+        "inputSchema": {
+            "type": "object",
+            "properties": {"topic": {"type": "string", "description": "The topic's slug, e.g. export-import"}},
+            "required": ["topic"],
         },
     },
     {

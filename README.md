@@ -192,6 +192,13 @@ currently valid* revision rather than to an arbitrary PDF.
   performance targets, and a volume generator runs them at 10× (50 000 records,
   20 000 tickets and 5 000 documents): all were met. See [docs/operations.md](docs/operations.md)
   for the results, the jobs to schedule and point-in-time recovery.
+- **User guide (Help).** How to do things in ARGUS, step by step, for the people using it: signing in,
+  workspaces and roles, equipment, imports, the review queue, tickets, documents, the graph, the beam
+  model, Ask ARGUS, AI settings, export and import (with GitHub/GitLab, and from a local ARGUS to
+  production) and administration. One set of Markdown files in `backend/app/help/guide/` is read by the
+  web app's **Help** page, by Ask ARGUS (`search_help`, `read_help`, so it can walk someone through a
+  task) and by MCP clients. Served by `/v1/help`. Keep it in step with the screens: when a page or
+  button is renamed, rename it in the guide too (`tests/test_help_guide.py` lists the names it relies on).
 - **Ask ARGUS.** A chat that answers from the workspace's own records, in any language, showing every
   lookup as it runs and writing the answer as it arrives; a follow-up continues the conversation, which
   is kept for its author, and every key an answer cites opens its record. The model works through
