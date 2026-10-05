@@ -298,6 +298,19 @@ def _missing_refs(db: Session, fam: Family, values: dict, pending: dict) -> list
     return out
 
 
+# Fields a reconciliation does not hold against a row: a relation is its ends and its type, and the same relation
+# stored twice by an older import (two rows, created microseconds apart) is loaded once and cannot match both stamps.
+RECONCILE_IGNORES = {"relations": {"created_at"}}
+
+
+def _reconciles(fam: Family, local, row: dict, form: dict) -> bool:
+    if form == row or (local is not None and _installation_defined(fam, local, row)):
+        return True
+    ignore = RECONCILE_IGNORES.get(fam.name)
+    return bool(ignore) and local is not None and \
+        {k: v for k, v in form.items() if k not in ignore} == {k: v for k, v in row.items() if k not in ignore}
+
+
 def _installation_defined(fam: Family, local, row: dict) -> bool:
     """A built-in role (viewer, owner…) is made by every installation and kept current by each release: the same
     role on both sides, whatever its timestamps say. The local one stands; it is never divergent."""
@@ -633,6 +646,8 @@ def rebuild(db: Session, plan: Plan) -> dict:
     from app.ledger import engine
     from app.ledger.engine import DERIVED_CONFLICTS
     from app.models.asset import Asset
+    from app.portability import jobs
+    jobs.report("rebuilding what the ledger derives (identities, heads, facts, relations)", force=True)
     before = {m.__tablename__: db.scalar(select(func.count()).select_from(m)) for m in EVENT_TABLES}
     with writing(db):
         refs = {db.get(IdentityEvent, int(rm.local_key)).source_ref for rm in _imported(db, plan, "identity_events")}
@@ -722,21 +737,31 @@ def reconcile(db: Session, plan: Plan, deferred: Optional[list] = None) -> dict:
     projections rebuilt here against the projections the export carried, invariants."""
     explained = {(d["family"], d["key"]) for d in (deferred or [])}
     fams: dict = {}
+    from app.portability import jobs
+    total = sum((plan.manifest["families"].get(f.name) or {}).get("rows") or 0 for f in plan.families()) or None
+    seen = 0
     for fam in plan.families():
+        jobs.report(f"reconciling {fam.name}", seen, total, force=True)
         h = hashlib.sha256()
         mismatches = []
         rows = 0
         for c in plan.manifest["families"][fam.name]["chunks"]:
             ch = hashlib.sha256()
             for key, row in chunks.read_chunk(plan.checkpoint / c["file"], fam.name):
+                seen += 1
+                if seen % 200 == 0:
+                    jobs.report(f"reconciling {fam.name}", seen, total)
                 if plan.selected is not None and not _kept(plan, fam, row):
                     continue
                 local, _ = find_local(db, plan, fam, key, row)
                 form = archive_form(plan, fam, local, key) if local is not None else {}
-                if form != row and (fam.name, key) not in explained and fam.name not in REFERENCE_ONLY:
+                same = _reconciles(fam, local, row, form)
+                if not same and (fam.name, key) not in explained and fam.name not in REFERENCE_ONLY:
                     mismatches.append({"key": key, "missing": local is None,
                                        "fields": sorted(_differs(row, form))[:10]})
-                ch.update(chunks.line(fam.name, key, form))
+                # A row accepted as the archive's (a built-in role, a relation's stamp) is hashed as the archive has
+                # it, so staging and promotion, each with its own local stamps, agree.
+                ch.update(chunks.line(fam.name, key, row if same else form))
                 rows += 1
             h.update(ch.hexdigest().encode())
         expected = plan.manifest["families"][fam.name]

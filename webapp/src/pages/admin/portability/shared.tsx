@@ -215,8 +215,10 @@ export function useJob(onDone: () => void) {
 
 const STEP_WORDS: Record<string, string> = {
   "fetch-git": "Fetching from Git into quarantine", verify: "Verifying the signature, checksums and every data file",
-  "dry-run": "Dry run: checking every row of the archive against this installation", execute: "Loading into staging",
-  resume: "Loading into staging", finalize: "Moving it into the real database", generate: "Generating the archive",
+  "dry-run": "Dry run: checking every row of the archive against this installation",
+  execute: "Loading into staging, then rebuilding and reconciling there",
+  resume: "Loading into staging, then rebuilding and reconciling there",
+  finalize: "Moving it into the real database, then rebuilding and reconciling", generate: "Generating the archive",
   "publish-git": "Committing and pushing to Git",
 };
 

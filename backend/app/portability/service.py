@@ -842,6 +842,8 @@ def execute(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
             sdb.commit()
             imp = db.get(PortabilityImport, imp.id)
             move(db, imp, "reconciling", actor, "rebuilt", rebuilt)
+            db.commit()             # seen as reconciling while it runs, not only when it ends
+            imp = db.get(PortabilityImport, imp.id)
             rec = importer.reconcile(sdb, plan, deferred)
             rec["rebuild"] = rebuilt
             rec["git"] = (imp.verification or {}).get("git")

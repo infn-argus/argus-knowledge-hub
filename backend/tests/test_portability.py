@@ -1409,11 +1409,22 @@ def test_built_in_roles_made_by_each_installation_never_block_an_import(dbs, env
         db.query(Role).filter(Role.is_system.is_(True)).update(
             {Role.created_at: datetime(2030, 1, 1, tzinfo=timezone.utc), Role.updated_at: datetime(2030, 1, 1, tzinfo=timezone.utc)})
         db.commit()
+    # The same relation stored twice by an older import, created microseconds apart (seen in ELI).
+    with Session(src) as db:
+        a, b = db.scalars(select(Asset.uid).where(Asset.workspace_id == s.ws).limit(2)).all()
+        t0 = datetime.now(timezone.utc)
+        db.add_all([Relation(workspace_id=s.ws, from_asset_uid=a, to_asset_uid=b, relation_type="enabled by",
+                             created_at=t0 + timedelta(microseconds=n)) for n in (1, 2)])
+        db.commit()
     view, manifest = run_export(src, env, s)
     assert manifest["families"]["roles"]["rows"] >= 1
     _, report = run_import(dst, env, view["git"]["tag"], expect_ready=False)
     assert report["ready"], report.get("blocking")
     assert report["families"]["roles"].get("identical", 0) >= 1 and not report["families"]["roles"].get("divergent")
+    # …and the reconciliation in staging, then the finalization, pass with both (the import that reached
+    # reconciling in production failed on exactly these two).
+    _, reconciliation = run_import(dst, env, view["git"]["tag"])
+    assert reconciliation["passed"], {k: v["mismatches"][:2] for k, v in reconciliation["families"].items() if not v["ok"]}
 
 
 def test_a_background_step_reports_how_far_it_has_got():
