@@ -1,3 +1,5 @@
+from typing import Optional
+
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -260,23 +262,44 @@ def create_workspace(
         # afterwards.
         workspace_id = unique_id(db, name, id_rule(db))
 
-    workspace = Workspace(id=workspace_id, name=name)
-    db.add(workspace)
-    db.flush()
-    db.add(Membership(
-        workspace_id=workspace.id, user_id=identity.user.id,
-        can_read=True, can_create=True, can_modify=True, can_delete=True,
-        can_read_tickets=True, can_create_tickets=True,
-        can_modify_tickets=True, can_delete_tickets=True,
-        can_read_documents=True, can_create_documents=True,
-        can_modify_documents=True, can_delete_documents=True, can_approve_documents=True,
-    ))
-    seed_default_global_values(db, workspace.id)
-    seed_default_ticket_types(db, workspace.id)
-    ensure_document_types(db, workspace.id)
+    workspace = make_workspace(db, workspace_id, name, owner_user_id=identity.user.id)
     db.commit()
     db.refresh(workspace)
     return workspace
+
+
+def make_workspace(db: Session, workspace_id: str, name: str, owner_user_id: Optional[str] = None) -> Workspace:
+    """A workspace ready to use: its global values, ticket types and document types, and, when someone made
+    it, that person with full rights."""
+    workspace = Workspace(id=workspace_id, name=name)
+    db.add(workspace)
+    db.flush()
+    if owner_user_id:
+        db.add(Membership(
+            workspace_id=workspace.id, user_id=owner_user_id,
+            can_read=True, can_create=True, can_modify=True, can_delete=True,
+            can_read_tickets=True, can_create_tickets=True,
+            can_modify_tickets=True, can_delete_tickets=True,
+            can_read_documents=True, can_create_documents=True,
+            can_modify_documents=True, can_delete_documents=True, can_approve_documents=True,
+        ))
+    seed_default_global_values(db, workspace.id)
+    seed_default_ticket_types(db, workspace.id)
+    ensure_document_types(db, workspace.id)
+    return workspace
+
+
+def ensure_default_workspace(db: Session) -> Optional[str]:
+    """An installation with no workspace at all gets one, so the first person signed in has somewhere to
+    start (ARGUS_DEFAULT_WORKSPACE, default "main"; empty to turn this off). Never touches an installation
+    that has any workspace."""
+    import os
+    workspace_id = os.environ.get("ARGUS_DEFAULT_WORKSPACE", "main").strip()
+    if not workspace_id or db.scalar(select(Workspace.id).limit(1)) is not None:
+        return None
+    make_workspace(db, workspace_id, os.environ.get("ARGUS_DEFAULT_WORKSPACE_NAME", "Main").strip() or "Main")
+    db.commit()
+    return workspace_id
 
 
 @router.get("/workspaces/id-rule", response_model=WorkspaceIdRule)

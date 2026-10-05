@@ -1,7 +1,7 @@
 ---
 title: My account, API tokens and the mobile app
 summary: Seeing who you are to ARGUS and what you may do; personal access tokens for your scripts; robot tokens for machines such as a facility's daily-logbook uploader; how the mobile app signs in.
-keywords: [account, profile, me, who am i, permissions, roles, groups, token, api token, personal access token, pat, robot, robot token, service account, bot, logbook, daily logbook, upload, script, curl, api, automation, scope, expiry, revoke, mobile, app, android, ios, flutter, field, pkce, argus-mobile]
+keywords: [olog, phoebus, epik8s, elog, electronic logbook, logbook entry, account, profile, me, who am i, permissions, roles, groups, token, api token, personal access token, pat, robot, robot token, service account, bot, logbook, daily logbook, upload, script, curl, api, automation, scope, expiry, revoke, mobile, app, android, ios, flutter, field, pkce, argus-mobile]
 order: 145
 ---
 
@@ -68,6 +68,25 @@ indexed like every other document, and Ask ARGUS can answer "what happened last 
 
 The same pattern serves any other data: a token with only the scopes and kinds of record the job
 needs, and the endpoints listed in the API reference at `<api>/docs`.
+
+## Facility logbooks from Olog
+
+A facility running the EPIK8s Olog service can send **every logbook entry** here once a day. Each entry
+becomes a *Logbook Entry* document of the facility's workspace (code `OLOG-<FACILITY>-<id>`), published,
+with its logbooks, tags, level, properties and files, a link back to Olog, and relations to the equipment
+it names. An entry edited in Olog becomes a new revision; one unchanged is left alone.
+
+To set it up for a facility:
+
+1. In ARGUS, on the workspace's **Robot tokens** page, generate a **Daily logbook upload** token.
+2. On the facility's cluster, store it once:
+   `kubectl -n <facility> create secret generic argus-olog-upload --from-literal=token=argus_bot_…`
+3. In the facility's EPIK8s `deploy/values.yaml`, under the `olog` service, set `argusUpload` (`enabled`,
+   the ARGUS API `url`, `facility`, and `entryUrl` for the links back to Olog).
+4. For the first run, send the logbook's history (`all: true`, or a job started by hand with
+   `OLOG_ALL=true`); after that, the job runs nightly and sends the last two days.
+
+The job is `tools/olog-to-argus` in the ARGUS repository, run by the Phoebus services chart.
 
 ## API tokens (administrators)
 

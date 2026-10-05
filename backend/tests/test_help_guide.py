@@ -88,3 +88,9 @@ def test_ask_and_mcp_clients_can_read_it():
 def test_the_guide_answers_how_a_facility_uploads_its_logbook():
     found = guide.search("robot token to upload the daily logbook")
     assert found[0]["topic"] == "account-and-api-tokens"
+
+
+
+def test_the_guide_answers_how_to_rebuild_a_lost_installation():
+    found = guide.search("rebuild a wiped installation from the git archive")
+    assert found[0]["topic"] == "export-import" and "rebuild" in found[0]["section"].lower()

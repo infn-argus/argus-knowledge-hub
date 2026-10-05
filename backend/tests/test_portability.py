@@ -1520,3 +1520,36 @@ def test_a_second_full_export_fills_in_what_the_first_import_lacked(dbs, env):
     assert reconciliation["passed"]
     with Session(dst) as db:
         assert db.scalar(select(BeamModelDocument).where(BeamModelDocument.model_id == "linac")) is not None
+
+
+def test_a_new_installations_empty_default_workspace_does_not_block_a_restore(dbs, env):
+    """A new installation makes a default workspace ("main"); restore needs an empty instance, and a workspace
+    nobody has put anything in leaves it empty. One holding records still blocks it."""
+    src, fresh, used = dbs(), dbs(), dbs()
+    s = populate(src, env.tmp)
+    with Session(src) as db:
+        exp = service.create_export(db, "alice", mode="full", workspaces=[], classifications=[],
+                                    destination={"repository": "escrow", "artifact_store": "vault"},
+                                    decisions={"opaque_blobs": "approve_opaque"}, cfg=env.cfg("src"),
+                                    identity_profile="full_identity")
+        service.analyse_export(db, exp, "alice", env.cfg("src"))
+        service.approve_export(db, exp, "bob", admin=True, fresh_auth=True, cfg=env.cfg("src"))
+        db.commit()
+        service.generate_export(src, db, exp, "bob", env.cfg("src"))
+        service.publish_export(db, exp, "bob", env.cfg("src"))
+        db.commit()
+        tag = exp.git["tag"]
+    with Session(fresh) as db:
+        db.add(Workspace(id="main", name="Main"))
+        db.commit()
+    run_import(fresh, env, tag, mode="restore", root="restore-fresh")
+    with Session(fresh) as db:
+        assert db.get(Asset, s.unit) is not None
+    with Session(used) as db:
+        db.add(Workspace(id="main", name="Main"))
+        db.flush()
+        from app.models.document import Document
+        db.add(Document(uid="mine-1", workspace_id="main", code="MINE-1", title="Mine"))
+        db.commit()
+    _, report = run_import(used, env, tag, mode="restore", root="restore-used", expect_ready=False)
+    assert not report["ready"] and any(b["family"] == "instance" for b in report["blocking"])

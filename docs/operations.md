@@ -375,6 +375,25 @@ hash.
 time (`recorded_at`). The daily digest seals by `recorded_at`, so `verify-audit` stays green: no
 sealed day changes.
 
+### Rebuilding an installation from Git
+
+A database backup (above) is the first choice for recovering the *same* installation. Without one, an
+empty installation is filled from the last full export in the portability repository. The user guide's
+"Rebuild an installation from its archive" gives the steps; for operations, the pitfalls are:
+
+- **Trust anchors are inside the installation.** Keep, outside ARGUS, the allowed-signers line of every
+  installation's signing key. Back up the Secret holding the production signing key
+  (`<existingSecret>`, mounted at `/etc/argus/portability`). A lost local development key can only be
+  replaced; archives it signed stay verifiable from the kept public line.
+- **Self-contained archives.** Exports meant for recovery keep their data in the repository
+  (`artifact_store: @repository`). An artifact store on the lost installation's volume is gone with it.
+- **New deploy key.** The repository registration is in the database: the new installation makes a new
+  deploy key, which must be added to GitHub/GitLab; remove the old one.
+- **Empty means no records.** *Restore* needs an empty instance; the default workspace a new
+  installation creates (`ARGUS_DEFAULT_WORKSPACE`, default `main`) does not count while nothing is in it.
+- **Not carried:** AI settings, import configurations, API and robot tokens, devices, the knowledge index.
+  Re-issue robot tokens (for example `argus-olog-upload` in each facility's namespace).
+
 ### Discarding or cleaning up an import
 
 ```
@@ -422,6 +441,18 @@ If a staging database outlives its import (a crash during finalization), drop it
 `DROP DATABASE argus_stage_… WITH (FORCE)` once the import is `finalized` or `discarded`. Old
 `quarantine/`, `staging/` and `verify/` directories under `ARGUS_PORTABILITY_ROOT` can be removed
 the same way.
+
+## Which release is running
+
+`GET /v1/meta/version` (no sign-in needed) answers the API's release, commit and build time, and the API
+contract version. *About* in the web application shows the same for the API and for the web application
+itself, and warns when they differ, as they do for a few minutes during a rollout. The release workflow
+sets them when it builds the images (`ARGUS_VERSION`, `ARGUS_COMMIT`, `ARGUS_BUILT_AT`, and
+`VITE_APP_*` for the web application). A local build says `dev`.
+
+```bash
+curl -s https://<api host>/v1/meta/version
+```
 
 ## API tokens
 
@@ -472,6 +503,28 @@ kcadm.sh create clients -r argus -s clientId=argus-mobile -s publicClient=true \
 Build the app against production with `--dart-define=ARGUS_ENV=production
 --dart-define=ARGUS_API_BASE=https://<api host> --dart-define=OIDC_ISSUER=https://<keycloak host>/realms/argus`
 (the variables are in `mobile/app/lib/core/config.dart`).
+
+### Signing in with Google instead
+
+With `OIDC_ISSUER=https://accounts.google.com` the app signs in with Google directly and sends the
+**ID token** (Google's access tokens are opaque). In the Google Cloud console, create an OAuth client
+of type *iOS* with bundle id `it.infn.argus.field`. Use it on Android too, because Google's Android
+clients do not accept a custom-scheme redirect. Build with:
+
+```
+--dart-define=OIDC_ISSUER=https://accounts.google.com
+--dart-define=OIDC_CLIENT_ID=<id>.apps.googleusercontent.com
+--dart-define=OIDC_REDIRECT=com.googleusercontent.apps.<id>:/oauthredirect
+```
+
+The Android redirect scheme follows `OIDC_REDIRECT` automatically. The API must trust Google as a
+provider whose audience is that client:
+
+```
+OIDC_EXTRA_PROVIDERS='[{"issuer": "https://accounts.google.com", "jwks_uri": "https://www.googleapis.com/oauth2/v3/certs", "audience": "<id>.apps.googleusercontent.com"}]'
+```
+
+A Google account is matched to an existing ARGUS user by email.
 
 ## Performance targets
 

@@ -1,7 +1,32 @@
+import { useQuery } from "@tanstack/react-query";
+import { metaApi } from "../../api/client";
+
 const EUPL_URL = "https://interoperable-europe.ec.europa.eu/collection/eupl/eupl-text-eupl-12";
 
-/** Who made the hub and under what licence. */
+interface ApiVersion {
+  version: string;
+  commit: string | null;
+  built_at: string | null;
+  api_version: string;
+}
+
+const WEB = {
+  version: import.meta.env.VITE_APP_VERSION || "dev",
+  commit: import.meta.env.VITE_APP_COMMIT || null,
+  builtAt: import.meta.env.VITE_APP_BUILT_AT || null,
+};
+
+function release(version: string, commit: string | null, builtAt: string | null) {
+  const parts = [version === "dev" ? "development build" : version];
+  if (commit) parts.push(commit);
+  if (builtAt) parts.push(`built ${new Date(builtAt).toLocaleString()}`);
+  return parts.join(" · ");
+}
+
+/** Who made the hub, under what licence, and which release is running. */
 export function AboutPage() {
+  const api = useQuery({ queryKey: ["api-version"], queryFn: () => metaApi.version(), staleTime: 60_000 });
+  const mismatch = api.data && api.data.version !== WEB.version;
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
       <div>
@@ -17,12 +42,27 @@ export function AboutPage() {
             andrea.michelotti@infn.it
           </a>
         </Row>
+        <Row label="Web application">{release(WEB.version, WEB.commit, WEB.builtAt)}</Row>
+        <Row label="API">
+          {api.data ? (
+            <>
+              {release(api.data.version, api.data.commit, api.data.built_at)}
+              <span className="text-slate-500"> · contract v{api.data.api_version}</span>
+            </>
+          ) : api.isError ? <span className="text-red-600">not reachable</span> : "…"}
+        </Row>
         <Row label="Licence">
           <a className="text-blue-600 hover:underline" href={EUPL_URL} target="_blank" rel="noreferrer">
             European Union Public Licence v. 1.2 (EUPL-1.2)
           </a>
         </Row>
       </dl>
+      {mismatch && (
+        <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          The web application ({WEB.version}) and the API ({api.data?.version}) are different releases: an update
+          is probably still rolling out. Reload the page in a few minutes.
+        </p>
+      )}
       <p className="text-xs text-slate-500">
         The web application, the ARGUS Field mobile application and the API are free software under
         the EUPL-1.2: you may use, copy, modify and redistribute them under its terms, which come

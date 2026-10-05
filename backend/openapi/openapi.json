@@ -1860,6 +1860,36 @@
         "title": "Body_propose_for_asset_v1_intake_propose_asset__uid__post",
         "type": "object"
       },
+      "Body_receive_attachment_v1_logbook_olog_entries__facility___entry_id__attachments_post": {
+        "properties": {
+          "attachment_id": {
+            "title": "Attachment Id",
+            "type": "string"
+          },
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          }
+        },
+        "required": [
+          "file",
+          "attachment_id"
+        ],
+        "title": "Body_receive_attachment_v1_logbook_olog_entries__facility___entry_id__attachments_post",
+        "type": "object"
+      },
       "Body_upload_asset_avatar_v1_assets__uid__avatar_post": {
         "properties": {
           "file": {
@@ -7663,6 +7693,46 @@
           }
         },
         "title": "NoteIn",
+        "type": "object"
+      },
+      "OlogBatch": {
+        "properties": {
+          "entries": {
+            "items": {
+              "type": "object"
+            },
+            "maxItems": 500,
+            "title": "Entries",
+            "type": "array"
+          },
+          "entry_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Url"
+          },
+          "facility": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Facility",
+            "type": "string"
+          },
+          "link_equipment": {
+            "default": true,
+            "title": "Link Equipment",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "facility",
+          "entries"
+        ],
+        "title": "OlogBatch",
         "type": "object"
       },
       "OutcomeIn": {
@@ -36951,6 +37021,182 @@
         ]
       }
     },
+    "/v1/logbook/olog/entries": {
+      "post": {
+        "description": "Store a batch of entries: new ones are created, edited ones get a new revision, the rest are left as\nthey are. The answer lists, per entry, the files still to send.",
+        "operationId": "receive_entries_v1_logbook_olog_entries_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OlogBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Receive Entries",
+        "tags": [
+          "logbook"
+        ]
+      }
+    },
+    "/v1/logbook/olog/entries/{facility}/{entry_id}/attachments": {
+      "post": {
+        "description": "One of an entry's files. Sending it again changes nothing.",
+        "operationId": "receive_attachment_v1_logbook_olog_entries__facility___entry_id__attachments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "facility",
+            "required": true,
+            "schema": {
+              "title": "Facility",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_receive_attachment_v1_logbook_olog_entries__facility___entry_id__attachments_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Receive Attachment",
+        "tags": [
+          "logbook"
+        ]
+      }
+    },
     "/v1/lookup/batch": {
       "post": {
         "description": "Many identifiers at once, for an integration re-pointing its stored\nJira or Insight references (§19 item 8). Answers in the same order.",
@@ -37682,6 +37928,70 @@
           }
         },
         "summary": "Api Meta",
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/v1/meta/version": {
+      "get": {
+        "description": "Which release is running: its version, commit and build time (set when the image is built), and the API\ncontract version. Public, like /health, so a deployment can be checked without signing in.",
+        "operationId": "version_meta_v1_meta_version_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Version Meta",
         "tags": [
           "meta"
         ]

@@ -33,6 +33,23 @@ def installation_config(db: Session) -> Optional[LLMConfig]:
     return db.get(LLMConfig, INSTALLATION)
 
 
+def installation_problem(db: Session) -> Optional[str]:
+    """Why the installation's settings are not being shared, or None when they are (or there are none)."""
+    mine = installation_config(db)
+    if mine is None:
+        return None
+    if not mine.enabled:
+        return ("The installation's AI settings (Administration → AI) are switched off: tick “Offer AI "
+                "features to the workspaces that use these settings”, save, and check the endpoint.")
+    if mine.last_check_ok is None:
+        return ("The installation's AI settings (Administration → AI) have not been checked since they were "
+                "last saved: press “Check endpoint” there.")
+    if not mine.last_check_ok:
+        return ("The installation's AI settings (Administration → AI) failed their last check"
+                + (f": {mine.last_check_error}" if mine.last_check_error else "."))
+    return None
+
+
 def own_config(db: Session, workspace_id: str) -> Optional[LLMConfig]:
     """This workspace's own settings, inherited or not."""
     return db.get(LLMConfig, workspace_id)

@@ -45,7 +45,7 @@ from app.schemas.ai import (
     SuggestRunResult,
 )
 from app.services.ai_authoring import draft_document, draft_ticket_fields, review_document
-from app.services.ai_config import resolve as resolve_config
+from app.services.ai_config import installation_problem, resolve as resolve_config
 from app.services.ask import ask as run_ask
 from app.services.ask import ask_events
 from app.services.asset_vision import MAX_IMAGE_BYTES, identify
@@ -191,8 +191,9 @@ def status(
             configured=False,
             enabled=False,
             validated=False,
-            reason="No AI endpoint is configured for this workspace, and no shared "
-                   "default is available.",
+            reason=installation_problem(db) or (
+                "No AI endpoint is configured for this workspace, and none is set for the installation "
+                "(Administration → AI)."),
         )
 
     shape = dict(

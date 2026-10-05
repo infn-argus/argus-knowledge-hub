@@ -44,7 +44,8 @@ function AIEndpointSettings({ scope }: { scope: "workspace" | "installation" }) 
   const [ttsModel, setTtsModel] = useState("");
   const [rerankModel, setRerankModel] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [enabled, setEnabled] = useState(false);
+  // A new form is filled in to use AI: offered unless someone unticks it.
+  const [enabled, setEnabled] = useState(true);
   const [allowConfidential, setAllowConfidential] = useState(false);
   const [maxOutputTokens, setMaxOutputTokens] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -125,6 +126,23 @@ function AIEndpointSettings({ scope }: { scope: "workspace" | "installation" }) 
             are never sent on these settings: each workspace decides that for itself.</>}
       </p>
 
+      {!workspace && saved && !(saved.enabled && saved.last_check_ok) && (
+        <div className="mt-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <span className="font-medium">Workspaces are not using these settings yet: </span>
+          {!saved.enabled
+            ? <>they are switched off. Tick “Offer AI features to the workspaces that use these settings”, save,
+                then press <i>Check endpoint</i>.</>
+            : saved.last_check_ok === false
+              ? <>the last check failed{saved.last_check_error ? `: ${saved.last_check_error}` : ""}.</>
+              : <>they have not been checked since they were last saved. Press <i>Check endpoint</i>.</>}
+        </div>
+      )}
+      {!workspace && saved?.enabled && saved.last_check_ok && (
+        <div className="mt-4 rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+          Shared with every workspace that has no AI settings of its own.
+        </div>
+      )}
+
       {inheriting && (
         <div className="mt-4 space-y-2 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
           {status.data?.inherited_from ? (
@@ -136,8 +154,7 @@ function AIEndpointSettings({ scope }: { scope: "workspace" | "installation" }) 
               settings.
             </p>
           ) : (
-            <p>This workspace has no AI settings of its own, and the installation has none to share
-              (Administration → AI).</p>
+            <p>{status.data?.reason ?? "This workspace has no AI settings of its own, and the installation has none to share (Administration → AI)."}</p>
           )}
           {!ownForm && (
             <button type="button" onClick={() => setOwnForm(true)}

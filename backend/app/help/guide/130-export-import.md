@@ -1,7 +1,7 @@
 ---
 title: Export and import (portability)
 summary: Moving workspaces or a whole instance between ARGUS installations, step by step: by downloaded file or through a GitHub or GitLab repository, and from a local ARGUS to production.
-keywords: [set-up, setup, deploy key, host key, fingerprint, register repository, export, import, portability, backup, restore, clone, migrate, migration, move, copy, transfer, git, github, gitlab, repository, escrow, escrow-dev, artifact store, signing key, trusted keys, allowed_signers, deploy key, token, checkpoint, tar, download, upload, dry run, finalize, local to production]
+keywords: [rebuild, recover, recovery, disaster, lost, wiped, clean installation, reinstall, re-populate, repopulate, set-up, setup, deploy key, host key, fingerprint, register repository, export, import, portability, backup, restore, clone, migrate, migration, move, copy, transfer, git, github, gitlab, repository, escrow, escrow-dev, artifact store, signing key, trusted keys, allowed_signers, deploy key, token, checkpoint, tar, download, upload, dry run, finalize, local to production]
 order: 130
 ---
 
@@ -238,6 +238,42 @@ Then set up on production what an export does not carry: the AI endpoint (*AI en
 index*) and import configurations (*Imports*). The local
 installation's test users come along with *Everything*; remove or deactivate the ones you do not want
 afterwards (*Administration → Users*).
+
+## Rebuild an installation from its archive
+
+When an installation is lost (a wiped server or laptop, a deleted volume), a new, empty one is filled again
+from the last export in the Git repository.
+
+**Keep these outside ARGUS, before you need them.** They live in the installation, so they are lost with it:
+- the **public line** of each installation's signing key (*Copy*, under *This installation's signing key*):
+  without it, the new installation cannot trust the archive. Keep it in a password manager or in the
+  repository's README. Do not trust a key taken from the archive itself, unless you can compare it with
+  the one you kept;
+- the signing key itself, where the deployment provides it (production: its Kubernetes Secret), so the
+  rebuilt installation keeps signing with the same key;
+- exports whose data is **In the repository, with the archive**. An archive whose data went to an
+  artifact store on the lost installation cannot be imported again.
+
+**Then, on the new installation:**
+1. Sign in as its first administrator (the deployment's `ARGUS_BOOTSTRAP_ADMINS`). A new installation
+   opens on a workspace of its own, *Main*; leave it empty.
+2. **Administration → Portability → Set-up**:
+   - **Add a repository** with the same address. It gets a **new deploy key**: add it to the repository
+     (and remove the lost installation's), **Confirm the fingerprints**, test with **Read**.
+   - Under **Trusted keys**, paste the public line you kept and press **Trust it**.
+   - Make a signing key for this installation (or let the deployment provide the old one), and keep its
+     public line.
+3. **Import**: source *Git*, the repository, the tag of the latest **full** export. Mode **restore** to
+   become the lost installation again (it needs an archive made with *Full identity*, and an installation
+   with nothing in it but the empty *Main*); otherwise **clone**. Then follow *Import, step by step*.
+   An increment builds on its full export: import the full one first, then each increment in order.
+4. **Set up again what an export does not carry**: the AI endpoint (then *Build the index* in each
+   workspace), import configurations, **robot and personal tokens** (machines such as a facility's
+   logbook uploader need new ones), and field devices. People get back their access by signing in.
+
+What an archive holds is what existed when it was made: data that came later, or kinds of data the
+archive did not yet carry (before 1.35: beam models, global values, groups, equipment classes), have to be
+brought back by hand.
 
 ## When something goes wrong
 

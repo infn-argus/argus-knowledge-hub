@@ -64,6 +64,9 @@ services:
       OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8081}/realms/argus-dev
       OIDC_JWKS_URI: http://keycloak:8080/realms/argus-dev/protocol/openid-connect/certs
       OIDC_AUDIENCE: argus-webapp
+      # The development realm's administrator, so a fresh local hub has someone who can manage it
+      # (the other test users get their access from scripts/seed_dev_users.py).
+      ARGUS_BOOTSTRAP_ADMINS: ${ARGUS_BOOTSTRAP_ADMINS:-admin.test@argus.test}
       # Portable exports (docs/operations.md). Development values: `python -m app.portability dev-setup`
       # creates a throwaway signing key, a local bare repository and an artifact store under the volume.
       ARGUS_PORTABILITY_ROOT: /data/portability

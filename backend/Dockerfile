@@ -61,6 +61,15 @@ COPY scripts scripts
 ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 
+# Which release this is, set by the release workflow (GET /v1/meta/version, the About page). Last, so a new
+# version does not invalidate the layers above.
+ARG ARGUS_VERSION=dev
+ARG ARGUS_COMMIT=
+ARG ARGUS_BUILT_AT=
+ENV ARGUS_VERSION=$ARGUS_VERSION \
+    ARGUS_COMMIT=$ARGUS_COMMIT \
+    ARGUS_BUILT_AT=$ARGUS_BUILT_AT
+
 EXPOSE 8080
 
 CMD alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}

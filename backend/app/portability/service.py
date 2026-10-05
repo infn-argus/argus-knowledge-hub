@@ -573,6 +573,16 @@ def export_view(exp: PortabilityExport) -> dict:
 IMPORT_MODES = ("restore", "clone", "merge", "selective", "evidence")
 
 
+def _holds_records(db: Session, workspace_id: str) -> bool:
+    """Whether anybody has put anything in this workspace: equipment, tickets, documents or ledger sources."""
+    from app.models.asset import Asset
+    from app.models.document import Document
+    from app.models.issue import Issue
+    from app.models.ledger import LedgerStream
+    return any(db.scalar(select(m.workspace_id).where(m.workspace_id == workspace_id).limit(1)) is not None
+               for m in (Asset, Issue, Document, LedgerStream))
+
+
 def create_import(db: Session, actor: str, *, mode: str, source: dict, decisions: Optional[dict],
                   cfg: Config) -> PortabilityImport:
     if mode not in IMPORT_MODES:
@@ -750,8 +760,10 @@ def dry_run(db: Session, imp: PortabilityImport, actor: str, cfg: Config,
         report["ready"] = False
     if imp.mode == "restore":
         from app.models.workspace import Workspace
+        # A workspace nobody has put anything in (the default one a new installation makes) does not make
+        # the instance any less empty.
         others = [w for w in db.scalars(select(Workspace.id).where(Workspace.import_state.is_(None)))
-                  if w not in plan.workspaces]
+                  if w not in plan.workspaces and _holds_records(db, w)]
         if others:
             report.setdefault("blocking", []).append({"family": "instance", "key": "-", "reason":
                                                       "restore needs an empty instance; use clone or merge"})

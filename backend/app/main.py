@@ -120,6 +120,15 @@ async def database_refusal(request: Request, exc: DBAPIError):
     raise exc
 
 
+@app.get("/v1/meta/version", tags=["meta"])
+def version_meta():
+    """Which release is running: its version, commit and build time (set when the image is built), and the API
+    contract version. Public, like /health, so a deployment can be checked without signing in."""
+    import os
+    return {"version": os.environ.get("ARGUS_VERSION") or "dev", "commit": os.environ.get("ARGUS_COMMIT") or None,
+            "built_at": os.environ.get("ARGUS_BUILT_AT") or None, "api_version": api_policy.API_VERSION}
+
+
 @app.get("/v1/meta/api", tags=["meta"])
 def api_meta():
     """The API version, its deprecation policy and what is deprecated now."""
@@ -171,6 +180,8 @@ app.include_router(ai.router)
 app.include_router(ai.admin_router)
 from app.routers import tokens as tokens_router  # noqa: E402
 app.include_router(tokens_router.router)
+from app.routers import logbook as logbook_router  # noqa: E402
+app.include_router(logbook_router.router)
 app.include_router(mcp.router)
 app.include_router(groups.router)
 app.include_router(icons.router)
@@ -190,6 +201,23 @@ from app.routers import help as help_router  # noqa: E402
 app.include_router(help_router.router)
 for _r in portability_router.ROUTERS:
     app.include_router(_r)
+
+
+@app.on_event("startup")
+def _default_workspace() -> None:
+    """A new installation starts with one workspace, so nobody signs in to an empty hub."""
+    from app.db import SessionLocal
+    from app.routers.workspaces import ensure_default_workspace
+    db = SessionLocal()
+    try:
+        made = ensure_default_workspace(db)
+        if made:
+            logging.getLogger(__name__).info("created the default workspace %s", made)
+    except Exception:  # noqa: BLE001 — a database not yet migrated must not stop the API
+        db.rollback()
+        logging.getLogger(__name__).warning("default workspace skipped", exc_info=True)
+    finally:
+        db.close()
 
 
 @app.on_event("startup")

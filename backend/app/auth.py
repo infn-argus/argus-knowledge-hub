@@ -176,6 +176,12 @@ def _resolve_oidc_user(db: Session, claims: dict) -> User:
     user.oidc_sub = sub
     if email:
         user.email = email
+    # A bootstrap administrator whose account existed before they were named one (a directory sync, a
+    # seeding script, a sign-in before the setting) is made one, but only while the installation has no
+    # administrator: after that, administrators are granted in the web app, and revoking one sticks.
+    if (not user.is_admin and email and email.lower() in bootstrap_admins()
+            and db.scalar(select(User.id).where(User.is_admin.is_(True), User.active.is_(True)).limit(1)) is None):
+        user.is_admin = True
     user.name = claims.get("name", user.name)
     # Signing in is proof the account is live, whatever a stale directory
     # sync may have concluded.

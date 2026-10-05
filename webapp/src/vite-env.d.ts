@@ -8,6 +8,10 @@ interface ImportMetaEnv {
   readonly VITE_OIDC_LABEL?: string;
   /** Where the API is, for a signed-in identity (a PAT is given its address by hand). */
   readonly VITE_API_BASE_URL?: string;
+  /** The release, its commit and build time (the release workflow sets them; "dev" otherwise). */
+  readonly VITE_APP_VERSION?: string;
+  readonly VITE_APP_COMMIT?: string;
+  readonly VITE_APP_BUILT_AT?: string;
 }
 
 interface ImportMeta {

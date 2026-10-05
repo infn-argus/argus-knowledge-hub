@@ -1710,3 +1710,10 @@ export const tokensApi = {
 export async function apiBaseUrl(): Promise<string> {
   return (await loadSession())?.baseUrl ?? "";
 }
+
+export const metaApi = {
+  /** Which release the API is running (public, no sign-in needed). */
+  version: () =>
+    request<{ version: string; commit: string | null; built_at: string | null; api_version: string }>(
+      "/v1/meta/version"),
+};

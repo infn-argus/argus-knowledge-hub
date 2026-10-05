@@ -204,3 +204,36 @@ def test_a_reranker_orders_by_relevance_and_falls_back_to_v1(monkeypatch):
     ep2 = llm.Endpoint("https://gw2", "m", rerank_model="bge")      # no /rerank at the root: /v1/rerank
     assert llm.rerank(ep2, "q", ["a", "b"])[0] == (1, 0.9) and seen[-1] == "https://gw2/v1/rerank"
     assert llm.rerank(llm.Endpoint("https://gw/v1", "m"), "q", ["a", "b"]) == [(0, 0.0), (1, 0.0)]  # none set
+
+
+def test_a_workspace_is_told_why_the_installation_settings_do_not_reach_it():
+    """Saved but switched off, or never checked, the installation's settings are not shared, and the workspace
+    is told which, not that nothing is configured."""
+    from fastapi.testclient import TestClient
+    from app.auth import OidcIdentity, get_identity
+    from app.main import app
+    from app.models.user import User
+    client = TestClient(app)
+    db = SessionLocal()
+    db.add(LLMConfig(workspace_id="__installation__", base_url="https://gw/v1", model="m", enabled=False))
+    db.commit()
+    beamline = make()
+    app.dependency_overrides[get_identity] = lambda: OidcIdentity(
+        user=User(id="adm-why", email="adm-why@argus.test", is_admin=True))
+    try:
+        reason = client.get("/v1/ai/status", headers={"X-Workspace-Id": beamline}).json()["reason"]
+        assert "switched off" in reason
+        config = db.get(LLMConfig, "__installation__")
+        config.enabled, config.last_check_ok = True, None
+        db.commit()
+        assert "not been checked" in client.get("/v1/ai/status", headers={"X-Workspace-Id": beamline}).json()["reason"]
+        config.last_check_ok, config.last_check_error = False, "401 from the gateway"
+        db.commit()
+        assert "401 from the gateway" in client.get("/v1/ai/status", headers={"X-Workspace-Id": beamline}).json()["reason"]
+        config.last_check_ok = True
+        db.commit()
+        status = client.get("/v1/ai/status", headers={"X-Workspace-Id": beamline}).json()
+        assert status["configured"] and status["inherited_from"].startswith("the installation")
+    finally:
+        app.dependency_overrides.pop(get_identity, None)
+        db.close()
