@@ -77,6 +77,31 @@
                 "readOnly": false,
                 "required": false,
                 "multiValue": false
+            },
+            {
+                "id": "status",
+                "key": "status",
+                "name": "Status",
+                "type": "enumeration",
+                "unique": false,
+                "indexed": false,
+                "readOnly": false,
+                "required": false,
+                "multiValue": false,
+                "options": [
+                    {
+                        "id": "planned",
+                        "value": "Planned"
+                    },
+                    {
+                        "id": "in_service",
+                        "value": "In service"
+                    },
+                    {
+                        "id": "standby",
+                        "value": "Standby"
+                    }
+                ]
             }
         ],
         "metadata": {

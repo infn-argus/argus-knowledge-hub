@@ -248,16 +248,27 @@ class _AssetEditScreenState extends ConsumerState<AssetEditScreen> {
         );
       case 'enumeration':
         final values = _choice[def.key]!;
+        final current = values.first;
+        // The option's label is what is stored and what the web form writes (AttributeInput.tsx), not its
+        // id — an enumeration's id and label commonly differ ("in_service" / "In service"). Deduplicated by
+        // label, and with the record's current value kept as an extra item when it names no listed option
+        // (a value from before the list changed, or edited outside the form): a dropdown must offer exactly
+        // one item equal to its value or Flutter refuses to render it at all.
+        final labels = <String>{};
+        final options = <DropdownMenuItem<String>>[];
+        for (final o in def.options) {
+          if (labels.add(o.value)) options.add(DropdownMenuItem(value: o.value, child: Text(o.value)));
+        }
+        if (current != null && labels.add(current)) {
+          options.add(DropdownMenuItem(value: current, child: Text('$current (not in the current list)')));
+        }
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: DropdownButtonFormField<String>(
             key: Key('attr-${def.key}'),
-            initialValue: values.first,
+            initialValue: current,
             decoration: InputDecoration(labelText: label),
-            items: [
-              const DropdownMenuItem(value: null, child: Text('—')),
-              for (final o in def.options) DropdownMenuItem(value: o.id, child: Text(o.value)),
-            ],
+            items: [const DropdownMenuItem(value: null, child: Text('—')), ...options],
             onChanged: (v) => setState(() => values[0] = v),
           ),
         );

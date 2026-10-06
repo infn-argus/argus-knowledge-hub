@@ -9,7 +9,8 @@
     "attributes": {
         "pumping_speed": 120.5,
         "nominal_voltage": 24,
-        "element_count": 2
+        "element_count": 2,
+        "status": "In service"
     },
     "inbound_relations": [],
     "outbound_relations": [],

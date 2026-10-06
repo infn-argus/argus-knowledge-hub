@@ -16,6 +16,15 @@ void main() {
     expect(find.text('Pumping speed (l/s)'), findsOneWidget);
     expect(find.widgetWithText(TextField, '120.5'), findsOneWidget, reason: 'the stored value is shown, pre-filled');
 
+    // An enumeration is stored and matched by its label ("In service"), not its id ("in_service") — the
+    // two commonly differ. The dropdown must show the record's actual value without crashing, and change
+    // to another option's label when picked.
+    expect(find.text('In service'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('attr-status')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Planned').last);
+    await tester.pumpAndSettle();
+
     // Typing letters into a number field and trying to save is refused, with a reason — not silently coerced.
     await r.type('attr-pumping_speed-0', 'not a number');
     await r.tap('asset-edit-save');
@@ -37,6 +46,7 @@ void main() {
     expect(sent['pumping_speed'], 131.2);
     expect(sent['manufacturer'], 'Agilent');
     expect(sent['nominal_voltage'], 24); // untouched fields travel unchanged
+    expect(sent['status'], 'Planned', reason: 'the label is sent, matching what the web form writes');
     expect(find.byKey(const Key('asset-edit-save')), findsNothing, reason: 'saving returns to the record, not stays on the form');
   });
 
