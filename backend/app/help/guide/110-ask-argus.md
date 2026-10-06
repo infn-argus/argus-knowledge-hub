@@ -1,7 +1,7 @@
 ---
 title: Ask ARGUS
 summary: Asking questions in your own words, following up, and letting the assistant propose changes you confirm.
-keywords: [ask, ask argus, chat, assistant, ai, question, answer, conversation, propose, proposal, apply, discard, create with ai, help, how to]
+keywords: [ask, ask argus, chat, voice, speak, microphone, hands-free, read aloud, phone, mobile, assistant, ai, question, answer, conversation, propose, proposal, apply, discard, create with ai, help, how to]
 order: 110
 ---
 
@@ -41,6 +41,21 @@ You are offered this only if you could make those changes by hand.
 
 "How do I import an EPIK8s configuration?", "step by step, how do I move my local workspaces to
 production?": it answers from this guide, and can go through it with you one step at a time.
+
+## On the phone (ARGUS Field)
+
+The mobile app has the same assistant: the robot icon at the top of its home screen opens **Ask**.
+
+1. Type a question, or press the **microphone** and say it. When you pause, what was heard is sent as the
+   question.
+2. The lookups appear as it works, then the answer. Follow-ups continue the conversation; **New
+   conversation** starts afresh, and **Earlier conversations** reopens one (also the ones from the web).
+3. The **speaker** under an answer reads it aloud.
+4. **Hands-free** (the headset icon): each answer is read aloud, then the app listens for the next
+   question. It stops when you say nothing, or when you press the headset again.
+
+Speech is recognised and spoken by the phone itself: only the words heard are sent, as a typed
+question would be. The first time, the phone asks to allow the microphone.
 
 ## When it is unavailable
 

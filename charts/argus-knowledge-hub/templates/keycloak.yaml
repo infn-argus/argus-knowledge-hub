@@ -3,6 +3,9 @@
 # existing realm is left as it is), with no users. Two clients: the web app, and argus-mobile for the ARGUS Field
 # app (PKCE, its access token addressed to the API by an audience mapper). People are added in its admin console, as the admin
 # whose password is in the Secret. Its data is in Postgres (database keycloak), so a restart keeps them.
+# With keycloak.google.clientId set, a "Google" button signs in with Google too: the client secret is read from
+# the Secret (keycloak-google-client-secret) when the realm is imported, never written here. Being imported
+# only on the first start, a change to an existing realm is made in the admin console (docs/operations.md).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -70,6 +73,24 @@ data:
           "defaultClientScopes": ["acr", "profile", "roles", "email"]
         }
       ]
+      {{- with .Values.keycloak.google }}{{ if .clientId }},
+      "identityProviders": [
+        {
+          "alias": "google",
+          "providerId": "google",
+          "displayName": "Google",
+          "enabled": true,
+          "trustEmail": true,
+          "config": {
+            "clientId": {{ .clientId | quote }},
+            "clientSecret": "${GOOGLE_CLIENT_SECRET}",
+            "defaultScope": "openid profile email",
+            "syncMode": "IMPORT",
+            "prompt": "select_account"
+          }
+        }
+      ]
+      {{- end }}{{ end }}
     }
 ---
 apiVersion: apps/v1
@@ -101,6 +122,9 @@ spec:
             - {name: KC_DB_URL, value: "jdbc:postgresql://argus-postgres:5432/keycloak"}
             - {name: KC_DB_USERNAME, value: {{ .Values.postgres.user | quote }}}
             {{- include "argus.secretEnv" (dict "name" "KC_DB_PASSWORD" "secret" .Values.existingSecret "key" "postgres-password") | nindent 12 }}
+            {{- if .Values.keycloak.google.clientId }}
+            {{- include "argus.secretEnv" (dict "name" "GOOGLE_CLIENT_SECRET" "secret" .Values.existingSecret "key" "keycloak-google-client-secret") | nindent 12 }}
+            {{- end }}
             # TLS ends at the ingress. The hostname fixes the issuer the API checks, whichever way a request
             # arrives (the API fetches the keys inside the cluster).
             - {name: KC_HOSTNAME, value: {{ .Values.hosts.keycloak | quote }}}

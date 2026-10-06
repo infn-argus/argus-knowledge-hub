@@ -43,8 +43,9 @@ currently valid* revision rather than to an arbitrary PDF.
   operations cockpit opens on what needs attention. Served by `/v1/hub` (`search`, `overview`,
   `assets|tickets|documents/{uid}/context`), which fills each section only for callers who may read it.
 - **Workspaces** with per-user, per-resource permissions (read/create/modify/delete/approve),
-  OIDC sign-in (*INFN login* through Keycloak, Google through Firebase) plus API tokens for
-  automation.
+  OIDC sign-in (*INFN login* through Keycloak, which can also offer Google; Google through
+  Firebase on the web) plus API tokens for automation. The ARGUS Field mobile app signs in through
+  Keycloak and can ask the assistant by voice.
 - **Types (schemas)** with inheritance: attributes are inherited down the hierarchy, and a type
   can be marked *global* to be referenced across workspaces.
 - **Assets** with typed attributes (string/number/date/enum/reference/user/…), typed relations,

@@ -79,6 +79,7 @@ are not held to feature parity. Each is designed for where it is used:
 | Identity reconciliation, large duplicate queues | — | ● | a single assigned duplicate may be dismissed on mobile |
 | Document authoring, comparison, approval, retention | — | ● | the field client may attach photos or notes as proposed inputs |
 | Bulk ticket operations, large tables, dashboards, reports | — | ● | |
+| Ask questions of the records, typed or spoken | ● (voice in and out, hands-free) | ● (Ask ARGUS, proposed changes) | the same conversations; changes are applied on the web |
 | Advanced knowledge-graph exploration | — | ● | the field client shows a short impact summary (`knowledge-graph-design.md` §3.2) |
 | Workspaces, roles, groups, access reviews | — | ● | |
 | AI model and prompt governance | — | ● | revision §23.12 |
@@ -245,6 +246,7 @@ ripple into screens, and a change to the local schema does not ripple into the A
 | `documents` | reading procedures and checklists, offline copies, freshness warnings |
 | `review` | assigned proposals and conflicts, one item at a time, with evidence |
 | `notifications` | push registration, the in-app inbox, routing into deep links |
+| `ask` | questions answered from the records (`/v1/ai/chat`, streamed), earlier conversations, speech in and out |
 | `sync` | the pending-command queue, upload of attachments, conflict presentation |
 | `settings_diagnostics` | settings, cache state, diagnostics screen and export (§13) |
 
@@ -263,6 +265,7 @@ M1 confirmed the first six rows; the others are still candidates.
 | On-device OCR (optional) | ML Kit text recognition, on-device model | a quick reading for the quality check. It is never the authoritative extraction |
 | Background sync | WorkManager (Android), BGTaskScheduler (iOS) | platform-scheduled retries |
 | Push | FCM / APNs through a server relay, or the MDM's channel | stakeholder decision U21 |
+| Speech (chosen) | `speech_to_text` and `flutter_tts`: the platform's recogniser and voice | no audio leaves the app, only the words recognised. Server-side speech (the AI settings' speech models) is the option for one voice across devices |
 
 Each package's licence, maintenance and data behaviour is reviewed before adoption. A package
 that sends data to a third party (analytics, cloud OCR) is excluded.
@@ -393,6 +396,13 @@ Otherwise the server opens a review item with the evidence the person captured.
 - **OIDC:** Authorization Code with **PKCE**, through the system browser (AppAuth). There is no
   embedded web view and no password in the app. The issuer is the one the web uses (revision
   §19 item 1; `docs/oidc-dev-setup.md`).
+  - Google accounts come through the same issuer: Keycloak brokers Google (`keycloak.google` in the
+    chart), so the app and the API see only Keycloak tokens.
+  - Signing in with Google directly (`OIDC_ISSUER=https://accounts.google.com`) is supported for
+    an installation without Keycloak: the app then sends Google's ID token, which the API trusts
+    as an extra provider (`docs/operations.md`).
+  - On Android, `MainActivity` has no `taskAffinity=""` (the Flutter template's default): with it,
+    the redirect arrives in another task and AppAuth drops it ("No stored state").
 - **Tokens:**
   - access tokens are short-lived (proposed 10 minutes) and refresh tokens are rotated;
   - both are stored only in the platform keystore;
@@ -813,6 +823,18 @@ Tests:
 
 Not yet: attachments are kept base64 in the keystore, which suits photos but not long videos. A
 Drift/SQLCipher store (§4.3) remains the option for larger volumes.
+
+Ask, in `mobile/app/lib/features/ask` (after M4):
+- questions answered from the workspace's records, streamed as server-sent events: the lookups
+  as they run, then the answer; a cut-short or failed answer says so;
+- follow-ups in the same conversation, and earlier conversations reopened (the web's too);
+- the microphone dictates a question; an answer is read aloud on request, without its Markdown;
+- hands-free: each answer read aloud, then the next question heard, until nothing is said;
+- offered only when `/v1/ai/status` says the endpoint is usable, otherwise the reason is shown;
+- never cached on the device. Proposals of changes stay on the web.
+
+Tests: 6 app tests (streaming, follow-up, voice, hands-free, unavailable, refused), with a fake
+voice in place of the platform's.
 
 M2 tests:
 - 35 app tests;

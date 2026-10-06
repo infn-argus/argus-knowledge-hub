@@ -43,6 +43,9 @@ web:
   nodeSelector:
     kubernetes.io/hostname: vnode-1
 keycloak:
+  # "Sign in with Google" on the Keycloak page (Google Cloud project seraphic-camera-479521-s5).
+  google:
+    clientId: 3066477772-1kgsiiv1akqfk266eia6spmod8o5ujjt.apps.googleusercontent.com
   nodeSelector:
     kubernetes.io/hostname: vnode-1
 imagePrune:

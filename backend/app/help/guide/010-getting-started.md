@@ -15,7 +15,8 @@ cover it; every document shows where it applies.
 1. Open the hub's address in a browser (in production,
    `https://argus-hub.90.147.174.30.myip.cloud.infn.it`).
 2. Choose how to sign in:
-   - **Keycloak login** (or *INFN login*): your account in the hub's sign-in service.
+   - **Keycloak login** (or *INFN login*): your account in the hub's sign-in service. Its page may also
+     offer **Google**, for a Google account.
    - **Sign in with Google**: a Google account.
    - **API token**: for scripts and tools, not for people.
 3. If it is your first time, an administrator may still have to give you access (see *Workspaces,

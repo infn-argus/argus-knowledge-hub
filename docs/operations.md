@@ -504,7 +504,31 @@ Build the app against production with `--dart-define=ARGUS_ENV=production
 --dart-define=ARGUS_API_BASE=https://<api host> --dart-define=OIDC_ISSUER=https://<keycloak host>/realms/argus`
 (the variables are in `mobile/app/lib/core/config.dart`).
 
-### Signing in with Google instead
+If the app returns from the sign-in page without being signed in, and its log says `AppAuth: No stored
+state`, the Android `MainActivity` has `android:taskAffinity=""` again (Flutter's template adds it): remove
+it, uninstall the app and build again.
+
+For **Ask** by voice the app asks for the microphone the first time. It needs a usable AI endpoint in the
+workspace (*Administration → AI*), as the web's Ask ARGUS does.
+
+### Google accounts through Keycloak
+
+The realm can offer **Google** beside its own accounts: the web app and the mobile app both see a
+Google button on the Keycloak page, and nothing else changes for them or the API. A Google user is matched to
+an existing ARGUS user by email (`trustEmail` is on).
+
+1. In Google Cloud, create an OAuth client of type *Web application* with the redirect URI
+   `https://<keycloak host>/realms/argus/broker/google/endpoint`.
+2. Put its secret in the Secret: `kubectl -n argus patch secret argus-secrets --type merge -p
+   '{"stringData":{"keycloak-google-client-secret":"<secret>"}}'`.
+3. Set `keycloak.google.clientId` in the values. A new realm is imported with the provider.
+
+The realm is imported only on Keycloak's first start, so on an existing installation also add the provider
+once in the admin console (*Identity providers → Google*), or with `kcadm.sh create identity-provider/instances
+-r argus -s alias=google -s providerId=google -s enabled=true -s trustEmail=true -s config.clientId=<id>
+-s config.clientSecret=<secret>`.
+
+### Signing in with Google directly, without Keycloak
 
 With `OIDC_ISSUER=https://accounts.google.com` the app signs in with Google directly and sends the
 **ID token** (Google's access tokens are opaque). In the Google Cloud console, create an OAuth client

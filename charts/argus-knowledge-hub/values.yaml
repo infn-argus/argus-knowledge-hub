@@ -1,7 +1,7 @@
 # Defaults; a deployment's own values (values-production.yaml) say where and how big.
 
 # Created by hand, never in Git (README.md): postgres-password, database-url, token-pepper,
-# import-secrets-key, keycloak-admin-password.
+# import-secrets-key, keycloak-admin-password; keycloak-google-client-secret when keycloak.google is set.
 existingSecret: argus-secrets
 
 hosts:
@@ -57,6 +57,10 @@ keycloak:
   realm: argus
   clientId: argus-webapp
   adminUser: admin
+  # Google as an identity provider in the realm: the OAuth client (type "Web application", redirect URI
+  # https://<keycloak host>/realms/<realm>/broker/google/endpoint). Its secret is in existingSecret.
+  google:
+    clientId: ""
   nodeSelector: {}
   resources:
     requests: {cpu: 100m, memory: 512Mi}

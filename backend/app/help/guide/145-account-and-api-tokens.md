@@ -105,3 +105,9 @@ For it to sign in, the identity provider needs the `argus-mobile` client, whose 
 addressed to the API (an audience mapper adding the web client's id). A new installation's Keycloak gets
 it with the realm. An installation set up before has to add it once (`docs/operations.md`, "The mobile
 app's sign-in client").
+
+On the Keycloak page the app opens, **Google** signs in with a Google account, when the installation offers
+it: the same person as with Google in the web app, recognised by email. Without a workspace yet, the app
+shows none until an administrator gives access.
+
+The app also has **Ask**, the assistant of *Ask ARGUS*, typed or spoken (see *Ask ARGUS*, "On the phone").
