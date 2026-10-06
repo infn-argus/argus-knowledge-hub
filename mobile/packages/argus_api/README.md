@@ -41,16 +41,16 @@ Please follow the [installation procedure](#installation--usage) and then run th
 import 'package:argus_api/api.dart';
 
 
-final api_instance = AssetsApi();
-final assetCreate = AssetCreate(); // AssetCreate | 
+final api_instance = AiApi();
+final chatIn = ChatIn(); // ChatIn | 
 final authorization = authorization_example; // String | 
 final xWorkspaceId = xWorkspaceId_example; // String | 
 
 try {
-    final result = api_instance.createAsset(assetCreate, authorization, xWorkspaceId);
+    final result = api_instance.chat(chatIn, authorization, xWorkspaceId);
     print(result);
 } catch (e) {
-    print('Exception when calling AssetsApi->createAsset: $e\n');
+    print('Exception when calling AiApi->chat: $e\n');
 }
 
 ```
@@ -61,6 +61,10 @@ All URIs are relative to *http://localhost*
 
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
+*AiApi* | [**chat**](doc//AiApi.md#chat) | **POST** /v1/ai/chat | Chat
+*AiApi* | [**getConversation**](doc//AiApi.md#getconversation) | **GET** /v1/ai/conversations/{conversation_id} | Get Conversation
+*AiApi* | [**listConversations**](doc//AiApi.md#listconversations) | **GET** /v1/ai/conversations | List Conversations
+*AiApi* | [**status**](doc//AiApi.md#status) | **GET** /v1/ai/status | Status
 *AssetsApi* | [**createAsset**](doc//AssetsApi.md#createasset) | **POST** /v1/assets | Create Asset
 *AssetsApi* | [**getAsset**](doc//AssetsApi.md#getasset) | **GET** /v1/assets/{uid} | Get Asset
 *AssetsApi* | [**updateAsset**](doc//AssetsApi.md#updateasset) | **PUT** /v1/assets/{uid} | Update Asset
@@ -114,11 +118,17 @@ Class | Method | HTTP request | Description
 
 ## Documentation For Models
 
+ - [AIStatus](doc//AIStatus.md)
+ - [AskConversationDetail](doc//AskConversationDetail.md)
+ - [AskConversationOut](doc//AskConversationOut.md)
+ - [AskMessageOut](doc//AskMessageOut.md)
+ - [AskStep](doc//AskStep.md)
  - [AssetCreate](doc//AssetCreate.md)
  - [AssetOut](doc//AssetOut.md)
  - [AssetUpdate](doc//AssetUpdate.md)
  - [AssistIn](doc//AssistIn.md)
  - [AttachmentOut](doc//AttachmentOut.md)
+ - [ChatIn](doc//ChatIn.md)
  - [CloseReviewIn](doc//CloseReviewIn.md)
  - [DecideIn](doc//DecideIn.md)
  - [DecideReplacementIn](doc//DecideReplacementIn.md)
@@ -151,5 +161,5 @@ Endpoints do not require authorization.
 
 ## Author
 
-
+andrea.michelotti@infn.it
 

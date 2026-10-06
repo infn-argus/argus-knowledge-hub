@@ -182,6 +182,16 @@ class ApiClient {
           return valueString == 'true' || valueString == '1';
         case 'DateTime':
           return value is DateTime ? value : DateTime.tryParse(value);
+        case 'AIStatus':
+          return AIStatus.fromJson(value);
+        case 'AskConversationDetail':
+          return AskConversationDetail.fromJson(value);
+        case 'AskConversationOut':
+          return AskConversationOut.fromJson(value);
+        case 'AskMessageOut':
+          return AskMessageOut.fromJson(value);
+        case 'AskStep':
+          return AskStep.fromJson(value);
         case 'AssetCreate':
           return AssetCreate.fromJson(value);
         case 'AssetOut':
@@ -192,6 +202,8 @@ class ApiClient {
           return AssistIn.fromJson(value);
         case 'AttachmentOut':
           return AttachmentOut.fromJson(value);
+        case 'ChatIn':
+          return ChatIn.fromJson(value);
         case 'CloseReviewIn':
           return CloseReviewIn.fromJson(value);
         case 'DecideIn':

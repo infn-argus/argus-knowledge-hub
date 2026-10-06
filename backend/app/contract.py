@@ -71,6 +71,12 @@ FIELD_OPERATIONS = [
     ("post", "/v1/intake/proposals/{claim_id}"),
     # Offline (M4): the assigned tickets prefetched for offline use
     ("get", "/v1/issues"),
+    # Ask: questions answered from the workspace's records, as a conversation. The chat's answer is
+    # server-sent events, which the generated client cannot stream: the app reads them itself.
+    ("get", "/v1/ai/status"),
+    ("post", "/v1/ai/chat"),
+    ("get", "/v1/ai/conversations"),
+    ("get", "/v1/ai/conversations/{conversation_id}"),
 ]
 
 
