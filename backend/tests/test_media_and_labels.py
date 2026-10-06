@@ -344,3 +344,83 @@ def test_jira_object_without_links_produces_no_label():
     assert _import_object_qrcode(db, asset, {"id": 1}) == 0
     assert db.query(AssetLabel).filter(AssetLabel.asset_uid == asset.uid).count() == 0
     db.close()
+
+
+def test_a_scanned_web_code_finds_the_record_it_is_printed_on(monkeypatch):
+    """A QR code of a web address (the service desk's page for the item) names the record: the whole value is
+    matched before the address is taken apart, which used to leave only its last path part."""
+    import secrets as _s
+    from datetime import datetime, timezone
+    from app.db import SessionLocal
+    from app.ledger import lookup
+    from app.models.asset import Asset
+    from app.models.asset_subresources import AssetLabel
+    from app.models.schema import Schema
+    from app.models.workspace import Workspace
+    from app.services.qr_from_alias import apply, plan
+    t = _s.token_hex(3); ws = f"qr-{t}"
+    url = f"https://servicedesk.example.org/secure/ShowObject.jspa?id={t}"
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name="QR"))
+    db.flush()
+    db.add(Schema(uid=f"{ws}:magnet", workspace_id=ws, name="Magnet", applies_to="objects"))
+    db.flush()
+    db.add(Asset(uid=f"{ws}-m", workspace_id=ws, schema_uid=f"{ws}:magnet", key=f"QR-{t}", name=f"Magnet {t}", type="Magnet"))
+    db.flush()
+    now = datetime.now(timezone.utc)
+    db.add(AssetLabel(uid=f"{ws}-alias", asset_uid=f"{ws}-m", type="alias", value=url, issuer="user",
+                      created_at=now, updated_at=now))
+    db.commit()
+    try:
+        # Scanned as a whole, the address already finds the record through its alias.
+        by_alias = lookup.resolve(db, url, [ws])
+        assert by_alias and by_alias["uid"] == f"{ws}-m" and by_alias["via"] == "alias"
+        # The backfill proposes the QR code from the alias; once it is there, the scan finds it as a QR code.
+        planned = plan(db, ws)
+        assert [r["value"] for r in planned["add"]] == [url] and not planned["skipped"]
+        assert apply(db, ws, planned) == 1
+        by_qr = lookup.resolve(db, url, [ws])
+        assert by_qr and by_qr["uid"] == f"{ws}-m" and by_qr["kind"] == "asset"
+        # Running it again adds nothing: the record now has a QR code.
+        assert plan(db, ws)["add"] == []
+    finally:
+        from app.ledger.audit import allow_purge
+        allow_purge(db)
+        db.delete(db.get(Workspace, ws))
+        db.commit()
+        db.close()
+
+
+def test_an_alias_already_printed_elsewhere_is_reported_not_moved(monkeypatch):
+    import secrets as _s
+    from datetime import datetime, timezone
+    from app.db import SessionLocal
+    from app.models.asset import Asset
+    from app.models.asset_subresources import AssetLabel
+    from app.models.schema import Schema
+    from app.models.workspace import Workspace
+    from app.services.qr_from_alias import plan
+    t = _s.token_hex(3); ws = f"qrd-{t}"; value = f"ALIAS-{t}"
+    db = SessionLocal()
+    db.add(Workspace(id=ws, name="QR dup"))
+    db.flush()
+    db.add(Schema(uid=f"{ws}:magnet", workspace_id=ws, name="Magnet", applies_to="objects"))
+    db.flush()
+    for n in ("a", "b"):
+        db.add(Asset(uid=f"{ws}-{n}", workspace_id=ws, schema_uid=f"{ws}:magnet", key=f"K{n}-{t}", name=f"M {n}", type="Magnet"))
+    db.flush()
+    now = datetime.now(timezone.utc)
+    db.add(AssetLabel(uid=f"{ws}-al-a", asset_uid=f"{ws}-a", type="alias", value=value, issuer="user", created_at=now, updated_at=now))
+    db.add(AssetLabel(uid=f"{ws}-al-b", asset_uid=f"{ws}-b", type="alias", value=value, issuer="user", created_at=now, updated_at=now))
+    db.add(AssetLabel(uid=f"{ws}-qr-b", asset_uid=f"{ws}-b", type="qrcode", value=value, issuer="argus", created_at=now, updated_at=now))
+    db.commit()
+    try:
+        planned = plan(db, ws)
+        assert planned["add"] == [] and len(planned["skipped"]) == 1
+        assert planned["skipped"][0]["asset"] == f"Ka-{t}" and "already the QR code" in planned["skipped"][0]["reason"]
+    finally:
+        from app.ledger.audit import allow_purge
+        allow_purge(db)
+        db.delete(db.get(Workspace, ws))
+        db.commit()
+        db.close()

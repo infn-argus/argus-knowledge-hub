@@ -22,6 +22,8 @@ from app.models.issue import Issue
 from app.models.ledger import IdentityBinding, LedgerDomain
 
 ALIAS_LABELS = ("former_key", "former_uid", "alias", "jiraObjectId")
+# Labels whose value is matched exactly as scanned: a QR code and the aliases that a printed code may carry.
+EXACT_LABELS = ("qrcode",) + ALIAS_LABELS
 JIRA_BROWSE = re.compile(r"/browse/([A-Z][A-Z0-9_]+-\d+)")
 
 
@@ -78,6 +80,14 @@ def resolve(db: Session, identifier: str, workspace_ids: Optional[Iterable[str]]
             return hit
     if not key:
         return None
+    # A label's value exactly as printed (a QR code of a web address, an alias that is a whole link) is what
+    # was scanned: it is matched whole before the identifier is taken apart.
+    whole = identifier.strip()
+    for label in db.scalars(select(AssetLabel).where(AssetLabel.value == whole,
+                                                     AssetLabel.type.in_(EXACT_LABELS))):
+        hit = _asset_hit(db, db.get(Asset, label.asset_uid), label.type)
+        if hit and in_scope(hit["workspace_id"]):
+            return hit
     q = select(Issue).where(Issue.attributes["argus_source_key"].astext == key)
     for issue in db.scalars(q):
         if in_scope(issue.workspace_id):

@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { SchemaTree } from "../../components/SchemaTree";
 import { ListDate, SortHeader, useSort } from "../../components/SortableTable";
 import { Link } from "react-router-dom";
 import { assetsApi, schemasApi } from "../../api/client";
@@ -35,6 +36,22 @@ export function AssetSearch() {
     () => (schemas.data ?? []).filter((s) => s.applies_to === "objects"),
     [schemas.data],
   );
+  // The chosen type and every type below it: choosing "Asset" lists the objects of all its kinds.
+  const familyUids = useMemo(() => {
+    if (!schemaUid) return null;
+    const children = new Map<string, string[]>();
+    for (const s of objectSchemas) {
+      if (s.parent_schema_uid) children.set(s.parent_schema_uid, [...(children.get(s.parent_schema_uid) ?? []), s.uid]);
+    }
+    const out = new Set<string>();
+    const walk = (uid: string) => {
+      if (out.has(uid)) return;
+      out.add(uid);
+      (children.get(uid) ?? []).forEach(walk);
+    };
+    walk(schemaUid);
+    return out;
+  }, [objectSchemas, schemaUid]);
   const schema = objectSchemas.find((s) => s.uid === schemaUid);
   const attrDefs = effectiveAttributes(schema, schemas.data);
 
@@ -45,7 +62,7 @@ export function AssetSearch() {
       if (needle && !a.name.toLowerCase().includes(needle) && !a.key.toLowerCase().includes(needle)) {
         return false;
       }
-      if (schemaUid && a.schema_uid !== schemaUid) return false;
+      if (familyUids && !familyUids.has(a.schema_uid)) return false;
       if (currentWorkspaceId !== null) {
         if (owner === "own" && a.workspace_id !== currentWorkspaceId) return false;
         if (owner === "shared" && a.workspace_id === currentWorkspaceId) return false;
@@ -55,7 +72,7 @@ export function AssetSearch() {
       }
       return true;
     });
-  }, [assets.data, q, schemaUid, schema, filters, owner, currentWorkspaceId]);
+  }, [assets.data, q, familyUids, schema, filters, owner, currentWorkspaceId]);
   const { sorted: results, sort, toggle: sortBy } = useSort(
     matched,
     {
@@ -70,7 +87,25 @@ export function AssetSearch() {
   );
 
   return (
-    <div>
+    <div className="flex min-h-[calc(100vh-7rem)] gap-4">
+      <aside className="flex w-72 shrink-0 flex-col rounded-lg border border-slate-200 bg-white p-3">
+        <div className="mb-2 flex items-center justify-between px-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Object types</p>
+          <Link to="/schemas/new" title="New object type" className="text-sm font-medium text-slate-400 hover:text-slate-700">+</Link>
+        </div>
+        <button
+          type="button"
+          onClick={() => setSchemaUid("")}
+          className={`mb-1 rounded px-2 py-1 text-left text-xs ${!schemaUid ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50"}`}
+        >
+          All objects
+          <span className="ml-1 text-slate-400">{assets.data?.length ?? 0}</span>
+        </button>
+        <div className="min-h-0 flex-1">
+          <SchemaTree appliesTo="objects" fill selectedUid={schemaUid || null} onSelect={(uid) => setSchemaUid(uid ?? "")} />
+        </div>
+      </aside>
+      <div className="min-w-0 flex-1">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">Search objects</h1>
         {/* The same affordance tickets and documents have: this is where
@@ -244,6 +279,7 @@ export function AssetSearch() {
           </p>
         </>
       )}
+      </div>
     </div>
   );
 }

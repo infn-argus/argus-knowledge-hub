@@ -315,6 +315,7 @@ export function AppShell() {
           </div>
         </nav>
 
+        {!(config.appliesTo === "objects" && location.pathname === "/assets/search") && (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-slate-200 px-2 pb-2">
           <div className="flex items-center justify-between px-1.5 pb-1 pt-2">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{config.treeLabel}</p>
@@ -328,6 +329,7 @@ export function AppShell() {
           </div>
           <SchemaTree appliesTo={config.appliesTo} />
         </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-1 border-t border-slate-200 px-2 py-1.5 text-xs">
           {accessLink && (

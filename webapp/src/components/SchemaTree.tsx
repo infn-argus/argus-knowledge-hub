@@ -142,11 +142,24 @@ function TreeNodeRow({
 
 export function SchemaTree({
   appliesTo = "objects",
+  selectedUid: controlledUid,
+  onSelect: controlledSelect,
+  fill = false,
 }: {
   appliesTo?: "objects" | "tickets" | "documents";
+  /** A browse pane: the type picked is reported here and nothing is navigated to. */
+  selectedUid?: string | null;
+  onSelect?: (uid: string | null) => void;
+  /** Fill the height of the pane it is in (a browse layout), rather than the sidebar's share of it. */
+  fill?: boolean;
 }) {
   const navigate = useNavigate();
-  const { uid: selectedUid } = useParams<{ uid?: string }>();
+  const { uid: routeUid } = useParams<{ uid?: string }>();
+  const selectedUid = controlledSelect ? controlledUid ?? null : routeUid ?? null;
+  const choose = (uid: string) => {
+    if (controlledSelect) controlledSelect(selectedUid === uid ? null : uid);
+    else navigate(`/schemas/${uid}`);
+  };
   const [query, setQuery] = useState("");
   const currentWorkspaceId = useCurrentWorkspaceId();
 
@@ -224,7 +237,7 @@ export function SchemaTree({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className={`flex min-h-0 flex-col ${fill ? "h-full" : "flex-1"}`}>
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -244,8 +257,8 @@ export function SchemaTree({
             node={node}
             depth={0}
             counts={counts}
-            selectedUid={selectedUid ?? null}
-            onSelect={(uid) => navigate(`/schemas/${uid}`)}
+            selectedUid={selectedUid}
+            onSelect={choose}
             forceExpanded={query.length > 0}
           />
         ))}
@@ -273,8 +286,8 @@ export function SchemaTree({
                       node={node}
                       depth={0}
                       counts={counts}
-                      selectedUid={selectedUid ?? null}
-                      onSelect={(uid) => navigate(`/schemas/${uid}`)}
+                      selectedUid={selectedUid}
+                      onSelect={choose}
                       forceExpanded={query.length > 0}
                     />
                   ))}
