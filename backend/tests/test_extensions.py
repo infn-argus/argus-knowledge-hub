@@ -102,7 +102,7 @@ def test_the_gate_refuses_what_would_break_the_model():
         ext.ExtRelation("feeds", "power", causal_model.FORWARD, None, "x")]), []))
     assert any("unknown type" in p for p in ext.check(sample(relations=[
         ext.ExtRelation("feeds", "power", causal_model.FORWARD, causal_model.FUNCTION, "x",
-                        target_types={"Klystron"})]), []))
+                        target_types={"Flux Capacitor"})]), []))
     # Two extensions may not both add the same type.
     a, b = sample(), sample()
     assert any("exists already" in p for p in ext.check(b, [a, b]))

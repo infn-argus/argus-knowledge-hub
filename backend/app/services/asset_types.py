@@ -397,6 +397,14 @@ _t("Magnet Assembly", "Asset", "The magnet itself, as a physical unit.", [
     F("coil_resistance", "Coil resistance (Ω)"),
     E("cooling", "Cooling", ["Air", "Water", "Cryogenic"]), F("weight", "Weight (kg)")])
 _t("RF Amplifier", "Asset", "Klystron or solid-state amplifier.")
+_t("Klystron", "RF Amplifier", "A klystron: the vacuum-tube amplifier itself, beam in, RF out.", [
+    F("frequency_mhz", "Frequency (MHz)"), F("peak_power_mw", "Peak power (MW)"),
+    F("beam_voltage_kv", "Beam voltage (kV)"), I("n_cavities", "Number of cavities")])
+_t("Collector", "Asset", "A klystron's collector: the sub-component housed inside it that absorbs the "
+   "spent electron beam once it has given up its energy to the RF cavities.", [
+    E("cooling", "Cooling", ["Air", "Water"]), F("dissipation_max_kw", "Maximum dissipation (kW)"),
+    B("is_depressed", "Depressed (multi-stage)")],
+   aliases=("beam collector", "electron collector"))
 _t("Modulator", "Asset", "Pulsed power for a klystron.")
 _t("Low-Level RF Unit", "Asset", "Regulates RF phase and amplitude.")
 _t("Waveguide Component", "Asset", "A part of the RF waveguide network.",
@@ -418,6 +426,10 @@ _t("Directional Coupler", "Waveguide Component", "Samples forward and reflected 
     B("is_bidirectional", "Bidirectional")])
 _t("RF Isolator", "Waveguide Component", "Protects the source from reflections.", [
     F("isolation_db", "Isolation (dB)"), F("insertion_loss_db", "Insertion loss (dB)")])
+_t("Circulator", "Waveguide Component", "A ferrite device that routes RF power from one port to the "
+   "next in turn, rather than back where it came from.", [
+    I("n_ports", "Number of ports"), F("isolation_db", "Isolation (dB)"),
+    F("insertion_loss_db", "Insertion loss (dB)")])
 _t("RF Hybrid", "Waveguide Component", "Splits or combines RF power.", [
     E("hybrid_kind", "Hybrid kind", ["3 dB", "Magic-T"]),
     F("phase_balance_deg", "Phase balance (°)")])
