@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/ask/ask_screen.dart';
 import '../features/auth/signin_screen.dart';
 import '../features/capture/register_screen.dart';
 import '../features/installations/replace_screen.dart';
@@ -78,6 +79,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/scan', builder: (_, st) => ScanScreen(pick: st.uri.queryParameters['pick'] == '1')),
       GoRoute(path: '/diagnostics', builder: (_, _) => const DiagnosticsScreen()),
       GoRoute(path: '/inbox', builder: (_, _) => const InboxScreen()),
+      GoRoute(path: '/ask', builder: (_, _) => const AskScreen()),
       GoRoute(path: '/report/:uid', builder: (_, st) => ReportScreen(subjectUid: st.pathParameters['uid']!)),
       GoRoute(
           path: '/register',

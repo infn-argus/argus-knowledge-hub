@@ -8,11 +8,13 @@ import '../core/config.dart';
 import '../core/problem.dart';
 import '../core/session.dart';
 import '../data/api_service.dart';
+import '../data/ask_repository.dart';
 import '../data/capture_repositories.dart';
 import '../data/replacement_repositories.dart';
 import '../data/repositories.dart';
 import '../domain/capture.dart';
 import '../domain/models.dart';
+import '../features/ask/voice.dart';
 import '../features/auth/auth_service.dart';
 import '../features/capture/photo_source.dart';
 import 'queue.dart';
@@ -306,4 +308,21 @@ final reviewRepositoryProvider = Provider((ref) => ReviewRepository(ref.watch(ap
 final myReviewItemsProvider = FutureProvider.autoDispose<List<ReviewItem>>((ref) {
   ref.watch(workspaceIdProvider);
   return ref.watch(reviewRepositoryProvider).mine();
+});
+
+// --------------------------------------------------------------------------- ask
+
+final askRepositoryProvider = Provider((ref) => AskRepository(ref.watch(apiServiceProvider)));
+
+/// The phone's speech recognition and voice. Tests put a fake here.
+final voiceProvider = Provider<Voice>((_) => DeviceVoice());
+
+final askAvailabilityProvider = FutureProvider.autoDispose<AskAvailability>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(askRepositoryProvider).availability();
+});
+
+final askConversationsProvider = FutureProvider.autoDispose<List<AskConversationSummary>>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(askRepositoryProvider).conversations();
 });

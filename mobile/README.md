@@ -48,6 +48,15 @@ as `If-Match`.
   - sign-out and revocation wipe the device and name the unsent work that was lost.
   - `ARGUS_OFFLINE_RETENTION_DAYS` (default 7) is the retention for saved copies and commands.
 
+- **Ask:**
+  - questions answered from the workspace's records (`POST /v1/ai/chat`), streamed as they are
+    looked up, with the lookups shown and earlier conversations reopened;
+  - typed or spoken, using the phone's own speech recognition, and answers read aloud on request.
+    In **hands-free** mode the app reads each answer aloud and then listens for the next question,
+    until nothing is said;
+  - offered only when the workspace has a usable AI endpoint (`GET /v1/ai/status`); otherwise it
+    says why. Nothing of it is kept on the device.
+
 Before a release, scan the built bundle for credentials, prompts and provider endpoints:
 `mobile/tool/check_build.sh build/web` (or an unzipped APK or IPA).
 

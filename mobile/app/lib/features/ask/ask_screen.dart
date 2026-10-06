@@ -1,0 +1,433 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../app/providers.dart';
+import '../../core/problem.dart';
+import '../../data/ask_repository.dart';
+import '../../widgets/common.dart';
+import 'voice.dart';
+
+/// Ask: a question answered from the workspace's records, typed or spoken, as a conversation
+/// (the web's Ask page). The lookups behind each answer are shown, so the person sees which
+/// records it rests on; an answer that was cut short says so.
+///
+/// Hands-free: answers are read aloud and, after one is read, the app listens for the next
+/// question, until the person says nothing or turns it off.
+class AskScreen extends ConsumerStatefulWidget {
+  const AskScreen({super.key});
+
+  @override
+  ConsumerState<AskScreen> createState() => _AskScreenState();
+}
+
+class _AskScreenState extends ConsumerState<AskScreen> {
+  final _input = TextEditingController();
+  final _scroll = ScrollController();
+  final _turns = <AskTurn>[];
+  String? _conversationId;
+  StreamSubscription<AskEvent>? _answering;
+  bool _listening = false;
+  bool _handsFree = false;
+  int? _speaking; // the turn being read aloud
+
+  late final Voice _voice;
+
+  @override
+  void initState() {
+    super.initState();
+    _voice = ref.read(voiceProvider);
+  }
+
+  @override
+  void dispose() {
+    _answering?.cancel();
+    _voice.stopListening();
+    _voice.quiet();
+    _input.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  bool get _busy => _answering != null;
+
+  void _toBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) {
+          _scroll.animateTo(_scroll.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+        }
+      });
+
+  void _send([String? text]) {
+    final question = (text ?? _input.text).trim();
+    if (question.isEmpty || _busy) return;
+    _input.clear();
+    final turn = AskTurn(question: question);
+    setState(() => _turns.add(turn));
+    _toBottom();
+    _answering = ref.read(askRepositoryProvider).ask(question, conversationId: _conversationId).listen(
+      (e) => setState(() {
+        switch (e) {
+          case AskConversationStarted(:final id):
+            _conversationId = id;
+          case AskText(:final text):
+            turn.answer += text;
+          case AskTextReset():
+            turn.answer = '';
+          case AskLookup(:final index):
+            final at = turn.lookups.indexWhere((l) => l.index == index);
+            at < 0 ? turn.lookups.add(e) : turn.lookups[at] = e;
+          case AskDone(:final answer, :final stopped, :final error):
+            turn
+              ..answer = answer.isEmpty ? turn.answer : answer
+              ..stopped = stopped
+              ..error = error;
+        }
+        _toBottom();
+      }),
+      onError: (Object e) => setState(() {
+        _answering = null; // cancelOnError: onDone does not follow
+        turn
+          ..stopped = 'failed'
+          ..error = e is Problem ? e.message : e.toString();
+      }),
+      onDone: () {
+        if (!mounted) return;
+        setState(() {
+          _answering = null;
+          turn.stopped ??= 'failed';
+        });
+        if (_handsFree && turn.stopped != 'failed' && turn.answer.isNotEmpty) _readThenListen(turn);
+      },
+      cancelOnError: true,
+    );
+  }
+
+  void _stop() {
+    _answering?.cancel();
+    setState(() {
+      _answering = null;
+      if (_turns.isNotEmpty) _turns.last.stopped ??= 'cancelled';
+    });
+  }
+
+  Future<void> _readAloud(AskTurn turn) async {
+    final i = _turns.indexOf(turn);
+    if (_speaking == i) {
+      await _voice.quiet();
+      if (mounted) setState(() => _speaking = null);
+      return;
+    }
+    setState(() => _speaking = i);
+    await _voice.speak(spoken(turn.answer));
+    if (mounted && _speaking == i) setState(() => _speaking = null);
+  }
+
+  Future<void> _readThenListen(AskTurn turn) async {
+    await _readAloud(turn);
+    if (mounted && _handsFree && !_busy && !_listening) await _listen();
+  }
+
+  Future<void> _listen() async {
+    if (_listening) {
+      await _voice.stopListening();
+      return;
+    }
+    if (!await _voice.canListen()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Speech recognition is not available. Allow the microphone for ARGUS Field in the '
+                "phone's settings.")));
+      }
+      return;
+    }
+    await _voice.quiet();
+    if (!mounted) return;
+    setState(() {
+      _listening = true;
+      _speaking = null;
+    });
+    await _voice.listen((words, last) {
+      if (!mounted) return;
+      setState(() {
+        _input.text = words;
+        if (last) _listening = false;
+      });
+      if (last) {
+        if (words.trim().isNotEmpty) {
+          _send(words);
+        } else if (_handsFree) {
+          setState(() => _handsFree = false); // nothing said: the conversation is over
+        }
+      }
+    });
+  }
+
+  void _toggleHandsFree() {
+    setState(() => _handsFree = !_handsFree);
+    if (!_handsFree) {
+      _voice.quiet();
+      _voice.stopListening();
+      setState(() => _speaking = null);
+    } else if (!_busy && !_listening) {
+      _listen();
+    }
+  }
+
+  void _newConversation() {
+    _stop();
+    _voice.quiet();
+    setState(() {
+      _turns.clear();
+      _conversationId = null;
+      _speaking = null;
+    });
+  }
+
+  Future<void> _history() async {
+    final picked = await showModalBottomSheet<AskConversationSummary>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => const _History(),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      final turns = await ref.read(askRepositoryProvider).conversation(picked.id);
+      _stop();
+      setState(() {
+        _turns
+          ..clear()
+          ..addAll(turns);
+        _conversationId = picked.id;
+      });
+      _toBottom();
+    } on Problem catch (p) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(p.message)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final available = ref.watch(askAvailabilityProvider);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Ask'),
+        actions: [
+          IconButton(
+            key: const Key('ask-handsfree'),
+            tooltip: _handsFree ? 'Hands-free on: answers are read and the app listens' : 'Hands-free',
+            isSelected: _handsFree,
+            icon: const Icon(Icons.headset_off_outlined),
+            selectedIcon: const Icon(Icons.headset_mic),
+            onPressed: _toggleHandsFree,
+          ),
+          IconButton(
+              key: const Key('ask-history'),
+              tooltip: 'Earlier conversations',
+              icon: const Icon(Icons.history),
+              onPressed: _history),
+          IconButton(
+              key: const Key('ask-new'),
+              tooltip: 'New conversation',
+              icon: const Icon(Icons.add_comment_outlined),
+              onPressed: _turns.isEmpty ? null : _newConversation),
+        ],
+      ),
+      body: available.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ProblemView(e, onRetry: () => ref.invalidate(askAvailabilityProvider)),
+        data: (a) => !a.usable
+            ? Center(
+                child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.smart_toy_outlined, size: 48, color: Theme.of(context).colorScheme.outline),
+                  const SizedBox(height: 12),
+                  Text('The assistant is not available', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Text(a.reason ?? '', key: const Key('ask-unavailable'), textAlign: TextAlign.center),
+                ]),
+              ))
+            : Column(children: [
+                Expanded(
+                  child: _turns.isEmpty
+                      ? const _Hint()
+                      : ListView.builder(
+                          controller: _scroll,
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                          itemCount: _turns.length,
+                          itemBuilder: (_, i) => _TurnView(
+                            turn: _turns[i],
+                            speaking: _speaking == i,
+                            onReadAloud: () => _readAloud(_turns[i]),
+                          ),
+                        ),
+                ),
+                _composer(context),
+              ]),
+      ),
+    );
+  }
+
+  Widget _composer(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+        child: Row(children: [
+          Expanded(
+            child: TextField(
+              key: const Key('ask-input'),
+              controller: _input,
+              minLines: 1,
+              maxLines: 4,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _send(),
+              decoration: InputDecoration(
+                hintText: _listening ? 'Listening…' : 'Ask about equipment, tickets, procedures',
+                border: const OutlineInputBorder(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton.filledTonal(
+            key: const Key('ask-mic'),
+            tooltip: _listening ? 'Stop listening' : 'Speak',
+            style: _listening ? IconButton.styleFrom(backgroundColor: scheme.errorContainer) : null,
+            icon: Icon(_listening ? Icons.mic : Icons.mic_none),
+            onPressed: _busy ? null : _listen,
+          ),
+          _busy
+              ? IconButton.filled(
+                  key: const Key('ask-stop'), tooltip: 'Stop', icon: const Icon(Icons.stop), onPressed: _stop)
+              : IconButton.filled(
+                  key: const Key('ask-send'), tooltip: 'Ask', icon: const Icon(Icons.send), onPressed: _send),
+        ]),
+      ),
+    );
+  }
+}
+
+class _Hint extends StatelessWidget {
+  const _Hint();
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            'Ask a question, typed or spoken: “how is the vacuum pump on this line reset?”, '
+            '“what failed on this position last month?”.\n\n'
+            'Answers come from this workspace’s records, and name the ones they rest on. '
+            'Check them before acting.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+        ),
+      );
+}
+
+class _TurnView extends StatelessWidget {
+  const _TurnView({required this.turn, required this.speaking, required this.onReadAloud});
+
+  final AskTurn turn;
+  final bool speaking;
+  final VoidCallback onReadAloud;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final notice = switch (turn.stopped) {
+      'exhausted' => 'The search was cut short: this answer may be incomplete.',
+      'cancelled' => 'Stopped.',
+      'failed' => turn.error ?? 'The assistant could not answer.',
+      _ => null,
+    };
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Align(
+        alignment: Alignment.centerRight,
+        child: Container(
+          margin: const EdgeInsets.only(left: 48, bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(16)),
+          child: Text(turn.question, style: TextStyle(color: scheme.onPrimaryContainer)),
+        ),
+      ),
+      if (turn.lookups.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final l in turn.lookups)
+              Chip(
+                visualDensity: VisualDensity.compact,
+                avatar: l.done
+                    ? Icon(l.error == null ? Icons.manage_search : Icons.error_outline, size: 16)
+                    : const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                label: Text(l.summary ?? _toolLabel(l.tool), style: theme.textTheme.labelSmall),
+              ),
+          ]),
+        ),
+      if (turn.answer.isNotEmpty)
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 10, 4, 4),
+          decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(16)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SelectableText(turn.answer, key: const Key('ask-answer')),
+            if (turn.finished)
+              Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  key: const Key('ask-read-aloud'),
+                  tooltip: speaking ? 'Stop reading' : 'Read aloud',
+                  icon: Icon(speaking ? Icons.stop_circle_outlined : Icons.volume_up_outlined),
+                  onPressed: onReadAloud,
+                ),
+              ),
+          ]),
+        )
+      else if (!turn.finished)
+        const Padding(
+          padding: EdgeInsets.all(8),
+          child: Align(alignment: Alignment.centerLeft, child: Text('Looking it up…')),
+        ),
+      if (notice != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: NoticeBar(icon: Icons.info_outline, text: notice),
+        ),
+      const SizedBox(height: 16),
+    ]);
+  }
+
+  static String _toolLabel(String tool) => tool.replaceAll('_', ' ');
+}
+
+class _History extends ConsumerWidget {
+  const _History();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final list = ref.watch(askConversationsProvider);
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.6,
+      child: list.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ProblemView(e, onRetry: () => ref.invalidate(askConversationsProvider)),
+        data: (items) => items.isEmpty
+            ? const Center(child: Text('No earlier conversations.'))
+            : ListView(children: [
+                for (final c in items)
+                  ListTile(
+                    leading: const Icon(Icons.chat_bubble_outline),
+                    title: Text(c.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    subtitle: c.updatedAt == null ? null : Text(formatWhenDate(c.updatedAt)),
+                    onTap: () => Navigator.pop(context, c),
+                  ),
+              ]),
+      ),
+    );
+  }
+}

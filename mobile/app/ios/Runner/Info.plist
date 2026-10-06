@@ -4,6 +4,10 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera reads the QR code or barcode on an equipment or position label.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>The microphone hears a question you ask the assistant.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speech recognition turns a question you ask the assistant into text.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

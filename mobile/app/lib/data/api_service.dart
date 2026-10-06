@@ -130,6 +130,37 @@ class ApiService {
     throw problem;
   }
 
+  /// A POST answered with server-sent events (the assistant's chat): each `data:` line's JSON
+  /// object as it arrives. The generated client would wait for the whole answer.
+  Stream<Map<String, Object?>> events(String path, Object body) async* {
+    if (ensureFresh != null) await ensureFresh!();
+    final client = httpClient ?? http.Client();
+    Problem? problem;
+    try {
+      final request = http.Request('POST', Uri.parse('$base$path'))
+        ..headers.addAll({...headers(), 'Content-Type': 'application/json', 'Accept': 'text/event-stream'})
+        ..body = jsonEncode(body);
+      final r = await client.send(request);
+      if (r.statusCode >= 400) {
+        problem = Problem.fromResponse(r.statusCode, await r.stream.bytesToString());
+      } else {
+        await for (final line in r.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+          if (!line.startsWith('data:')) continue;
+          final event = jsonDecode(line.substring(5).trim());
+          if (event is Map) yield event.map((k, v) => MapEntry(k.toString(), v));
+        }
+      }
+    } on http.ClientException {
+      problem = Problem(ProblemCode.offline, 'ARGUS cannot be reached. Check the network and try again.');
+    } finally {
+      if (httpClient == null) client.close();
+    }
+    if (problem != null) {
+      onProblem?.call(problem);
+      throw problem;
+    }
+  }
+
   Problem _fromException(api.ApiException e) => (e.code == 400 && e.innerException != null)
       ? Problem(ProblemCode.offline, 'ARGUS cannot be reached. Check the network and try again.')
       : Problem.fromResponse(e.code, e.message);
@@ -147,4 +178,5 @@ class ApiService {
   api.UploadsApi uploads(api.ApiClient c) => api.UploadsApi(c);
   api.NotificationsApi notifications(api.ApiClient c) => api.NotificationsApi(c);
   api.SchemasApi schemas(api.ApiClient c) => api.SchemasApi(c);
+  api.AiApi ai(api.ApiClient c) => api.AiApi(c);
 }

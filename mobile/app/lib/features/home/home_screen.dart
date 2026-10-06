@@ -53,6 +53,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ]),
         actions: [
           const _Unsent(),
+          IconButton(
+            key: const Key('home-ask'),
+            tooltip: 'Ask the assistant',
+            onPressed: () => context.push('/ask'),
+            icon: const Icon(Icons.smart_toy_outlined),
+          ),
           const _InboxBell(),
           PopupMenuButton<String>(
             key: const Key('home-menu'),

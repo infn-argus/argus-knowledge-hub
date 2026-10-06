@@ -8,6 +8,7 @@ import 'package:argus_field/domain/capture.dart';
 import 'package:argus_field/features/capture/photo_source.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -68,7 +69,8 @@ class Running {
   }
 }
 
-Future<Running> start(WidgetTester tester, {Map<String, String> stored = signedIn}) async {
+Future<Running> start(WidgetTester tester,
+    {Map<String, String> stored = signedIn, List<Override> overrides = const []}) async {
   FlutterSecureStorage.setMockInitialValues(Map.of(stored));
   await tester.binding.setSurfaceSize(const Size(420, 1400));
   final server = FakeArgus();
@@ -79,6 +81,7 @@ Future<Running> start(WidgetTester tester, {Map<String, String> stored = signedI
       configProvider.overrideWithValue(testConfig),
       httpClientProvider.overrideWithValue(server.client),
       photoSourceProvider.overrideWithValue(photos),
+      ...overrides,
     ],
     child: const ArgusFieldApp(),
   ));
