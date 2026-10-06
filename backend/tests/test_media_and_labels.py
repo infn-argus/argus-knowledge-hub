@@ -424,3 +424,51 @@ def test_an_alias_already_printed_elsewhere_is_reported_not_moved(monkeypatch):
         db.delete(db.get(Workspace, ws))
         db.commit()
         db.close()
+
+
+def test_the_field_app_resolves_a_scanned_web_code_through_its_link_endpoint(monkeypatch):
+    """What the app really sends: /lookup/<the address, percent-encoded> to /v1/links/resolve. Splitting the decoded
+    path on "/" turned https:// into https:/ and found nothing."""
+    import secrets as _s
+    from datetime import datetime, timezone
+    from urllib.parse import quote
+    from fastapi.testclient import TestClient
+    from app.auth import OidcIdentity, get_identity
+    from app.db import SessionLocal
+    from app.main import app
+    from app.models.asset import Asset
+    from app.models.asset_subresources import AssetLabel
+    from app.models.schema import Schema
+    from app.models.user import User
+    from app.models.workspace import Workspace
+    from app.services.roles import ensure_system_roles
+    t = _s.token_hex(3); ws = f"scan-{t}"
+    url = f"https://servicedesk.example.org/secure/ShowObject.jspa?id={t}"
+    db = SessionLocal()
+    ensure_system_roles(db)
+    admin = User(id=f"scan-adm-{t}", email=f"scan-{t}@argus.test", is_admin=True)
+    db.add_all([Workspace(id=ws, name="Scan"), admin])
+    db.flush()
+    db.add(Schema(uid=f"{ws}:magnet", workspace_id=ws, name="Magnet", applies_to="objects"))
+    db.flush()
+    db.add(Asset(uid=f"{ws}-m", workspace_id=ws, schema_uid=f"{ws}:magnet", key=f"SC-{t}", name=f"Scan {t}",
+                 type="Magnet"))
+    db.flush()
+    now = datetime.now(timezone.utc)
+    db.add(AssetLabel(uid=f"{ws}-q", asset_uid=f"{ws}-m", type="qrcode", value=url, issuer="user",
+                      created_at=now, updated_at=now))
+    db.commit()
+    client = TestClient(app)
+    app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=admin)
+    try:
+        r = client.get("/v1/links/resolve", params={"path": f"/lookup/{quote(url, safe='')}"},
+                       headers={"X-Workspace-Id": ws})
+        assert r.status_code == 200, r.text
+        assert r.json()["uid"] == f"{ws}-m"
+    finally:
+        app.dependency_overrides.pop(get_identity, None)
+        from app.ledger.audit import allow_purge
+        allow_purge(db)
+        db.delete(db.get(Workspace, ws))
+        db.commit()
+        db.close()

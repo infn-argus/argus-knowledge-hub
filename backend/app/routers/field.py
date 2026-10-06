@@ -146,10 +146,16 @@ def resolve_link(path: str = Query(..., description="e.g. /asset/<uid> or https:
     from urllib.parse import unquote, urlparse
     from app.routers.ledger import _readable_workspaces, _resolve_one
     raw = urlparse(path).path if "://" in path else path
-    parts = [p for p in unquote(raw).split("/") if p]
-    if len(parts) < 2 or parts[0] not in KINDS:
-        raise HTTPException(status_code=422, detail={"error": "not an ARGUS link", "code": "invalid"})
-    kind, ident = parts[0], "/".join(parts[1:])
+    head, _, rest = raw.lstrip("/").partition("/")
+    if head == "lookup" and rest:
+        # A label value (a key, a web address on a printed code) is taken exactly as it was sent: splitting it
+        # on "/" turned https:// into https:/, and the address no longer matched the label it is printed from.
+        kind, ident = "lookup", unquote(rest)
+    else:
+        parts = [p for p in unquote(raw).split("/") if p]
+        if len(parts) < 2 or parts[0] not in KINDS:
+            raise HTTPException(status_code=422, detail={"error": "not an ARGUS link", "code": "invalid"})
+        kind, ident = parts[0], "/".join(parts[1:])
     readable = _readable_workspaces(db, identity)
     ws = workspace_id if workspace_id in readable else (readable[0] if len(readable) == 1 else workspace_id)
     if kind in ("asset", "position"):
