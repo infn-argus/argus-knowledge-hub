@@ -6,7 +6,9 @@ analysis_options.yaml
 git_push.sh
 lib/api.dart
 lib/api/ai_api.dart
+lib/api/asset_subresources_api.dart
 lib/api/assets_api.dart
+lib/api/attachments_api.dart
 lib/api/documents_api.dart
 lib/api/field_client_api.dart
 lib/api/hub_api.dart
@@ -33,7 +35,10 @@ lib/model/ask_conversation_detail.dart
 lib/model/ask_conversation_out.dart
 lib/model/ask_message_out.dart
 lib/model/ask_step.dart
+lib/model/asset_comment_create.dart
+lib/model/asset_comment_out.dart
 lib/model/asset_create.dart
+lib/model/asset_history_out.dart
 lib/model/asset_out.dart
 lib/model/asset_update.dart
 lib/model/assist_in.dart

@@ -7,6 +7,7 @@ import 'package:http_parser/http_parser.dart' show MediaType;
 
 import '../core/problem.dart';
 import '../domain/capture.dart';
+import '../domain/models.dart' show AttributeDef;
 import 'api_service.dart';
 
 Map<String, Object?> _map(Object? o) => o is Map ? o.map((k, v) => MapEntry(k.toString(), v)) : const {};
@@ -102,6 +103,48 @@ class SchemaRepository {
       .map((s) => EquipmentType(s['uid'].toString(), s['name'].toString()))
       .toList()
     ..sort((a, b) => a.name.compareTo(b.name));
+
+  /// A type's attributes, with its ancestors' folded in (a child's own definition wins on the same
+  /// key) — the same rule webapp/src/lib/schemaAttributes.ts effectiveAttributes() applies, so a
+  /// record edited here sees the fields the web form would show.
+  Future<List<AttributeDef>> effectiveAttributes(String schemaUid) async {
+    final all = await _all();
+    final byUid = {for (final s in all) s['uid'].toString(): s};
+    final chain = <Map<String, Object?>>[];
+    final seen = <String>{};
+    Map<String, Object?>? current = byUid[schemaUid];
+    while (current != null && seen.add(current['uid'].toString())) {
+      chain.add(current);
+      final parent = current['parent_schema_uid']?.toString();
+      current = parent == null ? null : byUid[parent];
+    }
+    final merged = <String, AttributeDef>{};
+    for (final s in chain.reversed) {
+      for (final raw in _list(s['attributes']).map(_map)) {
+        final def = _attributeDef(raw);
+        if (def != null) merged[def.key] = def;
+      }
+    }
+    return merged.values.toList();
+  }
+
+  AttributeDef? _attributeDef(Map<String, Object?> m) {
+    final key = (m['key'] ?? m['name'])?.toString();
+    if (key == null || key.isEmpty) return null;
+    return AttributeDef(
+      key: key,
+      name: (m['name'] ?? key).toString(),
+      type: (m['type'] ?? 'string').toString(),
+      required: m['required'] == true,
+      multiValue: m['multiValue'] == true || m['multi_value'] == true,
+      minCardinality: (m['minCardinality'] ?? m['min_cardinality']) as int?,
+      maxCardinality: (m['maxCardinality'] ?? m['max_cardinality']) as int?,
+      options: _list(m['options']).map(_map).map((o) => (id: (o['id'] ?? '').toString(), value: (o['value'] ?? o['id'] ?? '').toString())).toList(),
+      regex: m['regex']?.toString(),
+      readOnly: m['readOnly'] == true || m['read_only'] == true,
+      description: m['description']?.toString(),
+    );
+  }
 }
 
 /// Files, sent in pieces with their hash so a weak network can resume (§5.5).

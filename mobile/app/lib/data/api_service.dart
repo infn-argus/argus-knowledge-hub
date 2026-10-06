@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data' show Uint8List;
 import 'dart:io' show Platform;
 
 import 'package:argus_api/api.dart' as api;
@@ -109,6 +110,25 @@ class ApiService {
     throw problem;
   }
 
+  /// A file's raw bytes (an attachment, an icon): the generated client decodes every body as JSON text,
+  /// which would corrupt binary content, so this reads [http.Response.bodyBytes] directly.
+  Future<Uint8List> getBytes(String path) async {
+    if (ensureFresh != null) await ensureFresh!();
+    final client = httpClient ?? http.Client();
+    Problem problem;
+    try {
+      final r = await client.get(Uri.parse('$base$path'), headers: headers());
+      if (r.statusCode < 400) return r.bodyBytes;
+      problem = Problem.fromResponse(r.statusCode, utf8.decode(r.bodyBytes, allowMalformed: true));
+    } on http.ClientException {
+      problem = Problem(ProblemCode.offline, 'ARGUS cannot be reached. Check the network and try again.');
+    } finally {
+      if (httpClient == null) client.close();
+    }
+    onProblem?.call(problem);
+    throw problem;
+  }
+
   /// One piece of a resumable upload, as raw bytes (the generated method cannot send them).
   Future<Object?> putBytes(String path, Map<String, String> query, List<int> bytes, {String? idempotencyKey}) async {
     if (ensureFresh != null) await ensureFresh!();
@@ -179,4 +199,6 @@ class ApiService {
   api.NotificationsApi notifications(api.ApiClient c) => api.NotificationsApi(c);
   api.SchemasApi schemas(api.ApiClient c) => api.SchemasApi(c);
   api.AiApi ai(api.ApiClient c) => api.AiApi(c);
+  api.AssetSubresourcesApi assetSubresources(api.ApiClient c) => api.AssetSubresourcesApi(c);
+  api.AttachmentsApi attachments(api.ApiClient c) => api.AttachmentsApi(c);
 }

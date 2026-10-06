@@ -13,6 +13,7 @@ const workspaceId = 'slice-20463f';
 const recordedUnit = '506c63d7-f353-4b5f-9e6d-a0528d4e679f';
 const recordedInstallation = 'a54b9136-c75f-4840-9d0e-1830186774dc';
 const incomingUnit = '812ddce6-b3a6-4d69-8e23-4e3600136faa';
+const ionPumpUid = 'd2b1c2d3-1234-4a5b-8c9d-0e1f2a3b4c5d';
 
 String fixture(String name) => File('test/fixtures/$name.json').readAsStringSync();
 Object? fixtureJson(String name) => jsonDecode(fixture(name));
@@ -112,6 +113,11 @@ class FakeArgus {
         final c = fixtureJson('comment_created') as Map<String, dynamic>;
         return _json({...c, 'uid': body()['uid'], 'body': body()['body']}, 201);
       }
+      if (RegExp(r'^/v1/assets/[^/]+/comments$').hasMatch(p)) {
+        final b = body();
+        return _json({'uid': b['uid'], 'asset_uid': p.split('/')[3], 'author': b['author'], 'text': b['text'],
+          'created': b['created'], 'updated': b['updated']}, 201);
+      }
       if (RegExp(r'^/v1/issues/[^/]+/transition$').hasMatch(p)) return _json(fixture('ticket'));
       if (RegExp(r'^/v1/notifications/\d+/read$').hasMatch(p)) return _json({'ok': true});
       final upload = RegExp(r'^/v1/uploads/([^/]+)/(complete|attach/(ticket|asset)/.+)$').firstMatch(p);
@@ -120,6 +126,10 @@ class FakeArgus {
         return _json({'uid': upload.group(1), 'state': attach ? 'attached' : 'complete',
           if (attach) 'attachment_uid': 'att-${upload.group(1)}'});
       }
+    }
+    if (m == 'PUT' && RegExp(r'^/v1/assets/[^/]+$').hasMatch(p)) {
+      final a = fixtureJson('position') as Map<String, dynamic>;
+      return _json({...a, 'attributes': body()['attributes'] ?? a['attributes']});
     }
     if (m == 'PUT' && p.startsWith('/v1/uploads/')) {
       final uid = p.split('/').last;
@@ -143,6 +153,8 @@ class FakeArgus {
       '/v1/notifications' => 'notifications',
       '/v1/assets/$positionUid' => 'position',
       '/v1/hub/assets/$positionUid/context' => 'position_context',
+      '/v1/assets/$ionPumpUid' => 'ion_pump',
+      '/v1/hub/assets/$ionPumpUid/context' => 'ion_pump_context',
       '/v1/installations' when q['position_uid'] == positionUid => 'position_installations',
       '/v1/issues/$ticketUid' => 'ticket',
       '/v1/documents/$documentUid' => 'document',
@@ -161,6 +173,10 @@ class FakeArgus {
     if (name == null && m == 'GET') {
       if (RegExp(r'^/v1/issues/[^/]+/comments$').hasMatch(p)) return _json(fixture('comments'));
       if (RegExp(r'^/v1/issues/[^/]+/attachments$').hasMatch(p)) return _json([]);
+      if (RegExp(r'^/v1/assets/[^/]+/comments$').hasMatch(p)) return _json(fixture('asset_comments'));
+      if (RegExp(r'^/v1/assets/[^/]+/history$').hasMatch(p)) return _json(fixture('asset_history'));
+      if (p == '/v1/attachments' && q['asset_uid'] == positionUid) return _json(fixture('asset_attachments'));
+      if (p == '/v1/attachments' && q['asset_uid'] == ionPumpUid) return _json([]);
       if (RegExp(r'^/v1/issues/[^/]+/transitions$').hasMatch(p)) return _json(fixture('transitions'));
       final issue = RegExp(r'^/v1/issues/([0-9a-f-]{36})$').firstMatch(p);
       if (issue != null) {

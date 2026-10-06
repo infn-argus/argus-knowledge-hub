@@ -26,6 +26,10 @@ dependencies:
   http_parser: ^4.1.2
   speech_to_text: ^7.5.0
   flutter_tts: ^4.2.5
+  # Imported content is sometimes Markdown, sometimes raw HTML (a Jira custom field, a Confluence
+  # macro that slipped through) — same reason the web app renders both (components/MarkdownView.tsx).
+  flutter_markdown_plus: ^1.0.3
+  html: ^0.15.7
 
 dev_dependencies:
   flutter_test:

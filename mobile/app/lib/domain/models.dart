@@ -128,8 +128,12 @@ class AssetDetail {
     this.installations = const [],
     this.tickets = const [],
     this.documents = const [],
+    this.relations = const [],
     this.processing = false,
     this.restricted,
+    this.avatarIconUid,
+    this.version,
+    required this.schemaUid,
   });
 
   final String uid;
@@ -143,10 +147,50 @@ class AssetDetail {
   final List<InstallationInfo> installations;
   final List<TicketSummary> tickets;
   final List<DocumentSummary> documents;
+  /// What this record points at, and what points at it (flutter-app-design: a smaller twin of the web's
+  /// relation graph — one hop, enough to see what is connected and jump to it).
+  final List<RelationItem> relations;
   final bool processing;
   final String? restricted;
+  final String? avatarIconUid;
+  /// The record version, for editing it (If-Match).
+  final int? version;
+  final String schemaUid;
 
   List<InstallationInfo> get current => installations.where((i) => i.current && i.status != 'Rejected').toList();
+  List<RelationItem> get outbound => relations.where((r) => r.direction == 'out').toList();
+  List<RelationItem> get inbound => relations.where((r) => r.direction == 'in').toList();
+}
+
+/// One edge of the relation graph, already resolved to the neighbour's name (hub.neighbours on the server).
+class RelationItem {
+  const RelationItem({
+    required this.uid,
+    required this.key,
+    required this.name,
+    required this.type,
+    required this.relation,
+    required this.direction, // 'in' | 'out'
+  });
+
+  final String uid;
+  final String key;
+  final String name;
+  final String type;
+  final String relation;
+  final String direction;
+}
+
+/// One entry of an object's imported or recorded history (not the live ledger audit — the migrated trail
+/// and anything added by hand, the same list the web app shows under "History").
+class HistoryEntry {
+  const HistoryEntry({required this.uid, required this.type, required this.author, required this.details, this.at});
+
+  final String uid;
+  final String type;
+  final String author;
+  final String details;
+  final DateTime? at;
 }
 
 class TicketDetail {
@@ -208,4 +252,43 @@ class DocumentDetail {
 
   bool get approved => revisionState == 'published' || revisionState == 'approved';
   bool get outdated => supersededBy != null || (nextReviewDue != null && nextReviewDue!.isBefore(DateTime.now()));
+}
+
+/// One of a type's attributes, as the schema defines it (mirrors webapp/src/api/types.ts
+/// SchemaAttribute — the web app's SchemaAttribute and this stay in step by hand, since the field
+/// contract does not expose the admin schema-editing shape).
+class AttributeDef {
+  const AttributeDef({
+    required this.key,
+    required this.name,
+    required this.type,
+    this.required = false,
+    this.multiValue = false,
+    this.minCardinality,
+    this.maxCardinality,
+    this.options = const [],
+    this.regex,
+    this.readOnly = false,
+    this.description,
+  });
+
+  final String key;
+  final String name;
+  final String type; // string | text | integer | float | boolean | date | datetime | enumeration | reference | ...
+  final bool required;
+  final bool multiValue;
+  final int? minCardinality;
+  final int? maxCardinality;
+  final List<({String id, String value})> options;
+  final String? regex;
+  final bool readOnly;
+  final String? description;
+
+  /// Kinds the field client can edit with a plain field. The rest (attachment, user, current_user,
+  /// group) need pickers the web app has and the field app does not yet — shown read-only there,
+  /// rather than offering a text box that silently cannot hold a valid value.
+  static const editableTypes = {
+    'string', 'text', 'integer', 'float', 'boolean', 'date', 'datetime', 'enumeration', 'reference',
+  };
+  bool get editable => !readOnly && editableTypes.contains(type);
 }

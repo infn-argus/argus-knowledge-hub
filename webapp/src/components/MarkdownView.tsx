@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { useState } from "react";
 import { AuthenticatedImage } from "./AuthenticatedImage";
 import { ImageLightbox } from "./ImageLightbox";
@@ -8,6 +10,15 @@ import { ImageLightbox } from "./ImageLightbox";
 /** An attachment URL written by the importer or the editor. The file is
  * behind the API's Bearer auth, so a plain <img src> can't fetch it. */
 const ATTACHMENT_URL = /^\/v1\/attachments\/([A-Za-z0-9-]+)$/;
+
+// Imported content (a Jira custom field, a Confluence macro that slipped through) is sometimes raw HTML
+// rather than Markdown, e.g. `<div class="created-with-ak-editor">…</div>`. rehype-raw parses that HTML
+// into the tree alongside the Markdown; rehype-sanitize then strips anything unsafe to render (scripts,
+// inline event handlers, iframes), on top of what Markdown itself produces.
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: { ...defaultSchema.attributes, "*": [...(defaultSchema.attributes?.["*"] ?? []), "className"] },
+};
 
 /** A document body, rendered.
  *
@@ -34,6 +45,7 @@ export function MarkdownView({
     <div className={`markdown-body text-sm leading-relaxed text-slate-700 ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
         components={{
           h1: ({ children }) => (
             <h1 className="mb-2 mt-5 border-b border-slate-200 pb-1 text-xl font-semibold text-slate-900 first:mt-0">

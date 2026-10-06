@@ -1,0 +1,22 @@
+{
+    "uid": "d2b1c2d3-1234-4a5b-8c9d-0e1f2a3b4c5d",
+    "workspace_id": "slice-20463f",
+    "schema_uid": "slice-20463f:argus-object:ion-pump",
+    "key": "SLICE-20463F-IP-0001",
+    "name": "Ion pump gun area 2",
+    "type": "Ion Pump",
+    "avatar_icon_uid": null,
+    "attributes": {
+        "pumping_speed": 120.5,
+        "nominal_voltage": 24,
+        "element_count": 2
+    },
+    "inbound_relations": [],
+    "outbound_relations": [],
+    "is_global": false,
+    "record_status": "Active",
+    "created_at": "2026-09-29T08:10:00Z",
+    "updated_at": "2026-09-29T08:10:00Z",
+    "deleted_at": null,
+    "version": 5
+}

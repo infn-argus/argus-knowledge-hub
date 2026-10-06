@@ -192,8 +192,14 @@ class ApiClient {
           return AskMessageOut.fromJson(value);
         case 'AskStep':
           return AskStep.fromJson(value);
+        case 'AssetCommentCreate':
+          return AssetCommentCreate.fromJson(value);
+        case 'AssetCommentOut':
+          return AssetCommentOut.fromJson(value);
         case 'AssetCreate':
           return AssetCreate.fromJson(value);
+        case 'AssetHistoryOut':
+          return AssetHistoryOut.fromJson(value);
         case 'AssetOut':
           return AssetOut.fromJson(value);
         case 'AssetUpdate':

@@ -24,6 +24,17 @@
         "parent_schema_uid": "slice-20463f:argus-object:vacuum-pump",
         "attributes": [
             {
+                "id": "manufacturer",
+                "key": "manufacturer",
+                "name": "Manufacturer",
+                "type": "string",
+                "unique": false,
+                "indexed": false,
+                "readOnly": false,
+                "required": false,
+                "multiValue": false
+            },
+            {
                 "id": "pumping_speed",
                 "key": "pumping_speed",
                 "name": "Pumping speed (l/s)",
@@ -50,6 +61,17 @@
                 "key": "element_count",
                 "name": "Number of elements",
                 "type": "integer",
+                "unique": false,
+                "indexed": false,
+                "readOnly": false,
+                "required": false,
+                "multiValue": false
+            },
+            {
+                "id": "responsible",
+                "key": "responsible",
+                "name": "Responsible",
+                "type": "user",
                 "unique": false,
                 "indexed": false,
                 "readOnly": false,

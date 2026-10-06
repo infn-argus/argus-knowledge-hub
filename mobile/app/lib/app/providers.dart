@@ -232,6 +232,21 @@ final assetDetailProvider = FutureProvider.autoDispose.family<AssetDetail, Strin
   return ref.watch(assetRepositoryProvider).detail(uid);
 });
 
+final assetCommentsProvider = FutureProvider.autoDispose.family<List<Comment>, String>((ref, uid) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(assetRepositoryProvider).comments(uid);
+});
+
+final assetHistoryProvider = FutureProvider.autoDispose.family<List<HistoryEntry>, String>((ref, uid) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(assetRepositoryProvider).history(uid);
+});
+
+final assetAttachmentsProvider = FutureProvider.autoDispose.family<List<AttachmentInfo>, String>((ref, uid) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(assetRepositoryProvider).attachments(uid);
+});
+
 final ticketDetailProvider = FutureProvider.autoDispose.family<TicketDetail, String>((ref, uid) {
   ref.watch(workspaceIdProvider);
   return ref.watch(ticketRepositoryProvider).detail(uid);
@@ -277,6 +292,11 @@ final ticketKindsProvider = FutureProvider.autoDispose<List<TicketKind>>((ref) {
 final objectTypesProvider = FutureProvider.autoDispose<List<EquipmentType>>((ref) {
   ref.watch(workspaceIdProvider);
   return ref.watch(schemaRepositoryProvider).objectTypes();
+});
+
+final schemaAttributesProvider = FutureProvider.autoDispose.family<List<AttributeDef>, String>((ref, schemaUid) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(schemaRepositoryProvider).effectiveAttributes(schemaUid);
 });
 
 final commentsProvider = FutureProvider.autoDispose.family<List<Comment>, String>((ref, uid) {

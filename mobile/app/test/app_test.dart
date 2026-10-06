@@ -69,7 +69,8 @@ void main() {
     router.go('/position/$positionUid');
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('asset-name')), findsOneWidget);
-    expect(find.text('GUNSIP01'), findsOneWidget);
+    // Shown twice now: the app bar's title is the name, not the key (it used to be the key).
+    expect(find.text('GUNSIP01'), findsWidgets);
     expect(find.text('Position'), findsOneWidget);
     expect(find.text('INSTALLED HERE NOW'), findsOneWidget);
     expect(find.text('S7C415EINV-84321 · Ion pump 84321'), findsOneWidget);

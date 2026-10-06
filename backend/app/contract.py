@@ -62,6 +62,12 @@ FIELD_OPERATIONS = [
     ("post", "/v1/intake/runs/{run_id}/outcome"),
     ("get", "/v1/notifications"),
     ("post", "/v1/notifications/{nid}/read"),
+    # Next to the equipment: what else references it, its files, and what people have said and done to it
+    ("get", "/v1/assets/{asset_uid}/comments"),
+    ("post", "/v1/assets/{asset_uid}/comments"),
+    ("get", "/v1/assets/{asset_uid}/history"),
+    ("get", "/v1/attachments"),
+    ("get", "/v1/attachments/{uid}"),
     # Replacement and review (M3)
     ("post", "/v1/installations/replace"),
     ("get", "/v1/ledger/review/mine"),

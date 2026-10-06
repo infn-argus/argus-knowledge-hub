@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../widgets/common.dart';
+import '../../widgets/rich_content.dart';
 
 /// A procedure or document. The field must never mistake a draft or an outdated revision for the
 /// one to work from, so the state is said before the content (flutter-app-design §5.5).
@@ -70,7 +71,7 @@ class DocumentScreen extends ConsumerWidget {
           ],
           if ((d.body ?? '').isNotEmpty) ...[
             const SectionHeader('Content'),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: SelectableText(d.body!)),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: RichContent(d.body!)),
           ],
         ]),
       ),

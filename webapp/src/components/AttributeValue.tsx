@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { directoryApi } from "../api/client";
 import { Asset, MemberDirectoryEntry, SchemaAttribute } from "../api/types";
+import { MarkdownView } from "./MarkdownView";
 
 function GroupValue({ value }: { value: string }) {
   const groups = useQuery({ queryKey: ["directory-groups"], queryFn: () => directoryApi.groups() });
@@ -104,6 +105,12 @@ function SingleAttributeValue({
         {String(value)}
       </span>
     );
+  }
+
+  if (attribute.type === "text") {
+    // Long free text: Markdown from the editor, or raw HTML from an import (a Jira custom field,
+    // a Confluence macro) — MarkdownView renders either, sanitized.
+    return <MarkdownView markdown={String(value)} className="text-left" />;
   }
 
   if (attribute.type === "boolean") {

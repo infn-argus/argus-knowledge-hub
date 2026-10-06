@@ -259,8 +259,10 @@ export function AssetDetail() {
             <p className="text-sm text-slate-400">This schema has no attributes defined.</p>
           ) : (
             <dl className="space-y-1.5 text-sm">
-              {attrDefs.map((attr) => (
-                <div key={attr.id ?? attr.name} className="flex justify-between gap-4">
+              {attrDefs.map((attr) => {
+                const long = attr.type === "text";
+                return (
+                <div key={attr.id ?? attr.name} className={long ? "space-y-1" : "flex justify-between gap-4"}>
                   <dt className="text-slate-500">
                     {attr.name}
                     {inherited.has(attr.key ?? attr.name) && (
@@ -269,7 +271,7 @@ export function AssetDetail() {
                       </span>
                     )}
                   </dt>
-                  <dd className="text-right text-slate-900">
+                  <dd className={long ? "text-slate-900" : "text-right text-slate-900"}>
                     <AttributeValue
                       attribute={attr}
                       value={a.attributes[attr.key ?? attr.name]}
@@ -278,7 +280,8 @@ export function AssetDetail() {
                     />
                   </dd>
                 </div>
-              ))}
+                );
+              })}
             </dl>
           )}
         </SectionCard>

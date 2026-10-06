@@ -15,6 +15,7 @@ import '../features/auth/workspace_screen.dart';
 import '../features/diagnostics/diagnostics_screen.dart';
 import '../features/documents/document_screen.dart';
 import '../features/home/home_screen.dart';
+import '../features/records/asset_edit_screen.dart';
 import '../features/records/asset_screen.dart';
 import '../features/records/resolve_screen.dart';
 import '../features/scan/scan_screen.dart';
@@ -89,6 +90,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/reviews', builder: (_, _) => const ReviewScreen()),
       GoRoute(path: '/outbox', builder: (_, _) => const OutboxScreen()),
       GoRoute(path: '/asset/:uid', builder: (_, st) => AssetScreen(uid: st.pathParameters['uid']!)),
+      GoRoute(path: '/asset/:uid/edit', builder: (_, st) => AssetEditScreen(uid: st.pathParameters['uid']!)),
       // A document code or a Jira key in the link is resolved first; a uid opens directly.
       GoRoute(
           path: '/document/:id',

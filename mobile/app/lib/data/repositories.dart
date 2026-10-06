@@ -1,10 +1,12 @@
 import 'package:argus_api/api.dart' as api;
 
 import '../core/problem.dart';
+import '../domain/capture.dart' show AttachmentInfo, Comment;
 import '../domain/models.dart';
 import 'api_service.dart';
 
 Map<String, Object?> _map(Object? o) => o is Map ? o.map((k, v) => MapEntry(k.toString(), v)) : const {};
+DateTime? _date(Object? o) => o is String ? DateTime.tryParse(o) : null;
 List<Object?> _list(Object? o) => o is List ? o : const [];
 
 RecordBrief? _brief(Object? o) {
@@ -131,6 +133,14 @@ class AssetRepository {
     } on Problem catch (p) {
       if (p.code != ProblemCode.notFound && p.code != ProblemCode.forbidden) rethrow;
     }
+    final relationItems = _list(_map(context['relations'])['items']).map(_map).map((r) => RelationItem(
+          uid: r['uid'].toString(),
+          key: (r['key'] ?? '').toString(),
+          name: (r['name'] ?? r['key'] ?? '').toString(),
+          type: (r['type'] ?? '').toString(),
+          relation: (r['relation'] ?? '').toString(),
+          direction: (r['direction'] ?? 'out').toString(),
+        )).toList();
     return AssetDetail(
       uid: asset.uid,
       key: asset.key,
@@ -141,8 +151,12 @@ class AssetRepository {
       attributes: _map(asset.attributes),
       isPosition: isPosition,
       installations: installations,
+      relations: relationItems,
       processing: context['processing'] != null,
       restricted: context['restricted']?.toString(),
+      avatarIconUid: asset.avatarIconUid,
+      version: asset.version,
+      schemaUid: asset.schemaUid,
       tickets: _list(context['tickets']).map(_map).map((t) => TicketSummary(
             uid: t['uid'].toString(),
             title: (t['title'] ?? '').toString(),
@@ -158,6 +172,62 @@ class AssetRepository {
             reviewOverdue: d['review_overdue'] == true,
           )).toList(),
     );
+  }
+
+  /// What is written on the record, next to the equipment: its comments, its recorded history, and its
+  /// files. Three separate calls (like the ticket screen's), so one failing or refreshing does not block
+  /// the others, and the field client's cache can keep each independently offline (I-MOB caching).
+
+  Future<List<Comment>> comments(String assetUid) async =>
+      _list(await _api.json((c) => _api.assetSubresources(c).listCommentsWithHttpInfo(assetUid)))
+          .map(_map)
+          .map((m) => Comment(
+              uid: m['uid'].toString(),
+              author: (m['author'] ?? '').toString(),
+              body: (m['text'] ?? '').toString(),
+              at: _date(m['created'])))
+          .toList()
+        ..sort((a, b) => (b.at ?? DateTime(0)).compareTo(a.at ?? DateTime(0)));
+
+  /// A comment is a small piece of the asset's recorded history (asset-subresources are a generic,
+  /// client-stamped log, not a live-authored thread like a ticket's): the person and the moment travel
+  /// with the text, the same way the web app's "Add comment" form sends them.
+  Future<void> comment(String assetUid, String commentUid, String author, String body) async {
+    final now = DateTime.now().toUtc();
+    await _api.json(
+        (c) => _api.assetSubresources(c).createCommentsWithHttpInfo(
+            assetUid, api.AssetCommentCreate(uid: commentUid, author: author, text: body, created: now, updated: now)),
+        idempotencyKey: 'asset-comment:$commentUid');
+  }
+
+  Future<List<HistoryEntry>> history(String assetUid) async =>
+      _list(await _api.json((c) => _api.assetSubresources(c).listHistoryWithHttpInfo(assetUid)))
+          .map(_map)
+          .map((m) => HistoryEntry(
+              uid: m['uid'].toString(),
+              type: (m['type'] ?? '').toString(),
+              author: (m['author'] ?? '').toString(),
+              details: (m['details'] ?? '').toString(),
+              at: _date(m['timestamp'])))
+          .toList()
+        ..sort((a, b) => (b.at ?? DateTime(0)).compareTo(a.at ?? DateTime(0)));
+
+  Future<List<AttachmentInfo>> attachments(String assetUid) async =>
+      _list(await _api.json((c) => _api.attachments(c).listAttachmentsWithHttpInfo(assetUid: assetUid)))
+          .map(_map)
+          .map((m) => AttachmentInfo(
+              uid: m['uid'].toString(),
+              filename: (m['filename'] ?? '').toString(),
+              mimeType: m['mime_type']?.toString(),
+              size: (m['file_size'] as num?)?.toInt()))
+          .toList();
+
+  /// Saves the edited attributes. The version read with the record must still be current (If-Match),
+  /// the same optimistic-concurrency rule every other edit in the app follows (§3.3).
+  Future<void> save(String assetUid, Map<String, Object?> attributes, {required int version, required String key}) async {
+    await _api.json(
+        (c) => _api.assets(c).updateAssetWithHttpInfo(assetUid, api.AssetUpdate(attributes: attributes)),
+        idempotencyKey: 'asset-edit:$key', ifMatch: '"$version"');
   }
 }
 

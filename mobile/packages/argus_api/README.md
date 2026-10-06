@@ -65,9 +65,14 @@ Class | Method | HTTP request | Description
 *AiApi* | [**getConversation**](doc//AiApi.md#getconversation) | **GET** /v1/ai/conversations/{conversation_id} | Get Conversation
 *AiApi* | [**listConversations**](doc//AiApi.md#listconversations) | **GET** /v1/ai/conversations | List Conversations
 *AiApi* | [**status**](doc//AiApi.md#status) | **GET** /v1/ai/status | Status
+*AssetSubresourcesApi* | [**createComments**](doc//AssetSubresourcesApi.md#createcomments) | **POST** /v1/assets/{asset_uid}/comments | Create Comments
+*AssetSubresourcesApi* | [**listComments**](doc//AssetSubresourcesApi.md#listcomments) | **GET** /v1/assets/{asset_uid}/comments | List Comments
+*AssetSubresourcesApi* | [**listHistory**](doc//AssetSubresourcesApi.md#listhistory) | **GET** /v1/assets/{asset_uid}/history | List History
 *AssetsApi* | [**createAsset**](doc//AssetsApi.md#createasset) | **POST** /v1/assets | Create Asset
 *AssetsApi* | [**getAsset**](doc//AssetsApi.md#getasset) | **GET** /v1/assets/{uid} | Get Asset
 *AssetsApi* | [**updateAsset**](doc//AssetsApi.md#updateasset) | **PUT** /v1/assets/{uid} | Update Asset
+*AttachmentsApi* | [**downloadAttachment**](doc//AttachmentsApi.md#downloadattachment) | **GET** /v1/attachments/{uid} | Download Attachment
+*AttachmentsApi* | [**listAttachments**](doc//AttachmentsApi.md#listattachments) | **GET** /v1/attachments | List Attachments
 *DocumentsApi* | [**getCurrentRevision**](doc//DocumentsApi.md#getcurrentrevision) | **GET** /v1/documents/{uid}/current | Get Current Revision
 *DocumentsApi* | [**getDocument**](doc//DocumentsApi.md#getdocument) | **GET** /v1/documents/{uid} | Get Document
 *FieldClientApi* | [**myDevices**](doc//FieldClientApi.md#mydevices) | **GET** /v1/devices | My Devices
@@ -123,7 +128,10 @@ Class | Method | HTTP request | Description
  - [AskConversationOut](doc//AskConversationOut.md)
  - [AskMessageOut](doc//AskMessageOut.md)
  - [AskStep](doc//AskStep.md)
+ - [AssetCommentCreate](doc//AssetCommentCreate.md)
+ - [AssetCommentOut](doc//AssetCommentOut.md)
  - [AssetCreate](doc//AssetCreate.md)
+ - [AssetHistoryOut](doc//AssetHistoryOut.md)
  - [AssetOut](doc//AssetOut.md)
  - [AssetUpdate](doc//AssetUpdate.md)
  - [AssistIn](doc//AssistIn.md)
