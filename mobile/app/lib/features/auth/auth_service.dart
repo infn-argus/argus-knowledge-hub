@@ -16,7 +16,8 @@ abstract class Authenticator {
 }
 
 class AppAuthAuthenticator implements Authenticator {
-  AppAuthAuthenticator(this.config, [FlutterAppAuth? appAuth]) : _appAuth = appAuth ?? const FlutterAppAuth();
+  AppAuthAuthenticator(this.config, [FlutterAppAuth? appAuth])
+    : _appAuth = appAuth ?? const FlutterAppAuth();
 
   final AppConfig config;
   final FlutterAppAuth _appAuth;
@@ -27,15 +28,28 @@ class AppAuthAuthenticator implements Authenticator {
   @override
   Future<Session> signInWithOidc() async {
     try {
-      final r = await _appAuth.authorizeAndExchangeCode(AuthorizationTokenRequest(
-        config.oidcClientId,
-        config.oidcRedirect,
-        issuer: config.oidcIssuer,
-        scopes: const ['openid', 'profile', 'email', 'offline_access'],
-      ));
-      if (r.accessToken == null) throw Problem(ProblemCode.unauthenticated, 'Sign-in did not return a token.');
+      final google = config.usesGoogle;
+      final r = await _appAuth.authorizeAndExchangeCode(
+        AuthorizationTokenRequest(
+          config.oidcClientId,
+          config.oidcRedirect,
+          issuer: config.oidcIssuer,
+          allowInsecureConnections: config.oidcIssuer.startsWith('http://'),
+          scopes: google
+              ? const ['openid', 'profile', 'email']
+              : const ['openid', 'profile', 'email', 'offline_access'],
+          // Google returns a refresh token only on consent, so ask for it every time. AppAuth
+          // refuses `prompt` among the additional parameters: it has its own field.
+          promptValues: google ? const ['select_account', 'consent'] : null,
+          additionalParameters: google ? const {'access_type': 'offline'} : null,
+        ),
+      );
+      final token = google ? r.idToken : r.accessToken;
+      if (token == null) {
+        throw Problem(ProblemCode.unauthenticated, 'Sign-in did not return a token.');
+      }
       return Session(
-        accessToken: r.accessToken!,
+        accessToken: token,
         authType: 'oidc',
         refreshToken: r.refreshToken,
         expiresAt: r.accessTokenExpirationDateTime,
@@ -43,7 +57,10 @@ class AppAuthAuthenticator implements Authenticator {
     } on FlutterAppAuthUserCancelledException {
       throw Problem(ProblemCode.unauthenticated, 'Sign-in was cancelled.');
     } on FlutterAppAuthPlatformException catch (e) {
-      throw Problem(ProblemCode.unauthenticated, 'Sign-in failed: ${e.message ?? e.code}');
+      throw Problem(
+        ProblemCode.unauthenticated,
+        'Sign-in failed: ${e.message ?? e.code}',
+      );
     }
   }
 
@@ -51,14 +68,22 @@ class AppAuthAuthenticator implements Authenticator {
   Future<Session?> refresh(Session s) async {
     if (s.authType != 'oidc' || s.refreshToken == null) return null;
     try {
-      final r = await _appAuth.token(TokenRequest(
-        config.oidcClientId,
-        config.oidcRedirect,
-        issuer: config.oidcIssuer,
-        refreshToken: s.refreshToken,
-      ));
-      if (r.accessToken == null) return null;
-      return s.copyWith(accessToken: r.accessToken, refreshToken: r.refreshToken, expiresAt: r.accessTokenExpirationDateTime);
+      final r = await _appAuth.token(
+        TokenRequest(
+          config.oidcClientId,
+          config.oidcRedirect,
+          issuer: config.oidcIssuer,
+          allowInsecureConnections: config.oidcIssuer.startsWith('http://'),
+          refreshToken: s.refreshToken,
+        ),
+      );
+      final token = config.usesGoogle ? r.idToken : r.accessToken;
+      if (token == null) return null;
+      return s.copyWith(
+        accessToken: token,
+        refreshToken: r.refreshToken,
+        expiresAt: r.accessTokenExpirationDateTime,
+      );
     } catch (_) {
       return null;
     }

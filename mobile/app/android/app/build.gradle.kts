@@ -1,8 +1,18 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+/** A --dart-define value, which Flutter hands Gradle base64-encoded in the dart-defines property. */
+fun dartDefine(name: String): String? =
+    (project.findProperty("dart-defines") as String?)
+        ?.split(',')
+        ?.map { String(Base64.getDecoder().decode(it)) }
+        ?.firstOrNull { it.startsWith("$name=") }
+        ?.substringAfter('=')
 
 android {
     namespace = "it.infn.argus.argus_field"
@@ -25,9 +35,11 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // The OIDC redirect (OIDC_REDIRECT, it.infn.argus.field:/oauthredirect) and the host of
+        // The OIDC redirect's scheme follows --dart-define=OIDC_REDIRECT (it.infn.argus.field:/oauthredirect
+        // for Keycloak, com.googleusercontent.apps.<id>:/oauthredirect for Google), and the host of
         // universal links and QR labels (ARGUS_LINK_HOST), per build: -PargusLinkHost=argus.example.org
-        manifestPlaceholders["appAuthRedirectScheme"] = "it.infn.argus.field"
+        manifestPlaceholders["appAuthRedirectScheme"] =
+            dartDefine("OIDC_REDIRECT")?.substringBefore(':') ?: "it.infn.argus.field"
         manifestPlaceholders["argusLinkHost"] =
             (project.findProperty("argusLinkHost") as String?) ?: "argus.invalid"
     }

@@ -28,6 +28,11 @@ class AppConfig {
 
   bool get allowsDeveloperToken => environment != 'production';
 
+  /// Google as the identity provider (OIDC_ISSUER=https://accounts.google.com) rather than
+  /// Keycloak: its access tokens are opaque, so the app sends the ID token instead, and it
+  /// grants a refresh token on `access_type=offline` rather than the `offline_access` scope.
+  bool get usesGoogle => Uri.tryParse(oidcIssuer)?.host == 'accounts.google.com';
+
   static AppConfig fromEnvironment() => const AppConfig(
         environment: String.fromEnvironment('ARGUS_ENV', defaultValue: 'development'),
         apiBase: String.fromEnvironment('ARGUS_API_BASE', defaultValue: 'http://localhost:8000'),
