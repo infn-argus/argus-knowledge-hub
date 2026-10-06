@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { issuesApi } from "../../api/client";
 import { BulkActionsBar } from "../../components/BulkActionsBar";
+import { ListDate, SortHeader, priorityRank, useSort } from "../../components/SortableTable";
 
 export function IssueList() {
   const queryClient = useQueryClient();
@@ -18,12 +19,25 @@ export function IssueList() {
       return next;
     });
 
-  const filtered = useMemo(() => {
+  const shown = useMemo(() => {
     if (!data) return [];
     if (stateFilter === "all") return data;
     if (stateFilter === "open") return data.filter((i) => i.state !== "closed");
     return data.filter((i) => i.state === "closed");
   }, [data, stateFilter]);
+  const { sorted: filtered, sort, toggle: sortBy } = useSort(
+    shown,
+    {
+      title: (i) => i.title,
+      state: (i) => i.state,
+      priority: (i) => priorityRank(i.priority),
+      assignee: (i) => i.assignee,
+      created: (i) => i.created_at,
+      updated: (i) => i.updated_at,
+    },
+    { key: "updated", dir: "desc" },
+    "tickets",
+  );
 
   return (
     <div>
@@ -84,11 +98,12 @@ export function IssueList() {
                     aria-label="Select all tickets"
                   />
                 </th>
-                <th className="px-4 py-2">Title</th>
-                <th className="px-4 py-2">State</th>
-                <th className="px-4 py-2">Priority</th>
-                <th className="px-4 py-2">Assignee</th>
-                <th className="px-4 py-2">Created</th>
+                <SortHeader label="Title" column="title" sort={sort} onSort={sortBy} />
+                <SortHeader label="State" column="state" sort={sort} onSort={sortBy} />
+                <SortHeader label="Priority" column="priority" sort={sort} onSort={sortBy} />
+                <SortHeader label="Assignee" column="assignee" sort={sort} onSort={sortBy} />
+                <SortHeader label="Created" column="created" sort={sort} onSort={sortBy} time />
+                <SortHeader label="Updated" column="updated" sort={sort} onSort={sortBy} time />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -120,14 +135,13 @@ export function IssueList() {
                   </td>
                   <td className="px-4 py-2 text-slate-500">{i.priority ?? "—"}</td>
                   <td className="px-4 py-2 text-slate-500">{i.assignee ?? "—"}</td>
-                  <td className="px-4 py-2 text-slate-500">
-                    {new Date(i.created_at).toLocaleDateString()}
-                  </td>
+                  <td className="whitespace-nowrap px-4 py-2 text-slate-500"><ListDate value={i.created_at} /></td>
+                  <td className="whitespace-nowrap px-4 py-2 text-slate-500"><ListDate value={i.updated_at} /></td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
                     No tickets.
                   </td>
                 </tr>

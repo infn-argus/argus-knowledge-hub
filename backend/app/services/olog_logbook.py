@@ -27,6 +27,30 @@ ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
 MAX_ATTACHMENT_BYTES = int(os.environ.get("ARGUS_OLOG_MAX_ATTACHMENT_MB", "50")) * 1024 * 1024
 
 
+# How Olog's editor puts a file in the text: ![caption](attachment/<file id>){width=… height=…}
+OLOG_FILE_LINK = re.compile(r"\]\(attachment/([^)\s]+)\)(\{[^}]*\})?")
+
+
+def link_files(db: Session, revision: DocumentRevision) -> bool:
+    """Point the entry's references to its files at the copies kept here, so its images show where the author
+    put them. A reference to a file not received yet is left as it is, and resolved when the file arrives.
+    Only the links change, never the words: the revision stays what Olog says."""
+    body = revision.body_markdown or ""
+    if "](attachment/" not in body:
+        return False
+    files = {a.backend_id.rsplit(":", 1)[-1]: a.uid for a in db.scalars(select(Attachment).where(
+        Attachment.document_revision_uid == revision.uid, Attachment.backend_id.like("olog:%")))}
+
+    def to_copy(m: re.Match) -> str:
+        uid = files.get(m.group(1))
+        return f"](/v1/attachments/{uid})" if uid else m.group(0)
+    linked = OLOG_FILE_LINK.sub(to_copy, body)
+    if linked == body:
+        return False
+    revision.body_markdown = linked
+    return True
+
+
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-") or "olog"
 
@@ -171,6 +195,8 @@ def upsert_entries(db: Session, workspace_id: str, facility: str, entries: list[
                 current.state = "superseded"
                 current.superseded_by_uid = revision.uid
             doc.current_revision_uid = revision.uid
+            db.flush()
+            link_files(db, revision)            # the files it already had, now on this revision
             if link_equipment:
                 _link_equipment(db, workspace_id, doc, f"{doc.title}\n{revision.body_markdown}")
         counts[status] += 1
@@ -225,5 +251,7 @@ def add_attachment(db: Session, workspace_id: str, facility: str, entry_id: str,
                       filename=filename, mime_type=mime_type, file_size=len(content),
                       sha256=hashlib.sha256(content).hexdigest(), storage_path=path, backend_id=key,
                       backend_url=source_url))
+    db.flush()
+    link_files(db, db.get(DocumentRevision, doc.current_revision_uid))
     db.commit()
     return {"uid": uid, "status": "created"}

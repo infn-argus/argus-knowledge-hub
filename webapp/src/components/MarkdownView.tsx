@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useState } from "react";
 import { AuthenticatedImage } from "./AuthenticatedImage";
+import { ImageLightbox } from "./ImageLightbox";
 
 /** An attachment URL written by the importer or the editor. The file is
  * behind the API's Bearer auth, so a plain <img src> can't fetch it. */
@@ -124,13 +126,7 @@ export function MarkdownView({
           img: ({ src, alt }) => {
             const match = typeof src === "string" ? src.match(ATTACHMENT_URL) : null;
             if (match) {
-              return (
-                <AuthenticatedImage
-                  uid={match[1]}
-                  alt={alt ?? ""}
-                  className="my-3 max-w-full rounded border border-slate-200"
-                />
-              );
+              return <InlineImage uid={match[1]} alt={alt ?? ""} />;
             }
             return (
               <img
@@ -149,5 +145,18 @@ export function MarkdownView({
         {markdown}
       </ReactMarkdown>
     </div>
+  );
+}
+
+/** An image in the text, at most as wide as the text; a click shows it full size. */
+function InlineImage({ uid, alt }: { uid: string; alt: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} title="Show full size" className="my-3 block cursor-zoom-in">
+        <AuthenticatedImage uid={uid} alt={alt} className="max-h-[32rem] max-w-full rounded border border-slate-200" />
+      </button>
+      {open && <ImageLightbox uid={uid} alt={alt} onClose={() => setOpen(false)} />}
+    </>
   );
 }

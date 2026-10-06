@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { ListDate, SortHeader, useSort } from "../../components/SortableTable";
 import { Link } from "react-router-dom";
 import { assetsApi, schemasApi } from "../../api/client";
 import { AttributeFilterInput } from "../../components/AttributeFilterInput";
@@ -37,7 +38,7 @@ export function AssetSearch() {
   const schema = objectSchemas.find((s) => s.uid === schemaUid);
   const attrDefs = effectiveAttributes(schema, schemas.data);
 
-  const results = useMemo(() => {
+  const matched = useMemo(() => {
     if (!assets.data) return [];
     const needle = q.trim().toLowerCase();
     return assets.data.filter((a) => {
@@ -55,6 +56,18 @@ export function AssetSearch() {
       return true;
     });
   }, [assets.data, q, schemaUid, schema, filters, owner, currentWorkspaceId]);
+  const { sorted: results, sort, toggle: sortBy } = useSort(
+    matched,
+    {
+      name: (a) => a.name,
+      key: (a) => a.key,
+      type: (a) => a.type,
+      created: (a) => a.created_at,
+      updated: (a) => a.updated_at,
+    },
+    { key: "name", dir: "asc" },
+    "assets",
+  );
 
   return (
     <div>
@@ -184,9 +197,11 @@ export function AssetSearch() {
                       aria-label="Select all objects"
                     />
                   </th>
-                  <th className="px-4 py-2">Name</th>
-                  <th className="px-4 py-2">Key</th>
-                  <th className="px-4 py-2">Type</th>
+                  <SortHeader label="Name" column="name" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Key" column="key" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Type" column="type" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Created" column="created" sort={sort} onSort={sortBy} time />
+                  <SortHeader label="Updated" column="updated" sort={sort} onSort={sortBy} time />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -210,11 +225,13 @@ export function AssetSearch() {
                       {a.type}
                       <OwnerBadge workspaceId={a.workspace_id} />
                     </td>
+                    <td className="whitespace-nowrap px-4 py-2 text-slate-500"><ListDate value={a.created_at} /></td>
+                    <td className="whitespace-nowrap px-4 py-2 text-slate-500"><ListDate value={a.updated_at} /></td>
                   </tr>
                 ))}
                 {results.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
+                    <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
                       No objects match.
                     </td>
                   </tr>

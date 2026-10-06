@@ -18,6 +18,7 @@ import { DrawingViewer } from "../../components/DrawingViewer";
 import { RecordPicker } from "../../components/RecordPicker";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { MarkdownView } from "../../components/MarkdownView";
+import { ImageGallery } from "../../components/ImageLightbox";
 import { TransferItemAction } from "../../components/TransferItemAction";
 import { StepsEditor } from "../../components/StepsEditor";
 import { DocumentStep } from "../../api/types";
@@ -99,6 +100,22 @@ export function DocumentDetail() {
   const [linkKind, setLinkKind] = useState<"asset" | "issue" | "document">("asset");
 
   const [bodyMarkdown, setBodyMarkdown] = useState("");
+  // Whether the images among the files are shown, remembered for this viewer.
+  const [showImages, setShowImagesState] = useState(() => {
+    try {
+      return localStorage.getItem("argus.document.showImages") !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const setShowImages = (on: boolean) => {
+    setShowImagesState(on);
+    try {
+      localStorage.setItem("argus.document.showImages", String(on));
+    } catch {
+      /* private window: remembered for this page only */
+    }
+  };
   const [steps, setSteps] = useState<DocumentStep[]>([]);
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
 
@@ -244,6 +261,13 @@ export function DocumentDetail() {
     (a) => !a.backend_id?.startsWith("sheet-of:"),
   );
   const isDrawing = (filename: string) => /\.(dwg|dxf|dwf|dwfx)$/i.test(filename);
+  const isImage = (a: { mime_type: string | null; filename: string }) =>
+    (a.mime_type ?? "").startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(a.filename);
+  // Images the text already shows are not repeated below it.
+  const shownInText = new Set(
+    [...(viewed?.body_markdown ?? "").matchAll(/\/v1\/attachments\/([A-Za-z0-9-]+)/g)].map((m) => m[1]),
+  );
+  const galleryImages = visibleAttachments.filter((a) => isImage(a) && !shownInText.has(a.uid));
   const sheetsFor = (a: { uid: string }) => sheetsBySource.get(a.uid) ?? [];
 
   const linkOptions = {
@@ -611,9 +635,22 @@ export function DocumentDetail() {
 
           {/* Files */}
           <div className="mt-4">
-            <label className="block text-xs font-medium uppercase tracking-wide text-slate-400">
-              Files
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-medium uppercase tracking-wide text-slate-400">
+                Files
+              </label>
+              {galleryImages.length > 0 && (
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <input type="checkbox" checked={showImages} onChange={(e) => setShowImages(e.target.checked)} />
+                  Show images ({galleryImages.length})
+                </label>
+              )}
+            </div>
+            {showImages && galleryImages.length > 0 && (
+              <div className="mt-2">
+                <ImageGallery images={galleryImages} />
+              </div>
+            )}
             <div className="mt-1 space-y-1">
               {visibleAttachments.map((a) => {
                 // A DWG is shown through the DXF the server converted it

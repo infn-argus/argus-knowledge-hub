@@ -5,6 +5,7 @@ import { documentsApi, schemasApi } from "../../api/client";
 import { AttributeFilterInput } from "../../components/AttributeFilterInput";
 import { activeFilterCount, defaultFilterFor, FilterState, matchesFilters } from "../../components/AttributeFilters";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
+import { ListDate, SortHeader, useSort } from "../../components/SortableTable";
 
 export function DocumentSearch() {
   const [q, setQ] = useState("");
@@ -44,7 +45,7 @@ export function DocumentSearch() {
         : [],
   });
 
-  const results = useMemo(() => {
+  const matched = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const textFiltered = typeMatches.filter(
       (d) => !needle || d.title.toLowerCase().includes(needle) || d.code.toLowerCase().includes(needle),
@@ -61,6 +62,19 @@ export function DocumentSearch() {
   }, [typeMatches, q, schema, hasActiveFilters, filters, currentRevisionQueries]);
 
   const revisionsLoading = hasActiveFilters && currentRevisionQueries.some((r) => r.isLoading);
+
+  const { sorted: results, sort, toggle: sortBy } = useSort(
+    matched,
+    {
+      code: (d) => d.code,
+      title: (d) => d.title,
+      status: (d) => (d.current_revision_uid ? "published" : "unpublished"),
+      created: (d) => d.created_at,
+      updated: (d) => d.updated_at,
+    },
+    { key: "updated", dir: "desc" },
+    "document-search",
+  );
 
   return (
     <div>
@@ -141,9 +155,11 @@ export function DocumentSearch() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-2">Code</th>
-                  <th className="px-4 py-2">Title</th>
-                  <th className="px-4 py-2">Status</th>
+                  <SortHeader label="Code" column="code" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Title" column="title" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Status" column="status" sort={sort} onSort={sortBy} />
+                  <SortHeader label="Created" column="created" sort={sort} onSort={sortBy} time />
+                  <SortHeader label="Updated" column="updated" sort={sort} onSort={sortBy} time />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -162,11 +178,13 @@ export function DocumentSearch() {
                     <td className="px-4 py-2 text-slate-500">
                       {d.current_revision_uid ? "published" : "unpublished"}
                     </td>
+                    <td className="whitespace-nowrap px-4 py-2 text-slate-500"><ListDate value={d.created_at} /></td>
+                    <td className="whitespace-nowrap px-4 py-2 text-slate-500"><ListDate value={d.updated_at} /></td>
                   </tr>
                 ))}
                 {results.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-4 py-6 text-center text-slate-400">
+                    <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
                       No documents match.
                     </td>
                   </tr>

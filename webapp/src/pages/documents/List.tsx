@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { documentsApi, schemasApi } from "../../api/client";
 import { BulkActionsBar } from "../../components/BulkActionsBar";
+import { ListDate, SortHeader, useSort } from "../../components/SortableTable";
 
 const AUTHORITY_STYLES: Record<string, string> = {
   ufficiale: "bg-indigo-100 text-indigo-700",
@@ -46,7 +47,21 @@ export function DocumentList() {
     onError: () => alert("Could not move those documents."),
   });
 
-  const rows = data ?? [];
+  const { sorted: rows, sort, toggle: sortBy } = useSort(
+    data,
+    {
+      code: (d) => d.code,
+      title: (d) => d.title,
+      type: (d) => (d.document_type_uid ? typeName.get(d.document_type_uid) : null),
+      authority: (d) => d.authority_level,
+      confidentiality: (d) => d.confidentiality,
+      published: (d) => (d.current_revision_uid ? "published" : "unpublished"),
+      created: (d) => d.created_at,
+      updated: (d) => d.updated_at,
+    },
+    { key: "updated", dir: "desc" },
+    "documents",
+  );
   const allSelected = rows.length > 0 && selected.size === rows.length;
 
   return (
@@ -132,12 +147,14 @@ export function DocumentList() {
                     aria-label="Select all documents"
                   />
                 </th>
-                <th className="px-4 py-2">Code</th>
-                <th className="px-4 py-2">Title</th>
-                <th className="px-4 py-2">Type</th>
-                <th className="px-4 py-2">Authority</th>
-                <th className="px-4 py-2">Confidentiality</th>
-                <th className="px-4 py-2">Published</th>
+                <SortHeader label="Code" column="code" sort={sort} onSort={sortBy} />
+                <SortHeader label="Title" column="title" sort={sort} onSort={sortBy} />
+                <SortHeader label="Type" column="type" sort={sort} onSort={sortBy} />
+                <SortHeader label="Authority" column="authority" sort={sort} onSort={sortBy} />
+                <SortHeader label="Confidentiality" column="confidentiality" sort={sort} onSort={sortBy} />
+                <SortHeader label="Published" column="published" sort={sort} onSort={sortBy} />
+                <SortHeader label="Created" column="created" sort={sort} onSort={sortBy} time />
+                <SortHeader label="Updated" column="updated" sort={sort} onSort={sortBy} time />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -186,11 +203,13 @@ export function DocumentList() {
                       </span>
                     )}
                   </td>
+                  <td className="whitespace-nowrap px-4 py-2 text-slate-500"><ListDate value={d.created_at} /></td>
+                  <td className="whitespace-nowrap px-4 py-2 text-slate-500"><ListDate value={d.updated_at} /></td>
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
                     No documents yet.
                   </td>
                 </tr>

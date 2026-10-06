@@ -220,3 +220,54 @@ def test_the_tool_says_what_is_missing_and_fails_when_argus_refuses(facility, ol
     status = tool.main(["--olog-url", olog, "--argus-url", "http://127.0.0.1:9", "--argus-token", "t",
                         "--facility", "btf"])
     assert status == 1 and "error:" in capsys.readouterr().err
+
+
+
+def test_the_images_in_an_entry_show_where_the_author_put_them(facility, olog):
+    """Olog writes ![](attachment/<file id>){width=…}: once the file is here, the text points at the copy."""
+    tool = _tool()
+    text = "Scope trace:\n\n![](attachment/att-7-trace.png){width=842 height=1052}\n\nand a missing one ![](attachment/gone)"
+    FakeOlog.entries = [entry(7, "Trace", text, "2026-10-04T11:00:00", attachments=["trace.png"])]
+    FakeOlog.files = {"trace.png": b"\x89PNG fake"}
+    tool.run(tool.Olog(olog), ArgusThroughTestClient(tool, facility["token"]), "btf", "2 days")
+    db = SessionLocal()
+    doc = db.get(Document, entry_uid(facility["ws"], "btf", 7))
+    body = db.get(DocumentRevision, doc.current_revision_uid).body_markdown
+    att = db.scalar(select(Attachment.uid).where(Attachment.document_revision_uid == doc.current_revision_uid))
+    assert f"![](/v1/attachments/{att})" in body and "{width=" not in body.split("missing")[0]
+    assert "](attachment/gone)" in body                      # a file never received stays as Olog wrote it
+    db.close()
+    # Edited in Olog: the new revision points at the same copy.
+    FakeOlog.entries = [entry(7, "Trace", text + " (seen again)", "2026-10-04T11:00:00",
+                              modified="2026-10-05T08:00:00", attachments=["trace.png"])]
+    tool.run(tool.Olog(olog), ArgusThroughTestClient(tool, facility["token"]), "btf", "2 days")
+    db = SessionLocal()
+    doc = db.get(Document, entry_uid(facility["ws"], "btf", 7))
+    assert f"](/v1/attachments/{att})" in db.get(DocumentRevision, doc.current_revision_uid).body_markdown
+    db.close()
+
+
+def test_entries_imported_before_get_their_image_links_on_upgrade(facility, monkeypatch):
+    """The migration points the old references (the first import, before links were rewritten) at the files."""
+    import importlib.util as iu
+    path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "f1a3c5e7b9d2_olog_image_links.py"
+    spec = iu.spec_from_file_location("olog_image_links", path)
+    migration = iu.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    db = SessionLocal()
+    uid = f"olog-old-{secrets.token_hex(3)}"
+    db.add(Document(uid=uid, workspace_id=facility["ws"], code=uid.upper(), title="Old", source="olog"))
+    db.flush()
+    db.add(DocumentRevision(uid=f"{uid}-r1", document_uid=uid, revision_number=1, state="published",
+                            body_markdown="Before ![](attachment/abc-1){width=10 height=20} after",
+                            attributes={"argus_source": "olog"}))
+    db.flush()
+    db.add(Attachment(uid=f"{uid}-a", workspace_id=facility["ws"], document_revision_uid=f"{uid}-r1",
+                      filename="abc-1.png", storage_path="/dev/null", backend_id="olog:btf:5:abc-1"))
+    db.commit()
+    with engine.begin() as conn:
+        monkeypatch.setattr(migration.op, "get_bind", lambda: conn, raising=False)
+        migration.upgrade()
+    db.expire_all()
+    assert db.get(DocumentRevision, f"{uid}-r1").body_markdown == f"Before ![](/v1/attachments/{uid}-a) after"
+    db.close()
