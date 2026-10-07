@@ -197,6 +197,7 @@ class ApiService {
   api.IntakeApi intake(api.ApiClient c) => api.IntakeApi(c);
   api.UploadsApi uploads(api.ApiClient c) => api.UploadsApi(c);
   api.NotificationsApi notifications(api.ApiClient c) => api.NotificationsApi(c);
+  api.GlobalValuesApi globalValues(api.ApiClient c) => api.GlobalValuesApi(c);
   api.SchemasApi schemas(api.ApiClient c) => api.SchemasApi(c);
   api.AiApi ai(api.ApiClient c) => api.AiApi(c);
   api.AssetSubresourcesApi assetSubresources(api.ApiClient c) => api.AssetSubresourcesApi(c);

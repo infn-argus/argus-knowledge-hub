@@ -116,6 +116,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onSubmitted: _submit,
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+          child: Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const Key('home-tickets'),
+                onPressed: () => context.push('/tickets'),
+                icon: const Icon(Icons.confirmation_number_outlined),
+                label: const Text('Tickets'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const Key('home-documents'),
+                onPressed: () => context.push('/documents'),
+                icon: const Icon(Icons.description_outlined),
+                label: const Text('Documents'),
+              ),
+            ),
+          ]),
+        ),
         Expanded(child: _q.length < 2 ? const _Hint() : _Results(q: _q)),
       ]),
     );

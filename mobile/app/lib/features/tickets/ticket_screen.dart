@@ -10,6 +10,7 @@ import '../../core/problem.dart';
 import '../../domain/capture.dart';
 import '../../domain/models.dart';
 import '../../widgets/common.dart';
+import '../../widgets/rich_content.dart';
 import 'report_screen.dart' show impactOptions;
 
 /// A ticket in the field (flutter-app-design §9): read it, comment, add a photo, and move it
@@ -143,7 +144,15 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
     final r = ref.watch(ticketDetailProvider(widget.uid));
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Ticket')),
+      appBar: AppBar(title: const Text('Ticket'), actions: [
+        if (r.hasValue)
+          IconButton(
+            key: const Key('ticket-edit'),
+            tooltip: 'Edit',
+            icon: const Icon(Icons.edit_outlined),
+            onPressed: () => context.push('/ticket/${widget.uid}/edit'),
+          ),
+      ]),
       body: r.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) {
@@ -183,7 +192,7 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
                   ),
                 ],
                 const SizedBox(height: 16),
-                SelectableText((t.description ?? '').isEmpty ? 'No description.' : t.description!),
+                (t.description ?? '').isEmpty ? const Text('No description.') : RichContent(t.description!),
               ]),
             ),
             _Unsent(uid: widget.uid),

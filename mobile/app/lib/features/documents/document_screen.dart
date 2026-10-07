@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
+import '../../core/problem.dart';
 import '../../widgets/common.dart';
 import '../../widgets/rich_content.dart';
 
@@ -64,6 +65,7 @@ class DocumentScreen extends ConsumerWidget {
               ],
             ]),
           ),
+          _Workflow(uid: uid),
           if (d.steps.isNotEmpty) ...[
             const SectionHeader('Steps'),
             for (final (i, s) in d.steps.indexed)
@@ -73,6 +75,115 @@ class DocumentScreen extends ConsumerWidget {
             const SectionHeader('Content'),
             Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: RichContent(d.body!)),
           ],
+        ]),
+      ),
+    );
+  }
+}
+
+/// Where work on the document stands: the revision being written or decided on, and the one step that
+/// moves it on — the same draft → review → approval → publication the web follows, with the server deciding
+/// who may take each step (an author cannot approve their own revision).
+class _Workflow extends ConsumerStatefulWidget {
+  const _Workflow({required this.uid});
+
+  final String uid;
+
+  @override
+  ConsumerState<_Workflow> createState() => _WorkflowState();
+}
+
+class _WorkflowState extends ConsumerState<_Workflow> {
+  bool _busy = false;
+
+  Future<void> _run(String done, Future<void> Function() action) async {
+    setState(() => _busy = true);
+    try {
+      await action();
+      ref.invalidate(documentRevisionsProvider(widget.uid));
+      ref.invalidate(documentDetailProvider(widget.uid));
+      ref.invalidate(documentListProvider);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
+    } on Problem catch (p) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(p.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final revs = ref.watch(documentRevisionsProvider(widget.uid)).value;
+    if (revs == null) return const SizedBox.shrink();
+    final repo = ref.read(documentRepositoryProvider);
+    final open = revs.where((r) => r.open).firstOrNull;
+    final published = revs.where((r) => r.state == 'published').firstOrNull;
+    if (open == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            key: const Key('doc-new-revision'),
+            onPressed: _busy ? null : () => _run('A new draft revision was started.', () => repo.newRevision(widget.uid, published)),
+            icon: const Icon(Icons.edit_note),
+            label: const Text('Start a new revision'),
+          ),
+        ),
+      );
+    }
+    final (label, next) = switch (open.state) {
+      'draft' => ('Draft', 'Edit it, then send it for review.'),
+      'in_review' => ('In review', 'Waiting for someone other than its author to approve it.'),
+      _ => ('Approved', 'Publish it to make it the revision to work from.'),
+    };
+    return Card(
+      key: const Key('doc-workflow'),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Revision ${open.number} · $label', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text([if (open.authoredBy != null) 'by ${open.authoredBy}', next].join(' — ')),
+          if ((open.reviewComment ?? '').isNotEmpty) ...[
+            const SizedBox(height: 8),
+            NoticeBar(icon: Icons.feedback_outlined, text: 'Review: ${open.reviewComment}'),
+          ],
+          if ((open.body ?? '').isNotEmpty)
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Its text'),
+              children: [RichContent(open.body!)],
+            ),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            if (open.state == 'draft') ...[
+              OutlinedButton.icon(
+                key: const Key('doc-edit-draft'),
+                onPressed: _busy ? null : () => context.push('/document/${widget.uid}/revision/${open.uid}/edit'),
+                icon: const Icon(Icons.edit),
+                label: const Text('Edit draft'),
+              ),
+              FilledButton(
+                key: const Key('doc-submit'),
+                onPressed: _busy ? null : () => _run('Sent for review.', () => repo.submit(widget.uid, open.uid)),
+                child: const Text('Send for review'),
+              ),
+            ],
+            if (open.state == 'in_review')
+              FilledButton(
+                key: const Key('doc-approve'),
+                onPressed: _busy ? null : () => _run('Approved.', () => repo.approve(widget.uid, open.uid)),
+                child: const Text('Approve'),
+              ),
+            if (open.state == 'approved')
+              FilledButton(
+                key: const Key('doc-publish'),
+                onPressed: _busy ? null : () => _run('Published.', () => repo.publish(widget.uid, open.uid)),
+                child: const Text('Publish'),
+              ),
+          ]),
         ]),
       ),
     );

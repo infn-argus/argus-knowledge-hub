@@ -243,6 +243,32 @@ final assetBriefProvider = FutureProvider.autoDispose.family<RecordBrief?, Strin
   }
 });
 
+/// The ticket list: every ticket in the workspace, or only the open ones assigned to me (`mine`).
+final ticketListProvider = FutureProvider.autoDispose.family<List<TicketListItem>, bool>((ref, mine) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(ticketRepositoryProvider).list(mine: mine);
+});
+
+final ticketPrioritiesProvider = FutureProvider.autoDispose<List<String>>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(ticketRepositoryProvider).priorities();
+});
+
+final documentListProvider = FutureProvider.autoDispose<List<DocumentListItem>>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(documentRepositoryProvider).list();
+});
+
+final documentRevisionsProvider = FutureProvider.autoDispose.family<List<DocumentRevision>, String>((ref, uid) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(documentRepositoryProvider).revisions(uid);
+});
+
+final documentTypesProvider = FutureProvider.autoDispose<List<EquipmentType>>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(schemaRepositoryProvider).documentTypes();
+});
+
 final assetCommentsProvider = FutureProvider.autoDispose.family<List<Comment>, String>((ref, uid) {
   ref.watch(workspaceIdProvider);
   return ref.watch(assetRepositoryProvider).comments(uid);

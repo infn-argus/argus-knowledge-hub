@@ -14,6 +14,7 @@ const recordedUnit = '506c63d7-f353-4b5f-9e6d-a0528d4e679f';
 const recordedInstallation = 'a54b9136-c75f-4840-9d0e-1830186774dc';
 const incomingUnit = '812ddce6-b3a6-4d69-8e23-4e3600136faa';
 const ionPumpUid = 'd2b1c2d3-1234-4a5b-8c9d-0e1f2a3b4c5d';
+const closedTicketUid = '5b3c9a10-0000-4000-8000-00000000c105';
 
 String fixture(String name) => File('test/fixtures/$name.json').readAsStringSync();
 Object? fixtureJson(String name) => jsonDecode(fixture(name));
@@ -22,8 +23,20 @@ http.Response _json(Object? body, [int status = 200]) => http.Response.bytes(
     utf8.encode(body is String ? body : jsonEncode(body)), status,
     headers: {'content-type': 'application/json; charset=utf-8'});
 
+/// A document revision as the API returns it.
+Map<String, Object?> revision(String documentUid, int number, String state, String? body) => {
+      'uid': '$documentUid-r$number', 'document_uid': documentUid, 'revision_number': number, 'state': state,
+      'body_markdown': body, 'steps': [], 'attributes': {}, 'valid_from': null, 'valid_until': null,
+      'next_review_due': null, 'authored_by': 'rossi@example.org', 'approved_by': null, 'submitted_at': null,
+      'approved_at': null, 'published_at': null, 'review_comment': null, 'superseded_by_uid': null,
+      'created_at': '2026-10-07T08:00:00Z', 'updated_at': '2026-10-07T08:00:00Z',
+    };
+
 class FakeArgus {
   final List<http.Request> requests = [];
+
+  /// The state of the draft document's only revision, as GET /revisions reports it.
+  String draftRevisionState = 'draft';
 
   /// Replace every response with this one (to simulate revocation, an old client, an outage).
   http.Response? override;
@@ -109,6 +122,27 @@ class FakeArgus {
         return _json({'ok': true, 'outcome': 'applied'});
       }
       if (RegExp(r'^/v1/intake/runs/[^/]+/outcome$').hasMatch(p)) return _json({'ok': true}, 201);
+      if (p == '/v1/documents') {
+        final b = body();
+        final d = fixtureJson('draft') as Map<String, dynamic>;
+        return _json({...d, 'uid': b['uid'], 'title': b['title'], 'code': 'DOC-0099',
+          'document_type_uid': b['document_type_uid']}, 201);
+      }
+      final relation = RegExp(r'^/v1/documents/([^/]+)/relations$').firstMatch(p);
+      if (relation != null) {
+        final b = body();
+        return _json({'id': 1, 'from_document_uid': relation.group(1), 'to_type': b['to_type'], 'to_uid': b['to_uid'],
+          'relation_type': b['relation_type'], 'created_at': '2026-10-07T08:00:00Z'}, 201);
+      }
+      final newRevision = RegExp(r'^/v1/documents/([^/]+)/revisions$').firstMatch(p);
+      if (newRevision != null) {
+        return _json(revision(newRevision.group(1)!, 2, 'draft', body()['body_markdown'] as String?), 201);
+      }
+      final step = RegExp(r'^/v1/documents/([^/]+)/revisions/[^/]+/(submit|approve|publish)$').firstMatch(p);
+      if (step != null) {
+        const to = {'submit': 'in_review', 'approve': 'approved', 'publish': 'published'};
+        return _json(revision(step.group(1)!, 1, to[step.group(2)]!, 'x'));
+      }
       if (RegExp(r'^/v1/issues/[^/]+/comments$').hasMatch(p)) {
         final c = fixtureJson('comment_created') as Map<String, dynamic>;
         return _json({...c, 'uid': body()['uid'], 'body': body()['body']}, 201);
@@ -130,6 +164,14 @@ class FakeArgus {
     if (m == 'PUT' && RegExp(r'^/v1/assets/[^/]+$').hasMatch(p)) {
       final a = fixtureJson('position') as Map<String, dynamic>;
       return _json({...a, 'attributes': body()['attributes'] ?? a['attributes']});
+    }
+    if (m == 'PUT' && RegExp(r'^/v1/issues/[^/]+$').hasMatch(p)) {
+      final t = fixtureJson('ticket') as Map<String, dynamic>;
+      return _json({...t, ...body(), 'version': (t['version'] as int) + 1});
+    }
+    final draftEdit = RegExp(r'^/v1/documents/([^/]+)/revisions/[^/]+$').firstMatch(p);
+    if (m == 'PUT' && draftEdit != null) {
+      return _json(revision(draftEdit.group(1)!, 1, 'draft', body()['body_markdown'] as String?));
     }
     if (m == 'PUT' && p.startsWith('/v1/uploads/')) {
       final uid = p.split('/').last;
@@ -171,6 +213,26 @@ class FakeArgus {
         'type': 'Ion Pump', 'web_path': '/assets/$incomingUnit'});
     }
     if (name == null && m == 'GET') {
+      if (p == '/v1/issues') {
+        final open = fixtureJson('ticket') as Map<String, dynamic>;
+        final closed = {...open, 'uid': closedTicketUid, 'title': 'Cooling water leak fixed', 'state': 'closed',
+          'closed_at': '2026-09-30T10:00:00Z', 'updated_at': '2026-09-30T10:00:00Z'};
+        return _json(q['mine'] == 'true' ? [open] : [open, closed]);
+      }
+      if (p == '/v1/global-values') {
+        return _json([
+          {'uid': 'gv-priority', 'workspace_id': workspaceId, 'name': 'Priority', 'key': 'priority', 'type': 'enumeration',
+            'applies_to': 'tickets', 'options': [{'id': 'low', 'value': 'Low'}, {'id': 'high', 'value': 'High'},
+              {'id': 'urgent', 'value': 'Urgent'}]},
+        ]);
+      }
+      if (p == '/v1/documents') return _json([fixtureJson('document'), fixtureJson('draft')]);
+      if (p == '/v1/documents/$documentUid/revisions') {
+        return _json([revision(documentUid, 1, 'published', '# Ion pump replacement')]);
+      }
+      if (p == '/v1/documents/$draftUid/revisions') {
+        return _json([revision(draftUid, 1, draftRevisionState, '# Bake-out\n\nHeat to 150 °C.')]);
+      }
       if (RegExp(r'^/v1/issues/[^/]+/comments$').hasMatch(p)) return _json(fixture('comments'));
       if (RegExp(r'^/v1/issues/[^/]+/attachments$').hasMatch(p)) return _json([]);
       if (RegExp(r'^/v1/assets/[^/]+/comments$').hasMatch(p)) return _json(fixture('asset_comments'));

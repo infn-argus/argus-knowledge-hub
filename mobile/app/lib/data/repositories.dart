@@ -281,7 +281,41 @@ class TicketRepository {
       occurredFrom: When.fromJson(_map(t.attributes)['occurred_from']),
       version: t.version,
       attributes: _map(t.attributes),
+      schemaUid: t.schemaUid,
     );
+  }
+
+  /// The workspace's tickets, or only the open ones assigned to the signed-in person ([mine]).
+  Future<List<TicketListItem>> list({bool mine = false}) async =>
+      _list(await _api.json((c) => _api.issues(c).listIssuesWithHttpInfo(mine: mine)))
+          .map(_map)
+          .where((m) => m['deleted_at'] == null)
+          .map((m) => TicketListItem(
+                uid: m['uid'].toString(),
+                title: (m['title'] ?? '').toString(),
+                state: (m['state'] ?? '').toString(),
+                priority: m['priority']?.toString(),
+                assignee: m['assignee']?.toString(),
+                assetUid: m['asset_uid']?.toString(),
+                updatedAt: _date(m['updated_at']),
+                closed: m['closed_at'] != null,
+              ))
+          .toList()
+        ..sort((a, b) => (b.updatedAt ?? DateTime(0)).compareTo(a.updatedAt ?? DateTime(0)));
+
+  /// The priorities tickets can have, in the order the workspace defines them (its "priority" global value).
+  Future<List<String>> priorities() async {
+    final rows = _list(await _api.json((c) => _api.globalValues(c).listGlobalValuesWithHttpInfo(appliesTo: 'tickets')));
+    final priority = rows.map(_map).where((g) => g['key'] == 'priority').firstOrNull;
+    return _list(priority?['options']).map(_map).map((o) => (o['value'] ?? o['label'] ?? o['id']).toString()).toList();
+  }
+
+  /// Changes a ticket. Only the fields in [changes] are sent — not the generated model, which writes every
+  /// field (null where unset) and would so clear the ones not being changed (the affected record, the
+  /// assignee…). The version read must still be current (If-Match), as with every other edit (§3.3).
+  Future<void> update(String uid, Map<String, Object?> changes, {required int version, required String key}) async {
+    await _api.json((c) => c.invokeAPI('/v1/issues/$uid', 'PUT', [], changes, {}, {}, 'application/json'),
+        idempotencyKey: 'ticket-edit:$key', ifMatch: '"$version"');
   }
 }
 
@@ -310,4 +344,84 @@ class DocumentRepository {
       steps: _list(rev?.steps).map((s) => (_map(s)['title'] ?? _map(s)['text'] ?? s).toString()).toList(),
     );
   }
+
+  Future<List<DocumentListItem>> list() async =>
+      _list(await _api.json((c) => _api.documents(c).listDocumentsWithHttpInfo()))
+          .map(_map)
+          .map((m) => DocumentListItem(
+                uid: m['uid'].toString(),
+                code: (m['code'] ?? '').toString(),
+                title: (m['title'] ?? '').toString(),
+                published: m['current_revision_uid'] != null,
+                documentTypeUid: m['document_type_uid']?.toString(),
+                updatedAt: _date(m['updated_at']),
+                retired: m['retired_at'] != null,
+              ))
+          .toList()
+        ..sort((a, b) => (b.updatedAt ?? DateTime(0)).compareTo(a.updatedAt ?? DateTime(0)));
+
+  /// Writes a new document; its text becomes the first revision, a draft. [assetUid], when given, is the
+  /// record it describes — the same relation the web's "Write a document" from an asset makes.
+  Future<String> create({
+    required String uid,
+    required String title,
+    String? documentTypeUid,
+    String? body,
+    String? assetUid,
+  }) async {
+    final created = _map(await _api.json(
+        (c) => c.invokeAPI('/v1/documents', 'POST', [], {
+              'uid': uid,
+              'title': title,
+              'document_type_uid': ?documentTypeUid,
+              if (body != null && body.isNotEmpty) 'body_markdown': body,
+            }, {}, {}, 'application/json'),
+        idempotencyKey: 'document:$uid'));
+    if (assetUid != null) {
+      await _api.json(
+          (c) => _api.documents(c).createRelationWithHttpInfo(
+              uid, api.DocumentRelationCreate(toType: api.DocumentRelationCreateToTypeEnum.asset, toUid: assetUid, relationType: 'describes')),
+          idempotencyKey: 'document:$uid:describes:$assetUid');
+    }
+    return created['uid'].toString();
+  }
+
+  Future<List<DocumentRevision>> revisions(String uid) async =>
+      _list(await _api.json((c) => _api.documents(c).listRevisionsWithHttpInfo(uid)))
+          .map(_map)
+          .map((m) => DocumentRevision(
+                uid: m['uid'].toString(),
+                number: (m['revision_number'] as num?)?.toInt() ?? 0,
+                state: (m['state'] ?? '').toString(),
+                body: m['body_markdown']?.toString(),
+                authoredBy: m['authored_by']?.toString(),
+                approvedBy: m['approved_by']?.toString(),
+                reviewComment: m['review_comment']?.toString(),
+                updatedAt: _date(m['updated_at']),
+              ))
+          .toList()
+        ..sort((a, b) => b.number.compareTo(a.number));
+
+  /// A new draft revision, starting from the text of [from] (the published one, typically).
+  Future<void> newRevision(String uid, DocumentRevision? from) async {
+    await _api.json(
+        (c) => c.invokeAPI('/v1/documents/$uid/revisions', 'POST', [], {'body_markdown': from?.body ?? ''}, {}, {},
+            'application/json'),
+        idempotencyKey: 'document:$uid:revision:${from?.uid ?? 'new'}');
+  }
+
+  /// Changes a draft's text — only what is given, so its dates and steps stay as they are.
+  Future<void> updateDraft(String uid, String revUid, {required String body}) async {
+    await _api.json((c) => c.invokeAPI(
+        '/v1/documents/$uid/revisions/$revUid', 'PUT', [], {'body_markdown': body}, {}, {}, 'application/json'));
+  }
+
+  Future<void> submit(String uid, String revUid) =>
+      _api.json((c) => _api.documents(c).submitRevisionWithHttpInfo(uid, revUid));
+
+  Future<void> approve(String uid, String revUid) =>
+      _api.json((c) => _api.documents(c).approveRevisionWithHttpInfo(uid, revUid, api.ApproveAction()));
+
+  Future<void> publish(String uid, String revUid) =>
+      _api.json((c) => _api.documents(c).publishRevisionWithHttpInfo(uid, revUid));
 }

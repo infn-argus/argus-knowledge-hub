@@ -216,6 +216,7 @@ class TicketDetail {
     this.occurredFrom,
     this.version = 1,
     this.attributes = const {},
+    this.schemaUid,
   });
 
   final String uid;
@@ -224,6 +225,8 @@ class TicketDetail {
   final String? description;
   final String? priority;
   final String? assetUid;
+  /// The ticket's type, whose attributes the edit form offers.
+  final String? schemaUid;
   final When? occurredFrom;
   final int version; // sent back as If-Match with a change (flutter-app-design §3.3)
   final Map<String, Object?> attributes;
@@ -307,4 +310,74 @@ class AttributeDef {
     'string', 'text', 'integer', 'float', 'boolean', 'date', 'datetime', 'enumeration', 'reference',
   };
   bool get editable => !readOnly && editableTypes.contains(type);
+}
+
+/// A ticket in a list: enough to choose one to open.
+class TicketListItem {
+  const TicketListItem({
+    required this.uid,
+    required this.title,
+    required this.state,
+    this.priority,
+    this.assignee,
+    this.assetUid,
+    this.updatedAt,
+    this.closed = false,
+  });
+
+  final String uid;
+  final String title;
+  final String state;
+  final String? priority;
+  final String? assignee;
+  final String? assetUid;
+  final DateTime? updatedAt;
+  final bool closed;
+}
+
+/// A document in a list. [published] is whether it has a revision to work from at all.
+class DocumentListItem {
+  const DocumentListItem({
+    required this.uid,
+    required this.code,
+    required this.title,
+    required this.published,
+    this.documentTypeUid,
+    this.updatedAt,
+    this.retired = false,
+  });
+
+  final String uid;
+  final String code;
+  final String title;
+  final bool published;
+  final String? documentTypeUid;
+  final DateTime? updatedAt;
+  final bool retired;
+}
+
+/// One revision of a document: drafted, sent for review, approved, then published (the one to work from).
+class DocumentRevision {
+  const DocumentRevision({
+    required this.uid,
+    required this.number,
+    required this.state,
+    this.body,
+    this.authoredBy,
+    this.approvedBy,
+    this.reviewComment,
+    this.updatedAt,
+  });
+
+  final String uid;
+  final int number;
+  final String state; // draft | in_review | approved | published | superseded | retired (a rejection: draft again)
+  final String? body;
+  final String? authoredBy;
+  final String? approvedBy;
+  final String? reviewComment;
+  final DateTime? updatedAt;
+
+  /// Still being written or decided on, so it is where work on the document continues.
+  bool get open => state == 'draft' || state == 'in_review' || state == 'approved';
 }

@@ -14,6 +14,10 @@ import '../features/auth/update_screen.dart';
 import '../features/auth/workspace_screen.dart';
 import '../features/diagnostics/diagnostics_screen.dart';
 import '../features/documents/document_screen.dart';
+import '../features/documents/document_list_screen.dart';
+import '../features/documents/document_write_screen.dart';
+import '../features/tickets/ticket_edit_screen.dart';
+import '../features/tickets/ticket_list_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/records/asset_edit_screen.dart';
 import '../features/records/asset_screen.dart';
@@ -91,6 +95,16 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/outbox', builder: (_, _) => const OutboxScreen()),
       GoRoute(path: '/asset/:uid', builder: (_, st) => AssetScreen(uid: st.pathParameters['uid']!)),
       GoRoute(path: '/asset/:uid/edit', builder: (_, st) => AssetEditScreen(uid: st.pathParameters['uid']!)),
+      GoRoute(path: '/tickets', builder: (_, _) => const TicketListScreen()),
+      GoRoute(path: '/ticket/:uid/edit', builder: (_, st) => TicketEditScreen(uid: st.pathParameters['uid']!)),
+      GoRoute(path: '/documents', builder: (_, _) => const DocumentListScreen()),
+      GoRoute(
+          path: '/documents/new',
+          builder: (_, st) => DocumentWriteScreen(assetUid: st.uri.queryParameters['asset'])),
+      GoRoute(
+          path: '/document/:uid/revision/:rev/edit',
+          builder: (_, st) =>
+              DocumentWriteScreen(documentUid: st.pathParameters['uid'], revisionUid: st.pathParameters['rev'])),
       // A document code or a Jira key in the link is resolved first; a uid opens directly.
       GoRoute(
           path: '/document/:id',

@@ -104,6 +104,12 @@ class SchemaRepository {
       .toList()
     ..sort((a, b) => a.name.compareTo(b.name));
 
+  Future<List<EquipmentType>> documentTypes() async => (await _all())
+      .where((s) => s['applies_to'] == 'documents' && s['is_concrete'] != false)
+      .map((s) => EquipmentType(s['uid'].toString(), s['name'].toString()))
+      .toList()
+    ..sort((a, b) => a.name.compareTo(b.name));
+
   /// A type's attributes, with its ancestors' folded in (a child's own definition wins on the same
   /// key) — the same rule webapp/src/lib/schemaAttributes.ts effectiveAttributes() applies, so a
   /// record edited here sees the fields the web form would show.

@@ -212,6 +212,18 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
           subtitle: Text([d.state ?? 'no revision', if (d.reviewOverdue) 'review overdue'].join(' · ')),
           onTap: () => context.push('/document/${d.uid}'),
         ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: const Key('asset-write-document'),
+            onPressed: () => context.push('/documents/new?asset=${a.uid}'),
+            icon: const Icon(Icons.note_add_outlined),
+            label: const Text('Write a document about it'),
+          ),
+        ),
+      ),
       SectionHeader('Files', trailing: '${attachments.length}'),
       if (attachments.isEmpty) const ListTile(title: Text('No files yet.')),
       if (attachments.isNotEmpty)
