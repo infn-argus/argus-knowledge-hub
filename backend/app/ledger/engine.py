@@ -1091,9 +1091,22 @@ def project_subject(db: Session, uid: str, cause: str, *, emit: bool = True) -> 
         values = []
         for m in present:
             try:
-                values.append(json.loads(m))
+                parsed = json.loads(m)
             except (TypeError, ValueError):
-                values.append(m)
+                parsed = m
+            if isinstance(parsed, list):
+                # A legacy claim from before callers decomposed a multi-value attribute into one
+                # present/absent statement per member (service.py): its member is the whole list's own
+                # hash, not one item's, so it would otherwise reassemble as a list containing that
+                # whole list — e.g. ["beam", "optics"] read back as [["beam", "optics"]]. Unwrap it.
+                values.extend(parsed)
+            else:
+                values.append(parsed)
+        try:
+            values = list(dict.fromkeys(values))  # de-duplicate: a legacy claim may repeat a member
+                                                   # a newer, properly-decomposed claim already carries
+        except TypeError:
+            pass                                  # an unhashable member (shouldn't happen): keep as-is
         if values:
             attrs[name] = values
         else:

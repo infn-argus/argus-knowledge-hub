@@ -15,6 +15,33 @@ def _active(db: Session, uid: str, predicate: str, member: Optional[str] = None)
     return [d.decision_id for d in engine._active_decisions(db, uid, predicate, member)]
 
 
+def _multi_attr_batch(db: Session, uid: str, key: str, value, old) -> tuple[list[ParsedClaim], list[dict]]:
+    """Claims and confirm-value decisions for one multi-value "set" attribute (engine.MULTI_ATTRS): one
+    present/absent statement per member, encoded exactly as set_member's single-member edit does
+    (member=json.dumps(item), the claim's value the item itself) — the shape project_subject's
+    reassembly expects, and the one this batches for several members changing in the same edit instead
+    of set_member's one call per member (which would split them across separate ledger revisions). A
+    caller that instead passed the whole list as a single claim's value (every caller here, until this
+    fix) made a claim whose auto-derived member was the whole list's own hash, so reassembly read it
+    back as a list containing that one whole list, not its items."""
+    import json
+    predicate = f"attr:{key}"
+
+    def items(v):
+        return [] if v is None else (v if isinstance(v, list) else [v])
+
+    new_members = {json.dumps(item): item for item in items(value)}
+    old_members = {json.dumps(item): item for item in items(old)}
+    wanted = {m: (True, new_members[m]) for m in new_members}
+    wanted |= {m: (False, old_members[m]) for m in old_members if m not in new_members}
+    claims, batch = [], []
+    for member, (present, item) in wanted.items():
+        state = "present" if present else "absent"
+        claims.append(ParsedClaim(f"uid:{uid}", predicate, item, method="manual", polarity=state, member=member))
+        batch.append(confirm_value(uid, predicate, state, member=member, replaces=_active(db, uid, predicate, member)))
+    return claims, batch
+
+
 def confirm_value(uid: str, predicate: str, value, *, member: Optional[str] = None,
                   replaces: Optional[list[str]] = None, reason: Optional[str] = None) -> dict:
     """One decision: supersede what is confirmed now, or confirm afresh."""
@@ -32,11 +59,15 @@ def edit_value(db: Session, workspace_id: str, actor: str, uid: str, predicate: 
     from app.ledger.cutover import assert_writable
     assert_writable(db, workspace_id, "objects")
     stream = engine.person_stream(db, workspace_id, actor)
-    engine.add_manual_claims(db, stream, [ParsedClaim(f"uid:{uid}", predicate, value, method="manual")],
-                             cause=f"edit by {actor}")
-    return engine.apply_decisions(db, workspace_id, actor, [
-        confirm_value(uid, predicate, value, replaces=_active(db, uid, predicate), reason=reason)],
-        defer_derive=defer_derive)
+    if predicate.startswith("attr:") and engine.is_multi(predicate):
+        record = db.get(Asset, uid)
+        old = (record.attributes or {}).get(predicate[5:]) if record else None
+        claims, batch = _multi_attr_batch(db, uid, predicate[5:], value, old)
+    else:
+        claims = [ParsedClaim(f"uid:{uid}", predicate, value, method="manual")]
+        batch = [confirm_value(uid, predicate, value, replaces=_active(db, uid, predicate), reason=reason)]
+    engine.add_manual_claims(db, stream, claims, cause=f"edit by {actor}")
+    return engine.apply_decisions(db, workspace_id, actor, batch, defer_derive=defer_derive)
 
 
 def set_member(db: Session, workspace_id: str, actor: str, uid: str, predicate: str, member_value,
@@ -163,11 +194,19 @@ def create_record(db: Session, workspace_id: str, actor: str, *, uid: str, schem
         ref = f"uid:{uid}"
         claims = [ParsedClaim(ref, "exists", {"type": type_name, "key": key, "name": name}, method="manual"),
                   ParsedClaim(ref, "name", name, method="manual")]
-        claims += [ParsedClaim(ref, f"attr:{k}", v, method="manual") for k, v in attributes.items() if v is not None]
+        batch = [confirm_value(uid, "exists", "present"), confirm_value(uid, "name", name)]
+        for k, v in attributes.items():
+            if v is None:
+                continue
+            if engine.is_multi(f"attr:{k}"):
+                c, b = _multi_attr_batch(db, uid, k, v, None)
+                claims += c
+                batch += b
+            else:
+                claims.append(ParsedClaim(ref, f"attr:{k}", v, method="manual"))
+                batch.append(confirm_value(uid, f"attr:{k}", v))
         engine.add_manual_claims(db, engine.person_stream(db, workspace_id, actor), claims,
                                  cause=f"created by {actor}")
-        batch = [confirm_value(uid, "exists", "present"), confirm_value(uid, "name", name)]
-        batch += [confirm_value(uid, f"attr:{k}", v) for k, v in attributes.items() if v is not None]
         engine.apply_decisions(db, workspace_id, actor, batch)
     return record
 
@@ -182,10 +221,19 @@ def edit_values(db: Session, workspace_id: str, actor: str, uid: str, changes: d
     if not changes:
         return []
     stream = engine.person_stream(db, workspace_id, actor)
-    engine.add_manual_claims(db, stream, [ParsedClaim(f"uid:{uid}", p, v, method="manual")
-                                          for p, v in changes.items()], cause=f"edit by {actor}")
-    return engine.apply_decisions(db, workspace_id, actor, [
-        confirm_value(uid, p, v, replaces=_active(db, uid, p), reason=reason) for p, v in changes.items()])
+    current = (db.get(Asset, uid).attributes or {}) if any(engine.is_multi(p) for p in changes) else {}
+    claims: list[ParsedClaim] = []
+    batch: list[dict] = []
+    for p, v in changes.items():
+        if p.startswith("attr:") and engine.is_multi(p):
+            c, b = _multi_attr_batch(db, uid, p[5:], v, current.get(p[5:]))
+            claims += c
+            batch += b
+        else:
+            claims.append(ParsedClaim(f"uid:{uid}", p, v, method="manual"))
+            batch.append(confirm_value(uid, p, v, replaces=_active(db, uid, p), reason=reason))
+    engine.add_manual_claims(db, stream, claims, cause=f"edit by {actor}")
+    return engine.apply_decisions(db, workspace_id, actor, batch)
 
 
 def retype(db: Session, workspace_id: str, actor: str, uid: str, type_name: str,

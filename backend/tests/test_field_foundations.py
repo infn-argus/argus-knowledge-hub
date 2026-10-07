@@ -158,6 +158,64 @@ def test_an_edit_that_sends_is_global_as_null_is_not_an_instruction_to_clear_it(
     assert r2.status_code == 200 and r2.json()["is_global"] is True
 
 
+def test_a_multi_value_attribute_round_trips_a_list_add_remove_and_clear_through_the_field_client():
+    """argus_keywords (engine.MULTI_ATTRS) edited the way the field app and the web app both do it: the
+    whole new list sent back in attributes, same as any other field — not one call per member. A list
+    value passed straight through as one claim used to reassemble as a list containing that one whole
+    list (["beam", "optics"] read back as [["beam", "optics"]]), crashing or corrupting nothing — every
+    save just silently wrote the wrong shape."""
+    ws, h = workspace()
+    uid = _pump(ws, h, {"argus_keywords": ["beam", "optics"]})
+    read = client.get(f"/v1/assets/{uid}", headers=h).json()
+    assert read["attributes"]["argus_keywords"] == ["beam", "optics"]
+
+    r1 = client.put(f"/v1/assets/{uid}", headers={**h, "If-Match": f'"{read["version"]}"'},
+                    json={"attributes": {**read["attributes"], "argus_keywords": ["beam", "optics", "laser"]}})
+    assert r1.status_code == 200, r1.text
+    assert sorted(r1.json()["attributes"]["argus_keywords"]) == ["beam", "laser", "optics"]
+
+    r2 = client.put(f"/v1/assets/{uid}", headers={**h, "If-Match": f'"{r1.json()["version"]}"'},
+                    json={"attributes": {**r1.json()["attributes"], "argus_keywords": ["optics", "laser"]}})
+    assert r2.status_code == 200, r2.text
+    assert sorted(r2.json()["attributes"]["argus_keywords"]) == ["laser", "optics"], "a dropped member must actually go"
+
+    r3 = client.put(f"/v1/assets/{uid}", headers={**h, "If-Match": f'"{r2.json()["version"]}"'},
+                    json={"attributes": {**r2.json()["attributes"], "argus_keywords": []}})
+    assert r3.status_code == 200, r3.text
+    assert "argus_keywords" not in r3.json()["attributes"], "empty must mean absent, not [[]]"
+
+
+def test_a_legacy_whole_list_claim_self_heals_into_a_flat_list_on_the_next_projection():
+    """Before the previous test's fix, a multi-value attribute's claim held the whole list as its own
+    value, so project_subject's reassembly (one list entry per member) read it back as a list
+    containing that one whole list. That claim is still sitting in any record edited before the fix —
+    this is not retroactively rewritten, so the read side must tolerate it: the next projection (any
+    edit at all, not just one that touches this attribute) unwraps it back to a flat list on its own."""
+    from app.ledger import engine as ledger_engine
+    from app.ledger.service import confirm_value
+
+    ws, h = workspace()
+    uid = _pump(ws, h, {})
+    db = SessionLocal()
+    stream = ledger_engine.person_stream(db, ws, "legacy-importer")
+    ledger_engine.add_manual_claims(
+        db, stream,
+        [ledger_engine.ParsedClaim(f"uid:{uid}", "attr:argus_keywords", ["beam", "optics"], method="manual")],
+        cause="legacy import")
+    ledger_engine.apply_decisions(db, ws, "legacy-importer",
+                                  [confirm_value(uid, "attr:argus_keywords", ["beam", "optics"])])
+    db.commit()
+    db.close()
+
+    before = client.get(f"/v1/assets/{uid}", headers=h).json()
+    assert before["attributes"]["argus_keywords"] == ["beam", "optics"], "heals on its very first projection too"
+
+    r = client.put(f"/v1/assets/{uid}", headers={**h, "If-Match": f'"{before["version"]}"'},
+                   json={"attributes": {**before["attributes"], "model": "Ace 2"}})
+    assert r.status_code == 200, r.text
+    assert r.json()["attributes"]["argus_keywords"] == ["beam", "optics"], "stays healed after an unrelated edit"
+
+
 def test_a_stale_edit_of_a_protected_field_becomes_a_review_item_not_an_overwrite():
     ws, h = workspace()
     uid = _pump(ws, h, {"serial": "S-1", "manufacturer": "Agilent"})
