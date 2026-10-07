@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
+import '../../core/link_parser.dart';
 import '../../core/problem.dart';
 import '../../widgets/common.dart';
 
@@ -29,6 +30,14 @@ class ResolveScreen extends ConsumerWidget {
         error: (e, _) => e is Problem && e.code == ProblemCode.ambiguous
             ? _Candidates(e)
             : Column(children: [
+                // A web link no record carries: probably someone else's code (a manufacturer's), not opened.
+                if (e is Problem && e.code == ProblemCode.notFound && foreignLinkHost(label) != null)
+                  NoticeBar(
+                    key: const Key('resolve-foreign-link'),
+                    icon: Icons.link_off,
+                    text: 'This code is a link to ${foreignLinkHost(label)}. No ARGUS record carries it as a label, '
+                        'and it was not opened.',
+                  ),
                 Expanded(child: ProblemView(e, onRetry: () => ref.invalidate(resolveProvider(path)))),
                 // An unknown label on a unit in hand: register it, never invent it from a name (I-MOB-6).
                 if (e is Problem && e.code == ProblemCode.notFound && path.startsWith('/lookup/'))

@@ -1,9 +1,10 @@
 /// What a scanned label or an opened link asks for (revision §24.5, I-MOB-6).
 ///
-/// Only an https link on the configured ARGUS host is followed as a path. Anything that looks like
-/// another URL or scheme is refused (a label must never open a browser, a phone number or a
-/// script). Plain text is a label value: a key, an inventory number, an old Jira or Insight
-/// identifier, and goes to lookup.
+/// Only an https link on the configured ARGUS host is followed as a path. Any other web link (a
+/// manufacturer's QR code, a label made for another address) is a label value: ARGUS looks it up
+/// among the labels registered on its records, and it is never opened. Other schemes are refused (a
+/// label must never open a browser, a phone number or a script). Plain text is a label value too: a
+/// key, an inventory number, an old Jira or Insight identifier, and goes to lookup.
 sealed class ScanResult {
   const ScanResult();
 }
@@ -30,6 +31,12 @@ const _neverFollowed = {
 
 const _argusKinds = {'asset', 'position', 'installation', 'document', 'ticket', 'review', 'lookup'};
 
+/// The host of a label value that is a web link, to say whose code it is when ARGUS has no record of it.
+String? foreignLinkHost(String value) {
+  final uri = Uri.tryParse(value.trim());
+  return uri != null && (uri.scheme == 'https' || uri.scheme == 'http') && uri.host.isNotEmpty ? uri.host : null;
+}
+
 ScanResult parseScan(String raw, {required String linkHost}) {
   final text = raw.trim();
   if (text.isEmpty) return const Refused('The label is empty.');
@@ -40,12 +47,11 @@ ScanResult parseScan(String raw, {required String linkHost}) {
   // label value (some old inventory numbers have a colon).
   final scheme = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.-]*):').firstMatch(text)?.group(1)?.toLowerCase();
   if (scheme != null && (text.contains('://') || _neverFollowed.contains(scheme))) {
-    // Something with a scheme. Only https on our host is followed.
+    // Something with a scheme. Only https on our host is followed; another web link is looked up.
     final uri = Uri.tryParse(text);
-    if (scheme != 'https' || uri == null) return Refused('Links of type "$scheme:" are not followed.');
-    if (uri.host.toLowerCase() != linkHost.toLowerCase()) {
-      return Refused('The link points to ${uri.host}, not to ARGUS. It was not opened.');
-    }
+    final web = scheme == 'https' || scheme == 'http';
+    if (!web || uri == null || uri.host.isEmpty) return Refused('Links of type "$scheme:" are not followed.');
+    if (scheme == 'http' || uri.host.toLowerCase() != linkHost.toLowerCase()) return LabelValue(text);
     final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
     if (segments.length < 2 || !_argusKinds.contains(segments.first)) {
       return const Refused('The link is on the ARGUS host but is not a record link.');

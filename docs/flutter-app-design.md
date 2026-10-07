@@ -478,6 +478,12 @@ and the printed code is not reissued.
 resolves a URL. It never assumes that a scanned serial identifies a unit: several matches are
 shown as candidates.
 
+**Codes that are web links elsewhere** (a manufacturer's QR code, registered as a label from the
+web's scanner) are label values too. Only an https link on the ARGUS host is followed as a path;
+any other http(s) link is looked up among the labels and **never opened**. When no record carries
+it, the app says which host it points to and offers to register the unit. Other schemes
+(`javascript:`, `tel:`, `intent:`, `data:`…) are refused (`lib/core/link_parser.dart`).
+
 ---
 
 ## 8. Guided equipment replacement

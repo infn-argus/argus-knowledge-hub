@@ -12,12 +12,23 @@ void main() {
     expect((parse('https://ARGUS.infn.it/ticket/SPARC-123?x=1') as ArgusPath).path, '/ticket/SPARC-123');
   });
 
-  test('links elsewhere, other schemes and scripts are refused', () {
+  test('a web link elsewhere is a label value to look up, never followed as a path', () {
     for (final s in [
       'https://evil.example/asset/1',
       'https://argus.infn.it.evil.example/asset/1',
       'https://argus@evil.example/asset/1',
       'http://argus.infn.it/asset/1',
+      'https://www.pfeiffer-vacuum.com/p/HiPace80?sn=123456',
+    ]) {
+      expect((parse(s) as LabelValue).value, s, reason: s);
+    }
+    expect(foreignLinkHost('https://www.pfeiffer-vacuum.com/p?sn=1'), 'www.pfeiffer-vacuum.com');
+    expect(foreignLinkHost('SPARC-1234'), isNull);
+  });
+
+  test('other schemes and scripts are refused', () {
+    for (final s in [
+      'https:no-host',
       'javascript:alert(1)',
       'JavaScript:alert(1)',
       'data:text/html,<script>1</script>',
