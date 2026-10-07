@@ -138,7 +138,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ]),
         ),
-        Expanded(child: _q.length < 2 ? const _Hint() : _Results(q: _q)),
+        Expanded(child: _q.length < 2 ? const _Cockpit() : _Results(q: _q)),
       ]),
     );
   }
@@ -198,6 +198,98 @@ class _InboxBell extends ConsumerWidget {
       icon: Badge(isLabelVisible: unread > 0, label: Text('$unread'), child: const Icon(Icons.notifications_none)),
     );
   }
+}
+
+/// The operations cockpit, what home shows before a search: assigned to me, open tickets, the equipment they
+/// pile up on, documents waiting for review, and recent activity — the web's home, from the same overview.
+/// Without it (offline, or not yet loaded) the scanning hint still shows.
+class _Cockpit extends ConsumerWidget {
+  const _Cockpit();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final r = ref.watch(cockpitProvider);
+    final c = r.value;
+    return RefreshIndicator(
+      onRefresh: () async => ref.invalidate(cockpitProvider),
+      child: ListView(key: const Key('home-cockpit'), padding: const EdgeInsets.only(bottom: 88), children: [
+        if (r.isLoading && c == null) const LinearProgressIndicator(),
+        if (c == null) const _Hint(),
+        if (c != null) ...[
+          if (c.mine.isNotEmpty) ...[
+            SectionHeader('Assigned to me', trailing: '${c.mine.length}'),
+            for (final t in c.mine) _CockpitTile(t),
+          ],
+          if (c.openTickets != null)
+            ListTile(
+              key: const Key('cockpit-open-tickets'),
+              leading: const Icon(Icons.confirmation_number_outlined),
+              title: Text('${c.openTickets} open ticket${c.openTickets == 1 ? '' : 's'}'),
+              subtitle: c.byState.isEmpty
+                  ? null
+                  : Text(c.byState.entries.where((e) => e.value > 0).map((e) => '${e.key} ${e.value}').join(' · ')),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.push('/tickets'),
+            ),
+          if (c.hotspots.isNotEmpty) ...[
+            const SectionHeader('Equipment needing attention'),
+            for (final a in c.hotspots) _CockpitTile(a),
+          ],
+          if (c.reviewOverdue.isNotEmpty || c.awaitingReview.isNotEmpty) ...[
+            const SectionHeader('Documents to review'),
+            for (final d in c.reviewOverdue) _CockpitTile(d, warning: 'review overdue'),
+            for (final d in c.awaitingReview) _CockpitTile(d, warning: 'waiting for approval'),
+          ],
+          const SectionHeader('Recent activity'),
+          if (c.recent.isEmpty) const ListTile(title: Text('Nothing yet.')),
+          for (final x in c.recent) _CockpitTile(x, showWhen: true),
+        ],
+      ]),
+    );
+  }
+}
+
+class _CockpitTile extends StatelessWidget {
+  const _CockpitTile(this.item, {this.warning, this.showWhen = false});
+
+  final CockpitItem item;
+  final String? warning;
+  final bool showWhen;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final icon = switch (item.kind) {
+      RecordKind.ticket => Icons.confirmation_number_outlined,
+      RecordKind.document => Icons.description_outlined,
+      _ => Icons.memory,
+    };
+    return ListTile(
+      key: Key('cockpit-${item.kind.name}-${item.uid}'),
+      dense: true,
+      leading: Icon(icon, color: warning != null ? theme.colorScheme.error : null),
+      title: Text(item.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text([
+        ?warning,
+        if ((item.sub ?? '').isNotEmpty) item.sub!,
+      ].join(' · ')),
+      trailing: item.count != null
+          ? Badge(label: Text('${item.count}'))
+          : showWhen && item.at != null
+              ? Text(_ago(item.at!), style: theme.textTheme.bodySmall)
+              : null,
+      onTap: () => context.push(item.path),
+    );
+  }
+}
+
+String _ago(DateTime at) {
+  final d = DateTime.now().difference(at);
+  if (d.inMinutes < 1) return 'now';
+  if (d.inHours < 1) return '${d.inMinutes} min';
+  if (d.inDays < 1) return '${d.inHours} h';
+  if (d.inDays < 30) return '${d.inDays} d';
+  return formatWhenDate(at);
 }
 
 class _Hint extends StatelessWidget {

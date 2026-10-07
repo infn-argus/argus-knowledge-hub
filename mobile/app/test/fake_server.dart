@@ -38,6 +38,9 @@ class FakeArgus {
   /// The state of the draft document's only revision, as GET /revisions reports it.
   String draftRevisionState = 'draft';
 
+  /// Serve the cockpit's overview (GET /v1/hub/overview). Off by default: other tests see home's plain hint.
+  bool serveOverview = false;
+
   /// Replace every response with this one (to simulate revocation, an old client, an outage).
   http.Response? override;
 
@@ -225,6 +228,23 @@ class FakeArgus {
             'applies_to': 'tickets', 'options': [{'id': 'low', 'value': 'Low'}, {'id': 'high', 'value': 'High'},
               {'id': 'urgent', 'value': 'Urgent'}]},
         ]);
+      }
+      if (p == '/v1/hub/overview' && serveOverview) {
+        final t = {'uid': ticketUid, 'title': 'Pressure spike on gun ion pump', 'state': 'new', 'priority': 'High',
+          'assignee': 'rossi@example.org', 'asset_uid': positionUid, 'open': true,
+          'updated_at': '2026-10-07T07:00:00Z'};
+        final pump = {'uid': ionPumpUid, 'key': 'SLICE-20463F-IP-0001', 'name': 'Ion pump gun area 2', 'type': 'Ion Pump',
+          'updated_at': '2026-10-06T07:00:00Z'};
+        final doc = {'uid': draftUid, 'code': 'DOC-0002', 'title': 'Ion pump bake-out', 'state': 'in_review',
+          'review_overdue': false, 'updated_at': '2026-10-05T07:00:00Z'};
+        return _json({
+          'access': {'assets': true, 'tickets': true, 'documents': true},
+          'assets': {'own': 2, 'recent': [pump]},
+          'tickets': {'open': 1, 'total': 2, 'by_state': {'new': 1}, 'by_priority': {'High': 1}, 'mine': [t],
+            'unassigned': 0, 'without_asset': 0, 'hotspots': [{...pump, 'open_tickets': 3}], 'recent': [t]},
+          'documents': {'total': 2, 'in_review': 1, 'awaiting_review': [doc], 'review_overdue': [],
+            'not_linked_to_assets': 0, 'recent': [doc]},
+        });
       }
       if (p == '/v1/documents') return _json([fixtureJson('document'), fixtureJson('draft')]);
       if (p == '/v1/documents/$documentUid/revisions') {

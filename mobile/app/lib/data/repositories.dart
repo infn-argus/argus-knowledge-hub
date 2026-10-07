@@ -425,3 +425,48 @@ class DocumentRepository {
   Future<void> publish(String uid, String revUid) =>
       _api.json((c) => _api.documents(c).publishRevisionWithHttpInfo(uid, revUid));
 }
+
+class CockpitRepository {
+  CockpitRepository(this._api);
+  final ApiService _api;
+
+  Future<Cockpit> overview() async {
+    final o = _map(await _api.json((c) => _api.hub(c).overviewWithHttpInfo()));
+    final tickets = o['tickets'] is Map ? _map(o['tickets']) : null;
+    final documents = o['documents'] is Map ? _map(o['documents']) : null;
+    final assets = o['assets'] is Map ? _map(o['assets']) : null;
+    CockpitItem ticket(Map<String, Object?> t) => CockpitItem(
+        kind: RecordKind.ticket,
+        uid: t['uid'].toString(),
+        label: (t['title'] ?? '').toString(),
+        sub: [t['state'], t['priority']].whereType<Object>().join(' · '),
+        at: _date(t['updated_at']));
+    CockpitItem document(Map<String, Object?> d) => CockpitItem(
+        kind: RecordKind.document,
+        uid: d['uid'].toString(),
+        label: '${d['code'] ?? ''} · ${d['title'] ?? ''}',
+        sub: d['state']?.toString(),
+        at: _date(d['updated_at']));
+    CockpitItem asset(Map<String, Object?> a) => CockpitItem(
+        kind: RecordKind.asset,
+        uid: a['uid'].toString(),
+        label: (a['name'] ?? a['key'] ?? '').toString(),
+        sub: [a['key'], a['type']].whereType<Object>().join(' · '),
+        at: _date(a['updated_at']),
+        count: (a['open_tickets'] as num?)?.toInt());
+    final recent = [
+      ..._list(assets?['recent']).map(_map).map(asset),
+      ..._list(tickets?['recent']).map(_map).map(ticket),
+      ..._list(documents?['recent']).map(_map).map(document),
+    ]..sort((a, b) => (b.at ?? DateTime(0)).compareTo(a.at ?? DateTime(0)));
+    return Cockpit(
+      mine: _list(tickets?['mine']).map(_map).map(ticket).toList(),
+      openTickets: (tickets?['open'] as num?)?.toInt(),
+      byState: _map(tickets?['by_state']).map((k, v) => MapEntry(k, (v as num?)?.toInt() ?? 0)),
+      hotspots: _list(tickets?['hotspots']).map(_map).map(asset).toList(),
+      awaitingReview: _list(documents?['awaiting_review']).map(_map).map(document).toList(),
+      reviewOverdue: _list(documents?['review_overdue']).map(_map).map(document).toList(),
+      recent: recent.take(12).toList(),
+    );
+  }
+}

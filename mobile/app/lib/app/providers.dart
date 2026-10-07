@@ -254,6 +254,13 @@ final ticketPrioritiesProvider = FutureProvider.autoDispose<List<String>>((ref) 
   return ref.watch(ticketRepositoryProvider).priorities();
 });
 
+final cockpitRepositoryProvider = Provider((ref) => CockpitRepository(ref.watch(apiServiceProvider)));
+
+final cockpitProvider = FutureProvider.autoDispose<Cockpit>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(cockpitRepositoryProvider).overview();
+});
+
 final documentListProvider = FutureProvider.autoDispose<List<DocumentListItem>>((ref) {
   ref.watch(workspaceIdProvider);
   return ref.watch(documentRepositoryProvider).list();

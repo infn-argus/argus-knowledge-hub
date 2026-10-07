@@ -93,6 +93,7 @@ Class | Method | HTTP request | Description
 *GlobalValuesApi* | [**listGlobalValues**](doc//GlobalValuesApi.md#listglobalvalues) | **GET** /v1/global-values | List Global Values
 *HubApi* | [**assetContext**](doc//HubApi.md#assetcontext) | **GET** /v1/hub/assets/{uid}/context | Asset Context
 *HubApi* | [**documentContext**](doc//HubApi.md#documentcontext) | **GET** /v1/hub/documents/{uid}/context | Document Context
+*HubApi* | [**overview**](doc//HubApi.md#overview) | **GET** /v1/hub/overview | Overview
 *HubApi* | [**search**](doc//HubApi.md#search) | **GET** /v1/hub/search | Search
 *HubApi* | [**ticketContext**](doc//HubApi.md#ticketcontext) | **GET** /v1/hub/tickets/{uid}/context | Ticket Context
 *InstallationsApi* | [**listInstallations**](doc//InstallationsApi.md#listinstallations) | **GET** /v1/installations | List Installations

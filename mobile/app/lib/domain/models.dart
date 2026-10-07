@@ -381,3 +381,44 @@ class DocumentRevision {
   /// Still being written or decided on, so it is where work on the document continues.
   bool get open => state == 'draft' || state == 'in_review' || state == 'approved';
 }
+
+/// One line of the cockpit: a record, ticket or document and where it leads.
+class CockpitItem {
+  const CockpitItem({required this.kind, required this.uid, required this.label, this.sub, this.at, this.count});
+
+  final RecordKind kind;
+  final String uid;
+  final String label;
+  final String? sub;
+  final DateTime? at;
+  final int? count; // a hotspot's open tickets
+
+  String get path => switch (kind) {
+        RecordKind.ticket => '/ticket/$uid',
+        RecordKind.document => '/document/$uid',
+        _ => '/asset/$uid',
+      };
+}
+
+/// The operations cockpit (the web's home): what is assigned to me, where tickets pile up, what waits for
+/// review, and what changed lately across records, tickets and documents. A section the person may not
+/// read is absent, not empty.
+class Cockpit {
+  const Cockpit({
+    this.mine = const [],
+    this.openTickets,
+    this.byState = const {},
+    this.hotspots = const [],
+    this.awaitingReview = const [],
+    this.reviewOverdue = const [],
+    this.recent = const [],
+  });
+
+  final List<CockpitItem> mine;
+  final int? openTickets; // null: tickets not readable here
+  final Map<String, int> byState;
+  final List<CockpitItem> hotspots;
+  final List<CockpitItem> awaitingReview;
+  final List<CockpitItem> reviewOverdue;
+  final List<CockpitItem> recent;
+}
