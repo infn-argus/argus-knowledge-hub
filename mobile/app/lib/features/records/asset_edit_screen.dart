@@ -169,7 +169,7 @@ class _AssetEditScreenState extends ConsumerState<AssetEditScreen> {
     try {
       await ref
           .read(assetRepositoryProvider)
-          .save(a.uid, attributes, version: a.version ?? 0, key: '${a.uid}-${DateTime.now().millisecondsSinceEpoch}');
+          .save(a, attributes, key: '${a.uid}-${DateTime.now().millisecondsSinceEpoch}');
       ref.invalidate(assetDetailProvider(a.uid));
       if (mounted) context.pop();
     } on Problem catch (p) {

@@ -135,6 +135,9 @@ class AssetDetail {
     this.avatarIconUid,
     this.version,
     required this.schemaUid,
+    this.isGlobal = false,
+    this.inboundRelationUids = const [],
+    this.outboundRelationUids = const [],
   });
 
   final String uid;
@@ -157,6 +160,14 @@ class AssetDetail {
   /// The record version, for editing it (If-Match).
   final int? version;
   final String schemaUid;
+  final bool isGlobal;
+  /// The raw relation-cache uids the record carries (not the enriched [relations] above, which is a
+  /// merged view for display): an edit must send these back unchanged, along with [isGlobal] and
+  /// [avatarIconUid] — the server treats the whole PUT body as the record's display/caching state, not
+  /// a diff of only the fields the client means to change, and a generated client can't omit a field
+  /// it didn't set (it serializes null/empty instead), so leaving these out would clear them.
+  final List<String> inboundRelationUids;
+  final List<String> outboundRelationUids;
 
   List<InstallationInfo> get current => installations.where((i) => i.current && i.status != 'Rejected').toList();
   List<RelationItem> get outbound => relations.where((r) => r.direction == 'out').toList();

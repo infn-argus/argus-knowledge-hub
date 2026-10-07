@@ -232,6 +232,11 @@ def update_asset(
 ):
     asset = _get_owned_asset(uid, workspace_id, db)
     patch = body.model_dump(exclude_unset=True)
+    # Never a legitimate value for this not-null column: a client whose JSON encoder cannot omit an
+    # unset field (the field app's generated client always writes every field, null where unset)
+    # would otherwise send this on every edit and crash the write, not just leave it unchanged.
+    if patch.get("is_global") is None:
+        patch.pop("is_global", None)
     global_changed = "is_global" in patch and patch["is_global"] != asset.is_global
     if patch.get("attributes") is not None:
         # A field the editor cannot see is neither erased nor overwritten by

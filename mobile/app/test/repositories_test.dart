@@ -82,12 +82,35 @@ void main() {
     expect(sent['uid'], 'c-new');
   });
 
-  test("saving an edit sends the record's version as If-Match", () async {
-    await AssetRepository(api).save(positionUid, {'position_class': 'Vacuum Gauge'}, version: 3, key: 'edit-1');
+  test("saving an edit sends the record's version as If-Match, and its isGlobal/avatar/relation-cache "
+      'fields unchanged — a generated client can\'t omit a field it did not mean to touch, so leaving '
+      'them out would null or empty them on the server (the Camera-asset 500 this regression-tests)', () async {
+    const current = AssetDetail(
+      uid: positionUid,
+      key: 'K',
+      name: 'N',
+      type: 'Vacuum Gauge',
+      typePath: [],
+      recordStatus: 'Active',
+      attributes: {},
+      isPosition: true,
+      schemaUid: 'slice-20463f:ledger:equipment-position',
+      version: 3,
+      isGlobal: true,
+      avatarIconUid: 'att-nameplate',
+      inboundRelationUids: ['in-1'],
+      outboundRelationUids: ['out-1', 'out-2'],
+    );
+    await AssetRepository(api).save(current, {'position_class': 'Vacuum Gauge'}, key: 'edit-1');
     final req = server.requests.last;
     expect(req.method, 'PUT');
     expect(req.headers['If-Match'], '"3"');
-    expect(jsonDecode(req.body)['attributes'], {'position_class': 'Vacuum Gauge'});
+    final sent = jsonDecode(req.body) as Map;
+    expect(sent['attributes'], {'position_class': 'Vacuum Gauge'});
+    expect(sent['is_global'], true);
+    expect(sent['avatar_icon_uid'], 'att-nameplate');
+    expect(sent['inbound_relations'], ['in-1']);
+    expect(sent['outbound_relations'], ['out-1', 'out-2']);
   });
 
   test("a type's attributes include its ancestor's, overridden by its own on the same key", () async {

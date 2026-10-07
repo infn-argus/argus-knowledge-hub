@@ -156,6 +156,9 @@ class AssetRepository {
       restricted: context['restricted']?.toString(),
       avatarIconUid: asset.avatarIconUid,
       version: asset.version,
+      isGlobal: asset.isGlobal,
+      inboundRelationUids: asset.inboundRelations,
+      outboundRelationUids: asset.outboundRelations,
       schemaUid: asset.schemaUid,
       tickets: _list(context['tickets']).map(_map).map((t) => TicketSummary(
             uid: t['uid'].toString(),
@@ -238,11 +241,19 @@ class AssetRepository {
           .toList();
 
   /// Saves the edited attributes. The version read with the record must still be current (If-Match),
-  /// the same optimistic-concurrency rule every other edit in the app follows (§3.3).
-  Future<void> save(String assetUid, Map<String, Object?> attributes, {required int version, required String key}) async {
+  /// the same optimistic-concurrency rule every other edit in the app follows (§3.3). [current]'s own
+  /// isGlobal/avatar/relation-cache fields travel unchanged in the same request: the generated client
+  /// serializes every field of AssetUpdate (null or empty where unset, never omitted), and the server
+  /// takes the whole body as the record's display/caching state — leaving them out would clear them.
+  Future<void> save(AssetDetail current, Map<String, Object?> attributes, {required String key}) async {
     await _api.json(
-        (c) => _api.assets(c).updateAssetWithHttpInfo(assetUid, api.AssetUpdate(attributes: attributes)),
-        idempotencyKey: 'asset-edit:$key', ifMatch: '"$version"');
+        (c) => _api.assets(c).updateAssetWithHttpInfo(current.uid, api.AssetUpdate(
+            attributes: attributes,
+            isGlobal: current.isGlobal,
+            avatarIconUid: current.avatarIconUid,
+            inboundRelations: current.inboundRelationUids,
+            outboundRelations: current.outboundRelationUids)),
+        idempotencyKey: 'asset-edit:$key', ifMatch: '"${current.version ?? 0}"');
   }
 }
 

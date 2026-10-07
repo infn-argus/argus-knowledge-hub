@@ -137,6 +137,27 @@ def test_A58_an_edit_on_an_old_version_applies_unless_it_touches_what_changed():
     assert client.get(f"/v1/assets/{uid}", headers=h).json()["attributes"]["notes"] == "Rack B"
 
 
+def test_an_edit_that_sends_is_global_as_null_is_not_an_instruction_to_clear_it():
+    """`is_global` is never null in storage; a client whose encoder cannot omit a field it did not mean
+    to set (the generated field-client model writes every field, null where unset) must not be able to
+    wipe it by just not touching it — that crashed every field-app save until this was guarded."""
+    ws, h = workspace()
+    uid = _pump(ws, h, {"model": "TiTan 45"})
+    read = client.get(f"/v1/assets/{uid}", headers=h)
+    attrs = read.json()["attributes"]
+    r = client.put(f"/v1/assets/{uid}", headers={**h, "If-Match": read.headers["ETag"]},
+                   json={"attributes": {**attrs, "model": "TiTan 75"}, "is_global": None,
+                         "avatar_icon_uid": None, "inbound_relations": [], "outbound_relations": [],
+                         "name": None, "type": None, "deleted_at": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["is_global"] is False                                 # unchanged, not nulled
+    assert r.json()["attributes"]["model"] == "TiTan 75"
+    # An explicit value is still a real, deliberate change.
+    r2 = client.put(f"/v1/assets/{uid}", headers={**h, "If-Match": f'"{r.json()["version"]}"'},
+                    json={"attributes": r.json()["attributes"], "is_global": True})
+    assert r2.status_code == 200 and r2.json()["is_global"] is True
+
+
 def test_a_stale_edit_of_a_protected_field_becomes_a_review_item_not_an_overwrite():
     ws, h = workspace()
     uid = _pump(ws, h, {"serial": "S-1", "manufacturer": "Agilent"})
