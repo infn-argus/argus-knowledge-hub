@@ -53,6 +53,7 @@ FIELD_OPERATIONS = [
     ("post", "/v1/uploads/{uid}/attach/asset/{asset_uid}"),
     # Capture and tickets (M2)
     ("get", "/v1/schemas"),
+    ("get", "/v1/assets"),
     ("post", "/v1/assets"),
     ("get", "/v1/issues/{uid}/transitions"),
     ("post", "/v1/intake/guide/asset"),

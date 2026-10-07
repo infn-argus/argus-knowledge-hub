@@ -222,6 +222,21 @@ class AssetRepository {
               size: (m['file_size'] as num?)?.toInt()))
           .toList();
 
+  /// Candidates for a reference-attribute picker: every asset of [schemaUid] (unfiltered — the whole
+  /// workspace's assets — when null, for the caller to narrow down to a reference's allowed descendant
+  /// types itself, the same split the web form's ReferenceInput makes between a plain and an
+  /// includeChildren reference).
+  Future<List<RecordBrief>> listByType(String? schemaUid) async =>
+      _list(await _api.json((c) => _api.assets(c).listAssetsWithHttpInfo(schemaUid: schemaUid)))
+          .map(_map)
+          .map((m) => RecordBrief(
+              uid: m['uid']?.toString(),
+              key: m['key']?.toString(),
+              name: m['name']?.toString(),
+              type: m['type']?.toString(),
+              schemaUid: m['schema_uid']?.toString()))
+          .toList();
+
   /// Saves the edited attributes. The version read with the record must still be current (If-Match),
   /// the same optimistic-concurrency rule every other edit in the app follows (§3.3).
   Future<void> save(String assetUid, Map<String, Object?> attributes, {required int version, required String key}) async {

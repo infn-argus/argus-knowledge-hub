@@ -102,6 +102,19 @@
                         "value": "Standby"
                     }
                 ]
+            },
+            {
+                "id": "product_model",
+                "key": "product_model",
+                "name": "Instance of",
+                "type": "reference",
+                "unique": false,
+                "indexed": false,
+                "readOnly": false,
+                "required": false,
+                "multiValue": false,
+                "referenceSchemaUid": "slice-20463f:argus-object:product-model",
+                "includeChildren": false
             }
         ],
         "metadata": {
@@ -177,6 +190,22 @@
         "metadata": {
             "source": "argus"
         },
+        "version": 1,
+        "icon_uid": null,
+        "is_global": false,
+        "applies_to": "objects",
+        "created_at": "2026-09-29T08:04:10.545433Z",
+        "updated_at": "2026-09-29T08:04:10.545437Z"
+    },
+    {
+        "uid": "slice-20463f:argus-object:product-model",
+        "workspace_id": "slice-20463f",
+        "name": "Product Model",
+        "description": "A manufacturer's catalogue model, instances of which are the actual units.",
+        "is_concrete": true,
+        "parent_schema_uid": null,
+        "attributes": [],
+        "metadata": {},
         "version": 1,
         "icon_uid": null,
         "is_global": false,

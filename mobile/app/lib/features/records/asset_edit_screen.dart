@@ -37,7 +37,9 @@ class _AssetEditScreenState extends ConsumerState<AssetEditScreen> {
     final values = def.multiValue ? (raw is List ? raw : (raw == null ? const [] : [raw])) : [raw];
     if (def.type == 'boolean') {
       _bool[def.key] = values.isEmpty ? [false] : values.map((v) => v == true).toList();
-    } else if (def.type == 'enumeration') {
+    } else if (def.type == 'enumeration' || (def.type == 'reference' && def.referenceSchemaUid != null)) {
+      // A reference is stored as the target's uid, same shape as an enumeration's stored label — one
+      // slot per current value, picked rather than typed (see _referencePicker).
       _choice[def.key] = values.isEmpty ? [null] : values.map((v) => v?.toString()).toList();
     } else {
       _text[def.key] = (values.isEmpty ? [null] : values).map((v) => TextEditingController(text: v?.toString() ?? '')).toList();
@@ -130,7 +132,7 @@ class _AssetEditScreenState extends ConsumerState<AssetEditScreen> {
     for (final def in defs.where((d) => d.editable)) {
       final count = def.type == 'boolean'
           ? _bool[def.key]!.length
-          : def.type == 'enumeration'
+          : _choice[def.key] != null
               ? _choice[def.key]!.where((v) => v != null).length
               : _text[def.key]!.where((c) => c.text.trim().isNotEmpty).length;
       if (def.required && count == 0) problem ??= '${def.name} is required.';
@@ -152,7 +154,7 @@ class _AssetEditScreenState extends ConsumerState<AssetEditScreen> {
       if (def.type == 'boolean') {
         final values = _bool[def.key]!;
         attributes[def.key] = def.multiValue ? values : values.first;
-      } else if (def.type == 'enumeration') {
+      } else if (_choice[def.key] != null) {
         final values = _choice[def.key]!.whereType<String>().toList();
         attributes[def.key] = def.multiValue ? values : (values.isEmpty ? null : values.first);
       } else {
@@ -272,11 +274,62 @@ class _AssetEditScreenState extends ConsumerState<AssetEditScreen> {
             onChanged: (v) => setState(() => values[0] = v),
           ),
         );
+      case 'reference':
+        if (def.referenceSchemaUid == null) return _plainTextField(def, a, label);
+        return _referencePicker(def, label);
       default:
-        final controllers = _text[def.key]!;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        return _plainTextField(def, a, label);
+    }
+  }
+
+  /// A reference attribute offers the candidates of its target type (and its descendant types, when
+  /// includeChildren) to pick among, instead of a free-text uid field the person could never type
+  /// correctly — the same choice the web form's ReferenceInput/AssetPicker makes.
+  Widget _referencePicker(AttributeDef def, String label) {
+    final values = _choice[def.key]!;
+    final candidatesAsync = ref.watch(referenceCandidatesProvider((def.referenceSchemaUid!, def.includeChildren)));
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        for (final (i, uid) in values.indexed)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              Expanded(
+                child: candidatesAsync.when(
+                  loading: () => const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: LinearProgressIndicator()),
+                  error: (e, _) => Text('Could not load choices: $e'),
+                  data: (candidates) => _ReferenceField(
+                    key: Key('attr-${def.key}-$i'),
+                    label: i == 0 ? label : null,
+                    candidates: candidates,
+                    value: uid,
+                    onChanged: (v) => setState(() => values[i] = v),
+                  ),
+                ),
+              ),
+              if (def.multiValue)
+                IconButton(
+                  icon: const Icon(Icons.remove_circle_outline),
+                  onPressed: values.length <= (def.minCardinality ?? 0) ? null : () => setState(() => values.removeAt(i)),
+                ),
+            ]),
+          ),
+        if (def.multiValue && (def.maxCardinality == null || values.length < def.maxCardinality!))
+          TextButton.icon(
+            onPressed: () => setState(() => values.add(null)),
+            icon: const Icon(Icons.add),
+            label: Text('Add ${def.name.toLowerCase()}'),
+          ),
+      ]),
+    );
+  }
+
+  Widget _plainTextField(AttributeDef def, AssetDetail a, String label) {
+    final controllers = _text[def.key]!;
+    return Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             for (final (i, c) in controllers.indexed)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -320,8 +373,75 @@ class _AssetEditScreenState extends ConsumerState<AssetEditScreen> {
                 icon: const Icon(Icons.add),
                 label: Text('Add ${def.name.toLowerCase()}'),
               ),
-          ]),
-        );
+        ]));
+  }
+}
+
+/// A search-as-you-type picker among a reference attribute's candidate records, instead of a bare
+/// uid text field — mirrors the web form's AssetPicker (name/key search, pick-only: there is no way
+/// to commit a value that isn't one of the candidates).
+class _ReferenceField extends StatelessWidget {
+  const _ReferenceField({super.key, required this.candidates, required this.value, required this.onChanged, this.label});
+
+  final List<RecordBrief> candidates;
+  final String? value;
+  final ValueChanged<String?> onChanged;
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    RecordBrief? selected;
+    for (final c in candidates) {
+      if (c.uid == value) {
+        selected = c;
+        break;
+      }
     }
+    return RawAutocomplete<RecordBrief>(
+      initialValue: TextEditingValue(text: selected?.label ?? (value ?? '')),
+      displayStringForOption: (o) => o.label,
+      optionsBuilder: (v) {
+        final q = v.text.trim().toLowerCase();
+        final matches = q.isEmpty
+            ? candidates
+            : candidates.where((c) => (c.name ?? '').toLowerCase().contains(q) || (c.key ?? '').toLowerCase().contains(q));
+        return matches.take(30);
+      },
+      onSelected: (o) => onChanged(o.uid),
+      fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) => TextField(
+        controller: controller,
+        focusNode: focusNode,
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: 'Search ${candidates.isEmpty ? '' : candidates.first.type ?? ''}…',
+          suffixIcon: value == null
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    controller.clear();
+                    onChanged(null);
+                  },
+                ),
+        ),
+      ),
+      optionsViewBuilder: (context, onSelected, options) => Align(
+        alignment: Alignment.topLeft,
+        child: Material(
+          elevation: 4,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 240),
+            child: ListView(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              children: [
+                for (final o in options)
+                  ListTile(dense: true, title: Text(o.label), onTap: () => onSelected(o)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

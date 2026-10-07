@@ -128,6 +128,24 @@ class SchemaRepository {
     return merged.values.toList();
   }
 
+  /// [schemaUid] and every type beneath it in the tree — the same set a reference attribute with
+  /// includeChildren set accepts (webapp/src/lib/schemaAttributes.ts descendantSchemaUids).
+  Future<Set<String>> descendantSchemaUids(String schemaUid) async {
+    final all = await _all();
+    final children = <String, List<String>>{};
+    for (final s in all) {
+      final parent = s['parent_schema_uid']?.toString();
+      if (parent != null) children.putIfAbsent(parent, () => []).add(s['uid'].toString());
+    }
+    final out = <String>{};
+    final queue = [schemaUid];
+    while (queue.isNotEmpty) {
+      final uid = queue.removeLast();
+      if (out.add(uid)) queue.addAll(children[uid] ?? const []);
+    }
+    return out;
+  }
+
   AttributeDef? _attributeDef(Map<String, Object?> m) {
     final key = (m['key'] ?? m['name'])?.toString();
     if (key == null || key.isEmpty) return null;
@@ -143,6 +161,8 @@ class SchemaRepository {
       regex: m['regex']?.toString(),
       readOnly: m['readOnly'] == true || m['read_only'] == true,
       description: m['description']?.toString(),
+      referenceSchemaUid: (m['referenceSchemaUid'] ?? m['reference_schema_uid'])?.toString(),
+      includeChildren: m['includeChildren'] == true || m['include_children'] == true,
     );
   }
 }

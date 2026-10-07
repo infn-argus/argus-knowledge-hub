@@ -50,6 +50,31 @@ void main() {
     expect(find.byKey(const Key('asset-edit-save')), findsNothing, reason: 'saving returns to the record, not stays on the form');
   });
 
+  testWidgets('a reference attribute offers a search among records of its target type, not a raw uid '
+      'text field', (tester) async {
+    final r = await start(tester);
+    await r.go('/asset/$ionPumpUid');
+    await r.tap('asset-edit');
+    await tester.drag(find.byKey(const Key('asset-edit-list')), const Offset(0, -2000));
+    await tester.pumpAndSettle();
+
+    // The record's current reference is shown by name, not as a bare uid.
+    expect(find.text('PM-ACE2 · Ace 2 a2A1920-51gmBAS'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('attr-product_model-0')), 'turbo');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('PM-TURBO350 · TURBO350').last);
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byKey(const Key('asset-edit-list')), const Offset(0, -500));
+    await tester.pumpAndSettle();
+    await r.tap('asset-edit-save');
+
+    final put = r.server.requests.lastWhere((q) => q.method == 'PUT' && q.url.path == '/v1/assets/$ionPumpUid');
+    final sent = jsonDecode(put.body)['attributes'] as Map;
+    expect(sent['product_model'], 'pm-turbo350');
+  });
+
   testWidgets('a field kind the field app cannot yet edit (its type needs the web\'s picker) is named, not '
       'offered as a text box that could never hold a valid value', (tester) async {
     final r = await start(tester);

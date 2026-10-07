@@ -299,6 +299,19 @@ final schemaAttributesProvider = FutureProvider.autoDispose.family<List<Attribut
   return ref.watch(schemaRepositoryProvider).effectiveAttributes(schemaUid);
 });
 
+/// Candidates for a reference attribute's picker: every asset of [schemaUid], plus its descendant
+/// types when [includeChildren] — mirrors the web form's ReferenceInput.
+final referenceCandidatesProvider =
+    FutureProvider.autoDispose.family<List<RecordBrief>, (String schemaUid, bool includeChildren)>((ref, key) async {
+  ref.watch(workspaceIdProvider);
+  final (schemaUid, includeChildren) = key;
+  final assets = ref.watch(assetRepositoryProvider);
+  if (!includeChildren) return assets.listByType(schemaUid);
+  final allowed = await ref.watch(schemaRepositoryProvider).descendantSchemaUids(schemaUid);
+  final all = await assets.listByType(null);
+  return all.where((a) => allowed.contains(a.schemaUid)).toList();
+});
+
 final commentsProvider = FutureProvider.autoDispose.family<List<Comment>, String>((ref, uid) {
   ref.watch(workspaceIdProvider);
   return ref.watch(ticketCommandsProvider).comments(uid);

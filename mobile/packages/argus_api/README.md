@@ -70,6 +70,7 @@ Class | Method | HTTP request | Description
 *AssetSubresourcesApi* | [**listHistory**](doc//AssetSubresourcesApi.md#listhistory) | **GET** /v1/assets/{asset_uid}/history | List History
 *AssetsApi* | [**createAsset**](doc//AssetsApi.md#createasset) | **POST** /v1/assets | Create Asset
 *AssetsApi* | [**getAsset**](doc//AssetsApi.md#getasset) | **GET** /v1/assets/{uid} | Get Asset
+*AssetsApi* | [**listAssets**](doc//AssetsApi.md#listassets) | **GET** /v1/assets | List Assets
 *AssetsApi* | [**updateAsset**](doc//AssetsApi.md#updateasset) | **PUT** /v1/assets/{uid} | Update Asset
 *AttachmentsApi* | [**downloadAttachment**](doc//AttachmentsApi.md#downloadattachment) | **GET** /v1/attachments/{uid} | Download Attachment
 *AttachmentsApi* | [**listAttachments**](doc//AttachmentsApi.md#listattachments) | **GET** /v1/attachments | List Attachments

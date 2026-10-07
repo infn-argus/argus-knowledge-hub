@@ -59,13 +59,14 @@ class When {
 
 /// The other side of an Installation, as briefly as the record screen needs it.
 class RecordBrief {
-  const RecordBrief({this.uid, this.key, this.name, this.type, this.restricted = false});
+  const RecordBrief({this.uid, this.key, this.name, this.type, this.restricted = false, this.schemaUid});
 
   final String? uid; // null when restricted
   final String? key;
   final String? name;
   final String? type;
   final bool restricted;
+  final String? schemaUid;
 
   String get label => restricted ? 'Restricted record' : [key, name].whereType<String>().join(' · ');
 }
@@ -270,6 +271,8 @@ class AttributeDef {
     this.regex,
     this.readOnly = false,
     this.description,
+    this.referenceSchemaUid,
+    this.includeChildren = false,
   });
 
   final String key;
@@ -283,6 +286,8 @@ class AttributeDef {
   final String? regex;
   final bool readOnly;
   final String? description;
+  final String? referenceSchemaUid;
+  final bool includeChildren;
 
   /// Kinds the field client can edit with a plain field. The rest (attachment, user, current_user,
   /// group) need pickers the web app has and the field app does not yet — shown read-only there,

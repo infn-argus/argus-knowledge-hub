@@ -10,7 +10,8 @@
         "pumping_speed": 120.5,
         "nominal_voltage": 24,
         "element_count": 2,
-        "status": "In service"
+        "status": "In service",
+        "product_model": "pm-ace2"
     },
     "inbound_relations": [],
     "outbound_relations": [],

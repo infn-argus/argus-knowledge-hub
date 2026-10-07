@@ -175,6 +175,9 @@ class FakeArgus {
       if (RegExp(r'^/v1/issues/[^/]+/attachments$').hasMatch(p)) return _json([]);
       if (RegExp(r'^/v1/assets/[^/]+/comments$').hasMatch(p)) return _json(fixture('asset_comments'));
       if (RegExp(r'^/v1/assets/[^/]+/history$').hasMatch(p)) return _json(fixture('asset_history'));
+      if (p == '/v1/assets' && q['schema_uid'] == 'slice-20463f:argus-object:product-model') {
+        return _json(fixture('product_models'));
+      }
       if (p == '/v1/attachments' && q['asset_uid'] == positionUid) return _json(fixture('asset_attachments'));
       if (p == '/v1/attachments' && q['asset_uid'] == ionPumpUid) return _json([]);
       if (RegExp(r'^/v1/issues/[^/]+/transitions$').hasMatch(p)) return _json(fixture('transitions'));
