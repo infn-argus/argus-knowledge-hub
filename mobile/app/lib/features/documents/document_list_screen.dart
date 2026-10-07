@@ -67,20 +67,22 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
   }
 }
 
-class _DocumentTile extends StatelessWidget {
+class _DocumentTile extends ConsumerWidget {
   const _DocumentTile(this.d);
 
   final DocumentListItem d;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final here = ref.watch(workspaceIdProvider);
+    final shared = !d.shared ? null : (d.workspaceId == null || d.workspaceId == here ? 'shared' : 'shared from ${d.workspaceId}');
     return ListTile(
       key: Key('document-${d.uid}'),
       leading: Icon(d.published ? Icons.description_outlined : Icons.edit_note,
           color: d.published ? theme.colorScheme.primary : theme.colorScheme.outline),
       title: Text(d.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: Text([d.code, d.published ? 'published' : 'not published yet'].join(' · ')),
+      subtitle: Text([d.code, d.published ? 'published' : 'not published yet', ?shared].join(' · ')),
       onTap: () => context.push('/document/${d.uid}'),
     );
   }

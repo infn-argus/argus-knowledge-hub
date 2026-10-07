@@ -1,7 +1,10 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show ProviderListenable;
 import 'package:go_router/go_router.dart';
 
+import '../core/problem.dart';
 import '../features/ask/ask_screen.dart';
 import '../features/auth/signin_screen.dart';
 import '../features/capture/register_screen.dart';
@@ -108,16 +111,37 @@ final routerProvider = Provider<GoRouter>((ref) {
       // A document code or a Jira key in the link is resolved first; a uid opens directly.
       GoRoute(
           path: '/document/:id',
-          builder: (_, st) => isUid(st.pathParameters['id']!)
-              ? DocumentScreen(uid: st.pathParameters['id']!)
-              : ResolveScreen(path: st.uri.path)),
+          builder: (_, st) => OpenOrResolve(
+              path: st.uri.path,
+              detail: documentDetailProvider(st.pathParameters['id']!),
+              screen: () => DocumentScreen(uid: st.pathParameters['id']!))),
       GoRoute(
           path: '/ticket/:id',
-          builder: (_, st) => isUid(st.pathParameters['id']!)
-              ? TicketScreen(uid: st.pathParameters['id']!)
-              : ResolveScreen(path: st.uri.path)),
+          builder: (_, st) => OpenOrResolve(
+              path: st.uri.path,
+              detail: ticketDetailProvider(st.pathParameters['id']!),
+              screen: () => TicketScreen(uid: st.pathParameters['id']!))),
       for (final kind in const ['position', 'installation', 'review', 'lookup'])
         GoRoute(path: '/$kind/:id', builder: (_, st) => ResolveScreen(path: st.uri.path)),
     ],
   );
 });
+
+/// A link inside the app carries a record's uid; a label or a web link may carry its code instead (DOC-0002,
+/// a Jira key). A uid is not always a UUID — an imported record keeps its source's (`olog-sparc-sparc-151`) —
+/// so the id is opened as a uid first, and only one that is no record's uid is resolved as a code.
+class OpenOrResolve extends ConsumerWidget {
+  const OpenOrResolve({super.key, required this.path, required this.detail, required this.screen});
+
+  final String path;
+  final ProviderListenable<AsyncValue<Object?>> detail;
+  final Widget Function() screen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (isUid(path.split('/').last)) return screen();
+    final e = ref.watch(detail).error;
+    if (e is Problem && e.code == ProblemCode.notFound) return ResolveScreen(path: path);
+    return screen();
+  }
+}

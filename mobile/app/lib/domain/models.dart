@@ -345,12 +345,17 @@ class DocumentListItem {
     this.documentTypeUid,
     this.updatedAt,
     this.retired = false,
+    this.shared = false,
+    this.workspaceId,
   });
 
   final String uid;
   final String code;
   final String title;
   final bool published;
+  /// Readable in every workspace; [workspaceId] is the one it belongs to (and the only one that edits it).
+  final bool shared;
+  final String? workspaceId;
   final String? documentTypeUid;
   final DateTime? updatedAt;
   final bool retired;

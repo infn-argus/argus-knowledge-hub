@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 
 import 'fake_server.dart';
 import 'harness.dart';
@@ -76,5 +77,26 @@ void main() {
     await r.tap('doc-new-revision');
     final sent = r.server.sent('POST', '/v1/documents/$documentUid/revisions').single;
     expect(sent, {'body_markdown': '# Ion pump replacement'});
+  });
+
+  testWidgets('an imported document, whose uid is not a UUID, opens as itself — not resolved as a code', (tester) async {
+    const imported = 'olog-sparc-sparc-151';
+    final r = await start(tester);
+    http.Response json(Object body) => http.Response(jsonEncode(body), 200, headers: {'content-type': 'application/json'});
+    final doc = fixtureJson('document') as Map<String, dynamic>;
+    final current = fixtureJson('document_current') as Map<String, dynamic>;
+    r.server.routes['GET /v1/documents/$imported'] = json({...doc, 'uid': imported, 'title': 'Olog entry 151'});
+    r.server.routes['GET /v1/documents/$imported/current'] = json({...current, 'document_uid': imported});
+    r.server.routes['GET /v1/documents/$imported/revisions'] = json([]);
+    await r.go('/document/$imported');
+    expect(find.text('Olog entry 151'), findsOneWidget);
+    expect(r.server.requests.where((q) => q.url.path == '/v1/links/resolve'), isEmpty);
+  });
+
+  testWidgets('a document code in a link is still resolved', (tester) async {
+    final r = await start(tester);
+    await r.go('/document/DOC-0001');
+    expect(r.server.requests.where((q) => q.url.path == '/v1/links/resolve'), isNotEmpty,
+        reason: 'no record has the uid DOC-0001: it is looked up as a code');
   });
 }

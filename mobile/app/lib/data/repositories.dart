@@ -356,6 +356,8 @@ class DocumentRepository {
                 documentTypeUid: m['document_type_uid']?.toString(),
                 updatedAt: _date(m['updated_at']),
                 retired: m['retired_at'] != null,
+                shared: m['is_global'] == true,
+                workspaceId: m['workspace_id']?.toString(),
               ))
           .toList()
         ..sort((a, b) => (b.updatedAt ?? DateTime(0)).compareTo(a.updatedAt ?? DateTime(0)));
