@@ -85,6 +85,8 @@ def _out(config: LLMConfig) -> LLMConfigOut:
         enabled=config.enabled,
         allow_confidential=config.allow_confidential,
         max_output_tokens=config.max_output_tokens,
+        index_on_publish=config.index_on_publish is not False,
+        index_interval_hours=12 if config.index_interval_hours is None else config.index_interval_hours,
         last_checked_at=config.last_checked_at,
         last_check_ok=config.last_check_ok,
         last_check_error=config.last_check_error,
@@ -129,6 +131,10 @@ def _save(db: Session, key: str, body: LLMConfigIn) -> LLMConfigOut:
     config.enabled = body.enabled
     config.allow_confidential = body.allow_confidential
     config.max_output_tokens = body.max_output_tokens
+    if body.index_on_publish is not None:
+        config.index_on_publish = body.index_on_publish
+    if body.index_interval_hours is not None:
+        config.index_interval_hours = body.index_interval_hours
 
     if body.api_key is not None:
         # An empty string clears it; omitting the field keeps what is stored.
@@ -685,8 +691,10 @@ def knowledge_status(workspace_id: str = Depends(require_permission("read")), db
     from app.services import knowledge_index
     from app.services.ai_config import resolve
     config, _from = resolve(db, workspace_id)
+    from app.services import knowledge_schedule
     out = knowledge_index.status(db, workspace_id)
     out["embedding_model"] = config.embedding_model if config else None
+    out["schedule"] = knowledge_schedule.schedule(config, (out.get("run") or {}))
     return out
 
 

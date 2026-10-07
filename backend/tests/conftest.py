@@ -41,6 +41,10 @@ def _ensure(url: str) -> None:
                    env={**os.environ, "DATABASE_URL": url}, stdout=subprocess.DEVNULL)
 
 
+# A publication in a test must not start indexing in a thread behind the test's back
+# (test_knowledge_schedule.py turns it on where it is what is tested).
+os.environ.setdefault("ARGUS_KNOWLEDGE_SCHEDULER", "off")
+
 if os.environ.get("DATABASE_URL") and os.environ.get("ARGUS_TESTS_USE_DATABASE_URL") != "1":
     os.environ["DATABASE_URL"] = _test_url()
     _ensure(os.environ["DATABASE_URL"])

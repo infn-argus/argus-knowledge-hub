@@ -229,6 +229,13 @@ def _recover_portability_jobs() -> None:
         portability_jobs.recover(SessionLocal)
     except Exception:  # noqa: BLE001 — a database not yet migrated must not stop the API
         logging.getLogger(__name__).warning("portability job recovery skipped", exc_info=True)
+@app.on_event("startup")
+def _knowledge_schedule() -> None:
+    """Keeps Ask ARGUS's index of the written knowledge up to date on each workspace's timer."""
+    from app.services import knowledge_schedule
+    knowledge_schedule.start_scheduler()
+
+
 app.include_router(uploads.router)
 app.include_router(workspaces.router)
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, Integer, String, true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -55,6 +55,11 @@ class LLMConfig(Base, TimestampMixin):
     # reasoning model needs (it thinks before answering, and a budget sized for the answer is spent
     # thinking). A number caps every reply, for a gateway that bills or throttles by token.
     max_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Keeping the written knowledge indexed for Ask ARGUS without anyone pressing the button
+    # (services/knowledge_schedule.py): after a document is published or retired, and on a timer for
+    # everything else (tickets, comments, files, imports). 0 hours: no timer.
+    index_on_publish: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+    index_interval_hours: Mapped[int] = mapped_column(Integer, default=12, server_default="12")
 
     last_checked_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

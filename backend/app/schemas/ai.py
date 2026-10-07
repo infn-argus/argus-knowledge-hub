@@ -19,6 +19,10 @@ class LLMConfigIn(BaseModel):
     allow_confidential: bool = False
     # Empty: no limit on a reply's length.
     max_output_tokens: Optional[int] = Field(default=None, ge=1)
+    # Indexing the written knowledge for Ask ARGUS by itself. Left out on an update, the stored value is kept.
+    index_on_publish: Optional[bool] = None
+    # Hours between refreshes of the whole index; 0: no timer.
+    index_interval_hours: Optional[int] = Field(default=None, ge=0, le=24 * 30)
 
 
 class LLMConfigOut(BaseModel):
@@ -39,6 +43,8 @@ class LLMConfigOut(BaseModel):
     enabled: bool
     allow_confidential: bool
     max_output_tokens: Optional[int] = None
+    index_on_publish: bool = True
+    index_interval_hours: int = 12
     last_checked_at: Optional[datetime]
     last_check_ok: Optional[bool]
     last_check_error: Optional[str]

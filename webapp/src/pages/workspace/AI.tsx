@@ -48,6 +48,8 @@ function AIEndpointSettings({ scope }: { scope: "workspace" | "installation" }) 
   const [enabled, setEnabled] = useState(true);
   const [allowConfidential, setAllowConfidential] = useState(false);
   const [maxOutputTokens, setMaxOutputTokens] = useState("");
+  const [indexOnPublish, setIndexOnPublish] = useState(true);
+  const [indexIntervalHours, setIndexIntervalHours] = useState("12");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -64,6 +66,8 @@ function AIEndpointSettings({ scope }: { scope: "workspace" | "installation" }) 
       setEnabled(c.enabled);
       setAllowConfidential(c.allow_confidential);
       setMaxOutputTokens(c.max_output_tokens ? String(c.max_output_tokens) : "");
+      setIndexOnPublish(c.index_on_publish ?? true);
+      setIndexIntervalHours(String(c.index_interval_hours ?? 12));
     }
     setLoaded(true);
   }, [config.data, config.isLoading, loaded]);
@@ -84,6 +88,8 @@ function AIEndpointSettings({ scope }: { scope: "workspace" | "installation" }) 
         enabled,
         allow_confidential: allowConfidential,
         max_output_tokens: Number(maxOutputTokens) > 0 ? Math.floor(Number(maxOutputTokens)) : null,
+        index_on_publish: indexOnPublish,
+        index_interval_hours: Math.min(720, Math.max(0, Math.floor(Number(indexIntervalHours) || 0))),
       }),
     onSuccess: () => {
       setApiKey("");
@@ -305,6 +311,42 @@ function AIEndpointSettings({ scope }: { scope: "workspace" | "installation" }) 
             answers, so a tight limit can leave it no room for the answer itself.
           </p>
         </div>
+
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium text-slate-700">Keeping Ask ARGUS's knowledge index up to date</legend>
+          <label className="flex items-start gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={indexOnPublish}
+              onChange={(e) => setIndexOnPublish(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Index a document as soon as it is published or retired
+              <span className="block text-xs text-slate-500">
+                Only that document is embedded again: what has not changed is skipped.
+              </span>
+            </span>
+          </label>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
+            <span>Refresh the whole index every</span>
+            <input
+              type="number"
+              min={0}
+              max={720}
+              step={1}
+              value={indexIntervalHours}
+              onChange={(e) => setIndexIntervalHours(e.target.value)}
+              className="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
+            />
+            <span>hours</span>
+          </div>
+          <p className="text-xs text-slate-500">
+            Picks up everything else with text — tickets and their comments, comments on equipment,
+            attached files, what an import brought in. 0 turns the timer off; the index button below
+            still works.
+          </p>
+        </fieldset>
 
         <label className="flex items-start gap-2 text-sm text-slate-700">
           <input

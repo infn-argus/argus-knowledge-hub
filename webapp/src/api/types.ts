@@ -878,6 +878,10 @@ export interface LLMConfig {
   allow_confidential: boolean;
   /** The most a single reply may use; null: no limit. */
   max_output_tokens: number | null;
+  /** Index a document for Ask ARGUS as soon as it is published or retired. */
+  index_on_publish?: boolean;
+  /** Hours between refreshes of the whole index; 0: no timer. */
+  index_interval_hours?: number;
   last_checked_at: string | null;
   last_check_ok: boolean | null;
   last_check_error: string | null;
@@ -897,6 +901,9 @@ export interface LLMConfigInput {
   allow_confidential: boolean;
   /** Null or omitted: no limit. */
   max_output_tokens?: number | null;
+  /** Omitted keeps the stored setting. */
+  index_on_publish?: boolean;
+  index_interval_hours?: number;
 }
 
 export interface LLMCheckResult {
@@ -1395,6 +1402,8 @@ export interface KnowledgeStatus {
       seconds?: number; failed?: string[];
     } | null;
   } | null;
+  /** When the index is brought up to date without anyone asking (the AI settings above). */
+  schedule?: { on_publish: boolean; interval_hours: number; active: boolean; next_at: string | null };
 }
 
 /** One hop of a failure's path: the provider stops, so the dependent loses what the relation carries. */

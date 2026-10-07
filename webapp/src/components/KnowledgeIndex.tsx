@@ -82,6 +82,14 @@ export function KnowledgeIndex() {
           </span>
         )}
       </div>
+      {s?.schedule?.active && (
+        <p className="mt-2 text-xs text-slate-500">
+          {s.schedule.on_publish ? "Documents are indexed as they are published. " : ""}
+          {s.schedule.interval_hours > 0 && s.schedule.next_at
+            ? `Next scheduled update ${new Date(s.schedule.next_at) <= new Date() ? "within minutes" : new Date(s.schedule.next_at).toLocaleString()} (every ${s.schedule.interval_hours} h).`
+            : "No scheduled updates."}
+        </p>
+      )}
       {result?.failed && result.failed.length > 0 && (
         <ul className="mt-2 list-disc pl-5 text-xs text-rose-700">
           {result.failed.slice(0, 5).map((f) => <li key={f}>{f}</li>)}

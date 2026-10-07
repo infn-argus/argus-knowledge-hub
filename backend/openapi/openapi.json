@@ -6684,6 +6684,30 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "index_interval_hours": {
+            "anyOf": [
+              {
+                "maximum": 720.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Interval Hours"
+          },
+          "index_on_publish": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index On Publish"
+          },
           "max_output_tokens": {
             "anyOf": [
               {
@@ -6780,6 +6804,16 @@
           },
           "has_api_key": {
             "title": "Has Api Key",
+            "type": "boolean"
+          },
+          "index_interval_hours": {
+            "default": 12,
+            "title": "Index Interval Hours",
+            "type": "integer"
+          },
+          "index_on_publish": {
+            "default": true,
+            "title": "Index On Publish",
             "type": "boolean"
           },
           "last_check_error": {

@@ -11,6 +11,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth import Identity, OidcIdentity, PatIdentity, get_identity, require_permission
 from app.db import get_db
+from app.services import knowledge_schedule
 from app.services.permissions import has_permission
 from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation, DocumentRevision
@@ -359,6 +360,7 @@ def retire_document(
     doc.retired_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(doc)
+    knowledge_schedule.after_document_change(db, workspace_id)
     return doc
 
 
@@ -558,6 +560,7 @@ def publish_revision(
     doc.current_revision_uid = revision.uid
     db.commit()
     db.refresh(revision)
+    knowledge_schedule.after_document_change(db, workspace_id)
     return revision
 
 
