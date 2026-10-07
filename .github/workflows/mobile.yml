@@ -1,0 +1,99 @@
+# The field app's Android build. A version tag builds the release APK against production — the same tag
+# release.yml deploys the server with, so the app and the API it talks to are released together — and
+# attaches it to that tag's GitHub release; "Run workflow" builds one on demand. The tests run first.
+#
+# Signing: with the ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and
+# ANDROID_KEY_PASSWORD secrets set, the APK is signed with that upload key (read by
+# android/app/build.gradle.kts from ANDROID_KEYSTORE_PATH and the others). Without them it is signed with
+# the runner's throwaway debug key: installable, but a phone can only update it with an APK signed by the
+# same key, so each such build has to replace the app (uninstall first) rather than update it.
+name: mobile
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 3.47.5
+  # As the launch configurations build it today. "production" hides the developer-token sign-in.
+  ARGUS_ENV: development
+  ARGUS_API_BASE: https://argus-hub-api.90.147.174.30.myip.cloud.infn.it
+  OIDC_ISSUER: https://keycloak.90.147.174.30.myip.cloud.infn.it/realms/argus
+  ARGUS_LINK_HOST: argus-hub.90.147.174.30.myip.cloud.infn.it
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: mobile/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter test
+      - name: Version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            name="${GITHUB_REF_NAME#v}"
+          else
+            name="$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml)"
+          fi
+          # Always above the 1 a local build uses, so a phone accepts it as an update.
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+      - name: Upload key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload.jks"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: this APK is signed with a throwaway debug key."
+          fi
+      - name: Build
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # The host of the app links and QR labels the manifest claims (-PargusLinkHost).
+          ORG_GRADLE_PROJECT_argusLinkHost: ${{ env.ARGUS_LINK_HOST }}
+        run: |
+          flutter build apk --release \
+            --build-name="${{ steps.version.outputs.name }}" \
+            --build-number="${{ steps.version.outputs.code }}" \
+            --dart-define=ARGUS_ENV="$ARGUS_ENV" \
+            --dart-define=ARGUS_API_BASE="$ARGUS_API_BASE" \
+            --dart-define=OIDC_ISSUER="$OIDC_ISSUER" \
+            --dart-define=ARGUS_LINK_HOST="$ARGUS_LINK_HOST" \
+            --dart-define=ARGUS_APP_VERSION="${{ steps.version.outputs.name }}"
+          mv build/app/outputs/flutter-apk/app-release.apk "build/argus-field-${{ steps.version.outputs.name }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: argus-field-${{ steps.version.outputs.name }}
+          path: mobile/app/build/argus-field-${{ steps.version.outputs.name }}.apk
+      - name: Attach to the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "ARGUS $GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" "build/argus-field-${{ steps.version.outputs.name }}.apk" --clobber
