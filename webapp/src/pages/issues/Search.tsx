@@ -6,6 +6,7 @@ import { AttributeFilterInput } from "../../components/AttributeFilterInput";
 import { activeFilterCount, defaultFilterFor, FilterState, matchesFilters } from "../../components/AttributeFilters";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 import { ListDate, SortHeader, priorityRank, useSort } from "../../components/SortableTable";
+import { SchemaTree } from "../../components/SchemaTree";
 
 const STATE_STYLES: Record<string, string> = {
   new: "bg-slate-100 text-slate-600",
@@ -71,7 +72,25 @@ export function IssueSearch() {
   );
 
   return (
-    <div>
+    <div className="flex min-h-[calc(100vh-7rem)] gap-4">
+      <aside className="flex w-72 shrink-0 flex-col rounded-lg border border-slate-200 bg-white p-3">
+        <div className="mb-2 flex items-center justify-between px-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Ticket types</p>
+          <Link to="/schemas/new?applies_to=tickets" title="New ticket type" className="text-sm font-medium text-slate-400 hover:text-slate-700">+</Link>
+        </div>
+        <button
+          type="button"
+          onClick={() => setSchemaUid("")}
+          className={`mb-1 rounded px-2 py-1 text-left text-xs ${!schemaUid ? "bg-slate-100 font-medium text-slate-900" : "text-slate-600 hover:bg-slate-50"}`}
+        >
+          All tickets
+          <span className="ml-1 text-slate-400">{issues.data?.length ?? 0}</span>
+        </button>
+        <div className="min-h-0 flex-1">
+          <SchemaTree appliesTo="tickets" fill selectedUid={schemaUid || null} onSelect={(uid) => setSchemaUid(uid ?? "")} />
+        </div>
+      </aside>
+      <div className="min-w-0 flex-1">
       <h1 className="text-2xl font-semibold text-slate-900">Search tickets</h1>
 
       <div className="mt-4 flex gap-3">
@@ -208,6 +227,7 @@ export function IssueSearch() {
           </p>
         </>
       )}
+      </div>
     </div>
   );
 }
