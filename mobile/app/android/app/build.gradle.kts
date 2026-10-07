@@ -1,4 +1,6 @@
+import java.io.FileInputStream
 import java.util.Base64
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -13,6 +15,29 @@ fun dartDefine(name: String): String? =
         ?.map { String(Base64.getDecoder().decode(it)) }
         ?.firstOrNull { it.startsWith("$name=") }
         ?.substringAfter('=')
+
+/**
+ * The upload key that signs release builds (Google Play re-signs them with the app signing key).
+ * From the environment in CI (ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
+ * ANDROID_KEY_PASSWORD), or from android/key.properties (storeFile, storePassword, keyAlias,
+ * keyPassword; never committed) on a developer's machine. Without either, a release build is signed
+ * with the debug key, so `flutter run --release` still works, but it cannot be published.
+ */
+val uploadKey: Map<String, String>? = run {
+    val env = System.getenv()
+    if (!env["ANDROID_KEYSTORE_PATH"].isNullOrBlank()) {
+        return@run mapOf(
+            "storeFile" to env.getValue("ANDROID_KEYSTORE_PATH"),
+            "storePassword" to env["ANDROID_KEYSTORE_PASSWORD"].orEmpty(),
+            "keyAlias" to env["ANDROID_KEY_ALIAS"].orEmpty(),
+            "keyPassword" to env["ANDROID_KEY_PASSWORD"].orEmpty(),
+        )
+    }
+    val file = rootProject.file("key.properties")
+    if (!file.exists()) return@run null
+    val p = Properties().apply { FileInputStream(file).use { load(it) } }
+    p.stringPropertyNames().associateWith { p.getProperty(it) }
+}
 
 android {
     namespace = "it.infn.argus.argus_field"
@@ -37,18 +62,27 @@ android {
         versionName = flutter.versionName
         // The OIDC redirect's scheme follows --dart-define=OIDC_REDIRECT (it.infn.argus.field:/oauthredirect
         // for Keycloak, com.googleusercontent.apps.<id>:/oauthredirect for Google), and the host of
-        // universal links and QR labels (ARGUS_LINK_HOST), per build: -PargusLinkHost=argus.example.org
+        // universal links and QR labels follows --dart-define=ARGUS_LINK_HOST (or -PargusLinkHost=…).
         manifestPlaceholders["appAuthRedirectScheme"] =
             dartDefine("OIDC_REDIRECT")?.substringBefore(':') ?: "it.infn.argus.field"
         manifestPlaceholders["argusLinkHost"] =
-            (project.findProperty("argusLinkHost") as String?) ?: "argus.invalid"
+            dartDefine("ARGUS_LINK_HOST") ?: (project.findProperty("argusLinkHost") as String?) ?: "argus.invalid"
+    }
+
+    signingConfigs {
+        uploadKey?.let { k ->
+            create("upload") {
+                storeFile = rootProject.file(k.getValue("storeFile"))
+                storePassword = k["storePassword"]
+                keyAlias = k["keyAlias"]
+                keyPassword = k["keyPassword"]
+            }
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("upload") ?: signingConfigs.getByName("debug")
         }
     }
 }
