@@ -184,6 +184,8 @@ class ApiClient {
           return value is DateTime ? value : DateTime.tryParse(value);
         case 'AIStatus':
           return AIStatus.fromJson(value);
+        case 'ApproveAction':
+          return ApproveAction.fromJson(value);
         case 'AskConversationDetail':
           return AskConversationDetail.fromJson(value);
         case 'AskConversationOut':
@@ -218,10 +220,24 @@ class ApiClient {
           return DecideReplacementIn.fromJson(value);
         case 'DeviceIn':
           return DeviceIn.fromJson(value);
+        case 'DocumentCreate':
+          return DocumentCreate.fromJson(value);
         case 'DocumentOut':
           return DocumentOut.fromJson(value);
+        case 'DocumentRelationCreate':
+          return DocumentRelationCreate.fromJson(value);
+        case 'DocumentRelationOut':
+          return DocumentRelationOut.fromJson(value);
+        case 'DocumentRevisionCreate':
+          return DocumentRevisionCreate.fromJson(value);
         case 'DocumentRevisionOut':
           return DocumentRevisionOut.fromJson(value);
+        case 'DocumentRevisionUpdate':
+          return DocumentRevisionUpdate.fromJson(value);
+        case 'DocumentUpdate':
+          return DocumentUpdate.fromJson(value);
+        case 'GlobalValueOut':
+          return GlobalValueOut.fromJson(value);
         case 'GuideIn':
           return GuideIn.fromJson(value);
         case 'HTTPValidationError':

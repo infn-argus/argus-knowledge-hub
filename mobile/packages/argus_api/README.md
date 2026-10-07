@@ -74,12 +74,23 @@ Class | Method | HTTP request | Description
 *AssetsApi* | [**updateAsset**](doc//AssetsApi.md#updateasset) | **PUT** /v1/assets/{uid} | Update Asset
 *AttachmentsApi* | [**downloadAttachment**](doc//AttachmentsApi.md#downloadattachment) | **GET** /v1/attachments/{uid} | Download Attachment
 *AttachmentsApi* | [**listAttachments**](doc//AttachmentsApi.md#listattachments) | **GET** /v1/attachments | List Attachments
+*DocumentsApi* | [**approveRevision**](doc//DocumentsApi.md#approverevision) | **POST** /v1/documents/{uid}/revisions/{rev_uid}/approve | Approve Revision
+*DocumentsApi* | [**createDocument**](doc//DocumentsApi.md#createdocument) | **POST** /v1/documents | Create Document
+*DocumentsApi* | [**createRelation**](doc//DocumentsApi.md#createrelation) | **POST** /v1/documents/{uid}/relations | Create Relation
+*DocumentsApi* | [**createRevision**](doc//DocumentsApi.md#createrevision) | **POST** /v1/documents/{uid}/revisions | Create Revision
 *DocumentsApi* | [**getCurrentRevision**](doc//DocumentsApi.md#getcurrentrevision) | **GET** /v1/documents/{uid}/current | Get Current Revision
 *DocumentsApi* | [**getDocument**](doc//DocumentsApi.md#getdocument) | **GET** /v1/documents/{uid} | Get Document
+*DocumentsApi* | [**listDocuments**](doc//DocumentsApi.md#listdocuments) | **GET** /v1/documents | List Documents
+*DocumentsApi* | [**listRevisions**](doc//DocumentsApi.md#listrevisions) | **GET** /v1/documents/{uid}/revisions | List Revisions
+*DocumentsApi* | [**publishRevision**](doc//DocumentsApi.md#publishrevision) | **POST** /v1/documents/{uid}/revisions/{rev_uid}/publish | Publish Revision
+*DocumentsApi* | [**submitRevision**](doc//DocumentsApi.md#submitrevision) | **POST** /v1/documents/{uid}/revisions/{rev_uid}/submit | Submit Revision
+*DocumentsApi* | [**updateDocument**](doc//DocumentsApi.md#updatedocument) | **PUT** /v1/documents/{uid} | Update Document
+*DocumentsApi* | [**updateRevision**](doc//DocumentsApi.md#updaterevision) | **PUT** /v1/documents/{uid}/revisions/{rev_uid} | Update Revision
 *FieldClientApi* | [**myDevices**](doc//FieldClientApi.md#mydevices) | **GET** /v1/devices | My Devices
 *FieldClientApi* | [**registerDevice**](doc//FieldClientApi.md#registerdevice) | **POST** /v1/devices | Register Device
 *FieldClientApi* | [**resolveLink**](doc//FieldClientApi.md#resolvelink) | **GET** /v1/links/resolve | Resolve Link
 *FieldClientApi* | [**revokeDevice**](doc//FieldClientApi.md#revokedevice) | **POST** /v1/devices/{device_id}/revoke | Revoke Device
+*GlobalValuesApi* | [**listGlobalValues**](doc//GlobalValuesApi.md#listglobalvalues) | **GET** /v1/global-values | List Global Values
 *HubApi* | [**assetContext**](doc//HubApi.md#assetcontext) | **GET** /v1/hub/assets/{uid}/context | Asset Context
 *HubApi* | [**documentContext**](doc//HubApi.md#documentcontext) | **GET** /v1/hub/documents/{uid}/context | Document Context
 *HubApi* | [**search**](doc//HubApi.md#search) | **GET** /v1/hub/search | Search
@@ -125,6 +136,7 @@ Class | Method | HTTP request | Description
 ## Documentation For Models
 
  - [AIStatus](doc//AIStatus.md)
+ - [ApproveAction](doc//ApproveAction.md)
  - [AskConversationDetail](doc//AskConversationDetail.md)
  - [AskConversationOut](doc//AskConversationOut.md)
  - [AskMessageOut](doc//AskMessageOut.md)
@@ -142,8 +154,15 @@ Class | Method | HTTP request | Description
  - [DecideIn](doc//DecideIn.md)
  - [DecideReplacementIn](doc//DecideReplacementIn.md)
  - [DeviceIn](doc//DeviceIn.md)
+ - [DocumentCreate](doc//DocumentCreate.md)
  - [DocumentOut](doc//DocumentOut.md)
+ - [DocumentRelationCreate](doc//DocumentRelationCreate.md)
+ - [DocumentRelationOut](doc//DocumentRelationOut.md)
+ - [DocumentRevisionCreate](doc//DocumentRevisionCreate.md)
  - [DocumentRevisionOut](doc//DocumentRevisionOut.md)
+ - [DocumentRevisionUpdate](doc//DocumentRevisionUpdate.md)
+ - [DocumentUpdate](doc//DocumentUpdate.md)
+ - [GlobalValueOut](doc//GlobalValueOut.md)
  - [GuideIn](doc//GuideIn.md)
  - [HTTPValidationError](doc//HTTPValidationError.md)
  - [IssueCommentCreate](doc//IssueCommentCreate.md)

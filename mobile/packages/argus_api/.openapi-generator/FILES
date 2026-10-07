@@ -11,6 +11,7 @@ lib/api/assets_api.dart
 lib/api/attachments_api.dart
 lib/api/documents_api.dart
 lib/api/field_client_api.dart
+lib/api/global_values_api.dart
 lib/api/hub_api.dart
 lib/api/installations_api.dart
 lib/api/intake_api.dart
@@ -31,6 +32,7 @@ lib/auth/http_basic_auth.dart
 lib/auth/http_bearer_auth.dart
 lib/auth/oauth.dart
 lib/model/ai_status.dart
+lib/model/approve_action.dart
 lib/model/ask_conversation_detail.dart
 lib/model/ask_conversation_out.dart
 lib/model/ask_message_out.dart
@@ -48,8 +50,15 @@ lib/model/close_review_in.dart
 lib/model/decide_in.dart
 lib/model/decide_replacement_in.dart
 lib/model/device_in.dart
+lib/model/document_create.dart
 lib/model/document_out.dart
+lib/model/document_relation_create.dart
+lib/model/document_relation_out.dart
+lib/model/document_revision_create.dart
 lib/model/document_revision_out.dart
+lib/model/document_revision_update.dart
+lib/model/document_update.dart
+lib/model/global_value_out.dart
 lib/model/guide_in.dart
 lib/model/http_validation_error.dart
 lib/model/issue_comment_create.dart

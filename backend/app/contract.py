@@ -76,8 +76,21 @@ FIELD_OPERATIONS = [
     ("post", "/v1/ledger/review/replacements/{conflict_id}/reject"),
     ("post", "/v1/ledger/review/stale/{conflict_id}/close"),
     ("post", "/v1/intake/proposals/{claim_id}"),
-    # Offline (M4): the assigned tickets prefetched for offline use
+    # Offline (M4): the assigned tickets prefetched for offline use; also the ticket list
     ("get", "/v1/issues"),
+    # Tickets' priorities and states, in the order the workspace defines them
+    ("get", "/v1/global-values"),
+    # Documents: the list, writing one, and its revisions' draft → review → approval → publication
+    ("get", "/v1/documents"),
+    ("post", "/v1/documents"),
+    ("put", "/v1/documents/{uid}"),
+    ("post", "/v1/documents/{uid}/relations"),
+    ("get", "/v1/documents/{uid}/revisions"),
+    ("post", "/v1/documents/{uid}/revisions"),
+    ("put", "/v1/documents/{uid}/revisions/{rev_uid}"),
+    ("post", "/v1/documents/{uid}/revisions/{rev_uid}/submit"),
+    ("post", "/v1/documents/{uid}/revisions/{rev_uid}/approve"),
+    ("post", "/v1/documents/{uid}/revisions/{rev_uid}/publish"),
     # Ask: questions answered from the workspace's records, as a conversation. The chat's answer is
     # server-sent events, which the generated client cannot stream: the app reads them itself.
     ("get", "/v1/ai/status"),
@@ -169,8 +182,16 @@ def _for_generators(node):
         # An object default ({}) becomes a non-constant default in Dart; the server applies it anyway.
         if isinstance(node.get("default"), dict):
             node = {k: v for k, v in node.items() if k != "default"}
+        # So does an enum's default: the Dart generator falls back to the bare string, not the enum value.
+        if "enum" in node and "default" in node:
+            node = {k: v for k, v in node.items() if k != "default"}
         if node.get("type") == "array" and _untyped(node.get("items")):
             node = {k: v for k, v in node.items() if k not in ("type", "items")}
+        # One of "any value" (such a list, made so just above) or something else is any value, null included;
+        # the Dart generator cannot process an untyped option inside anyOf at all.
+        options = node.get("anyOf")
+        if isinstance(options, list) and any(_untyped(o) for o in options):
+            node = {k: v for k, v in node.items() if k != "anyOf"}
         return node
     if isinstance(node, list):
         return [_for_generators(v) for v in node]
