@@ -250,7 +250,8 @@ export interface DryRunReport {
   note?: string;
   workspaces?: { archive: string; local: string; exists: boolean }[];
   families?: Record<string, Record<string, number>>;
-  blocking?: { family: string; key: string; reason: string }[];
+  blocking?: { family: string; key: string; reason: string; resolvable?: boolean; fields?: string[];
+    local?: Record<string, unknown>; archive?: Record<string, unknown> }[];
   blocking_count?: number;
   catalogue_conflicts?: { family: string; key: string; reason: string }[];
   identity_candidates?: { archive: string; here: string; identifier: string; value: string }[];

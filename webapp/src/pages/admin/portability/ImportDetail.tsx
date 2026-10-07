@@ -218,7 +218,11 @@ export function ImportDetailPage() {
       {(i.state === "dry_run_ready" || i.state === "awaiting_approval") && i.mode !== "evidence" && (
         <DecisionsForm i={i} running={dryRunning || running} onRun={(d) => dry.mutate(d)} />
       )}
-      {hasDryRun && <DryRun r={report} />}
+      {hasDryRun && (
+        <DryRun r={report} resolving={dryRunning || running}
+                current={(i.decisions as { catalogue_conflicts?: Record<string, string> }).catalogue_conflicts ?? {}}
+                onResolve={(catalogue_conflicts) => dry.mutate({ ...(i.decisions as Record<string, unknown>), catalogue_conflicts })} />
+      )}
       {rec.data && <Reconciliation r={rec.data.report} sha={rec.data.sha256} />}
       {chain.data && (
         <Section title="Origin chain" right={<span className={`text-sm font-medium ${chain.data.ok ? "text-emerald-700" : "text-rose-700"}`}>
@@ -317,7 +321,10 @@ function DecisionsForm({ i, onRun, running }: { i: ImportView; onRun: (d: Record
 
 const OUTCOMES = ["create", "identical", "update_same_origin", "known_identity", "unresolved_reference", "divergent"];
 
-function DryRun({ r }: { r: DryRunReport }) {
+function DryRun({ r, current, onResolve, resolving }: { r: DryRunReport; current: Record<string, string>;
+    onResolve: (decisions: Record<string, string>) => void; resolving: boolean }) {
+  const resolvable = (r.blocking ?? []).filter((b) => b.resolvable);
+  const otherBlocking = (r.blocking ?? []).filter((b) => !b.resolvable);
   return (
     <Section title="Dry run" right={<span className={`text-sm font-medium ${r.ready ? "text-emerald-700" : "text-rose-700"}`}>
       {r.ready ? "Ready for approval" : "Blocked"}</span>}>
@@ -343,7 +350,8 @@ function DryRun({ r }: { r: DryRunReport }) {
           </tbody>
         </table>
       )}
-      <Issues title="Blocking" items={(r.blocking ?? []).map((b) => `${b.family} ${b.key}: ${b.reason}`)} tone="rose" />
+      {resolvable.length > 0 && <DivergentCatalogue items={resolvable} current={current} onResolve={onResolve} running={resolving} />}
+      <Issues title="Blocking" items={otherBlocking.map((b) => `${b.family} ${b.key}: ${b.reason}`)} tone="rose" />
       <Issues title="Catalogue conflicts (never overwritten; review the type here)" tone="rose"
               items={(r.catalogue_conflicts ?? []).map((c) => `${c.key}: ${c.reason}`)} />
       <Issues title="Identity candidates (opened for review after import, never merged)" tone="amber"
@@ -358,6 +366,73 @@ function DryRun({ r }: { r: DryRunReport }) {
         </p>
       )}
     </Section>
+  );
+}
+
+/** A divergent row in a catalogue family with no access or ledger history riding on it (icons,
+ * equipment classes, equipment class reviews — see CATALOGUE_RESOLVABLE in importer.py): choosing
+ * what to do with it here, instead of only ever blocking the import, since there is nowhere else in
+ * the product to make that call before the import's own next run. */
+function DivergentCatalogue({ items, current, onResolve, running }: {
+  items: NonNullable<DryRunReport["blocking"]>;
+  current: Record<string, string>;
+  onResolve: (decisions: Record<string, string>) => void;
+  running: boolean;
+}) {
+  const [choices, setChoices] = useState<Record<string, string>>({});
+  const pending = { ...current, ...choices };
+  const unchosen = items.filter((it) => !pending[`${it.family}:${it.key}`]);
+  return (
+    <div className="mb-3 rounded border border-amber-200 bg-amber-50 p-3">
+      <p className="text-xs font-semibold text-amber-900">
+        {items.length} record(s) already exist here with different content, made here rather than by this
+        archive's origin. Choose what to do with each one, then apply.
+      </p>
+      <div className="mt-2 space-y-2">
+        {items.map((it) => {
+          const id = `${it.family}:${it.key}`;
+          const choice = pending[id];
+          return (
+            <div key={id} className="rounded border border-amber-200 bg-white p-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono font-medium text-slate-800">{it.family} · {it.key}</span>
+                <div className="flex gap-1">
+                  <button type="button" onClick={() => setChoices({ ...choices, [id]: "keep_local" })}
+                          className={`rounded px-2 py-0.5 ${choice === "keep_local" ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>
+                    Keep what's here
+                  </button>
+                  <button type="button" onClick={() => setChoices({ ...choices, [id]: "use_archive" })}
+                          className={`rounded px-2 py-0.5 ${choice === "use_archive" ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>
+                    Use the archive's version
+                  </button>
+                </div>
+              </div>
+              {(it.fields ?? []).length > 0 && (
+                <table className="mt-1.5 w-full text-[11px]">
+                  <thead className="text-slate-400"><tr><th className="text-left font-normal">Field</th><th className="text-left font-normal">Here</th><th className="text-left font-normal">Archive</th></tr></thead>
+                  <tbody>
+                    {it.fields!.map((f) => (
+                      <tr key={f} className="border-t border-slate-100">
+                        <td className="py-0.5 pr-2 text-slate-500">{f}</td>
+                        <td className="py-0.5 pr-2 font-mono text-slate-700">{String(it.local?.[f] ?? "—")}</td>
+                        <td className="py-0.5 font-mono text-slate-700">{String(it.archive?.[f] ?? "—")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <button type="button" disabled={running || Object.keys(choices).length === 0}
+              onClick={() => onResolve({ ...current, ...choices })}
+              className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white disabled:bg-slate-300">
+        {running ? "Running…" : unchosen.length > 0 && Object.keys(choices).length > 0
+          ? `Apply ${Object.keys(choices).length} of ${items.length} and re-run the dry run`
+          : "Apply and re-run the dry run"}
+      </button>
+    </div>
   );
 }
 

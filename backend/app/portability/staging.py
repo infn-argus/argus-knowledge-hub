@@ -149,12 +149,22 @@ def seed(active: Session, stage: Session, plan, archive_refs: dict) -> dict:
     c = _Copier(active, stage)
     present = [w for w in plan.workspaces if active.execute(
         text("SELECT 1 FROM workspaces WHERE id = :w"), {"w": w}).first()]
-    if present:
-        sc = Scope(workspaces=present, watermark={t: 2 ** 62 for t in _sequenced()})
-        for fam in FAMILIES:
-            pk = c._pk(fam.model.__table__)
-            for obj in active.scalars(fam.select(active, sc)):
-                c.row(fam.table, tuple(getattr(obj, col.key) for col in pk))
+    # Not scoped to a workspace at all (no workspace_id column: see families.py), so whether any of
+    # the archive's workspaces exist here yet has nothing to do with whether it's worth seeding — a
+    # local row here can diverge from the archive's regardless. Without this, staging's reconciliation
+    # of a merge into a brand-new workspace never sees a pre-existing local row here at all (it was
+    # never copied in), so it reconciles as a fresh create — disagreeing with promotion's reconcile
+    # against the real, unscoped table, which does see it.
+    # The governance policies and installation-wide rulesets belong here for the same reason: which
+    # sources are in effect decides what rebuild projects, so staging must see the policy promotion will.
+    UNSCOPED = ("equipment_classes", "equipment_class_reviews", "policies", "rulesets")
+    sc = Scope(workspaces=present, watermark={t: 2 ** 62 for t in _sequenced()})
+    for fam in FAMILIES:
+        if not present and fam.name not in UNSCOPED:
+            continue
+        pk = c._pk(fam.model.__table__)
+        for obj in active.scalars(fam.select(active, sc)):
+            c.row(fam.table, tuple(getattr(obj, col.key) for col in pk))
     for table_name, keys in archive_refs.items():
         for k in keys:
             c.row(table_name, (k,))

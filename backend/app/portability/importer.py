@@ -59,6 +59,12 @@ from app.portability.families import BY_NAME, FAMILIES, ORIGIN_CHAIN, Family, Sc
 LOAD_GROUPS = ("catalogue", "identity", "access", "governance", "records", "ledger")
 GOVERNANCE = ("policies", "rulesets")
 REFERENCE_ONLY = ("identities",)              # never updated, never compared as a failure
+# A divergent row here may be resolved as part of the import instead of only ever blocking it: pure
+# vocabulary, no access control or ledger history riding on it (unlike, say, roles or group members,
+# where letting an archive silently overwrite a local decision would be a real privilege question, or
+# assets/tickets/documents, which go through the fact ledger, not a plain column overwrite). "types"
+# is catalogue too but already has its own admission flow (catalogue_conflicts), not this one.
+CATALOGUE_RESOLVABLE = ("icons", "equipment_classes", "equipment_class_reviews")
 EVENT_TABLES = (ClaimEvent, RevisionEvent, Decision, StatusEvent, IdentityEvent, RecordEvent, ConflictEvent)
 
 
@@ -300,12 +306,42 @@ def _missing_refs(db: Session, fam: Family, values: dict, pending: dict) -> list
 
 # Fields a reconciliation does not hold against a row: a relation is its ends and its type, and the same relation
 # stored twice by an older import (two rows, created microseconds apart) is loaded once and cannot match both stamps.
-RECONCILE_IGNORES = {"relations": {"created_at"}}
+# A policy is its body and vocabulary; when it was activated is this instance's own history — an import that
+# activates one of the archive's policies again here (_activate_archive_sources) moves only that.
+RECONCILE_IGNORES = {"relations": {"created_at"}, "policies": {"activated_at"}}
+
+
+def _normalize_legacy_multi(attrs: object) -> object:
+    """A multi-value attribute (engine.MULTI_ATTRS: zones, networks, argus_keywords) read from an
+    export taken before the claim-per-member fix may still carry the shape a claim holding the whole
+    list, instead of one per member, used to project as — ["beam"] stored as [["beam"]] — exactly what
+    project_subject itself now unwraps on sight (engine.py). Reconciling an archive against a freshly
+    rebuilt local copy needs the same tolerance, or every asset so affected looks like a genuine
+    mismatch on every import of an archive taken before the fix, forever (the archive is immutable)."""
+    if not isinstance(attrs, dict):
+        return attrs
+    from app.ledger.engine import MULTI_ATTRS
+    keys = {p[5:] for p in MULTI_ATTRS if p.startswith("attr:")}
+    out = dict(attrs)
+    for key in keys & set(out):
+        v = out[key]
+        if not isinstance(v, list):
+            continue
+        flat = []
+        for item in v:
+            flat.extend(item) if isinstance(item, list) else flat.append(item)
+        out[key] = list(dict.fromkeys(flat))
+    return out
 
 
 def _reconciles(fam: Family, local, row: dict, form: dict) -> bool:
     if form == row or (local is not None and _installation_defined(fam, local, row)):
         return True
+    if isinstance(form.get("attributes"), dict) and isinstance(row.get("attributes"), dict):
+        nform = {**form, "attributes": _normalize_legacy_multi(form["attributes"])}
+        nrow = {**row, "attributes": _normalize_legacy_multi(row["attributes"])}
+        if nform == nrow:
+            return True
     ignore = RECONCILE_IGNORES.get(fam.name)
     return bool(ignore) and local is not None and \
         {k: v for k, v in form.items() if k not in ignore} == {k: v for k, v in row.items() if k not in ignore}
@@ -348,18 +384,30 @@ def dry_run(db: Session, plan: Plan) -> dict:
                 if fam.name == "assets":
                     candidates += _candidates(db, row)
                 continue
-            if archive_form(plan, fam, local, key) == row or _installation_defined(fam, local, row):
+            form = archive_form(plan, fam, local, key)
+            if form == row or _installation_defined(fam, local, row) or \
+                    (fam.name in RECONCILE_IGNORES and _reconciles(fam, local, row, form)):
                 counts[fam.name]["identical"] += 1
                 continue
             if fam.name in REFERENCE_ONLY:
                 counts[fam.name]["known_identity"] += 1
                 identity_notes.append({"user": key, "note": "known here with other details; kept as is"})
                 continue
-            if rm is not None and rm.content_sha256 == _digest(archive_form(plan, fam, local, key)):
+            if rm is not None and rm.content_sha256 == _digest(form):
                 counts[fam.name]["update_same_origin"] += 1
                 continue
             counts[fam.name]["divergent"] += 1
-            item = {"family": fam.name, "key": key, "reason": "same key, different content, not from this chain"}
+            if fam.name in CATALOGUE_RESOLVABLE:
+                resolution = (plan.decisions.get("catalogue_conflicts") or {}).get(f"{fam.name}:{key}")
+                if resolution in ("keep_local", "use_archive"):
+                    counts[fam.name][f"resolved_{resolution}"] += 1
+                    continue
+                fields = _differs(row, form)[:20]
+                item = {"family": fam.name, "key": key, "reason": "same key, different content, not from this chain",
+                        "resolvable": True, "fields": fields,
+                        "local": {f: form.get(f) for f in fields}, "archive": {f: row.get(f) for f in fields}}
+            else:
+                item = {"family": fam.name, "key": key, "reason": "same key, different content, not from this chain"}
             (catalogue if fam.name == "types" else blocking).append(item)
     unresolved = refs if (plan.decisions.get("unresolved_references") or "block") == "block" else []
     governance = [f for f in GOVERNANCE if f in plan.manifest["families"] and f not in [x.name for x in plan.families()]]
@@ -520,7 +568,29 @@ def execute(db: Session, plan: Plan, done: set, save: Callable[[set], None],
     for fam in plan.families():
         if fam.deferred:
             step(f"{fam.name}:deferred", lambda fam=fam: _deferred(db, plan, fam, pending, report))
+    if "policies" in {f.name for f in plan.families()}:
+        step("policies:activate", lambda: _activate_archive_sources(db, plan))
     return report
+
+
+def _activate_archive_sources(db: Session, plan: Plan) -> None:
+    """Loading the archive's policies alone changes nothing: the active one is the most recently activated,
+    and a policy this instance activated after the archive's stays so. The sources the archive's latest
+    policy had admitted would then stay pending here, and their records project empty. When the import
+    loads governance (approved as part of it), activate the active policy again with those streams added:
+    the union of what is in effect here and what was in effect there — never a stream that was still
+    pending at the source, and never one dropped from here."""
+    from app.ledger import engine
+    latest = None
+    for _, _key, row in archive_rows(plan, BY_NAME["policies"]):
+        if latest is None or str(row.get("activated_at") or "") > str(latest.get("activated_at") or ""):
+            latest = row
+    archived = set(((latest or {}).get("vocabulary") or {}).get("streams") or [])
+    _policy, active = engine.active_policy(db)
+    here = set((active.vocabulary or {}).get("streams") or [])
+    if archived <= here:
+        return
+    engine.activate_policy(db, active.body, actor=f"import:{plan.import_id}", streams=here | archived)
 
 
 def _remember(db: Session, plan: Plan, fam: Family, key: str, local_key: str, created: bool, form: dict) -> None:
@@ -546,15 +616,25 @@ def _load_chunk(db: Session, plan: Plan, fam: Family, chunk: dict, pending: dict
         local, rm = find_local(db, plan, fam, key, row)
         if local is not None:
             form = archive_form(plan, fam, local, key)
-            if form == row or fam.name in REFERENCE_ONLY or _installation_defined(fam, local, row):
+            if form == row or fam.name in REFERENCE_ONLY or _installation_defined(fam, local, row) or \
+                    (fam.name in RECONCILE_IGNORES and _reconciles(fam, local, row, form)):
                 if rm is None:
                     _remember(db, plan, fam, key, _local_key(fam, local), False, form)
                 report["identical"] += 1
                 continue
             if rm is None or rm.content_sha256 != _digest(form):
-                raise ImportBlocked(f"{fam.name} {key} exists here with different content", "divergent",
-                                    {"family": fam.name, "key": key, "fields": _differs(row, form)[:10],
-                                     "same_origin": rm is not None})
+                resolution = (plan.decisions.get("catalogue_conflicts") or {}).get(f"{fam.name}:{key}") \
+                    if fam.name in CATALOGUE_RESOLVABLE else None
+                if resolution == "keep_local":
+                    # No row-map entry: this archive's content was not adopted here, so a future
+                    # import (a new job, possibly a newer export) must ask again rather than treat
+                    # this origin as trusted to auto-update it from here on.
+                    report["identical"] += 1
+                    continue
+                if resolution != "use_archive":
+                    raise ImportBlocked(f"{fam.name} {key} exists here with different content", "divergent",
+                                        {"family": fam.name, "key": key, "fields": _differs(row, form)[:10],
+                                         "same_origin": rm is not None})
             for attr, v in _values(plan, fam, row, with_deferred=True).items():
                 setattr(local, attr, v)
             db.flush()
@@ -756,7 +836,12 @@ def reconcile(db: Session, plan: Plan, deferred: Optional[list] = None) -> dict:
                 local, _ = find_local(db, plan, fam, key, row)
                 form = archive_form(plan, fam, local, key) if local is not None else {}
                 same = _reconciles(fam, local, row, form)
-                if not same and (fam.name, key) not in explained and fam.name not in REFERENCE_ONLY:
+                # A "keep what's here" catalogue resolution (importer.CATALOGUE_RESOLVABLE) is exactly
+                # as deliberate as identities (REFERENCE_ONLY) staying local: this row's own divergence
+                # was already decided at execute time, not left for reconciliation to flag again.
+                kept_local = (fam.name in CATALOGUE_RESOLVABLE and local is not None and
+                             (plan.decisions.get("catalogue_conflicts") or {}).get(f"{fam.name}:{key}") == "keep_local")
+                if not same and (fam.name, key) not in explained and fam.name not in REFERENCE_ONLY and not kept_local:
                     mismatches.append({"key": key, "missing": local is None,
                                        "fields": sorted(_differs(row, form))[:10]})
                 # A row accepted as the archive's (a built-in role, a relation's stamp) is hashed as the archive has

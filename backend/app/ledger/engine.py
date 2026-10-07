@@ -172,11 +172,16 @@ def current_vocabulary(db: Session) -> Vocabulary:
     )
 
 
-def activate_policy(db: Session, body: Optional[dict] = None, actor: str = "system") -> LedgerPolicy:
+def activate_policy(db: Session, body: Optional[dict] = None, actor: str = "system",
+                    streams: Optional[set] = None) -> LedgerPolicy:
     """Validate a policy against the current vocabulary and make it active.
-    Raises PolicyError (nothing written) when it is invalid."""
+    Raises PolicyError (nothing written) when it is invalid. `streams`, when given, admits only those
+    of the existing external streams rather than all of them."""
     body = body or DEFAULT_POLICY
     vocab = current_vocabulary(db)
+    if streams is not None:
+        import dataclasses
+        vocab = dataclasses.replace(vocab, streams={k: v for k, v in vocab.streams.items() if k in streams})
     report = validate_policy(Policy(body, vocab.depths()), vocab)
     version = f"{body.get('policy_version', 'unversioned')}@{vocab.digest()}"
     previous = db.scalar(select(LedgerPolicy).order_by(LedgerPolicy.activated_at.desc()).limit(1))

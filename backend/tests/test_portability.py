@@ -674,6 +674,96 @@ def test_A12_A13_A14_merge_blocks_divergent_uids_proposes_candidates_and_never_o
             service.approve_import(db, imp, "dave@example.org", cfg=env.cfg("dst"))        # not ready: nothing to approve
 
 
+def test_a_divergent_equipment_class_is_resolvable_keep_local_or_use_the_archive(dbs, env):
+    """Unlike an asset or a type (A12/A14 above), an equipment class carries no ledger history and no
+    access control — so instead of only ever blocking, the dry run offers a per-record choice
+    (importer.CATALOGUE_RESOLVABLE), and the import proceeds once every one is made."""
+    from app.models.equipment_class import EquipmentClass
+    src, dst = dbs(), dbs()
+    s = populate(src, env.tmp)
+    t = datetime.now(timezone.utc)
+    name = f"Crate {s.ws}"
+    with Session(src) as db:
+        db.add(EquipmentClass(name=name, status="active", added_by="rossi@example.org", added_at=t,
+                              note="from the archive"))
+        db.commit()
+    with Session(dst) as db:
+        db.add(Workspace(id="local", name="Local"))
+        db.add(EquipmentClass(name=name, status="deprecated", added_by="local-admin@example.org", added_at=t,
+                              note="made here, not by that archive"))
+        db.commit()
+    view, _ = run_export(src, env, s)
+
+    # No decision yet: it blocks, but names what differs and both options — not a dead end.
+    _, report = run_import(dst, env, view["git"]["tag"], mode="merge", expect_ready=False)
+    item = next(b for b in report["blocking"] if b["family"] == "equipment_classes" and b["key"] == name)
+    assert item["resolvable"] is True
+    assert set(item["fields"]) >= {"status", "added_by", "note"}
+    assert item["local"]["status"] == "deprecated" and item["archive"]["status"] == "active"
+    with Session(dst) as db:
+        assert db.get(EquipmentClass, name).status == "deprecated"    # a dry run writes nothing
+
+    # "Keep what's here": the import goes on, and the local record is untouched.
+    _, rec = run_import(dst, env, view["git"]["tag"], mode="merge",
+                        decisions={"catalogue_conflicts": {f"equipment_classes:{name}": "keep_local"}})
+    assert rec["passed"], _failures(rec)
+    with Session(dst) as db:
+        assert db.get(EquipmentClass, name).status == "deprecated"
+        assert db.get(EquipmentClass, name).note == "made here, not by that archive"
+
+    # The same conflict, resolved the other way in a fresh destination (re-importing the same export
+    # into the same one is correctly a no-op the second time — "already applied" — so this needs its
+    # own): "use the archive's version" overwrites it.
+    dst2 = dbs()
+    with Session(dst2) as db:
+        db.add(Workspace(id="local", name="Local"))
+        db.add(EquipmentClass(name=name, status="deprecated", added_by="local-admin@example.org", added_at=t,
+                              note="made here, not by that archive"))
+        db.commit()
+    _, rec2 = run_import(dst2, env, view["git"]["tag"], mode="merge",
+                         decisions={"catalogue_conflicts": {f"equipment_classes:{name}": "use_archive"}})
+    assert rec2["passed"], _failures(rec2)
+    with Session(dst2) as db:
+        assert db.get(EquipmentClass, name).status == "active"
+        assert db.get(EquipmentClass, name).note == "from the archive"
+
+
+def test_a_beam_model_admitted_at_the_source_stays_in_effect_after_a_clone_into_a_hub_with_its_own_policy(dbs, env):
+    """A beam model's records are claims from its own external stream, in effect only once a policy lists the
+    stream. The archive carries the source's policy that admitted it, but a hub that activated a policy of its own
+    later keeps that one active — so, loaded alone, the model's records would project empty here (and staging,
+    never seeing the hub's policy, used to pass where finalization then failed). The import activates the union."""
+    import json as _json
+    from app.services import beam_model as bm
+    from app.services.asset_types import ensure_asset_types
+    src, dst = dbs(), dbs()
+    s = populate(src, env.tmp)
+    linac = _json.loads((Path(__file__).parent / "fixtures" / "beam_model" / "linac.json").read_text())
+    with Session(src) as db:
+        ensure_asset_types(db, s.ws)
+        ledger.activate_policy(db)
+        assert bm.import_canonical(db, s.ws, linac, "test")["awaiting_policy"]
+        ledger.activate_policy(db)                                   # governance admits the model's stream
+        db.commit()
+        admitted = set(ledger.active_policy(db)[1].vocabulary["streams"])
+        elements = {a.uid: a.attributes for a in db.scalars(select(Asset).where(
+            Asset.workspace_id == s.ws, Asset.attributes["model_id"].astext.isnot(None)))}
+    assert admitted and elements
+    with Session(dst) as db:
+        ledger.activate_policy(db)                                   # the hub's own, newer, admitting nothing
+        db.commit()
+    view, _ = run_export(src, env, s)
+    _, rec = run_import(dst, env, view["git"]["tag"], mode="clone")
+    assert rec["passed"], _failures(rec)
+    with Session(dst) as db:
+        policy = ledger.active_policy(db)[1]
+        # Here the union is exactly the archive's own latest policy, so that one is activated again (keeping
+        # who first activated it); with local sources of its own it would be a new version, by the import.
+        assert admitted <= set(policy.vocabulary["streams"])
+        for uid, attrs in elements.items():
+            assert db.get(Asset, uid).attributes.get("model_id") == attrs["model_id"]
+
+
 def test_A13_a_candidate_is_opened_never_merged(dbs, env):
     src, dst = dbs(), dbs()
     s = populate(src, env.tmp)
