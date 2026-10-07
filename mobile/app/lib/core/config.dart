@@ -11,6 +11,7 @@ class AppConfig {
     required this.oidcRedirect,
     required this.appVersion,
     this.offlineRetentionDays = 7,
+    this.distribution = 'local',
   });
 
   final String environment; // development | staging | production
@@ -20,6 +21,13 @@ class AppConfig {
   final String oidcClientId;
   final String oidcRedirect;
   final String appVersion;
+
+  /// Where this build was published: `github` (an APK on a GitHub release — the app looks for newer ones
+  /// there), `play` (the store updates it), or `local` (a developer's build: no update check).
+  final String distribution;
+
+  /// The repository whose releases carry the APK, for the update check of a `github` build.
+  static const releasesRepo = 'infn-argus/argus-knowledge-hub';
 
   /// How long saved copies and pending commands may live on the device (U22, proposed 7 days).
   final int offlineRetentionDays;
@@ -42,5 +50,6 @@ class AppConfig {
         oidcRedirect: String.fromEnvironment('OIDC_REDIRECT', defaultValue: 'it.infn.argus.field:/oauthredirect'),
         appVersion: String.fromEnvironment('ARGUS_APP_VERSION', defaultValue: '0.1.0'),
         offlineRetentionDays: int.fromEnvironment('ARGUS_OFFLINE_RETENTION_DAYS', defaultValue: 7),
+        distribution: String.fromEnvironment('ARGUS_DISTRIBUTION', defaultValue: 'local'),
       );
 }

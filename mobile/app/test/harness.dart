@@ -70,15 +70,19 @@ class Running {
 }
 
 Future<Running> start(WidgetTester tester,
-    {Map<String, String> stored = signedIn, List<Override> overrides = const []}) async {
+    {Map<String, String> stored = signedIn,
+    List<Override> overrides = const [],
+    AppConfig config = testConfig,
+    void Function(FakeArgus server)? prepare}) async {
   FlutterSecureStorage.setMockInitialValues(Map.of(stored));
   await tester.binding.setSurfaceSize(const Size(420, 1400));
   final server = FakeArgus();
+  prepare?.call(server);
   final photos = FakePhotos();
   await tester.pumpWidget(ProviderScope(
     retry: retryPolicy,
     overrides: [
-      configProvider.overrideWithValue(testConfig),
+      configProvider.overrideWithValue(config),
       httpClientProvider.overrideWithValue(server.client),
       photoSourceProvider.overrideWithValue(photos),
       ...overrides,

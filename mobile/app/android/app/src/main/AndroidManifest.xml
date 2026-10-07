@@ -55,6 +55,11 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- Opening a newer release's download page in the browser (the in-app update check). -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
         <!-- The speech recogniser and the voice that reads answers aloud (Android 11+ package visibility). -->
         <intent>
             <action android:name="android.speech.RecognitionService"/>

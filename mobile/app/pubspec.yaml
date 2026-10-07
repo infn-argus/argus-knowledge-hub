@@ -30,6 +30,7 @@ dependencies:
   # macro that slipped through) — same reason the web app renders both (components/MarkdownView.tsx).
   flutter_markdown_plus: ^1.0.3
   html: ^0.15.7
+  url_launcher: ^6.3.3
 
 dev_dependencies:
   flutter_test:

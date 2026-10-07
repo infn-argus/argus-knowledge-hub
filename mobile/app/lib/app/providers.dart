@@ -12,6 +12,7 @@ import '../data/ask_repository.dart';
 import '../data/capture_repositories.dart';
 import '../data/replacement_repositories.dart';
 import '../data/repositories.dart';
+import '../data/update_check.dart';
 import '../domain/capture.dart';
 import '../domain/models.dart';
 import '../features/ask/voice.dart';
@@ -252,6 +253,12 @@ final ticketListProvider = FutureProvider.autoDispose.family<List<TicketListItem
 final ticketPrioritiesProvider = FutureProvider.autoDispose<List<String>>((ref) {
   ref.watch(workspaceIdProvider);
   return ref.watch(ticketRepositoryProvider).priorities();
+});
+
+/// A newer release to download, checked once per run (data/update_check.dart).
+final updateCheckProvider = FutureProvider<AvailableUpdate?>((ref) {
+  final client = ref.watch(httpClientProvider) ?? http.Client();
+  return checkForUpdate(ref.watch(configProvider), client);
 });
 
 final cockpitRepositoryProvider = Provider((ref) => CockpitRepository(ref.watch(apiServiceProvider)));

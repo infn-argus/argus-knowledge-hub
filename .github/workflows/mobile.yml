@@ -7,6 +7,14 @@
 # android/app/build.gradle.kts from ANDROID_KEYSTORE_PATH and the others). Without them it is signed with
 # the runner's throwaway debug key: installable, but a phone can only update it with an APK signed by the
 # same key, so each such build has to replace the app (uninstall first) rather than update it.
+#
+# Two builds of the same version come out of it. The APK on the GitHub release (ARGUS_DISTRIBUTION=github)
+# checks GitHub for a newer release and offers to download it. The app bundle (ARGUS_DISTRIBUTION=play)
+# goes to Google Play's internal testing track when the PLAY_SERVICE_ACCOUNT_JSON secret is set; Play updates
+# it, so it never checks GitHub. Play re-signs what it delivers with its own app signing key, so a phone with
+# the GitHub APK cannot update to the Play build (or back) without uninstalling first: pick one per phone.
+# A new Play app accepts only draft releases, finished by hand in the Console; once it has been through
+# that, set the repository variable PLAY_RELEASE_STATUS to "completed" so a tag reaches testers by itself.
 name: mobile
 
 on:
@@ -83,7 +91,8 @@ jobs:
             --dart-define=ARGUS_API_BASE="$ARGUS_API_BASE" \
             --dart-define=OIDC_ISSUER="$OIDC_ISSUER" \
             --dart-define=ARGUS_LINK_HOST="$ARGUS_LINK_HOST" \
-            --dart-define=ARGUS_APP_VERSION="${{ steps.version.outputs.name }}"
+            --dart-define=ARGUS_APP_VERSION="${{ steps.version.outputs.name }}" \
+            --dart-define=ARGUS_DISTRIBUTION=github
           mv build/app/outputs/flutter-apk/app-release.apk "build/argus-field-${{ steps.version.outputs.name }}.apk"
       - uses: actions/upload-artifact@v4
         with:
@@ -97,3 +106,47 @@ jobs:
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "ARGUS $GITHUB_REF_NAME"
           gh release upload "$GITHUB_REF_NAME" "build/argus-field-${{ steps.version.outputs.name }}.apk" --clobber
+      - name: Build the app bundle for Google Play
+        if: github.ref_type == 'tag'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_argusLinkHost: ${{ env.ARGUS_LINK_HOST }}
+        run: |
+          flutter build appbundle --release \
+            --build-name="${{ steps.version.outputs.name }}" \
+            --build-number="${{ steps.version.outputs.code }}" \
+            --dart-define=ARGUS_ENV="$ARGUS_ENV" \
+            --dart-define=ARGUS_API_BASE="$ARGUS_API_BASE" \
+            --dart-define=OIDC_ISSUER="$OIDC_ISSUER" \
+            --dart-define=ARGUS_LINK_HOST="$ARGUS_LINK_HOST" \
+            --dart-define=ARGUS_APP_VERSION="${{ steps.version.outputs.name }}" \
+            --dart-define=ARGUS_DISTRIBUTION=play
+          mv build/app/outputs/bundle/release/app-release.aab "build/argus-field-${{ steps.version.outputs.name }}.aab"
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type == 'tag'
+        with:
+          name: argus-field-${{ steps.version.outputs.name }}-play
+          path: mobile/app/build/argus-field-${{ steps.version.outputs.name }}.aab
+      - name: Is Google Play set up
+        id: play
+        if: github.ref_type == 'tag'
+        env:
+          PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$PLAY_JSON" ] && [ -n "$ANDROID_KEYSTORE_PATH" ]; then
+            echo "upload=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No PLAY_SERVICE_ACCOUNT_JSON secret (or no upload key): the bundle is not sent to Google Play."
+          fi
+      - name: Send to Google Play internal testing
+        if: steps.play.outputs.upload == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: it.infn.argus.field
+          releaseFiles: mobile/app/build/argus-field-${{ steps.version.outputs.name }}.aab
+          releaseName: ${{ steps.version.outputs.name }}
+          track: internal
+          status: ${{ vars.PLAY_RELEASE_STATUS || 'draft' }}

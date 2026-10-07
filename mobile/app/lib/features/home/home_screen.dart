@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/providers.dart';
 import '../../app/queue.dart';
@@ -93,6 +94,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         label: const Text('Scan label'),
       ),
       body: Column(children: [
+        const _UpdateBanner(),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: TextField(
@@ -290,6 +292,38 @@ String _ago(DateTime at) {
   if (d.inDays < 1) return '${d.inHours} h';
   if (d.inDays < 30) return '${d.inDays} d';
   return formatWhenDate(at);
+}
+
+/// A newer release is out: offer to download it (an APK installs over this one as an update). Dismissed for
+/// this run only — it comes back on the next start until the app is updated.
+class _UpdateBanner extends ConsumerStatefulWidget {
+  const _UpdateBanner();
+
+  @override
+  ConsumerState<_UpdateBanner> createState() => _UpdateBannerState();
+}
+
+class _UpdateBannerState extends ConsumerState<_UpdateBanner> {
+  bool _dismissed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final update = ref.watch(updateCheckProvider).value;
+    if (update == null || _dismissed) return const SizedBox.shrink();
+    return MaterialBanner(
+      key: const Key('home-update'),
+      leading: const Icon(Icons.system_update),
+      content: Text('Version ${update.version} is available.'),
+      actions: [
+        TextButton(onPressed: () => setState(() => _dismissed = true), child: const Text('Later')),
+        FilledButton(
+          key: const Key('home-update-download'),
+          onPressed: () => launchUrl(Uri.parse(update.url), mode: LaunchMode.externalApplication),
+          child: const Text('Download'),
+        ),
+      ],
+    );
+  }
 }
 
 class _Hint extends StatelessWidget {
