@@ -1479,6 +1479,10 @@ export const beamModelApi = {
   exportModel: (id: string, format?: "1" | "2") =>
     request<CanonicalBeamModel>(`/v1/beam-model/models/${encodeURIComponent(id)}/export${format ? `?format=${format}` : ""}`),
   exportAll: () => request<{ format: string; models: CanonicalBeamModel[] }>("/v1/beam-model/export"),
+  /** The whole model out of the workspace: its records retire (history kept), values, documents and bindings go. */
+  removeModel: (id: string) =>
+    request<{ model: string; retired: number; values: number; documents: number; bindings: number }>(
+      `/v1/beam-model/models/${encodeURIComponent(id)}`, { method: "DELETE" }),
   validate: (doc: unknown) =>
     request<{ models: BeamModelCheck[] }>("/v1/beam-model/validate", { method: "POST", body: json(doc) }),
   importModels: (doc: unknown) =>

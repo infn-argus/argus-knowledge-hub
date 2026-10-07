@@ -76,7 +76,7 @@ function Upload({ onEdit }: { onEdit: (m: BeamModelV2) => void }) {
   const qc = useQueryClient();
   const [raw, setRaw] = useState<{ name: string; text: string }[]>([]);
   const [files, setFiles] = useState<UploadedFile[]>([]);
-  const [opts, setOpts] = useState<ConvertOptions>({ topology: "auto", keep_markers: false, system_kind: "" });
+  const [opts, setOpts] = useState<ConvertOptions>({ topology: "auto", keep_markers: true, system_kind: "" });
   const formats = useQuery({ queryKey: ["beam-formats"], queryFn: beamModelApi.formats });
   const docs = files.flatMap((f) => f.models);
   const check = useQuery({

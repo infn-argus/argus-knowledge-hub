@@ -27,6 +27,13 @@ export const KIND_STYLE: Record<string, KindStyle> = {
   mirror: { label: "mirror", colour: "#c4b5fd", glyph: "bar" },
   lens: { label: "lens", colour: "#7dd3fc", glyph: "pill" },
   beam_splitter: { label: "beam splitter", colour: "#e879f9", glyph: "diamond" },
+  pump_port: { label: "vacuum pump", colour: "#2dd4bf", glyph: "circle" },
+  gauge_port: { label: "vacuum gauge", colour: "#5eead4", glyph: "triangle" },
+  gate_valve: { label: "valve", colour: "#14b8a6", glyph: "square" },
+  fast_valve: { label: "fast valve", colour: "#0d9488", glyph: "square" },
+  bellows: { label: "bellows", colour: "#99f6e4", glyph: "bar" },
+  generic_vacuum: { label: "vacuum", colour: "#2dd4bf", glyph: "circle" },
+  marker: { label: "marker", colour: "#cbd5e1", glyph: "diamond" },
   drift: { label: "drift", colour: "#475569", glyph: "box" },
   generic: { label: "other", colour: "#94a3b8", glyph: "circle" },
 };

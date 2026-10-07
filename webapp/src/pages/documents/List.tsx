@@ -3,7 +3,9 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { documentsApi, schemasApi } from "../../api/client";
 import { BulkActionsBar } from "../../components/BulkActionsBar";
+import { useWorkspaceNames } from "../../api/useWorkspaceNames";
 import { ListDate, SortHeader, useSort } from "../../components/SortableTable";
+import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 
 const AUTHORITY_STYLES: Record<string, string> = {
   ufficiale: "bg-indigo-100 text-indigo-700",
@@ -13,6 +15,8 @@ const AUTHORITY_STYLES: Record<string, string> = {
 
 export function DocumentList() {
   const queryClient = useQueryClient();
+  const workspaceId = useCurrentWorkspaceId();
+  const workspaceName = useWorkspaceNames();
   const { data, isLoading } = useQuery({ queryKey: ["documents"], queryFn: () => documentsApi.list() });
   const schemas = useQuery({ queryKey: ["schemas"], queryFn: schemasApi.list });
   const documentSchemas = useMemo(
@@ -180,6 +184,14 @@ export function DocumentList() {
                     <Link to={`/documents/${d.uid}`} className="hover:underline">
                       {d.title}
                     </Link>
+                    {d.is_global && (
+                      <span
+                        className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 text-xs font-normal text-sky-700"
+                        title={d.workspace_id === workspaceId ? "Readable in every workspace" : "Editing belongs to that workspace"}
+                      >
+                        {d.workspace_id === workspaceId ? "shared" : `shared from ${workspaceName(d.workspace_id)}`}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-slate-500">
                     {d.document_type_uid ? typeName.get(d.document_type_uid) ?? "—" : "—"}

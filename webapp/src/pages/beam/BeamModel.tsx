@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { LayoutView, LineView, place } from "./LatticeViews";
 import { Link, useSearchParams } from "react-router-dom";
@@ -14,6 +14,14 @@ import type { BeamElementContext, BeamNode, BeamPathGraph, BeamRecord } from "..
 export function BeamModelPage() {
   const [params, setParams] = useSearchParams();
   const systems = useQuery({ queryKey: ["beam-systems"], queryFn: beamModelApi.systems });
+  const queryClient = useQueryClient();
+  const remove = useMutation({
+    mutationFn: beamModelApi.removeModel,
+    onSuccess: () => {
+      setParams({});
+      void queryClient.invalidateQueries({ queryKey: ["beam-systems"] });
+    },
+  });
   // The first system's main path (its largest) when none is chosen: the ring, not its extraction line.
   const pathUid = params.get("path") ?? mainPath(systems.data?.[0]?.paths ?? []) ?? null;
   const [dataset, setDataset] = useState<string | null>(null);
@@ -63,6 +71,9 @@ export function BeamModelPage() {
                     onClick={() => void beamModelApi.exportAll().then((b) => downloadJson("beam-models.json", b))}>Export all</button>
           )}
         </div>
+        {remove.isError && (
+          <p className="mt-2 text-xs text-rose-700">{String((remove.error as Error).message ?? remove.error)}</p>
+        )}
         {systems.data?.length === 0 && (
           <p className="mt-4 text-xs text-slate-500">
             No beam model in this workspace. Import one with <code>POST /v1/beam-model/import</code>, or try the demo
@@ -80,6 +91,14 @@ export function BeamModelPage() {
                         title="Match the model's components to physical assets">assets</Link>
                   <button type="button" className="text-indigo-700 hover:underline"
                           onClick={() => void beamModelApi.exportModel(s.model_id!).then((m) => downloadJson(`${s.model_id}.json`, m))}>export</button>
+                  <button type="button" className="text-rose-700 hover:underline" disabled={remove.isPending}
+                          title="Remove the whole model from this workspace"
+                          onClick={() => {
+                            if (window.confirm(`Remove the beam model ${s.model_id} from this workspace?\n\n` +
+                                "Its systems, paths, elements and datasets are retired (their history, tickets and " +
+                                "installations stay); its values, stored documents and asset bindings are deleted. " +
+                                "Importing the model again brings it back.")) remove.mutate(s.model_id!);
+                          }}>remove</button>
                 </span>
               )}
             </div>
