@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:argus_api/api.dart' as api;
 
 import 'api_service.dart';
@@ -34,12 +36,14 @@ class AskTextReset extends AskEvent {
 
 /// A lookup in the records: started ([done] false), then finished with a short summary.
 class AskLookup extends AskEvent {
-  const AskLookup({required this.index, required this.tool, this.summary, this.error, this.done = false});
+  const AskLookup({required this.index, required this.tool, this.summary, this.error, this.done = false, this.result});
   final int index;
   final String tool;
   final String? summary;
   final String? error;
   final bool done;
+  /// What the lookup returned (JSON, possibly cut short): the records an answer cites come from here.
+  final String? result;
 }
 
 /// The end of the turn: the whole answer, and whether it was cut short.
@@ -61,6 +65,35 @@ class AskTurn {
   String? error;
 
   bool get finished => stopped != null;
+
+  /// Every record the lookups returned, by the key, code or ticket key an answer cites it with, to its
+  /// screen (the web's Ask links them the same way).
+  Map<String, String> get recordLinks {
+    final links = <String, String>{};
+    void walk(Object? v) {
+      if (v is List) {
+        v.forEach(walk);
+      } else if (v is Map) {
+        final uid = v['uid'];
+        if (uid is String) {
+          if (v['key'] is String) links[v['key'] as String] = '/asset/$uid';
+          if (v['code'] is String) links[v['code'] as String] = '/document/$uid';
+          if (v['source_key'] is String) links[v['source_key'] as String] = '/ticket/$uid';
+        }
+        v.values.forEach(walk);
+      }
+    }
+
+    for (final l in lookups) {
+      if (l.result == null) continue;
+      try {
+        walk(jsonDecode(l.result!));
+      } catch (_) {
+        // a result cut short is not JSON: its records just are not linked
+      }
+    }
+    return links;
+  }
 }
 
 class AskConversationSummary {
@@ -106,6 +139,7 @@ class AskRepository {
             summary: e['summary']?.toString(),
             error: e['error']?.toString(),
             done: true,
+            result: e['result']?.toString(),
           );
         case 'done':
           yield AskDone(
@@ -138,7 +172,7 @@ class AskRepository {
           ..error = m.error
           ..lookups.addAll([
             for (final (i, s) in (m.steps ?? const <api.AskStep>[]).indexed)
-              AskLookup(index: i, tool: s.tool, error: s.error, done: true),
+              AskLookup(index: i, tool: s.tool, error: s.error, done: true, result: s.result),
           ]);
       }
     }

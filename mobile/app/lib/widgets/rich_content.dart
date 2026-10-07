@@ -11,24 +11,41 @@ import 'package:html/parser.dart' show parse;
 /// a dedicated HTML-widget package pulled in an incompatible `html`/`csslib` release that would not even
 /// compile, and there is no reason to carry two rendering engines for text this simple (block tags,
 /// bold/italic, lists, links — no embedded styling worth keeping).
+///
+/// [codeLink] turns an inline code span that names a record (`SPARC:ELM:SBNQUA01`) into a link to its
+/// screen, opened with [onLink]; without them links inside the text are informational only.
 class RichContent extends StatelessWidget {
-  const RichContent(this.text, {super.key, this.style});
+  const RichContent(this.text, {super.key, this.style, this.codeLink = const {}, this.onLink, this.selectable = true});
 
   final String text;
   final TextStyle? style;
+  final Map<String, String> codeLink;
+  final void Function(String path)? onLink;
+  /// Selectable text does not pass taps to links: text with links goes in a SelectionArea instead.
+  final bool selectable;
+
+  static final _code = RegExp(r'(?<![`\[])`([^`\n]+)`(?!`)');
 
   static final _htmlTag = RegExp(r'<(p|div|span|table|tr|td|th|ul|ol|li|br|b|i|strong|em|h[1-6])[\s>/]', caseSensitive: false);
 
   @override
   Widget build(BuildContext context) {
     if (text.trim().isEmpty) return const SizedBox.shrink();
-    final markdown = _htmlTag.hasMatch(text) ? htmlToMarkdown(text) : text;
+    var markdown = _htmlTag.hasMatch(text) ? htmlToMarkdown(text) : text;
+    if (codeLink.isNotEmpty) {
+      markdown = markdown.replaceAllMapped(_code, (m) {
+        final to = codeLink[m[1]!.trim()];
+        return to == null ? m[0]! : '[${m[0]}](argus:$to)';
+      });
+    }
     final body = Theme.of(context).textTheme.bodyMedium?.merge(style) ?? style;
     return MarkdownBody(
       data: markdown,
-      selectable: true,
+      selectable: selectable,
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(p: body),
-      onTapLink: (text, href, title) {}, // links inside imported text are informational only here
+      onTapLink: (text, href, title) {
+        if (href != null && href.startsWith('argus:')) onLink?.call(href.substring('argus:'.length));
+      },
     );
   }
 }

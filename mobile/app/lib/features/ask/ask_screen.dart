@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../core/problem.dart';
 import '../../data/ask_repository.dart';
 import '../../widgets/common.dart';
+import '../../widgets/rich_content.dart';
 import 'voice.dart';
 
 /// Ask: a question answered from the workspace's records, typed or spoken, as a conversation
@@ -375,7 +377,13 @@ class _TurnView extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 10, 4, 4),
           decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(16)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            SelectableText(turn.answer, key: const Key('ask-answer')),
+            SelectionArea(
+              child: RichContent(turn.answer,
+                  key: const Key('ask-answer'),
+                  selectable: false,
+                  codeLink: turn.finished ? turn.recordLinks : const {},
+                  onLink: (path) => context.push(path)),
+            ),
             if (turn.finished)
               Align(
                 alignment: Alignment.centerRight,

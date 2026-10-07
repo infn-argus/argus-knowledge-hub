@@ -412,10 +412,22 @@ class Cockpit {
     this.awaitingReview = const [],
     this.reviewOverdue = const [],
     this.recent = const [],
+    this.totalTickets,
+    this.unassigned,
+    this.withoutAsset,
+    this.inReview,
+    this.notLinked,
+    this.assets,
   });
 
   final List<CockpitItem> mine;
   final int? openTickets; // null: tickets not readable here
+  final int? totalTickets;
+  final int? unassigned; // open, nobody on it
+  final int? withoutAsset; // open, linked to no equipment
+  final int? inReview; // revisions waiting for approval; null: documents not readable here
+  final int? notLinked; // documents that apply to no equipment or type yet
+  final int? assets; // owned by this workspace; null: records not readable here
   final Map<String, int> byState;
   final List<CockpitItem> hotspots;
   final List<CockpitItem> awaitingReview;

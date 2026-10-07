@@ -202,9 +202,10 @@ class _InboxBell extends ConsumerWidget {
   }
 }
 
-/// The operations cockpit, what home shows before a search: assigned to me, open tickets, the equipment they
-/// pile up on, documents waiting for review, and recent activity — the web's home, from the same overview.
-/// Without it (offline, or not yet loaded) the scanning hint still shows.
+/// The operations cockpit, what home shows before a search — the web's home, from the same overview: the
+/// counts that need attention, what is assigned to me, the equipment tickets pile up on, the documents due
+/// for review or approval, open tickets by state, and recent activity. A section the person may not read is
+/// absent. Without the overview (offline, or not yet loaded) the scanning hint still shows.
 class _Cockpit extends ConsumerWidget {
   const _Cockpit();
 
@@ -212,43 +213,155 @@ class _Cockpit extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final r = ref.watch(cockpitProvider);
     final c = r.value;
+    final review = c == null
+        ? const <CockpitItem>[]
+        : [...c.reviewOverdue, ...c.awaitingReview.where((d) => !c.reviewOverdue.any((o) => o.uid == d.uid))];
     return RefreshIndicator(
       onRefresh: () async => ref.invalidate(cockpitProvider),
       child: ListView(key: const Key('home-cockpit'), padding: const EdgeInsets.only(bottom: 88), children: [
         if (r.isLoading && c == null) const LinearProgressIndicator(),
         if (c == null) const _Hint(),
         if (c != null) ...[
+          _Kpis(c),
           if (c.mine.isNotEmpty) ...[
             SectionHeader('Assigned to me', trailing: '${c.mine.length}'),
             for (final t in c.mine) _CockpitTile(t),
           ],
-          if (c.openTickets != null)
-            ListTile(
-              key: const Key('cockpit-open-tickets'),
-              leading: const Icon(Icons.confirmation_number_outlined),
-              title: Text('${c.openTickets} open ticket${c.openTickets == 1 ? '' : 's'}'),
-              subtitle: c.byState.isEmpty
-                  ? null
-                  : Text(c.byState.entries.where((e) => e.value > 0).map((e) => '${e.key} ${e.value}').join(' · ')),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/tickets'),
-            ),
-          if (c.hotspots.isNotEmpty) ...[
+          if (c.openTickets != null) ...[
             const SectionHeader('Equipment needing attention'),
+            if (c.hotspots.isEmpty) const _Empty('No equipment has open tickets.'),
             for (final a in c.hotspots) _CockpitTile(a),
           ],
-          if (c.reviewOverdue.isNotEmpty || c.awaitingReview.isNotEmpty) ...[
-            const SectionHeader('Documents to review'),
-            for (final d in c.reviewOverdue) _CockpitTile(d, warning: 'review overdue'),
-            for (final d in c.awaitingReview) _CockpitTile(d, warning: 'waiting for approval'),
+          if (c.inReview != null) ...[
+            SectionHeader('Knowledge health',
+                trailing: (c.notLinked ?? 0) > 0 ? '${c.notLinked} not linked to equipment' : null),
+            if (review.isEmpty) const _Empty('No document is overdue for review or waiting for approval.'),
+            for (final d in review.take(8))
+              _CockpitTile(d, warning: c.reviewOverdue.contains(d) ? 'review overdue' : 'waiting for approval'),
+          ],
+          if (c.openTickets != null) ...[
+            const SectionHeader('Open tickets by state'),
+            if (c.byState.isEmpty) const _Empty('No open tickets.'),
+            _ByState(c.byState),
           ],
           const SectionHeader('Recent activity'),
-          if (c.recent.isEmpty) const ListTile(title: Text('Nothing yet.')),
+          if (c.recent.isEmpty) const _Empty('Nothing yet.'),
           for (final x in c.recent) _CockpitTile(x, showWhen: true),
         ],
       ]),
     );
   }
+}
+
+/// The counts at the top of the web's cockpit, each leading to where the work is.
+class _Kpis extends StatelessWidget {
+  const _Kpis(this.c);
+
+  final Cockpit c;
+
+  @override
+  Widget build(BuildContext context) {
+    final error = Theme.of(context).colorScheme.error;
+    final tiles = [
+      if (c.openTickets != null) ...[
+        _Kpi(key: const Key('cockpit-open-tickets'), label: 'Open tickets', value: c.openTickets!,
+            hint: c.totalTickets == null ? null : '${c.totalTickets} in total', to: '/tickets'),
+        _Kpi(label: 'Unassigned', value: c.unassigned ?? 0, hint: 'nobody on it', to: '/tickets',
+            alert: (c.unassigned ?? 0) > 0 ? error : null),
+        _Kpi(label: 'No equipment', value: c.withoutAsset ?? 0, hint: 'open, no asset', to: '/tickets',
+            alert: (c.withoutAsset ?? 0) > 0 ? Colors.amber.shade800 : null),
+      ],
+      if (c.inReview != null) ...[
+        _Kpi(label: 'Awaiting approval', value: c.inReview!, hint: 'revisions in review', to: '/documents'),
+        _Kpi(label: 'Reviews overdue', value: c.reviewOverdue.length, hint: 'past review date', to: '/documents',
+            alert: c.reviewOverdue.isNotEmpty ? error : null),
+      ],
+      if (c.assets != null) _Kpi(label: 'Assets', value: c.assets!, hint: 'in this workspace'),
+    ];
+    if (tiles.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: LayoutBuilder(builder: (context, box) {
+        final columns = box.maxWidth >= 560 ? 6 : 3;
+        final width = (box.maxWidth - 8 * (columns - 1)) / columns;
+        return Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final t in tiles) SizedBox(width: width, child: t),
+        ]);
+      }),
+    );
+  }
+}
+
+class _Kpi extends StatelessWidget {
+  const _Kpi({super.key, required this.label, required this.value, this.hint, this.to, this.alert});
+
+  final String label;
+  final int value;
+  final String? hint;
+  final String? to;
+  final Color? alert;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: to == null ? null : () => context.push(to!),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.labelSmall),
+            Text('$value', style: theme.textTheme.headlineSmall?.copyWith(color: alert)),
+            if (hint != null)
+              Text(hint!, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Open tickets per state, largest first, each with a bar of its share.
+class _ByState extends StatelessWidget {
+  const _ByState(this.byState);
+
+  final Map<String, int> byState;
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = byState.entries.where((e) => e.value > 0).toList()..sort((a, b) => b.value.compareTo(a.value));
+    final total = entries.fold<int>(0, (n, e) => n + e.value);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(key: const Key('cockpit-by-state'), children: [
+        for (final e in entries)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(children: [
+              SizedBox(width: 110, child: Text(e.key.replaceAll('_', ' '), overflow: TextOverflow.ellipsis)),
+              Expanded(child: LinearProgressIndicator(value: e.value / total, minHeight: 6,
+                  borderRadius: BorderRadius.circular(3))),
+              SizedBox(width: 40, child: Text('${e.value}', textAlign: TextAlign.right)),
+            ]),
+          ),
+      ]),
+    );
+  }
+}
+
+class _Empty extends StatelessWidget {
+  const _Empty(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: Text(text, style: TextStyle(color: Theme.of(context).colorScheme.outline)),
+      );
 }
 
 class _CockpitTile extends StatelessWidget {

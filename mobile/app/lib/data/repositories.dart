@@ -467,6 +467,12 @@ class CockpitRepository {
       awaitingReview: _list(documents?['awaiting_review']).map(_map).map(document).toList(),
       reviewOverdue: _list(documents?['review_overdue']).map(_map).map(document).toList(),
       recent: recent.take(12).toList(),
+      totalTickets: (tickets?['total'] as num?)?.toInt(),
+      unassigned: (tickets?['unassigned'] as num?)?.toInt(),
+      withoutAsset: (tickets?['without_asset'] as num?)?.toInt(),
+      inReview: (documents?['in_review'] as num?)?.toInt(),
+      notLinked: (documents?['not_linked_to_assets'] as num?)?.toInt(),
+      assets: (assets?['own'] as num?)?.toInt(),
     );
   }
 }

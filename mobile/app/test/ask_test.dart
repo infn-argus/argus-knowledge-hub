@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
+import 'fake_server.dart';
 import 'harness.dart';
 
 const _usable = {'configured': true, 'enabled': true, 'validated': true, 'model': 'test-model'};
@@ -23,11 +24,12 @@ final _answer = _events([
   {'type': 'text', 'text': 'Let me look.'},
   {'type': 'text_reset'},
   {'type': 'step_start', 'index': 0, 'tool': 'search_records', 'arguments': {'q': 'IP-0001'}},
-  {'type': 'step', 'index': 0, 'tool': 'search_records', 'arguments': {}, 'result': '[]', 'error': null,
+  {'type': 'step', 'index': 0, 'tool': 'search_records', 'arguments': {},
+    'result': jsonEncode([{'uid': ionPumpUid, 'key': 'SLICE-IP-0001', 'name': 'Ion pump'}]), 'error': null,
     'seconds': 0.1, 'summary': '2 records'},
   {'type': 'text', 'text': 'Follow **PROC-12**: '},
-  {'type': 'text', 'text': 'switch it off, wait a minute.'},
-  {'type': 'done', 'answer': 'Follow **PROC-12**: switch it off, wait a minute.', 'steps': [], 'stopped': 'answered',
+  {'type': 'text', 'text': 'switch `SLICE-IP-0001` off, wait a minute.'},
+  {'type': 'done', 'answer': 'Follow **PROC-12**: switch `SLICE-IP-0001` off, wait a minute.', 'steps': [], 'stopped': 'answered',
     'error': null, 'seconds': 1.2},
 ]);
 
@@ -69,7 +71,9 @@ void main() {
 
     expect(find.text('How is IP-0001 reset?'), findsOneWidget);
     expect(find.text('2 records'), findsOneWidget, reason: 'the lookup behind the answer is shown');
-    expect(find.text('Follow **PROC-12**: switch it off, wait a minute.'), findsOneWidget);
+    expect(find.textContaining('Follow PROC-12: switch SLICE-IP-0001 off', findRichText: true), findsOneWidget,
+        reason: 'the answer is Markdown, rendered: no ** or backticks left in it');
+    expect(find.textContaining('**', findRichText: true), findsNothing);
     expect(find.textContaining('Let me look'), findsNothing, reason: 'text before lookups is not the answer');
     expect(app.server.sent('POST', '/v1/ai/chat').single, {'question': 'How is IP-0001 reset?'});
 
@@ -88,7 +92,7 @@ void main() {
     await app.tap('ask-handsfree');
 
     expect(app.server.sent('POST', '/v1/ai/chat').single['question'], 'How is IP-0001 reset?');
-    expect(voice.said, ['Follow PROC-12: switch it off, wait a minute.'], reason: 'read without Markdown marks');
+    expect(voice.said, ['Follow PROC-12: switch SLICE-IP-0001 off, wait a minute.'], reason: 'read without Markdown marks');
     // It listened again and heard nothing: hands-free ends, no second question is sent.
     expect(app.server.sent('POST', '/v1/ai/chat'), hasLength(1));
     expect(tester.widget<IconButton>(find.byKey(const Key('ask-handsfree'))).isSelected, isFalse);
@@ -105,7 +109,7 @@ void main() {
 
     expect(voice.said, isEmpty);
     await app.tap('ask-read-aloud');
-    expect(voice.said, ['Follow PROC-12: switch it off, wait a minute.']);
+    expect(voice.said, ['Follow PROC-12: switch SLICE-IP-0001 off, wait a minute.']);
   });
 
   testWidgets('without a usable AI endpoint the assistant says why instead of offering itself', (tester) async {
@@ -135,5 +139,19 @@ void main() {
   test('what is read aloud has no Markdown, links or code', () {
     expect(spoken('## Steps\n- **Open** [PROC-12](/document/x)\n- `reset` it\n```\ncode\n```'),
         'Steps\nOpen PROC-12\nreset it');
+  });
+
+  testWidgets('a record the answer cites is a link to it', (tester) async {
+    final app = await start(tester);
+    app.server.routes['GET /v1/ai/status'] = _json(_usable);
+    app.server.routes['POST /v1/ai/chat'] = _answer;
+    await app.tap('home-ask');
+    await app.type('ask-input', 'How is IP-0001 reset?');
+    await app.tap('ask-send');
+
+    await tester.tapOnText(find.textRange.ofSubstring('SLICE-IP-0001'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ask-input')), findsNothing, reason: 'the record opened over the chat');
+    expect(app.server.requests.any((q) => q.url.path == '/v1/assets/$ionPumpUid'), isTrue);
   });
 }
