@@ -378,6 +378,22 @@ def list_models(workspace_id: str = Depends(require_permission("read")), db: Ses
     return bm.list_models(db, workspace_id)
 
 
+@model_router.delete("/models/{model_id}")
+def remove_model(model_id: str, workspace_id: str = Depends(require_permission("delete")),
+                 identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Remove a whole model: its records retire (their history, tickets and installations stay), its values,
+    stored documents and bindings go. Importing it again brings it back."""
+    try:
+        report = bm.remove_model(db, workspace_id, model_id, actor=_actor(identity))
+    except bm.BeamModelError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="; ".join(e.problems)) from e
+    if report is None:
+        raise HTTPException(status_code=404, detail="No such beam model in this workspace")
+    db.commit()
+    return report
+
+
 @model_router.get("/models/{model_id}/export")
 def export_model(model_id: str, format: Optional[str] = Query(None, pattern="^(1|2)$"),
                  workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):

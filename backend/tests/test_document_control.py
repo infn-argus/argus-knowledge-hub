@@ -146,3 +146,44 @@ def test_an_access_review_captures_every_grant_and_needs_two_distinct_signers(ws
     done = sign(second["id"], "owner-b").json()
     assert done["completed_at"] is not None and len(done["signatures"]) == 2
     db.close()
+
+
+def test_a_shared_document_is_read_with_its_files_in_every_workspace_and_changed_only_in_its_own(ws, tmp_path):
+    owner, headers = ws
+    reader = f"doc-{secrets.token_hex(3)}"
+    db = SessionLocal()
+    db.add(Workspace(id=reader, name="Elsewhere"))
+    db.flush()
+    elsewhere = token(db, reader)
+    db.commit()
+    uid = published(headers, "Shared vacuum rules")
+    rev = client.get(f"/v1/documents/{uid}/current", headers=headers).json()["uid"]
+    picture = tmp_path / "valve.png"
+    picture.write_bytes(b"png")
+    att = Attachment(uid=str(uuid.uuid4()), workspace_id=owner, document_revision_uid=rev, filename="valve.png",
+                     mime_type="image/png", storage_path=str(picture), file_size=3)
+    db.add(att)
+    db.commit()
+    att_uid = att.uid
+    db.close()
+
+    def seen_elsewhere():
+        return [d["uid"] for d in client.get("/v1/documents", headers=elsewhere).json()]
+
+    assert uid not in seen_elsewhere()
+    assert client.get(f"/v1/attachments/{att_uid}", headers=elsewhere).status_code == 404
+
+    assert client.put(f"/v1/documents/{uid}", headers=headers, json={"is_global": True}).status_code == 200
+    assert uid in seen_elsewhere()
+    assert client.get(f"/v1/documents/{uid}/current", headers=elsewhere).json()["uid"] == rev
+    got = client.get(f"/v1/attachments/{att_uid}", headers=elsewhere)
+    assert got.status_code == 200 and got.content == b"png", "its pictures open where it is shared"
+    assert client.put(f"/v1/documents/{uid}", headers=elsewhere, json={"title": "Mine now"}).status_code == 404
+    assert client.delete(f"/v1/attachments/{att_uid}", headers=elsewhere).status_code == 404
+
+    db = SessionLocal()                                   # (the API refuses to make a shared document riservato)
+    db.get(Document, uid).confidentiality = "riservato"
+    db.commit()
+    db.close()
+    assert uid not in seen_elsewhere(), "riservato is never shared"
+    assert client.get(f"/v1/attachments/{att_uid}", headers=elsewhere).status_code == 404

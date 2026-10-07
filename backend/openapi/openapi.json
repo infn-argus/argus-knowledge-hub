@@ -18074,6 +18074,84 @@
         ]
       }
     },
+    "/v1/beam-model/models/{model_id}": {
+      "delete": {
+        "description": "Remove a whole model: its records retire (their history, tickets and installations stay), its values,\nstored documents and bindings go. Importing it again brings it back.",
+        "operationId": "remove_model_v1_beam_model_models__model_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Model",
+        "tags": [
+          "beam-model"
+        ]
+      }
+    },
     "/v1/beam-model/models/{model_id}/export": {
       "get": {
         "description": "One model as canonical JSON — in the format it was imported in, or `format` 1 or 2. v2 gives back the\ndocument whole with the hub's current bindings; v1 is rebuilt from what the hub holds now. Either imports\nagain, here or in another hub, as the same model.",

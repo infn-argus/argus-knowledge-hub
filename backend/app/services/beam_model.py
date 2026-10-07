@@ -35,7 +35,7 @@ from collections import defaultdict, deque
 from typing import Iterable, Optional
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.ledger import engine
@@ -497,6 +497,50 @@ def import_canonical(db: Session, workspace_id: str, doc: dict, actor: str = "im
                               roll=g.roll if g else None, physics=physics, optics=v.optics or {}, native=own_native))
         report["values"] += 1
     report["document_revision"] = v2.store(db, workspace_id, m, check.to_dict(), actor, native)
+    db.flush()
+    return report
+
+
+def remove_model(db: Session, workspace_id: str, model_id: str, actor: str) -> Optional[dict]:
+    """Take a whole model out of a workspace. Its records (systems, paths, elements, datasets) retire through the
+    ledger — the model's stream publishes a revision that lists nothing, approved by the person removing it,
+    since the ledger's guard holds any revision that would retire this much — so their history and any ticket
+    or installation that points at them stay intact. What the import wrote beside the ledger goes: the
+    datasets' values, the stored model documents and the asset bindings. Importing the model again brings it
+    back as the same records. None when the workspace has no such model."""
+    from app.models.ledger import LedgerStream
+    from app.models.beam_model import BeamAssetBinding, BeamModelDocument
+    stream_id = f"beam-model:{workspace_id}:{model_id}"
+    stream = db.get(LedgerStream, stream_id)
+    documents = db.scalar(select(func.count()).select_from(BeamModelDocument).where(
+        BeamModelDocument.workspace_id == workspace_id, BeamModelDocument.model_id == model_id)) or 0
+    records = [a for a in db.scalars(select(Asset).where(Asset.workspace_id == workspace_id,
+                                                          Asset.deleted_at.is_(None)))
+               if (a.attributes or {}).get("model_id") == model_id]
+    if stream is None and not documents and not records:
+        return None
+    report = {"model": model_id, "retired": 0, "values": 0, "documents": documents, "bindings": 0}
+    if stream is not None:
+        before = sum(1 for a in records if _live(a))
+        result = engine.ingest(db, stream_id, revision=f"removed-{engine.ulid()[:12]}", content=b"[]",
+                               observed_at=engine.now(), parser="resolved",
+                               cause=f"beam model {model_id} removed by {actor}")
+        if result.get("state") == "held":
+            engine.approve_revision(db, result["revision_id"], actor)
+        elif result.get("state") != "published":
+            raise BeamModelError([f"the model could not be removed: its source is {result.get('state')}"
+                                  + (f" ({result['reason']})" if result.get("reason") else "")])
+        db.flush()
+        for a in records:
+            db.refresh(a)
+        report["retired"] = before - sum(1 for a in records if _live(a))
+    datasets = [a.uid for a in records if a.type == "Model Dataset"]
+    if datasets:
+        report["values"] = db.execute(delete(BeamModelValue).where(BeamModelValue.dataset_uid.in_(datasets))).rowcount
+    report["bindings"] = db.execute(delete(BeamAssetBinding).where(BeamAssetBinding.workspace_id == workspace_id,
+                                                                   BeamAssetBinding.model_id == model_id)).rowcount
+    db.execute(delete(BeamModelDocument).where(BeamModelDocument.workspace_id == workspace_id,
+                                               BeamModelDocument.model_id == model_id))
     db.flush()
     return report
 

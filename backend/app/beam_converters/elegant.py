@@ -147,7 +147,6 @@ def convert_elegant(text: str, filename: str, options: Options) -> dict:
         if (base == "drift" and not options.keep_drifts) or (base == "marker" and not options.keep_markers):
             pos += length
             continue
-        base = "generic" if base == "marker" else base
         physics: dict = {}
         if base == "dipole":
             physics["angle"] = num("ANGLE")

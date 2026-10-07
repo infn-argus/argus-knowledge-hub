@@ -183,10 +183,8 @@ def _placed(lat: _Lattice, name: str, attrs: dict, s: float, length: float, opti
         return None
     if base == "drift" and not options.keep_drifts:
         return None
-    if base == "marker":
-        if not options.keep_markers:
-            return None
-        base = "generic"
+    if base == "marker" and not options.keep_markers:
+        return None
     # The physics follows the simulator's class; the name only refines the kind (a HKICKER called KCK…
     # is a fast kicker, an RBEND called SEP… a septum).
     kind = hint(name, base, options)
@@ -316,7 +314,7 @@ def convert_tfs(text: str, filename: str, options: Options) -> dict:
         if name.startswith("$") or (kind == "drift" and not options.keep_drifts) or \
                 (kind == "marker" and not options.keep_markers):
             continue
-        kind = "generic" if kind == "marker" else hint(name, kind, options)
+        kind = hint(name, kind, options)
         length = num("L")
         physics: dict = {}
         if kind == "dipole":

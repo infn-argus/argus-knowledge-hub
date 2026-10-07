@@ -31,7 +31,9 @@ class ConversionError(ValueError):
 class Options:
     """What the person can say that a simulator file does not: the model's id and name, the system, the
     topology (`auto` reads it from the bends: a full turn is a ring), the beam, which beam line to use when a
-    file defines several, and whether to keep markers and drifts as elements."""
+    file defines several, and whether to keep markers and drifts as elements. Markers are kept unless asked
+    otherwise: a lattice places with them what its simulation does not compute (pumps, valves, gauges), and
+    the beam model describes the beam line, not one simulator's view of it."""
     model_id: Optional[str] = None
     model_name: Optional[str] = None
     version: Optional[str] = None
@@ -41,7 +43,7 @@ class Options:
     beamline: Optional[str] = None
     species: Optional[str] = None
     reference_energy: Optional[float] = None
-    keep_markers: bool = False
+    keep_markers: bool = True
     keep_drifts: bool = False
     name_hints: bool = True
     output: str = "2"                   # "2": argus.beam-model/2; "1": the v1 form

@@ -98,7 +98,7 @@ def convert_xsuite(text: str, filename: str, options: Options) -> dict:
             for k, out in (("voltage", "voltage"), ("frequency", "frequency"), ("lag", "phase")):
                 if e.get(k) is not None:
                     physics[out] = float(e[k])
-        kind = hint(name, kind, options) if kind in ("generic", "corrector", "dipole") else kind
+        kind = hint(name, kind, options) if kind in ("generic", "corrector", "dipole", "marker") else kind
         native = {k: v for k, v in e.items() if k != "__class__"}
         placed.append(Placed(name=name, kind=kind, s=pos, length=length, native_type=cls, native=native,
                              physics=physics))

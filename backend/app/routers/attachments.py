@@ -24,6 +24,29 @@ def _get_owned_attachment(uid: str, workspace_id: str, db: Session) -> Attachmen
     return attachment
 
 
+def _get_readable_attachment(uid: str, workspace_id: str, db: Session) -> Attachment:
+    """A file this workspace may read: its own, or one belonging to a record shared with every workspace — a
+    global document's revision (never one marked riservato) or global equipment. A shared procedure whose
+    pictures and files only its own workspace could open would be shared in name only."""
+    attachment = db.get(Attachment, uid)
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if attachment.workspace_id == workspace_id:
+        return attachment
+    from app.models.document import Document, DocumentRevision
+    from app.services.visibility import asset_visible_in
+    if attachment.document_revision_uid:
+        revision = db.get(DocumentRevision, attachment.document_revision_uid)
+        doc = db.get(Document, revision.document_uid) if revision else None
+        if doc is not None and doc.is_global and doc.confidentiality != "riservato":
+            return attachment
+    if attachment.asset_uid:
+        asset = db.get(Asset, attachment.asset_uid)
+        if asset is not None and asset_visible_in(asset, workspace_id):
+            return attachment
+    raise HTTPException(status_code=404, detail="Attachment not found")
+
+
 @router.post("", response_model=AttachmentOut, status_code=201)
 async def upload_attachment(
     asset_uid: str,
@@ -61,7 +84,7 @@ async def upload_attachment(
 def download_attachment(
     uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)
 ):
-    attachment = _get_owned_attachment(uid, workspace_id, db)
+    attachment = _get_readable_attachment(uid, workspace_id, db)
     return FileResponse(
         attachment.storage_path,
         media_type=attachment.mime_type or "application/octet-stream",
@@ -73,7 +96,7 @@ def download_attachment(
 def verify_attachment(uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     """Whether the stored file still has the checksum recorded when it arrived."""
     from app.models.attachment import file_sha256
-    attachment = _get_owned_attachment(uid, workspace_id, db)
+    attachment = _get_readable_attachment(uid, workspace_id, db)
     now = file_sha256(attachment.storage_path)
     return {"uid": uid, "recorded": attachment.sha256, "actual": now,
             "ok": now is not None and now == attachment.sha256, "missing": now is None}

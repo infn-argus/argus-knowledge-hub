@@ -137,6 +137,19 @@ NAME_HINTS = [  # (prefix of the element name, kind) — only when the simulator
     (r"^(kck|kick|kik)", "kicker"), (r"^(sep|spt|sept)", "septum"), (r"^(bpm|bps|bpm_)", "bpm"),
     (r"^(scr|flg|yag|otr)", "screen"),
 ]
+# A marker is how a lattice places what the simulation does not compute — a pump, a valve, a gauge — and the
+# beam model keeps it: MAD-X is one of the formats it reads, not the measure of what is on the beam line.
+# Its name says what it is, when it follows the usual conventions; otherwise it stays a marker.
+MARKER_HINTS = [
+    (r"^(vpi|vpu|sip|igp|tmp|ngp|pmp|pump|ionp|vip)", "pump_port"),
+    (r"^(vg|gauge|pig)", "gauge_port"),
+    (r"^(fv|vfv|fast_?valve)", "fast_valve"),
+    (r"^(vvs|vvg|vlv|valve|gv|vv)", "gate_valve"),
+    (r"^(bel|blw|bellow)", "bellows"),
+    (r"^flange", "flange"),
+    (r"^(win|vwin)", "vacuum_window"),
+    *NAME_HINTS,
+]
 OBSERVES = {"bpm": ["beam.position.x", "beam.position.y"], "screen": ["beam.size.x", "beam.size.y"]}
 
 
@@ -160,9 +173,9 @@ class Placed:
 
 
 def hint(name: str, kind: str, options: Options) -> str:
-    if not options.name_hints or kind not in ("generic", "corrector", "dipole", "generic_monitor"):
+    if not options.name_hints or kind not in ("generic", "corrector", "dipole", "generic_monitor", "marker"):
         return kind
-    for pattern, k in NAME_HINTS:
+    for pattern, k in (MARKER_HINTS if kind == "marker" else NAME_HINTS):
         if re.match(pattern, name.lower()):
             return k
     return kind

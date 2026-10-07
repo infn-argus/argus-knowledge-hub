@@ -418,3 +418,36 @@ def test_the_relations_are_classified_and_registered():
 
 def _now():
     return datetime.now(timezone.utc)
+
+
+def test_a_model_is_removed_whole_and_comes_back_when_imported_again(world, db):
+    ws, h = world["ws"], world["h"]
+    from app.models.beam_model import BeamModelDocument
+    linac = [a.uid for a in db.scalars(select(Asset).where(Asset.workspace_id == ws))
+             if (a.attributes or {}).get("model_id") == "linac-demo"]
+    assert linac
+    r = client.delete("/v1/beam-model/models/linac-demo", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["retired"] == len(linac)
+    db.expire_all()
+    assert "linac-demo" not in {m["model_id"] for m in bm.list_models(db, ws)}
+    assert {m["model_id"] for m in bm.list_models(db, ws)} == {"dafne-accumulator", "laser-transport"}, \
+        "the other models are untouched"
+    assert all(db.get(Asset, u).record_status == "Retired" for u in linac), "retired, history kept"
+    assert not db.scalars(select(BeamModelDocument).where(BeamModelDocument.workspace_id == ws,
+                                                          BeamModelDocument.model_id == "linac-demo")).first()
+    assert not db.scalars(select(BeamModelValue).where(BeamModelValue.dataset_uid.in_(linac))).first()
+    assert client.get("/v1/beam-model/models/linac-demo/export", headers=h).status_code == 404
+    assert client.delete("/v1/beam-model/models/linac-demo", headers=h).status_code in (200, 404)
+
+    bm.import_canonical(db, ws, load("linac.json"), "test")
+    db.commit()
+    db.expire_all()
+    assert "linac-demo" in {m["model_id"] for m in bm.list_models(db, ws)}
+    back = [a.uid for a in db.scalars(select(Asset).where(Asset.workspace_id == ws))
+            if (a.attributes or {}).get("model_id") == "linac-demo" and a.record_status != "Retired"]
+    assert set(back) == set(linac), "the same records, not copies"
+
+
+def test_removing_a_model_that_is_not_there_says_so(world):
+    assert client.delete("/v1/beam-model/models/no-such-model", headers=world["h"]).status_code == 404

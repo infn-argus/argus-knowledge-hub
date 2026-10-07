@@ -81,7 +81,7 @@ def convert_at(text: str, filename: str, options: Options) -> dict:
                 prof["offset_y"] = (y1 + y0) / 2
             bounds.append({"profile": prof, "note": "AT RApertures"})
         name = e.get("FamName") or cls
-        kind = hint(name, kind, options) if kind in ("generic", "corrector", "dipole") else kind
+        kind = hint(name, kind, options) if kind in ("generic", "corrector", "dipole", "marker") else kind
         caps = None
         if kind == "corrector":
             caps = ["particle_transport", "steering", "powered", "horizontal_steering", "vertical_steering"]

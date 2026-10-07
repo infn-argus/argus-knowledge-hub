@@ -167,7 +167,7 @@ def convert_bmad(text: str, filename: str, options: Options) -> dict:
             shape = {"shape": "ellipse", "semi_axis_x": xl, "semi_axis_y": yl} if cls == "ecollimator" else \
                 {"shape": "rectangle", "half_width_x": xl, "half_height_y": yl}
             component["boundaries"] = [{"profile": shape, "note": f"Bmad {cls} limits"}]
-        kind = hint(name, kind, options) if kind in ("generic", "corrector", "dipole") else kind
+        kind = hint(name, kind, options) if kind in ("generic", "corrector", "dipole", "marker") else kind
         caps = None
         if kind == "corrector":
             plane = {"hkicker": ["horizontal_steering"], "vkicker": ["vertical_steering"]}.get(

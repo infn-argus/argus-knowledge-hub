@@ -84,6 +84,34 @@ def test_madx_keeps_what_the_simulator_says_and_names_what_it_is():
         "source": "madx", "file": "dafne_accumulator.madx", "symbol": "K1"}
 
 
+def test_madx_markers_are_kept_and_what_the_simulation_does_not_compute_is_named():
+    """A lattice places pumps, valves and gauges as markers: MAD-X computes nothing for them, but they are on
+    the beam line, and the beam model keeps them — typed by their name when it follows the usual conventions."""
+    text = """
+    qf: quadrupole, l=0.4, k1=1.2;
+    vpi01: marker;  vv01: marker;  vgc01: marker;  ip1: marker;  mstart: marker;
+    tl: sequence, l=6, refer=entry;
+      mstart, at=0;
+      q1: qf, at=1;
+      vpi01, at=2;
+      vv01, at=3;
+      vgc01, at=4;
+      ip1, at=5;
+    endsequence;
+    """
+    d = bc.convert("tl.madx", text, bc.Options(beamline="tl"))
+    valid(d)
+    by = comps(d)
+    assert order(d) == ["MSTART", "Q1", "VPI01", "VV01", "VGC01", "IP1"]
+    assert by["VPI01"]["type"] == "pump_port" and by["VV01"]["type"] == "gate_valve"
+    assert by["VGC01"]["type"] == "gauge_port"
+    assert by["IP1"]["type"] == "marker" and by["MSTART"]["type"] == "marker", "a marker it cannot name stays one"
+    assert by["VPI01"]["native"]["type"] == "MARKER"
+    assert d["datasets"][0]["values"]["VPI01"]["s"] == pytest.approx(2)
+    dropped = bc.convert("tl.madx", text, bc.Options(beamline="tl", keep_markers=False))
+    assert order(dropped) == ["Q1"], "left out only when asked"
+
+
 def test_madx_language_variables_inheritance_refer_from_and_lines():
     text = """
     ! a transfer line, two ways
@@ -125,14 +153,14 @@ def test_elegant_reads_rpn_and_continuations():
     W1: WATCH, FILENAME="w1.sdds"
     L1: LINE=(Q1, D1, B1, W1, D1, Q1)
     """
-    d = bc.convert("x.lte", text)
+    d = bc.convert("x.lte", text, bc.Options(keep_markers=False))
     assert order(d) == ["Q1", "B1", "Q1#2"]                                    # drifts and watch points left out
     v = d["datasets"][0]["values"]
     assert v["Q1"]["physics"] == {"length": 1.0, "k1": 8.2} and v["B1"]["s"] == pytest.approx(1.25)
     assert v["B1"]["physics"]["angle"] == pytest.approx(math.pi / 18) and v["Q1#2"]["s"] == pytest.approx(2.0)
-    with_markers = bc.convert("x.lte", text, bc.Options(keep_markers=True))
+    with_markers = bc.convert("x.lte", text)                                    # kept unless asked otherwise
     assert "W1" in order(with_markers)
-    v1 = bc.convert("x.lte", text, bc.Options(output="1"))                    # the old form, when asked
+    v1 = bc.convert("x.lte", text, bc.Options(output="1", keep_markers=False))                    # the old form, when asked
     assert v1["format"] == "argus.beam-model/1" and v1["paths"][0]["elements"] == ["Q1", "B1", "Q1#2"]
 
 
