@@ -61,6 +61,12 @@ void main() {
     // The record's current reference is shown by name, not as a bare uid.
     expect(find.text('PM-ACE2 · Ace 2 a2A1920-51gmBAS'), findsOneWidget);
 
+    // Focusing it shows every candidate right away, not just the ones matching its own already-picked
+    // display text (which nothing else would match) — the field must not look unusable until cleared.
+    await tester.tap(find.byKey(const Key('attr-product_model-0')));
+    await tester.pumpAndSettle();
+    expect(find.text('PM-TURBO350 · TURBO350'), findsOneWidget);
+
     await tester.enterText(find.byKey(const Key('attr-product_model-0')), 'turbo');
     await tester.pumpAndSettle();
     await tester.tap(find.text('PM-TURBO350 · TURBO350').last);

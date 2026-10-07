@@ -379,8 +379,11 @@ class _AssetEditScreenState extends ConsumerState<AssetEditScreen> {
 
 /// A search-as-you-type picker among a reference attribute's candidate records, instead of a bare
 /// uid text field — mirrors the web form's AssetPicker (name/key search, pick-only: there is no way
-/// to commit a value that isn't one of the candidates).
-class _ReferenceField extends StatelessWidget {
+/// to commit a value that isn't one of the candidates). Owns its controller and focus node (rather
+/// than RawAutocomplete's defaults built from `initialValue`) so that focusing the field can clear the
+/// query to show every candidate immediately, the way AssetPicker's onFocus does — filtering against
+/// the field's own already-picked "key · name" display text would otherwise match nothing.
+class _ReferenceField extends StatefulWidget {
   const _ReferenceField({super.key, required this.candidates, required this.value, required this.onChanged, this.label});
 
   final List<RecordBrief> candidates;
@@ -389,38 +392,78 @@ class _ReferenceField extends StatelessWidget {
   final String? label;
 
   @override
-  Widget build(BuildContext context) {
-    RecordBrief? selected;
-    for (final c in candidates) {
-      if (c.uid == value) {
-        selected = c;
-        break;
-      }
+  State<_ReferenceField> createState() => _ReferenceFieldState();
+}
+
+class _ReferenceFieldState extends State<_ReferenceField> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  String _displayFor(String? value) {
+    for (final c in widget.candidates) {
+      if (c.uid == value) return c.label;
     }
+    return value ?? '';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: _displayFor(widget.value));
+    _focusNode = FocusNode()..addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (_focusNode.hasFocus) {
+      _controller.clear(); // show every candidate right away, as AssetPicker's onFocus does
+    } else if (_controller.text.isEmpty) {
+      _controller.text = _displayFor(widget.value); // nothing picked while open: restore it
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReferenceField old) {
+    super.didUpdateWidget(old);
+    if (widget.value != old.value && !_focusNode.hasFocus) _controller.text = _displayFor(widget.value);
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return RawAutocomplete<RecordBrief>(
-      initialValue: TextEditingValue(text: selected?.label ?? (value ?? '')),
+      textEditingController: _controller,
+      focusNode: _focusNode,
       displayStringForOption: (o) => o.label,
       optionsBuilder: (v) {
         final q = v.text.trim().toLowerCase();
         final matches = q.isEmpty
-            ? candidates
-            : candidates.where((c) => (c.name ?? '').toLowerCase().contains(q) || (c.key ?? '').toLowerCase().contains(q));
+            ? widget.candidates
+            : widget.candidates.where((c) => (c.name ?? '').toLowerCase().contains(q) || (c.key ?? '').toLowerCase().contains(q));
         return matches.take(30);
       },
-      onSelected: (o) => onChanged(o.uid),
+      onSelected: (o) {
+        widget.onChanged(o.uid);
+        _focusNode.unfocus();
+      },
       fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) => TextField(
         controller: controller,
         focusNode: focusNode,
         decoration: InputDecoration(
-          labelText: label,
-          hintText: 'Search ${candidates.isEmpty ? '' : candidates.first.type ?? ''}…',
-          suffixIcon: value == null
+          labelText: widget.label,
+          hintText: 'Search ${widget.candidates.isEmpty ? '' : widget.candidates.first.type ?? ''}…',
+          suffixIcon: widget.value == null
               ? null
               : IconButton(
                   icon: const Icon(Icons.clear),
                   onPressed: () {
                     controller.clear();
-                    onChanged(null);
+                    widget.onChanged(null);
                   },
                 ),
         ),

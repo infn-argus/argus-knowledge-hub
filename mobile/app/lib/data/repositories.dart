@@ -110,6 +110,14 @@ class AssetRepository {
   AssetRepository(this._api);
   final ApiService _api;
 
+  /// A reference attribute's target, named rather than the bare uid it is stored as — the single-record
+  /// equivalent of [listByType], for showing what a reference points at without fetching everything
+  /// [detail] does (context, installations, tickets…) just to read a name.
+  Future<RecordBrief> brief(String uid) async {
+    final asset = await _api.call((c) => _api.assets(c).getAsset(uid));
+    return RecordBrief(uid: asset.uid, key: asset.key, name: asset.name, type: asset.type, schemaUid: asset.schemaUid);
+  }
+
   Future<AssetDetail> detail(String uid) async {
     final asset = await _api.call((c) => _api.assets(c).getAsset(uid));
     final context = _map(await _api.json((c) => _api.hub(c).assetContextWithHttpInfo(uid)));

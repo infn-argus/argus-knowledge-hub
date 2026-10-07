@@ -178,6 +178,25 @@ class FakeArgus {
       if (p == '/v1/assets' && q['schema_uid'] == 'slice-20463f:argus-object:product-model') {
         return _json(fixture('product_models'));
       }
+      final productModel = RegExp(r'^/v1/assets/(pm-[^/]+)$').firstMatch(p);
+      if (productModel != null) {
+        final rows = fixtureJson('product_models') as List;
+        final row = rows.cast<Map<String, dynamic>>().firstWhere((r) => r['uid'] == productModel.group(1));
+        return _json(row);
+      }
+      final productModelContext = RegExp(r'^/v1/hub/assets/(pm-[^/]+)/context$').firstMatch(p);
+      if (productModelContext != null) {
+        final rows = fixtureJson('product_models') as List;
+        final row = rows.cast<Map<String, dynamic>>().firstWhere((r) => r['uid'] == productModelContext.group(1));
+        return _json({
+          'asset': {'uid': row['uid'], 'key': row['key'], 'name': row['name'], 'type': row['type'],
+            'schema_uid': row['schema_uid'], 'workspace_id': row['workspace_id']},
+          'nature': 'equipment', 'processing': null, 'restricted': null, 'merged': null,
+          'type_path': ['Product Model'], 'access': {'tickets': true, 'documents': true},
+          'stats': {'open_tickets': 0, 'tickets': 0, 'external_tickets': 0, 'documents': 0, 'documents_overdue': 0, 'relations': 0},
+          'tickets': [], 'external_tickets': [], 'documents': [], 'relations': {'total': 0, 'by_relation': {}, 'items': []},
+        });
+      }
       if (p == '/v1/attachments' && q['asset_uid'] == positionUid) return _json(fixture('asset_attachments'));
       if (p == '/v1/attachments' && q['asset_uid'] == ionPumpUid) return _json([]);
       if (RegExp(r'^/v1/issues/[^/]+/transitions$').hasMatch(p)) return _json(fixture('transitions'));

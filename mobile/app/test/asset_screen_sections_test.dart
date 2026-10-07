@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_server.dart';
@@ -22,5 +23,21 @@ void main() {
     // The centre node and the two neighbours, drawn as the radial graph.
     expect(find.textContaining('GUNSIP01'), findsWidgets);
     expect(find.textContaining('INS-01M3MTM6768A8HE1ZQFE397AR0'), findsOneWidget);
+  });
+
+  testWidgets('a reference attribute is shown by the name of what it points at, and opens it', (tester) async {
+    final r = await start(tester);
+    await r.go('/asset/$ionPumpUid');
+    await tester.drag(find.byKey(const Key('asset-body-list')), const Offset(0, -2000));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Instance of'), findsOneWidget);
+    expect(find.text('pm-ace2'), findsNothing); // never the bare uid
+    expect(find.text('PM-ACE2 · Ace 2 a2A1920-51gmBAS'), findsOneWidget); // the target's name instead
+
+    await tester.tap(find.text('PM-ACE2 · Ace 2 a2A1920-51gmBAS'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('asset-name')), findsOneWidget); // opened the target record
+    expect(find.text('Ace 2 a2A1920-51gmBAS'), findsWidgets); // its name, both app bar and body
   });
 }

@@ -102,6 +102,7 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
     final theme = Theme.of(context);
     final current = a.current;
     final attrs = a.attributes.entries.where((e) => e.value != null && e.value.toString().isNotEmpty).toList();
+    final defsByKey = {for (final d in ref.watch(schemaAttributesProvider(a.schemaUid)).value ?? const []) d.key: d};
     final openTickets = a.tickets.where((t) => t.open).toList();
     final comments = ref.watch(assetCommentsProvider(a.uid)).value ?? const [];
     final history = ref.watch(assetHistoryProvider(a.uid)).value ?? const [];
@@ -226,11 +227,13 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(e.key, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.outline)),
+              Text(defsByKey[e.key]?.name ?? e.key, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.outline)),
               const SizedBox(height: 2),
-              e.value is Map || e.value is List
-                  ? SelectableText(e.value.toString())
-                  : RichContent('${e.value}'),
+              defsByKey[e.key]?.type == 'reference' && e.value is String
+                  ? _ReferenceValue(e.value as String)
+                  : e.value is Map || e.value is List
+                      ? SelectableText(e.value.toString())
+                      : RichContent('${e.value}'),
             ]),
           ),
       ],
@@ -312,6 +315,30 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
         if (when.isNotEmpty) when,
       ].join(' · ')),
       onTap: other?.uid == null ? null : () => context.push('/asset/${other!.uid}'),
+    );
+  }
+}
+
+/// A reference attribute's stored uid, shown by the name of what it points at and tappable to open it —
+/// not the bare uid a reference is stored as (flutter-app-design §5.4, mirroring the web's attribute
+/// view, which resolves a reference the same way).
+class _ReferenceValue extends ConsumerWidget {
+  const _ReferenceValue(this.uid);
+
+  final String uid;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final brief = ref.watch(assetBriefProvider(uid));
+    return brief.when(
+      loading: () => Text(uid, style: Theme.of(context).textTheme.bodySmall),
+      error: (_, _) => SelectableText(uid),
+      data: (b) => b == null
+          ? SelectableText(uid)
+          : InkWell(
+              onTap: () => context.push('/asset/${b.uid}'),
+              child: Text(b.label, style: TextStyle(color: Theme.of(context).colorScheme.primary, decoration: TextDecoration.underline)),
+            ),
     );
   }
 }

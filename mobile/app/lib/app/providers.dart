@@ -232,6 +232,17 @@ final assetDetailProvider = FutureProvider.autoDispose.family<AssetDetail, Strin
   return ref.watch(assetRepositoryProvider).detail(uid);
 });
 
+/// A reference attribute's target, named — null if it can no longer be resolved (deleted, or not
+/// visible to this viewer), so the caller falls back to showing the bare uid rather than crashing.
+final assetBriefProvider = FutureProvider.autoDispose.family<RecordBrief?, String>((ref, uid) async {
+  ref.watch(workspaceIdProvider);
+  try {
+    return await ref.watch(assetRepositoryProvider).brief(uid);
+  } on Problem {
+    return null;
+  }
+});
+
 final assetCommentsProvider = FutureProvider.autoDispose.family<List<Comment>, String>((ref, uid) {
   ref.watch(workspaceIdProvider);
   return ref.watch(assetRepositoryProvider).comments(uid);
