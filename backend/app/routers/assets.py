@@ -2,8 +2,8 @@ import os
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, UploadFile
-from sqlalchemy import or_, select
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, UploadFile
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.auth import OidcIdentity, get_current_user_id, get_grants, get_identity, require_permission
@@ -70,9 +70,36 @@ def _ledger_failed(db: Session, exc: LedgerError):
 ATTACHMENTS_DIR = os.environ.get("ATTACHMENTS_DIR", "/data/attachments")
 
 
+def _with_subtypes(db: Session, schema_uid: str) -> list[str]:
+    """A type and every type below it, as the web's type tree selects them."""
+    children: dict[str, list[str]] = {}
+    for uid, parent in db.execute(select(Schema.uid, Schema.parent_schema_uid)):
+        if parent:
+            children.setdefault(parent, []).append(uid)
+    out, todo = [], [schema_uid]
+    while todo:
+        uid = todo.pop()
+        if uid not in out:
+            out.append(uid)
+            todo.extend(children.get(uid, []))
+    return out
+
+
+_SORT = {"name": Asset.name, "key": Asset.key, "created": Asset.created_at, "updated": Asset.updated_at}
+
+
 @router.get("", response_model=list[AssetOut])
 def list_assets(
+    response: Response,
     schema_uid: Optional[str] = None,
+    include_subtypes: bool = Query(False, description="With schema_uid: also the records of every type below it."),
+    q: Optional[str] = Query(None, description="Only records whose key or name contains this, ignoring case."),
+    sort: Optional[str] = Query(None, pattern="^(name|key|created|updated)$"),
+    order: str = Query("asc", pattern="^(asc|desc)$"),
+    limit: Optional[int] = Query(None, ge=1, le=500,
+                                 description="A page of at most this many, with the total in X-Total-Count. "
+                                             "Without it, every record (and deleted ones are not left out)."),
+    offset: int = Query(0, ge=0),
     workspace_id: str = Depends(require_permission("read")),
     grants=Depends(get_grants),
     db: Session = Depends(get_db),
@@ -82,8 +109,35 @@ def list_assets(
     # A restricted record is absent unless the viewer holds its class.
     stmt = select(Asset).where(visible_assets_clause(workspace_id, grants))
     if schema_uid:
-        stmt = stmt.where(Asset.schema_uid == schema_uid)
+        stmt = stmt.where(Asset.schema_uid.in_(_with_subtypes(db, schema_uid)) if include_subtypes
+                          else Asset.schema_uid == schema_uid)
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(or_(Asset.key.ilike(like), Asset.name.ilike(like)))
+    if limit is None and not sort:
+        return [asset_out(db, a) for a in db.scalars(stmt).all()]
+    if limit is not None:
+        # A page is for browsing: what was deleted is not part of it.
+        stmt = stmt.where(Asset.deleted_at.is_(None))
+        response.headers["X-Total-Count"] = str(db.scalar(select(func.count()).select_from(stmt.subquery())) or 0)
+    column = _SORT[sort or "name"]
+    stmt = stmt.order_by(column.desc().nulls_last() if order == "desc" else column.asc().nulls_last(), Asset.uid)
+    if limit is not None:
+        stmt = stmt.offset(offset).limit(limit)
     return [asset_out(db, a) for a in db.scalars(stmt).all()]
+
+
+@router.get("/type-counts", response_model=dict[str, int])
+def asset_type_counts(
+    workspace_id: str = Depends(require_permission("read")),
+    grants=Depends(get_grants),
+    db: Session = Depends(get_db),
+):
+    """How many visible, not deleted records each type has (its own, not its subtypes'): what a type tree
+    shows beside each type."""
+    rows = db.execute(select(Asset.schema_uid, func.count()).where(
+        visible_assets_clause(workspace_id, grants), Asset.deleted_at.is_(None)).group_by(Asset.schema_uid))
+    return {uid: n for uid, n in rows if uid}
 
 
 def asset_out(db: Session, asset: Asset) -> AssetOut:

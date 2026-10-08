@@ -55,6 +55,7 @@ FIELD_OPERATIONS = [
     # Capture and tickets (M2)
     ("get", "/v1/schemas"),
     ("get", "/v1/assets"),
+    ("get", "/v1/assets/type-counts"),
     ("post", "/v1/assets"),
     ("get", "/v1/issues/{uid}/transitions"),
     ("post", "/v1/intake/guide/asset"),
