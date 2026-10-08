@@ -7,10 +7,7 @@ import 'harness.dart';
 void main() {
   testWidgets('home shows the cockpit: the counts, assigned to me, hotspots, knowledge health, states and activity',
       (tester) async {
-    final r = await start(tester);
-    r.server.serveOverview = true;
-    await r.go('/tickets');
-    await r.go('/');
+    final r = await start(tester, prepare: (s) => s.serveOverview = true);
 
     expect(find.text('ASSIGNED TO ME'), findsOneWidget);
     expect(find.text('Open tickets'), findsOneWidget);

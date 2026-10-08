@@ -27,7 +27,14 @@ class CachingClient extends http.BaseClient {
     this.onReachable,
     this.onServerTime,
     this.maxEntries = 400,
+    this.fresh = Duration.zero,
   });
+
+  /// How long a copy is served instead of asking ARGUS again (U23): going back to a screen, or between
+  /// tabs, need not cost a request. Any change sent from here (anything but a read) makes every copy taken
+  /// before it stale, so what the person just did is never hidden by what they saw a moment earlier.
+  final Duration fresh;
+  DateTime _lastWrite = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
   final http.Client _inner;
   final LocalStore _store;
@@ -63,6 +70,12 @@ class CachingClient extends http.BaseClient {
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final cacheable = request.method == 'GET' && keeps(request.url);
+    if (request.method != 'GET' && request.method != 'HEAD') {
+      _lastWrite = DateTime.now().toUtc();
+    } else if (cacheable && fresh > Duration.zero) {
+      final copy = await _copy(request.url, freshOnly: true);
+      if (copy != null) return copy;
+    }
     http.StreamedResponse response;
     try {
       response = await _inner.send(request);
@@ -109,11 +122,19 @@ class CachingClient extends http.BaseClient {
     await _evict();
   }
 
-  Future<http.StreamedResponse?> _copy(Uri url) async {
+  Future<http.StreamedResponse?> _copy(Uri url, {bool freshOnly = false}) async {
     final raw = await _store.read(_key(url));
     if (raw == null) return null;
     final m = jsonDecode(raw) as Map<String, dynamic>;
     final at = DateTime.parse(m['at'] as String);
+    if (freshOnly) {
+      final now = DateTime.now().toUtc();
+      if (now.difference(at) > fresh || !at.isAfter(_lastWrite)) return null;
+      return http.StreamedResponse(Stream.value(base64Decode(m['body'] as String)), 200, headers: {
+        'content-type': (m['type'] as String?) ?? 'application/json',
+        if (m['etag'] != null) 'etag': m['etag'] as String,
+      });
+    }
     if (DateTime.now().toUtc().difference(at) > retention) {
       await _store.delete(_key(url)); // past the retention: hidden, then deleted (§5.6)
       return null;
@@ -127,24 +148,20 @@ class CachingClient extends http.BaseClient {
   }
 
   Future<void> _evict() async {
-    final all = await _store.readPrefix(prefix);
+    final all = await _store.stamps(prefix);
     if (all.length <= maxEntries) return;
-    final dated = all.entries
-        .map((e) => MapEntry(e.key, DateTime.tryParse((jsonDecode(e.value) as Map)['at'] as String? ?? '')))
-        .toList()
-      ..sort((a, b) => (a.value ?? DateTime(0)).compareTo(b.value ?? DateTime(0)));
+    final dated = all.entries.toList()..sort((a, b) => a.value.compareTo(b.value));
     for (final e in dated.take(all.length - maxEntries)) {
-      await _store.delete(e.key);
+      await _store.forget(e.key);
     }
   }
 
   /// Remove copies past the retention (run at start and after a sync).
   Future<int> purge() async {
     var n = 0;
-    for (final e in (await _store.readPrefix(prefix)).entries) {
-      final at = DateTime.tryParse((jsonDecode(e.value) as Map)['at'] as String? ?? '');
-      if (at == null || DateTime.now().toUtc().difference(at) > retention) {
-        await _store.delete(e.key);
+    for (final e in (await _store.stamps(prefix)).entries) {
+      if (DateTime.now().toUtc().difference(e.value.toUtc()) > retention) {
+        await _store.forget(e.key);
         n++;
       }
     }

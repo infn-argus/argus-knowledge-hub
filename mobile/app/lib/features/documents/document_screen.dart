@@ -6,6 +6,7 @@ import '../../app/providers.dart';
 import '../../core/problem.dart';
 import '../../widgets/common.dart';
 import '../../widgets/rich_content.dart';
+import '../../widgets/type_tree.dart';
 
 /// A procedure or document. The field must never mistake a draft or an outdated revision for the
 /// one to work from, so the state is said before the content (flutter-app-design §5.5).
@@ -48,6 +49,8 @@ class DocumentScreen extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(d.title, key: const Key('doc-title'), style: theme.textTheme.headlineSmall),
+              const SizedBox(height: 4),
+              TypeBreadcrumb(tree: ref.watch(typeTreeProvider('documents')).value, schemaUid: d.documentTypeUid),
               const SizedBox(height: 8),
               Wrap(spacing: 8, children: [
                 StatusChip(d.authorityLevel),

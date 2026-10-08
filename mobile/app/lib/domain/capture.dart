@@ -284,3 +284,62 @@ class ReviewItem {
         _ => kind.replaceAll('_', ' '),
       };
 }
+
+/// A workspace's types of one kind (equipment, tickets, documents) as the hierarchy they form — the web's
+/// type tree. A type includes the records of every type below it.
+class TypeTree {
+  TypeTree(List<TypeNode> all) : byUid = {for (final t in all) t.uid: t} {
+    for (final t in all) {
+      final parent = t.parentUid == null ? null : byUid[t.parentUid];
+      if (parent != null) {
+        parent.children.add(t);
+      } else {
+        roots.add(t);
+      }
+    }
+    void sort(List<TypeNode> ns) {
+      ns.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      for (final n in ns) {
+        sort(n.children);
+      }
+    }
+
+    sort(roots);
+  }
+
+  final Map<String, TypeNode> byUid;
+  final List<TypeNode> roots = [];
+
+  /// From the top of the hierarchy down to [uid].
+  List<TypeNode> path(String? uid) {
+    final out = <TypeNode>[];
+    var t = uid == null ? null : byUid[uid];
+    while (t != null && !out.contains(t)) {
+      out.insert(0, t);
+      t = t.parentUid == null ? null : byUid[t.parentUid];
+    }
+    return out;
+  }
+
+  /// [uid] and every type below it.
+  Set<String> subtree(String uid) {
+    final out = <String>{};
+    void walk(TypeNode t) {
+      if (out.add(t.uid)) t.children.forEach(walk);
+    }
+
+    final t = byUid[uid];
+    if (t != null) walk(t);
+    return out;
+  }
+}
+
+class TypeNode {
+  TypeNode({required this.uid, required this.name, this.parentUid, this.concrete = true});
+
+  final String uid;
+  final String name;
+  final String? parentUid;
+  final bool concrete;
+  final List<TypeNode> children = [];
+}

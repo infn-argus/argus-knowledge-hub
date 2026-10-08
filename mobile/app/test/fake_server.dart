@@ -32,6 +32,20 @@ Map<String, Object?> revision(String documentUid, int number, String state, Stri
       'created_at': '2026-10-07T08:00:00Z', 'updated_at': '2026-10-07T08:00:00Z',
     };
 
+/// What the equipment list browses.
+final browseAssets = [
+  for (final (i, (key, name, type, schema, created, updated)) in const [
+    ('SLICE-IP-0001', 'Ion pump gun area 2', 'Ion Pump', 'slice-20463f:argus-object:ion-pump', '2026-01-01', '2026-10-01'),
+    ('SLICE-IP-0002', 'Ion pump linac 1', 'Ion Pump', 'slice-20463f:argus-object:ion-pump', '2026-03-01', '2026-06-01'),
+    ('SLICE-VG-0001', 'Gauge arc 3', 'Vacuum Gauge', 'slice-20463f:argus-object:vacuum-gauge', '2026-02-01', '2026-09-01'),
+  ].indexed)
+    {
+      'uid': i == 0 ? ionPumpUid : 'browse-$i', 'key': key, 'name': name, 'type': type, 'schema_uid': schema,
+      'workspace_id': workspaceId, 'attributes': {}, 'created_at': '${created}T00:00:00Z',
+      'updated_at': '${updated}T00:00:00Z', 'record_status': 'Active',
+    },
+];
+
 class FakeArgus {
   final List<http.Request> requests = [];
 
@@ -257,6 +271,23 @@ class FakeArgus {
       if (RegExp(r'^/v1/issues/[^/]+/attachments$').hasMatch(p)) return _json([]);
       if (RegExp(r'^/v1/assets/[^/]+/comments$').hasMatch(p)) return _json(fixture('asset_comments'));
       if (RegExp(r'^/v1/assets/[^/]+/history$').hasMatch(p)) return _json(fixture('asset_history'));
+      if (p == '/v1/assets/type-counts') {
+        return _json({'slice-20463f:argus-object:ion-pump': 2, 'slice-20463f:argus-object:vacuum-gauge': 1});
+      }
+      if (p == '/v1/assets' && q['limit'] != null) {
+        // The equipment list, a page at a time (routers/assets.py list_assets).
+        var rows = browseAssets
+            .where((a) => q['q'] == null ||
+                '${a['key']} ${a['name']}'.toLowerCase().contains(q['q']!.toLowerCase()))
+            .where((a) => q['schema_uid'] == null || a['schema_uid'] == q['schema_uid'])
+            .toList();
+        final by = {'name': 'name', 'key': 'key', 'created': 'created_at', 'updated': 'updated_at'}[q['sort'] ?? 'name']!;
+        rows.sort((a, b) => (a[by] as String).compareTo(b[by] as String));
+        if (q['order'] == 'desc') rows = rows.reversed.toList();
+        final offset = int.parse(q['offset'] ?? '0'), limit = int.parse(q['limit']!);
+        return http.Response.bytes(utf8.encode(jsonEncode(rows.skip(offset).take(limit).toList())), 200,
+            headers: {'content-type': 'application/json', 'x-total-count': '${rows.length}'});
+      }
       if (p == '/v1/assets' && q['schema_uid'] == 'slice-20463f:argus-object:product-model') {
         return _json(fixture('product_models'));
       }

@@ -4,7 +4,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../domain/models.dart';
+import '../../data/browse_repository.dart';
 import '../../widgets/common.dart';
+import '../../widgets/sort_menu.dart';
+import '../../widgets/type_tree.dart';
+import '../shell/app_shell.dart';
 
 /// The workspace's documents, searchable by title or code. One with nothing published yet is marked so —
 /// a draft is never something to work from (flutter-app-design §5.5).
@@ -17,14 +21,29 @@ class DocumentListScreen extends ConsumerStatefulWidget {
 
 class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
   String _q = '';
+  String? _type;
+  ListOrder _order = ListOrder.byUpdate;
 
   @override
   Widget build(BuildContext context) {
     final r = ref.watch(documentListProvider);
+    final tree = ref.watch(typeTreeProvider('documents')).value;
+    final counts = <String, int>{};
+    for (final d in r.value ?? const <DocumentListItem>[]) {
+      if (d.documentTypeUid != null && !d.retired) {
+        counts[d.documentTypeUid!] = (counts[d.documentTypeUid!] ?? 0) + 1;
+      }
+    }
+    final inType = _type == null || tree == null ? null : tree.subtree(_type!);
     return Scaffold(
-      appBar: AppBar(title: const Text('Documents')),
+      appBar: AppBar(
+        leading: const ShellMenuButton(),
+        title: const Text('Documents'),
+        actions: [SortMenu(order: _order, onChanged: (o) => setState(() => _order = o))],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('documents-new'),
+        heroTag: 'documents-new', // the tabs stay mounted together: each its own hero
         onPressed: () => context.push('/documents/new'),
         icon: const Icon(Icons.add),
         label: const Text('New document'),
@@ -38,6 +57,18 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
             onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: TypeFilterButton(
+              tree: tree,
+              selected: _type,
+              counts: counts,
+              onSelected: (t) => setState(() => _type = t),
+            ),
+          ),
+        ),
         Expanded(
           child: r.when(
             loading: () => const Center(child: CircularProgressIndicator()),
@@ -47,7 +78,10 @@ class _DocumentListScreenState extends ConsumerState<DocumentListScreen> {
                   .where((d) => !d.retired)
                   .where((d) =>
                       _q.isEmpty || d.title.toLowerCase().contains(_q) || d.code.toLowerCase().contains(_q))
-                  .toList();
+                  .where((d) => inType == null || inType.contains(d.documentTypeUid))
+                  .toList()
+                ..sort((a, b) => _order.compare(a, b,
+                    name: (d) => d.title, created: (d) => d.createdAt, updated: (d) => d.updatedAt));
               if (shown.isEmpty) return const Center(child: Text('No documents match.'));
               return RefreshIndicator(
                 onRefresh: () async => ref.invalidate(documentListProvider),

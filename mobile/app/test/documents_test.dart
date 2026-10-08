@@ -10,7 +10,7 @@ import 'harness.dart';
 void main() {
   testWidgets('the document list says which have nothing published yet, and opens one', (tester) async {
     final r = await start(tester);
-    await r.tap('home-documents');
+    await r.tap('nav-documents');
     expect(find.text('Ion pump replacement'), findsOneWidget);
     expect(find.textContaining('DOC-0002 · not published yet'), findsOneWidget);
     await r.tap('document-$documentUid');

@@ -6,6 +6,10 @@ import 'package:go_router/go_router.dart';
 
 import '../core/problem.dart';
 import '../features/ask/ask_screen.dart';
+import '../features/assets/asset_list_screen.dart';
+import '../features/graph/graph_screen.dart';
+import '../features/settings/settings_screen.dart';
+import '../features/shell/app_shell.dart';
 import '../features/auth/signin_screen.dart';
 import '../features/capture/register_screen.dart';
 import '../features/installations/replace_screen.dart';
@@ -83,11 +87,22 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: '/workspace',
           builder: (_, st) => WorkspaceScreen(returnTo: safeReturn(st.uri.queryParameters['from']))),
-      GoRoute(path: '/', builder: (_, _) => const HomeScreen()),
+      // The six destinations of the navigation bar, each keeping its place (features/shell/app_shell.dart).
+      StatefulShellRoute.indexedStack(
+        builder: (_, _, shell) => AppShell(shell: shell),
+        branches: [
+          StatefulShellBranch(routes: [GoRoute(path: '/', builder: (_, _) => const HomeScreen())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/tickets', builder: (_, _) => const TicketListScreen())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/documents', builder: (_, _) => const DocumentListScreen())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/assets', builder: (_, _) => const AssetListScreen())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/graph', builder: (_, _) => const GraphScreen())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/ask', builder: (_, _) => const AskScreen())]),
+        ],
+      ),
+      GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
       GoRoute(path: '/scan', builder: (_, st) => ScanScreen(pick: st.uri.queryParameters['pick'] == '1')),
       GoRoute(path: '/diagnostics', builder: (_, _) => const DiagnosticsScreen()),
       GoRoute(path: '/inbox', builder: (_, _) => const InboxScreen()),
-      GoRoute(path: '/ask', builder: (_, _) => const AskScreen()),
       GoRoute(path: '/report/:uid', builder: (_, st) => ReportScreen(subjectUid: st.pathParameters['uid']!)),
       GoRoute(
           path: '/register',
@@ -98,9 +113,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/outbox', builder: (_, _) => const OutboxScreen()),
       GoRoute(path: '/asset/:uid', builder: (_, st) => AssetScreen(uid: st.pathParameters['uid']!)),
       GoRoute(path: '/asset/:uid/edit', builder: (_, st) => AssetEditScreen(uid: st.pathParameters['uid']!)),
-      GoRoute(path: '/tickets', builder: (_, _) => const TicketListScreen()),
       GoRoute(path: '/ticket/:uid/edit', builder: (_, st) => TicketEditScreen(uid: st.pathParameters['uid']!)),
-      GoRoute(path: '/documents', builder: (_, _) => const DocumentListScreen()),
       GoRoute(
           path: '/documents/new',
           builder: (_, st) => DocumentWriteScreen(assetUid: st.uri.queryParameters['asset'])),

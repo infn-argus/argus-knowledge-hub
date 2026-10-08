@@ -64,7 +64,7 @@ void main() {
     final app = await start(tester);
     app.server.routes['GET /v1/ai/status'] = _json(_usable);
     app.server.routes['POST /v1/ai/chat'] = _answer;
-    await app.tap('home-ask');
+    await app.tap('nav-ask');
 
     await app.type('ask-input', 'How is IP-0001 reset?');
     await app.tap('ask-send');
@@ -87,7 +87,7 @@ void main() {
     final app = await start(tester, overrides: [voiceProvider.overrideWithValue(voice)]);
     app.server.routes['GET /v1/ai/status'] = _json(_usable);
     app.server.routes['POST /v1/ai/chat'] = _answer;
-    await app.tap('home-ask');
+    await app.tap('nav-ask');
 
     await app.tap('ask-handsfree');
 
@@ -103,7 +103,7 @@ void main() {
     final app = await start(tester, overrides: [voiceProvider.overrideWithValue(voice)]);
     app.server.routes['GET /v1/ai/status'] = _json(_usable);
     app.server.routes['POST /v1/ai/chat'] = _answer;
-    await app.tap('home-ask');
+    await app.tap('nav-ask');
     await app.type('ask-input', 'How is IP-0001 reset?');
     await app.tap('ask-send');
 
@@ -118,7 +118,7 @@ void main() {
       'configured': false, 'enabled': false, 'validated': false,
       'reason': 'No AI endpoint is configured for this workspace.',
     });
-    await app.tap('home-ask');
+    await app.tap('nav-ask');
 
     expect(find.text('No AI endpoint is configured for this workspace.'), findsOneWidget);
     expect(find.byKey(const Key('ask-input')), findsNothing);
@@ -128,7 +128,7 @@ void main() {
     final app = await start(tester);
     app.server.routes['GET /v1/ai/status'] = _json(_usable);
     app.server.routes['POST /v1/ai/chat'] = _json({'detail': 'AI features are switched off for this workspace'}, 409);
-    await app.tap('home-ask');
+    await app.tap('nav-ask');
     await app.type('ask-input', 'Anything?');
     await app.tap('ask-send');
 
@@ -145,7 +145,7 @@ void main() {
     final app = await start(tester);
     app.server.routes['GET /v1/ai/status'] = _json(_usable);
     app.server.routes['POST /v1/ai/chat'] = _answer;
-    await app.tap('home-ask');
+    await app.tap('nav-ask');
     await app.type('ask-input', 'How is IP-0001 reset?');
     await app.tap('ask-send');
 

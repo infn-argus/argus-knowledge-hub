@@ -16,6 +16,73 @@ class AssetsApi {
 
   final ApiClient apiClient;
 
+  /// Asset Type Counts
+  ///
+  /// How many visible, not deleted records each type has (its own, not its subtypes'): what a type tree shows beside each type.
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Response> assetTypeCountsWithHttpInfo({ String? authorization, String? xWorkspaceId, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/assets/type-counts';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// Asset Type Counts
+  ///
+  /// How many visible, not deleted records each type has (its own, not its subtypes'): what a type tree shows beside each type.
+  ///
+  /// Parameters:
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Map<String, int>?> assetTypeCounts({ String? authorization, String? xWorkspaceId, }) async {
+    final response = await assetTypeCountsWithHttpInfo( authorization: authorization, xWorkspaceId: xWorkspaceId, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return Map<String, int>.from(await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Map<String, int>'),);
+
+    }
+    return null;
+  }
+
   /// Create Asset
   ///
   /// Note: This method returns the HTTP [Response].
@@ -159,10 +226,25 @@ class AssetsApi {
   ///
   /// * [String] schemaUid:
   ///
+  /// * [bool] includeSubtypes:
+  ///   With schema_uid: also the records of every type below it.
+  ///
+  /// * [String] q:
+  ///   Only records whose key or name contains this, ignoring case.
+  ///
+  /// * [String] sort:
+  ///
+  /// * [String] order:
+  ///
+  /// * [int] limit:
+  ///   A page of at most this many, with the total in X-Total-Count. Without it, every record (and deleted ones are not left out).
+  ///
+  /// * [int] offset:
+  ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<Response> listAssetsWithHttpInfo({ String? schemaUid, String? authorization, String? xWorkspaceId, }) async {
+  Future<Response> listAssetsWithHttpInfo({ String? schemaUid, bool? includeSubtypes, String? q, String? sort, String? order, int? limit, int? offset, String? authorization, String? xWorkspaceId, }) async {
     // ignore: prefer_const_declarations
     final path = r'/v1/assets';
 
@@ -175,6 +257,24 @@ class AssetsApi {
 
     if (schemaUid != null) {
       queryParams.addAll(_queryParams('', 'schema_uid', schemaUid));
+    }
+    if (includeSubtypes != null) {
+      queryParams.addAll(_queryParams('', 'include_subtypes', includeSubtypes));
+    }
+    if (q != null) {
+      queryParams.addAll(_queryParams('', 'q', q));
+    }
+    if (sort != null) {
+      queryParams.addAll(_queryParams('', 'sort', sort));
+    }
+    if (order != null) {
+      queryParams.addAll(_queryParams('', 'order', order));
+    }
+    if (limit != null) {
+      queryParams.addAll(_queryParams('', 'limit', limit));
+    }
+    if (offset != null) {
+      queryParams.addAll(_queryParams('', 'offset', offset));
     }
 
     if (authorization != null) {
@@ -204,11 +304,26 @@ class AssetsApi {
   ///
   /// * [String] schemaUid:
   ///
+  /// * [bool] includeSubtypes:
+  ///   With schema_uid: also the records of every type below it.
+  ///
+  /// * [String] q:
+  ///   Only records whose key or name contains this, ignoring case.
+  ///
+  /// * [String] sort:
+  ///
+  /// * [String] order:
+  ///
+  /// * [int] limit:
+  ///   A page of at most this many, with the total in X-Total-Count. Without it, every record (and deleted ones are not left out).
+  ///
+  /// * [int] offset:
+  ///
   /// * [String] authorization:
   ///
   /// * [String] xWorkspaceId:
-  Future<List<AssetOut>?> listAssets({ String? schemaUid, String? authorization, String? xWorkspaceId, }) async {
-    final response = await listAssetsWithHttpInfo( schemaUid: schemaUid, authorization: authorization, xWorkspaceId: xWorkspaceId, );
+  Future<List<AssetOut>?> listAssets({ String? schemaUid, bool? includeSubtypes, String? q, String? sort, String? order, int? limit, int? offset, String? authorization, String? xWorkspaceId, }) async {
+    final response = await listAssetsWithHttpInfo( schemaUid: schemaUid, includeSubtypes: includeSubtypes, q: q, sort: sort, order: order, limit: limit, offset: offset, authorization: authorization, xWorkspaceId: xWorkspaceId, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

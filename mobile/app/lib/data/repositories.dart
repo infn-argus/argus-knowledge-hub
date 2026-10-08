@@ -298,6 +298,8 @@ class TicketRepository {
                 assignee: m['assignee']?.toString(),
                 assetUid: m['asset_uid']?.toString(),
                 updatedAt: _date(m['updated_at']),
+                createdAt: _date(m['created_at']),
+                schemaUid: m['schema_uid']?.toString(),
                 closed: m['closed_at'] != null,
               ))
           .toList()
@@ -341,6 +343,7 @@ class DocumentRepository {
       body: rev?.bodyMarkdown,
       nextReviewDue: rev?.nextReviewDue,
       supersededBy: d.supersededByUid,
+      documentTypeUid: d.documentTypeUid,
       steps: _list(rev?.steps).map((s) => (_map(s)['title'] ?? _map(s)['text'] ?? s).toString()).toList(),
     );
   }
@@ -355,6 +358,7 @@ class DocumentRepository {
                 published: m['current_revision_uid'] != null,
                 documentTypeUid: m['document_type_uid']?.toString(),
                 updatedAt: _date(m['updated_at']),
+                createdAt: _date(m['created_at']),
                 retired: m['retired_at'] != null,
                 shared: m['is_global'] == true,
                 workspaceId: m['workspace_id']?.toString(),

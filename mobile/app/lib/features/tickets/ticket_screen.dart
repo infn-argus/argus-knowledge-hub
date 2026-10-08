@@ -10,6 +10,7 @@ import '../../core/problem.dart';
 import '../../domain/capture.dart';
 import '../../domain/models.dart';
 import '../../widgets/common.dart';
+import '../../widgets/type_tree.dart';
 import '../../widgets/rich_content.dart';
 import 'report_screen.dart' show impactOptions;
 
@@ -175,6 +176,8 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(t.title, key: const Key('ticket-title'), style: theme.textTheme.headlineSmall),
+                const SizedBox(height: 4),
+                TypeBreadcrumb(tree: ref.watch(typeTreeProvider('tickets')).value, schemaUid: t.schemaUid),
                 const SizedBox(height: 8),
                 Wrap(spacing: 8, runSpacing: 6, children: [
                   StatusChip(t.state, tone: theme.colorScheme.primary),

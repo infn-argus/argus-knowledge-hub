@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/sync/sync_driver.dart';
+import 'providers.dart';
 import 'router.dart';
 
 /// Field use: large targets, high contrast, a theme that follows the system (bright sun, dark
@@ -26,6 +27,7 @@ class ArgusFieldApp extends ConsumerWidget {
         debugShowCheckedModeBanner: false,
         theme: _theme(Brightness.light),
         darkTheme: _theme(Brightness.dark),
+        themeMode: ref.watch(themeModeProvider),
         routerConfig: ref.watch(routerProvider),
         builder: (context, child) => SyncDriver(child: OfflineBanner(child: child ?? const SizedBox.shrink())),
       );

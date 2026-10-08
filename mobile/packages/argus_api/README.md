@@ -68,6 +68,7 @@ Class | Method | HTTP request | Description
 *AssetSubresourcesApi* | [**createComments**](doc//AssetSubresourcesApi.md#createcomments) | **POST** /v1/assets/{asset_uid}/comments | Create Comments
 *AssetSubresourcesApi* | [**listComments**](doc//AssetSubresourcesApi.md#listcomments) | **GET** /v1/assets/{asset_uid}/comments | List Comments
 *AssetSubresourcesApi* | [**listHistory**](doc//AssetSubresourcesApi.md#listhistory) | **GET** /v1/assets/{asset_uid}/history | List History
+*AssetsApi* | [**assetTypeCounts**](doc//AssetsApi.md#assettypecounts) | **GET** /v1/assets/type-counts | Asset Type Counts
 *AssetsApi* | [**createAsset**](doc//AssetsApi.md#createasset) | **POST** /v1/assets | Create Asset
 *AssetsApi* | [**getAsset**](doc//AssetsApi.md#getasset) | **GET** /v1/assets/{uid} | Get Asset
 *AssetsApi* | [**listAssets**](doc//AssetsApi.md#listassets) | **GET** /v1/assets | List Assets

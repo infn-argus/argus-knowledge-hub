@@ -1,5 +1,6 @@
 import 'package:argus_field/app/app.dart';
 import 'package:argus_field/app/providers.dart';
+import 'package:argus_field/core/local_store.dart';
 import 'package:argus_field/app/router.dart';
 import 'package:argus_field/core/config.dart';
 import 'package:flutter/material.dart';
@@ -29,6 +30,7 @@ Future<FakeArgus> _start(WidgetTester tester, {Map<String, String> stored = cons
     overrides: [
       configProvider.overrideWithValue(_config),
       httpClientProvider.overrideWithValue(server.client),
+      cacheStoreProvider.overrideWithValue(MemoryLocalStore()),
     ],
     child: const ArgusFieldApp(),
   ));

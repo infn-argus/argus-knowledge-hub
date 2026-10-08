@@ -252,7 +252,11 @@ class DocumentDetail {
     this.nextReviewDue,
     this.supersededBy,
     this.steps = const [],
+    this.documentTypeUid,
   });
+
+  /// The document's type, placed in the hierarchy on screen.
+  final String? documentTypeUid;
 
   final String uid;
   final String code;
@@ -322,6 +326,8 @@ class TicketListItem {
     this.assignee,
     this.assetUid,
     this.updatedAt,
+    this.createdAt,
+    this.schemaUid,
     this.closed = false,
   });
 
@@ -332,6 +338,8 @@ class TicketListItem {
   final String? assignee;
   final String? assetUid;
   final DateTime? updatedAt;
+  final DateTime? createdAt;
+  final String? schemaUid;
   final bool closed;
 }
 
@@ -344,6 +352,7 @@ class DocumentListItem {
     required this.published,
     this.documentTypeUid,
     this.updatedAt,
+    this.createdAt,
     this.retired = false,
     this.shared = false,
     this.workspaceId,
@@ -358,6 +367,7 @@ class DocumentListItem {
   final String? workspaceId;
   final String? documentTypeUid;
   final DateTime? updatedAt;
+  final DateTime? createdAt;
   final bool retired;
 }
 

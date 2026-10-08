@@ -9,6 +9,7 @@ import '../../core/problem.dart';
 import '../../data/ask_repository.dart';
 import '../../widgets/common.dart';
 import '../../widgets/rich_content.dart';
+import '../shell/app_shell.dart';
 import 'voice.dart';
 
 /// Ask: a question answered from the workspace's records, typed or spoken, as a conversation
@@ -214,7 +215,8 @@ class _AskScreenState extends ConsumerState<AskScreen> {
     final available = ref.watch(askAvailabilityProvider);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Ask'),
+        leading: const ShellMenuButton(),
+        title: const Text('Ask ARGUS'),
         actions: [
           IconButton(
             key: const Key('ask-handsfree'),

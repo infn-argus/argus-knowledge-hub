@@ -31,6 +31,8 @@ dependencies:
   flutter_markdown_plus: ^1.0.3
   html: ^0.15.7
   url_launcher: ^6.3.3
+  cryptography: ^2.9.0
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:

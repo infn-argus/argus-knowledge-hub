@@ -9,7 +9,7 @@ import 'harness.dart';
 void main() {
   testWidgets('the ticket list shows the open tickets, or all of them, and opens one', (tester) async {
     final r = await start(tester);
-    await r.tap('home-tickets');
+    await r.tap('nav-tickets');
 
     expect(find.text('Pressure spike on gun ion pump'), findsOneWidget);
     expect(find.text('Cooling water leak fixed'), findsNothing, reason: 'closed: not among the open ones');

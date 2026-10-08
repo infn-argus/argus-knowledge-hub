@@ -5,7 +5,11 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../core/problem.dart';
 import '../../domain/models.dart';
+import '../../data/browse_repository.dart';
 import '../../widgets/common.dart';
+import '../../widgets/sort_menu.dart';
+import '../../widgets/type_tree.dart';
+import '../shell/app_shell.dart';
 
 enum _Show { open, mine, all }
 
@@ -21,6 +25,8 @@ class TicketListScreen extends ConsumerStatefulWidget {
 class _TicketListScreenState extends ConsumerState<TicketListScreen> {
   _Show _show = _Show.open;
   String _q = '';
+  String? _type;
+  ListOrder _order = ListOrder.byUpdate;
 
   Future<void> _newTicket() async {
     final path = await context.push<String>('/scan?pick=1');
@@ -42,10 +48,22 @@ class _TicketListScreenState extends ConsumerState<TicketListScreen> {
   @override
   Widget build(BuildContext context) {
     final r = ref.watch(ticketListProvider(_show == _Show.mine));
+    final tree = ref.watch(typeTreeProvider('tickets')).value;
+    final all = r.value ?? const <TicketListItem>[];
+    final counts = <String, int>{};
+    for (final t in all) {
+      if (t.schemaUid != null) counts[t.schemaUid!] = (counts[t.schemaUid!] ?? 0) + 1;
+    }
+    final inType = _type == null || tree == null ? null : tree.subtree(_type!);
     return Scaffold(
-      appBar: AppBar(title: const Text('Tickets')),
+      appBar: AppBar(
+        leading: const ShellMenuButton(),
+        title: const Text('Tickets'),
+        actions: [SortMenu(order: _order, onChanged: (o) => setState(() => _order = o))],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('tickets-new'),
+        heroTag: 'tickets-new', // the tabs stay mounted together: each its own hero
         onPressed: _newTicket,
         icon: const Icon(Icons.add),
         label: const Text('New ticket'),
@@ -72,6 +90,19 @@ class _TicketListScreenState extends ConsumerState<TicketListScreen> {
             onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: TypeFilterButton(
+              tree: tree,
+              selected: _type,
+              counts: counts,
+              label: 'All kinds',
+              onSelected: (t) => setState(() => _type = t),
+            ),
+          ),
+        ),
         Expanded(
           child: r.when(
             loading: () => const Center(child: CircularProgressIndicator()),
@@ -80,7 +111,10 @@ class _TicketListScreenState extends ConsumerState<TicketListScreen> {
               final shown = all
                   .where((t) => _show == _Show.all || !t.closed)
                   .where((t) => _q.isEmpty || t.title.toLowerCase().contains(_q))
-                  .toList();
+                  .where((t) => inType == null || inType.contains(t.schemaUid))
+                  .toList()
+                ..sort((a, b) => _order.compare(a, b,
+                    name: (t) => t.title, created: (t) => t.createdAt, updated: (t) => t.updatedAt));
               if (shown.isEmpty) {
                 return Center(
                   child: Text(_show == _Show.mine ? 'No open tickets are assigned to you.' : 'No tickets match.'),

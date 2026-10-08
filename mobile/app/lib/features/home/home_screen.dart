@@ -9,6 +9,7 @@ import '../../app/providers.dart';
 import '../../app/queue.dart';
 import '../../domain/models.dart';
 import '../../widgets/common.dart';
+import '../shell/app_shell.dart';
 
 /// Home: find a record by scanning its label or by typing (flutter-app-design §5.1).
 class HomeScreen extends ConsumerStatefulWidget {
@@ -47,6 +48,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final session = ref.watch(sessionProvider).value;
     return Scaffold(
       appBar: AppBar(
+        leading: const ShellMenuButton(),
         title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('ARGUS Field'),
           if (session?.workspaceName != null)
@@ -54,41 +56,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ]),
         actions: [
           const _Unsent(),
-          IconButton(
-            key: const Key('home-ask'),
-            tooltip: 'Ask the assistant',
-            onPressed: () => context.push('/ask'),
-            icon: const Icon(Icons.smart_toy_outlined),
-          ),
           const _InboxBell(),
-          PopupMenuButton<String>(
-            key: const Key('home-menu'),
-            onSelected: (v) {
-              switch (v) {
-                case 'register':
-                  context.push('/register');
-                case 'reviews':
-                  context.push('/reviews');
-                case 'workspace':
-                  context.push('/workspace');
-                case 'diagnostics':
-                  context.push('/diagnostics');
-                case 'signout':
-                  _signOut(context, ref);
-              }
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'register', child: Text('Register equipment')),
-              PopupMenuItem(value: 'reviews', child: Text('Review items')),
-              PopupMenuItem(value: 'workspace', child: Text('Switch workspace')),
-              PopupMenuItem(value: 'diagnostics', child: Text('About and diagnostics')),
-              PopupMenuItem(value: 'signout', child: Text('Sign out')),
-            ],
-          ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('home-scan'),
+        heroTag: 'home-scan', // the tabs stay mounted together: each its own hero
         onPressed: () => context.push('/scan'),
         icon: const Icon(Icons.qr_code_scanner),
         label: const Text('Scan label'),
@@ -118,28 +91,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onSubmitted: _submit,
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-          child: Row(children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                key: const Key('home-tickets'),
-                onPressed: () => context.push('/tickets'),
-                icon: const Icon(Icons.confirmation_number_outlined),
-                label: const Text('Tickets'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                key: const Key('home-documents'),
-                onPressed: () => context.push('/documents'),
-                icon: const Icon(Icons.description_outlined),
-                label: const Text('Documents'),
-              ),
-            ),
-          ]),
-        ),
         Expanded(child: _q.length < 2 ? const _Cockpit() : _Results(q: _q)),
       ]),
     );
@@ -147,7 +98,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 }
 
 /// Signing out wipes the device (§5.6). Unsent changes would be lost: the person sees them first.
-Future<void> _signOut(BuildContext context, WidgetRef ref) async {
+Future<void> signOut(BuildContext context, WidgetRef ref) async {
   final unsent = ref.read(queueProvider.notifier).unsent;
   if (unsent.isNotEmpty) {
     final ok = await showDialog<bool>(
@@ -308,7 +259,7 @@ class _Kpi extends StatelessWidget {
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: to == null ? null : () => context.push(to!),
+        onTap: to == null ? null : () => context.go(to!),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

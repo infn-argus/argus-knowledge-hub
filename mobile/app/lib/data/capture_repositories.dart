@@ -110,6 +110,18 @@ class SchemaRepository {
       .toList()
     ..sort((a, b) => a.name.compareTo(b.name));
 
+  /// The hierarchy of one kind of type: 'objects', 'tickets' or 'documents'.
+  Future<TypeTree> tree(String appliesTo) async => TypeTree([
+        for (final s in await _all())
+          if (s['applies_to'] == appliesTo)
+            TypeNode(
+              uid: s['uid'].toString(),
+              name: (s['name'] ?? '').toString(),
+              parentUid: s['parent_schema_uid']?.toString(),
+              concrete: s['is_concrete'] != false,
+            ),
+      ]);
+
   /// A type's attributes, with its ancestors' folded in (a child's own definition wins on the same
   /// key) — the same rule webapp/src/lib/schemaAttributes.ts effectiveAttributes() applies, so a
   /// record edited here sees the fields the web form would show.

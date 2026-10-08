@@ -161,7 +161,7 @@ void main() {
     final app = await start(tester);
     await reportOffline(app, photos: 0);
     await app.go('/');
-    await app.tap('home-menu');
+    await app.tap('nav-menu');
     await tester.tap(find.text('Sign out'));
     await tester.pumpAndSettle();
     expect(find.text('Sign out and lose unsent changes?'), findsOneWidget);

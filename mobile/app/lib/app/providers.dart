@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
+import '../core/file_cache_store.dart';
 import '../core/local_store.dart';
 import '../data/caching_client.dart';
 
@@ -9,6 +12,7 @@ import '../core/problem.dart';
 import '../core/session.dart';
 import '../data/api_service.dart';
 import '../data/ask_repository.dart';
+import '../data/browse_repository.dart';
 import '../data/capture_repositories.dart';
 import '../data/replacement_repositories.dart';
 import '../data/repositories.dart';
@@ -33,6 +37,35 @@ final httpClientProvider = Provider<http.Client?>((_) => null);
 
 /// Saved copies, pending commands and their attachments, encrypted on the device.
 final localStoreProvider = Provider<LocalStore>((_) => SecureLocalStore());
+
+/// The saved copies of records: encrypted files on a phone (the keystore is for secrets, not hundreds of
+/// records — core/file_cache_store.dart), the encrypted local store in a browser.
+final cacheStoreProvider =
+    Provider<LocalStore>((ref) => kIsWeb ? ref.watch(localStoreProvider) : FileCacheStore());
+
+/// How long a record just read is shown again without asking ARGUS (caching_client.dart).
+const freshCopies = Duration(seconds: 45);
+
+/// Light, dark, or as the system says; kept on the device.
+class ThemeModeController extends Notifier<ThemeMode> {
+  static const _key = 'argus.pref.theme';
+
+  @override
+  ThemeMode build() {
+    ref.read(localStoreProvider).read(_key).then((v) {
+      final m = ThemeMode.values.where((m) => m.name == v).firstOrNull;
+      if (m != null && m != state) state = m;
+    }).catchError((_) {});
+    return ThemeMode.system;
+  }
+
+  Future<void> set(ThemeMode m) async {
+    state = m;
+    await ref.read(localStoreProvider).write(_key, m.name);
+  }
+}
+
+final themeModeProvider = NotifierProvider<ThemeModeController, ThemeMode>(ThemeModeController.new);
 
 /// Whether ARGUS answered the last request, and the device's offset from the server's clock.
 class Reachability {
@@ -107,6 +140,9 @@ class SessionController extends AsyncNotifier<Session?> {
   Future<void> _set(Session? s) async {
     if (s == null) {
       await _store.wipe();
+      try {
+        await ref.read(cacheStoreProvider).clear(CachingClient.prefix);
+      } catch (_) {}
     } else {
       await _store.save(s);
     }
@@ -198,8 +234,9 @@ final apiServiceProvider = Provider<ApiService>((ref) {
   final reach = ref.read(reachabilityProvider.notifier);
   final caching = CachingClient(
     ref.watch(httpClientProvider) ?? http.Client(),
-    ref.watch(localStoreProvider),
+    ref.watch(cacheStoreProvider),
     retention: config.offlineRetention,
+    fresh: freshCopies,
     scope: () {
       final s = ref.read(sessionProvider).value;
       return '${s?.workspaceId}|${s?.userLabel ?? s?.deviceId}';
@@ -330,6 +367,19 @@ final serverMetaProvider = FutureProvider.autoDispose<Map<String, Object?>>((ref
 final photoSourceProvider = Provider<PhotoSource>((_) => DevicePhotoSource());
 final intakeRepositoryProvider = Provider((ref) => IntakeRepository(ref.watch(apiServiceProvider)));
 final schemaRepositoryProvider = Provider((ref) => SchemaRepository(ref.watch(apiServiceProvider)));
+final browseRepositoryProvider = Provider((ref) => BrowseRepository(ref.watch(apiServiceProvider)));
+
+/// One kind of type ('objects', 'tickets', 'documents') as its hierarchy, for the lists' type filter and the
+/// records' type path. Types change rarely: kept for the session, refreshed with the workspace.
+final typeTreeProvider = FutureProvider.family<TypeTree, String>((ref, appliesTo) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(schemaRepositoryProvider).tree(appliesTo);
+});
+
+final assetTypeCountsProvider = FutureProvider.autoDispose<Map<String, int>>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(browseRepositoryProvider).assetTypeCounts();
+});
 final uploadRepositoryProvider = Provider((ref) => UploadRepository(ref.watch(apiServiceProvider)));
 final ticketCommandsProvider = Provider((ref) => TicketCommands(ref.watch(apiServiceProvider)));
 final equipmentCommandsProvider = Provider((ref) => EquipmentCommands(ref.watch(apiServiceProvider)));

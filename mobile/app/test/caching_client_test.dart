@@ -70,4 +70,60 @@ void main() {
     offline = true;
     await expectLater(c.get(Uri.parse('https://a/v1/assets/a1')), throwsA(isA<http.ClientException>()));
   });
+
+  group('fresh copies', () {
+    late int calls;
+    CachingClient freshClient() => CachingClient(
+          MockClient((req) async {
+            calls++;
+            return http.Response('{"uid":"a1","n":$calls}', 200, headers: {'content-type': 'application/json'});
+          }),
+          store,
+          retention: const Duration(days: 7),
+          scope: () => scope,
+          fresh: const Duration(minutes: 1),
+        );
+
+    setUp(() => calls = 0);
+
+    test('what was just read is shown again without asking ARGUS', () async {
+      final c = freshClient();
+      await c.get(Uri.parse('https://a/v1/assets/a1'));
+      final again = await c.get(Uri.parse('https://a/v1/assets/a1'));
+      expect(calls, 1);
+      expect(jsonDecode(again.body)['n'], 1);
+      expect(again.headers[CachingClient.offlineHeader], isNull, reason: 'fresh, not an offline copy');
+    });
+
+    test('a change sent from here makes every earlier copy stale', () async {
+      final c = freshClient();
+      await c.get(Uri.parse('https://a/v1/assets/a1'));
+      await c.put(Uri.parse('https://a/v1/assets/a1'), body: '{}');
+      final after = await c.get(Uri.parse('https://a/v1/assets/a1'));
+      expect(calls, 3);
+      expect(jsonDecode(after.body)['n'], 3, reason: 'what the person just changed is never hidden');
+    });
+
+    test('what is never kept is never served fresh either', () async {
+      final c = freshClient();
+      await c.get(Uri.parse('https://a/v1/hub/search?q=x'));
+      await c.get(Uri.parse('https://a/v1/hub/search?q=x'));
+      expect(calls, 2);
+    });
+  });
+
+  test('the oldest copies go first when there are too many', () async {
+    final c = CachingClient(
+      MockClient((req) async => http.Response('{}', 200, headers: {'content-type': 'application/json'})),
+      store,
+      retention: const Duration(days: 7),
+      scope: () => scope,
+      maxEntries: 2,
+    );
+    for (final id in ['a1', 'a2', 'a3']) {
+      await c.get(Uri.parse('https://a/v1/assets/$id'));
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    expect((await store.stamps(CachingClient.prefix)).length, 2);
+  });
 }

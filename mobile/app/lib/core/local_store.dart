@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Everything the app keeps on the device, other than the session: saved copies of records,
@@ -13,9 +15,26 @@ abstract class LocalStore {
 
   /// Every entry whose key starts with [prefix].
   Future<Map<String, String>> readPrefix(String prefix);
+
+  /// The keys under [prefix] and when each was written, without reading what they hold: what eviction and
+  /// the retention purge need, and, for a store that decrypts on read, much cheaper than [readPrefix].
+  Future<Map<String, DateTime>> stamps(String prefix) async => {
+        for (final e in (await readPrefix(prefix)).entries)
+          e.key: DateTime.tryParse(((jsonDecode(e.value) as Map)['at'] as String?) ?? '') ?? DateTime(0),
+      };
+
+  /// Remove an entry by the name [stamps] gave it.
+  Future<void> forget(String stamped) => delete(stamped);
+
+  /// Remove every entry under [prefix].
+  Future<void> clear(String prefix) async {
+    for (final k in (await readPrefix(prefix)).keys) {
+      await delete(k);
+    }
+  }
 }
 
-class SecureLocalStore implements LocalStore {
+class SecureLocalStore extends LocalStore {
   SecureLocalStore([FlutterSecureStorage? storage]) : _s = storage ?? const FlutterSecureStorage();
   final FlutterSecureStorage _s;
 
@@ -36,7 +55,7 @@ class SecureLocalStore implements LocalStore {
 }
 
 /// For tests, and for a browser where storage is unavailable.
-class MemoryLocalStore implements LocalStore {
+class MemoryLocalStore extends LocalStore {
   final Map<String, String> data = {};
 
   @override

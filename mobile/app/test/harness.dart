@@ -12,6 +12,8 @@ import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:argus_field/core/local_store.dart';
+
 import 'fake_server.dart';
 
 const testConfig = AppConfig(
@@ -84,6 +86,7 @@ Future<Running> start(WidgetTester tester,
     overrides: [
       configProvider.overrideWithValue(config),
       httpClientProvider.overrideWithValue(server.client),
+      cacheStoreProvider.overrideWithValue(MemoryLocalStore()),
       photoSourceProvider.overrideWithValue(photos),
       ...overrides,
     ],
