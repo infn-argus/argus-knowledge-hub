@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/misc.dart' show ProviderListenable;
 import 'package:go_router/go_router.dart';
 
 import '../core/problem.dart';
+import '../domain/capture.dart' show DocumentSeed;
 import '../features/ask/ask_screen.dart';
 import '../features/assets/asset_list_screen.dart';
 import '../features/graph/graph_screen.dart';
@@ -107,7 +108,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: '/register',
           builder: (_, st) =>
-              RegisterScreen(label: st.uri.queryParameters['label'], pick: st.uri.queryParameters['pick'] == '1')),
+              RegisterScreen(
+                  label: st.uri.queryParameters['label'],
+                  pick: st.uri.queryParameters['pick'] == '1',
+                  photoFirst: st.uri.queryParameters['photo'] == '1')),
       GoRoute(path: '/replace/:uid', builder: (_, st) => ReplaceScreen(positionUid: st.pathParameters['uid']!)),
       GoRoute(path: '/reviews', builder: (_, _) => const ReviewScreen()),
       GoRoute(path: '/outbox', builder: (_, _) => const OutboxScreen()),
@@ -116,7 +120,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/ticket/:uid/edit', builder: (_, st) => TicketEditScreen(uid: st.pathParameters['uid']!)),
       GoRoute(
           path: '/documents/new',
-          builder: (_, st) => DocumentWriteScreen(assetUid: st.uri.queryParameters['asset'])),
+          builder: (_, st) => DocumentWriteScreen(
+              assetUid: st.uri.queryParameters['asset'], seed: st.extra is DocumentSeed ? st.extra as DocumentSeed : null)),
       GoRoute(
           path: '/document/:uid/revision/:rev/edit',
           builder: (_, st) =>

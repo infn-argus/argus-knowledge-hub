@@ -97,6 +97,12 @@ Future<PendingCommand?> attachTo(BuildContext context, WidgetRef ref, AttachTarg
     return null;
   }
   if (file == null) return null;
+  return queueAttachment(ref, target, file, dependsOn: dependsOn);
+}
+
+/// Sends a file to a record through the queue: now when ARGUS can be reached, later when it cannot.
+Future<PendingCommand> queueAttachment(WidgetRef ref, AttachTarget target, PickedPhoto file,
+    {List<String> dependsOn = const []}) async {
   final queue = ref.read(queueProvider.notifier);
   final command = await queue.enqueue(
     kind: 'attachment.upload',
@@ -109,6 +115,14 @@ Future<PendingCommand?> attachTo(BuildContext context, WidgetRef ref, AttachTarg
   );
   return queue.sendNow(command);
 }
+
+/// Records a note: the recording sheet, until the person stops (the file) or cancels (null).
+Future<PickedPhoto?> recordNote(BuildContext context, WidgetRef ref) => showModalBottomSheet<PickedPhoto>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      builder: (_) => _RecordSheet(ref.read(mediaSourceProvider).recorder()),
+    );
 
 class _RecordSheet extends StatefulWidget {
   const _RecordSheet(this.recorder);

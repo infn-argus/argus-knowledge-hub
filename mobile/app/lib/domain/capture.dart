@@ -367,3 +367,14 @@ class AssetLabelInfo {
 
   String get kindLabel => kinds[type] ?? type.replaceAll('_', ' ');
 }
+
+/// Where a new document starts from, besides a blank page: what was said in a recording, or the text read from
+/// a photo — with the recording or photo itself, kept with the draft as its source.
+class DocumentSeed {
+  const DocumentSeed({this.title = '', this.body = '', this.original, this.from});
+
+  final String title;
+  final String body;
+  final PickedPhoto? original;
+  final String? from; // 'recording' | 'photo'
+}

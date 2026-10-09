@@ -240,6 +240,10 @@ class ApiClient {
           return DocumentRevisionUpdate.fromJson(value);
         case 'DocumentUpdate':
           return DocumentUpdate.fromJson(value);
+        case 'DraftDocumentIn':
+          return DraftDocumentIn.fromJson(value);
+        case 'DraftDocumentOut':
+          return DraftDocumentOut.fromJson(value);
         case 'GlobalValueOut':
           return GlobalValueOut.fromJson(value);
         case 'GuideIn':
@@ -258,6 +262,8 @@ class ApiClient {
           return IssueUpdate.fromJson(value);
         case 'MeOut':
           return MeOut.fromJson(value);
+        case 'MentionedObject':
+          return MentionedObject.fromJson(value);
         case 'MyWorkspaceOut':
           return MyWorkspaceOut.fromJson(value);
         case 'OutcomeIn':

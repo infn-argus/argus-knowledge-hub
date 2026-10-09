@@ -295,6 +295,8 @@ class FakeArgus {
       if (p == '/v1/documents/$draftUid/revisions') {
         return _json([revision(draftUid, 1, draftRevisionState, '# Bake-out\n\nHeat to 150 °C.')]);
       }
+      final newDoc = RegExp(r'^/v1/documents/([^/]+)/revisions$').firstMatch(p);
+      if (newDoc != null) return _json([revision(newDoc.group(1)!, 1, 'draft', '')]); // one written here
       if (RegExp(r'^/v1/issues/[^/]+/comments$').hasMatch(p)) return _json(fixture('comments'));
       if (RegExp(r'^/v1/issues/[^/]+/attachments$').hasMatch(p)) return _json([]);
       if (RegExp(r'^/v1/assets/[^/]+/comments$').hasMatch(p)) return _json(fixture('asset_comments'));

@@ -26,7 +26,10 @@ const baseFields = ['manufacturer', 'model', 'serial', 'inventory_number'];
 /// values the person types, or from a similar unit the person scans (its kind and attributes, never its
 /// identifiers). A QR code read from the unit's own label becomes its label.
 class RegisterScreen extends ConsumerStatefulWidget {
-  const RegisterScreen({super.key, this.label, this.pick = false});
+  const RegisterScreen({super.key, this.label, this.pick = false, this.photoFirst = false});
+
+  /// Opened to photograph the nameplate (from Ask ARGUS): the camera opens at once.
+  final bool photoFirst;
 
   /// Return the new unit's uid to the screen that asked (the replacement), instead of opening it.
   final bool pick;
@@ -62,6 +65,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     // A label that found nothing: a web address is a QR code printed for this unit, anything else its serial.
     final label = widget.label;
     if (label != null) (label.contains('://') ? _qr : _attrs['serial']!).text = label;
+    if (widget.photoFirst) WidgetsBinding.instance.addPostFrameCallback((_) => _capture());
   }
 
   @override

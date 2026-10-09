@@ -1,6 +1,10 @@
 import 'dart:convert';
 
 import 'package:argus_api/api.dart' as api;
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' show MediaType;
+
+import '../domain/capture.dart' show PickedPhoto;
 
 import 'api_service.dart';
 
@@ -109,6 +113,22 @@ class AskRepository {
   AskRepository(this._api);
 
   final ApiService _api;
+
+  /// What was said in a recording, as text, by the workspace's speech-to-text model. Nothing is kept.
+  Future<String> transcribe(PickedPhoto recording, {String? language}) async {
+    final file = http.MultipartFile.fromBytes('file', recording.bytes,
+        filename: recording.name, contentType: MediaType.parse(recording.mimeType));
+    final r = await _api.json((c) => _api.ai(c).transcribeRecordingWithHttpInfo(file, language: language));
+    return ((r is Map ? r['text'] : null) ?? '').toString().trim();
+  }
+
+  /// A document's rough text (a dictation, a photographed page) written up as a document by the assistant,
+  /// for the person to check. Nothing is saved.
+  Future<String> tidy({required String title, required String notes, String? documentTypeUid}) async {
+    final r = await _api.json((c) => _api.ai(c).draftADocumentWithHttpInfo(
+        api.DraftDocumentIn(title: title, notes: notes, documentTypeUid: documentTypeUid)));
+    return ((r is Map ? r['body_markdown'] : null) ?? '').toString().trim();
+  }
 
   Future<AskAvailability> availability() async {
     final s = await _api.call((c) => _api.ai(c).status());

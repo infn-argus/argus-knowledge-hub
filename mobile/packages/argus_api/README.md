@@ -62,9 +62,11 @@ All URIs are relative to *http://localhost*
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
 *AiApi* | [**chat**](doc//AiApi.md#chat) | **POST** /v1/ai/chat | Chat
+*AiApi* | [**draftADocument**](doc//AiApi.md#draftadocument) | **POST** /v1/ai/draft-document | Draft A Document
 *AiApi* | [**getConversation**](doc//AiApi.md#getconversation) | **GET** /v1/ai/conversations/{conversation_id} | Get Conversation
 *AiApi* | [**listConversations**](doc//AiApi.md#listconversations) | **GET** /v1/ai/conversations | List Conversations
 *AiApi* | [**status**](doc//AiApi.md#status) | **GET** /v1/ai/status | Status
+*AiApi* | [**transcribeRecording**](doc//AiApi.md#transcriberecording) | **POST** /v1/ai/transcribe | Transcribe Recording
 *AssetSubresourcesApi* | [**createComments**](doc//AssetSubresourcesApi.md#createcomments) | **POST** /v1/assets/{asset_uid}/comments | Create Comments
 *AssetSubresourcesApi* | [**createLabels**](doc//AssetSubresourcesApi.md#createlabels) | **POST** /v1/assets/{asset_uid}/labels | Create Labels
 *AssetSubresourcesApi* | [**listComments**](doc//AssetSubresourcesApi.md#listcomments) | **GET** /v1/assets/{asset_uid}/comments | List Comments
@@ -171,6 +173,8 @@ Class | Method | HTTP request | Description
  - [DocumentRevisionOut](doc//DocumentRevisionOut.md)
  - [DocumentRevisionUpdate](doc//DocumentRevisionUpdate.md)
  - [DocumentUpdate](doc//DocumentUpdate.md)
+ - [DraftDocumentIn](doc//DraftDocumentIn.md)
+ - [DraftDocumentOut](doc//DraftDocumentOut.md)
  - [GlobalValueOut](doc//GlobalValueOut.md)
  - [GuideIn](doc//GuideIn.md)
  - [HTTPValidationError](doc//HTTPValidationError.md)
@@ -180,6 +184,7 @@ Class | Method | HTTP request | Description
  - [IssueOut](doc//IssueOut.md)
  - [IssueUpdate](doc//IssueUpdate.md)
  - [MeOut](doc//MeOut.md)
+ - [MentionedObject](doc//MentionedObject.md)
  - [MyWorkspaceOut](doc//MyWorkspaceOut.md)
  - [OutcomeIn](doc//OutcomeIn.md)
  - [ReplaceIn](doc//ReplaceIn.md)

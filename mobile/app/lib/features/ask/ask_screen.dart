@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../core/problem.dart';
 import '../../data/ask_repository.dart';
+import '../../domain/capture.dart';
+import '../../widgets/attach_menu.dart';
 import '../../widgets/common.dart';
 import '../../widgets/rich_content.dart';
 import '../shell/app_shell.dart';
@@ -34,6 +36,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
   bool _listening = false;
   bool _handsFree = false;
   int? _speaking; // the turn being read aloud
+  String? _preparing; // a recording being transcribed, a photo being read
 
   late final Voice _voice;
 
@@ -274,13 +277,98 @@ class _AskScreenState extends ConsumerState<AskScreen> {
     );
   }
 
+  /// Besides asking: registering equipment, and writing a document by voice or from a photo.
+  Future<void> _actions() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final (k, icon, title, sub) in const [
+            ('register-photo', Icons.add_a_photo_outlined, 'Register equipment from a photo',
+                'Its nameplate is read and the form filled in'),
+            ('scan', Icons.qr_code_scanner, 'Find or register by its label', 'QR code, barcode, serial or printed text'),
+            ('doc-voice', Icons.mic_none, 'Write a document by voice', 'Dictate it: what you say is transcribed'),
+            ('doc-photo', Icons.document_scanner_outlined, 'Write a document from a photo',
+                'A page, a sign, a whiteboard: its text is read'),
+          ])
+            ListTile(
+              key: Key('ask-action-$k'),
+              leading: Icon(icon),
+              title: Text(title),
+              subtitle: Text(sub),
+              onTap: () => Navigator.pop(sheet, k),
+            ),
+        ]),
+      ),
+    );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case 'register-photo':
+        context.push('/register?photo=1');
+      case 'scan':
+        context.push('/scan');
+      case 'doc-voice':
+        final recording = await recordNote(context, ref);
+        if (recording == null || !mounted) return;
+        await _startDocument('Transcribing your recording…', 'recording', recording,
+            () => ref.read(askRepositoryProvider).transcribe(recording));
+      case 'doc-photo':
+        final reader = ref.read(textReaderProvider);
+        if (!reader.available) {
+          _say('Reading text from a photo needs the app on a phone.');
+          return;
+        }
+        final photo = await ref.read(photoSourceProvider).take();
+        if (photo == null || !mounted) return;
+        await _startDocument('Reading the text…', 'photo', photo, () => reader.read(photo));
+    }
+  }
+
+  /// The new-document editor, started from what was said or read — or a word that nothing could be.
+  Future<void> _startDocument(String working, String from, PickedPhoto original, Future<String> Function() read) async {
+    setState(() => _preparing = working);
+    try {
+      final text = (await read()).trim();
+      if (!mounted) return;
+      if (text.isEmpty) {
+        _say(from == 'recording' ? 'Nothing could be heard in the recording.' : 'No text could be read in the photo.');
+        return;
+      }
+      context.push('/documents/new',
+          extra: DocumentSeed(title: firstLineOf(text), body: text, original: original, from: from));
+    } on Problem catch (p) {
+      _say(p.message);
+    } finally {
+      if (mounted) setState(() => _preparing = null);
+    }
+  }
+
+  void _say(String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+
   Widget _composer(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return SafeArea(
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-        child: Row(children: [
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (_preparing != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(children: [
+                const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 8),
+                Text(_preparing!, key: const Key('ask-preparing')),
+              ]),
+            ),
+          Row(children: [
+          IconButton(
+            key: const Key('ask-actions'),
+            tooltip: 'Register equipment, write a document…',
+            icon: const Icon(Icons.add_circle_outline),
+            onPressed: _busy || _preparing != null ? null : _actions,
+          ),
           Expanded(
             child: TextField(
               key: const Key('ask-input'),
@@ -308,6 +396,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                   key: const Key('ask-stop'), tooltip: 'Stop', icon: const Icon(Icons.stop), onPressed: _stop)
               : IconButton.filled(
                   key: const Key('ask-send'), tooltip: 'Ask', icon: const Icon(Icons.send), onPressed: _send),
+          ]),
         ]),
       ),
     );
@@ -440,4 +529,12 @@ class _History extends ConsumerWidget {
       ),
     );
   }
+}
+
+
+/// A document's title from its first words: the first line or sentence, at most 80 characters.
+String firstLineOf(String text) {
+  final first = text.trim().split(RegExp(r'[\n.!?]')).firstWhere((l) => l.trim().isNotEmpty, orElse: () => '').trim();
+  final bare = first.replaceFirst(RegExp(r'^#+\s*'), '');
+  return bare.length <= 80 ? bare : '${bare.substring(0, 77).trimRight()}…';
 }
