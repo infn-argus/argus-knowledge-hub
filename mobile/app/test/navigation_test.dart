@@ -40,7 +40,8 @@ void main() {
   testWidgets('the drawer holds the account, settings, about and help', (tester) async {
     final r = await start(tester);
     await r.tap('nav-menu');
-    for (final k in ['drawer-workspace', 'drawer-inbox', 'drawer-signout', 'drawer-settings', 'drawer-help', 'drawer-about']) {
+    for (final k in ['drawer-workspace', 'drawer-inbox', 'drawer-signout', 'drawer-settings', 'drawer-help', 'drawer-about',
+        'drawer-privacy']) {
       expect(find.byKey(Key(k)), findsOneWidget, reason: k);
     }
     await r.tap('drawer-settings');
@@ -115,5 +116,11 @@ void main() {
     expect(tree.path('pump').map((t) => t.name), ['Asset', 'Vacuum', 'Ion Pump']);
     expect(tree.subtree('vacuum'), {'vacuum', 'pump', 'gauge'});
     expect(tree.subtree('magnet'), {'magnet'});
+  });
+
+  testWidgets('the privacy policy is reachable before signing in, and from the drawer', (tester) async {
+    await start(tester, stored: const {});
+    expect(find.byKey(const Key('signin-privacy')), findsOneWidget);
+    expect(testConfig.privacyPolicy.toString(), 'https://argus.test/privacy.html');
   });
 }

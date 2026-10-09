@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/providers.dart';
 import '../../core/problem.dart';
@@ -135,6 +136,14 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                 const SizedBox(height: 16),
                 Text(_error!, style: TextStyle(color: theme.colorScheme.error), textAlign: TextAlign.center),
               ],
+              const SizedBox(height: 24),
+              Center(
+                child: TextButton(
+                  key: const Key('signin-privacy'),
+                  onPressed: () => launchUrl(config.privacyPolicy, mode: LaunchMode.externalApplication),
+                  child: const Text('Privacy policy'),
+                ),
+              ),
             ]),
           ),
         ),

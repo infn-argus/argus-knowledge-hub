@@ -111,6 +111,10 @@ class AppDrawer extends ConsumerWidget {
               mode: LaunchMode.externalApplication);
         }),
         _Item('drawer-about', Icons.info_outline, 'About and diagnostics', () => open('/diagnostics')),
+        _Item('drawer-privacy', Icons.privacy_tip_outlined, 'Privacy policy', () {
+          Navigator.pop(context);
+          launchUrl(config.privacyPolicy, mode: LaunchMode.externalApplication);
+        }),
         Padding(
           padding: const EdgeInsets.fromLTRB(28, 16, 28, 16),
           child: Text('Version ${config.appVersion}', style: theme.textTheme.bodySmall),

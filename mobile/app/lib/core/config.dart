@@ -34,6 +34,9 @@ class AppConfig {
 
   Duration get offlineRetention => Duration(days: offlineRetentionDays);
 
+  /// The privacy policy: a public page on the web app's host (webapp/public/privacy.html), as the stores require.
+  Uri get privacyPolicy => Uri.https(linkHost.isNotEmpty ? linkHost : Uri.parse(apiBase).host, '/privacy.html');
+
   bool get allowsDeveloperToken => environment != 'production';
 
   /// Google as the identity provider (OIDC_ISSUER=https://accounts.google.com) rather than
