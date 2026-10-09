@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import require_permission
+from app.auth import get_identity, require_permission
 from app.db import get_db
 from app.models.asset import Asset
 from app.models.asset_subresources import (
@@ -58,7 +58,7 @@ def _reject_duplicate_label(db: Session, workspace_id: str, body) -> None:
 
 def _make_subresource_routes(
     path: str, model, create_schema, out_schema, id_field: str = "uid", on_create=None,
-    with_list: bool = True,
+    with_list: bool = True, after_create=None,
 ):
     # Tickets have a hand-written listing (it resolves the local ticket for
     # each row), so the generic one must not also claim the path.
@@ -77,6 +77,7 @@ def _make_subresource_routes(
         asset_uid: str,
         body: create_schema,
         workspace_id: str = Depends(require_permission("create")),
+        identity=Depends(get_identity),
         db: Session = Depends(get_db),
     ):
         _check_asset(asset_uid, workspace_id, db)
@@ -84,6 +85,8 @@ def _make_subresource_routes(
             on_create(db, workspace_id, body)
         item = model(asset_uid=asset_uid, **body.model_dump())
         db.add(item)
+        if after_create is not None:
+            after_create(db, asset_uid, item, identity)
         db.commit()
         db.refresh(item)
         return item
@@ -115,6 +118,21 @@ _make_subresource_routes(
 )
 _make_subresource_routes("comments", AssetComment, AssetCommentCreate, AssetCommentOut)
 _make_subresource_routes("history", AssetHistory, AssetHistoryCreate, AssetHistoryOut)
+def record_label_change(db: Session, asset_uid: str, label, identity, change: str) -> None:
+    """A label put on or taken off a record is a change to that record: it shows in its history and moves
+    its "last changed", so a list sorted by change and the cockpit's recent activity show it too."""
+    import uuid
+    from datetime import datetime, timezone
+    from app.routers.ledger import actor_of
+    now = datetime.now(timezone.utc)
+    db.add(AssetHistory(uid=str(uuid.uuid4()), asset_uid=asset_uid, type="label", author=actor_of(identity),
+                        details=f"{change} {label.type} label {label.value}", timestamp=now))
+    asset = db.get(Asset, asset_uid)
+    if asset is not None:
+        asset.updated_at = now
+
+
 _make_subresource_routes(
-    "labels", AssetLabel, AssetLabelCreate, AssetLabelOut, on_create=_reject_duplicate_label
+    "labels", AssetLabel, AssetLabelCreate, AssetLabelOut, on_create=_reject_duplicate_label,
+    after_create=lambda db, asset_uid, label, identity: record_label_change(db, asset_uid, label, identity, "Added"),
 )

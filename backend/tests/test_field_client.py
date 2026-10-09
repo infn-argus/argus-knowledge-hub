@@ -121,3 +121,55 @@ def test_a_revoked_device_is_told_to_wipe_itself():
     other = world()
     assert client.post(f"/v1/devices/{d['id']}/revoke", headers=other["headers"],
                        json={"reason": "x"}).status_code == 404                  # not someone else's device
+
+
+def _label(w, asset_uid, type_, value):
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    r = client.post(f"/v1/assets/{asset_uid}/labels", headers=w["headers"], json={
+        "uid": str(uuid.uuid4()), "type": type_, "value": value, "issuer": "field", "created_at": now, "updated_at": now})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_a_scan_finds_every_kind_of_label_a_qr_code_first():
+    w = world()
+    tag = secrets.token_hex(3)
+    _label(w, w["pump"], "barcode", f"BC-{tag}")
+    assert resolve(w, f"/lookup/BC-{tag}").json()["uid"] == w["pump"], "a barcode label, not only a QR code"
+    _label(w, w["twin"], "asset_tag", f"tag-{tag}")
+    assert resolve(w, f"/lookup/TAG-{tag}").json()["uid"] == w["twin"], "a hand-typed serial may differ in case"
+    # The same value as one record's QR code and another's serial: the QR code is what a scan means.
+    _label(w, w["pump"], "qrcode", f"SHARED-{tag}")
+    _label(w, w["twin"], "serial", f"SHARED-{tag}")
+    assert resolve(w, f"/lookup/SHARED-{tag}").json()["uid"] == w["pump"]
+    # A QR code that is a number is the label, not an Insight objectId.
+    number = str(900000000 + int(tag, 16) % 99999)
+    _label(w, w["twin"], "qrcode", number)
+    assert resolve(w, f"/lookup/{number}").json()["uid"] == w["twin"]
+
+
+def test_a_label_put_on_or_taken_off_a_record_is_in_its_history():
+    w = world()
+    before = client.get(f"/v1/assets/{w['pump']}", headers=w["headers"]).json()["updated_at"]
+    label = _label(w, w["pump"], "qrcode", f"QR-{secrets.token_hex(3)}")
+    history = client.get(f"/v1/assets/{w['pump']}/history", headers=w["headers"]).json()
+    assert [h["details"] for h in history] == [f"Added qrcode label {label['value']}"] and history[0]["type"] == "label"
+    assert client.get(f"/v1/assets/{w['pump']}", headers=w["headers"]).json()["updated_at"] > before
+    assert client.delete(f"/v1/assets/{w['pump']}/labels/{label['uid']}", headers=w["headers"]).status_code == 204
+    details = [h["details"] for h in client.get(f"/v1/assets/{w['pump']}/history", headers=w["headers"]).json()]
+    assert f"Removed qrcode label {label['value']}" in details
+
+
+def test_an_edit_is_in_the_records_history_from_what_to_what():
+    w = world()
+    r = client.get(f"/v1/assets/{w['pump']}", headers=w["headers"])
+    body = r.json()
+    attrs = {**body["attributes"], "manufacturer": "Pfeiffer"}
+    put = client.put(f"/v1/assets/{w['pump']}", headers={**w["headers"], "If-Match": r.headers["etag"]},
+                     json={"attributes": attrs, "is_global": body["is_global"], "avatar_icon_uid": None,
+                           "inbound_relations": body["inbound_relations"], "outbound_relations": body["outbound_relations"]})
+    assert put.status_code == 200, put.text
+    history = client.get(f"/v1/assets/{w['pump']}/history", headers=w["headers"]).json()
+    assert len(history) == 1 and history[0]["type"] == "edit"
+    assert "Agilent → Pfeiffer" in history[0]["details"]

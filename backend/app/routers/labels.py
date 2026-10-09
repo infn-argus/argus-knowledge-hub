@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import require_permission
+from app.auth import get_identity, require_permission
 from app.db import get_db
 from app.models.asset import Asset
 from app.models.asset_subresources import AssetLabel
@@ -52,6 +52,7 @@ def delete_label(
     asset_uid: str,
     label_uid: str,
     workspace_id: str = Depends(require_permission("delete")),
+    identity=Depends(get_identity),
     db: Session = Depends(get_db),
 ):
     asset = db.get(Asset, asset_uid)
@@ -62,5 +63,7 @@ def delete_label(
     if label is None or label.asset_uid != asset_uid:
         raise HTTPException(status_code=404, detail="Label not found")
 
+    from app.routers.asset_subresources import record_label_change
+    record_label_change(db, asset_uid, label, identity, "Removed")
     db.delete(label)
     db.commit()

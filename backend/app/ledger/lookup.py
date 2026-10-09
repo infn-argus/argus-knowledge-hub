@@ -69,6 +69,16 @@ def resolve(db: Session, identifier: str, workspace_ids: Optional[Iterable[str]]
     def in_scope(workspace_id: str) -> bool:
         return ws is None or workspace_id in ws
 
+    # A label's value exactly as printed (a QR code of a web address, an alias that is a whole link, a number)
+    # is what was scanned: a QR code first, then the aliases a printed code may carry — before the identifier
+    # is taken apart, and before a number is read as an Insight objectId.
+    whole = identifier.strip()
+    if not by_object_id and whole:
+        for label_type in EXACT_LABELS:
+            for label in db.scalars(select(AssetLabel).where(AssetLabel.value == whole, AssetLabel.type == label_type)):
+                hit = _asset_hit(db, db.get(Asset, label.asset_uid), label.type)
+                if hit and in_scope(hit["workspace_id"]):
+                    return hit
     object_id = parsed.get("object_id")
     key = parsed.get("key")
     if object_id is None and key and key.isdigit():
@@ -80,14 +90,6 @@ def resolve(db: Session, identifier: str, workspace_ids: Optional[Iterable[str]]
             return hit
     if not key:
         return None
-    # A label's value exactly as printed (a QR code of a web address, an alias that is a whole link) is what
-    # was scanned: it is matched whole before the identifier is taken apart.
-    whole = identifier.strip()
-    for label in db.scalars(select(AssetLabel).where(AssetLabel.value == whole,
-                                                     AssetLabel.type.in_(EXACT_LABELS))):
-        hit = _asset_hit(db, db.get(Asset, label.asset_uid), label.type)
-        if hit and in_scope(hit["workspace_id"]):
-            return hit
     q = select(Issue).where(Issue.attributes["argus_source_key"].astext == key)
     for issue in db.scalars(q):
         if in_scope(issue.workspace_id):

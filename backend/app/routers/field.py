@@ -231,17 +231,59 @@ LABEL_FIELDS = ("serial", "inventory_number", "mac", "manufacturer")
 
 
 def _label_holders(db: Session, value: str, readable: list[str], grants) -> list[Asset]:
-    """Active records this person may see whose serial, inventory number or MAC is the value."""
-    from sqlalchemy import or_
+    """Active records this person may see that carry the value: as a label of any type — a QR code first,
+    then every other kind a record is labelled with (a serial, a barcode, an inventory or asset tag, an
+    alias) — or as their serial, inventory number or MAC. Exactly as scanned, then ignoring case, which is
+    how a serial read by a camera or typed by hand usually differs."""
+    from sqlalchemy import func, or_
     from app.ledger.identity import INACTIVE
+    from app.models.asset_subresources import AssetLabel
     from app.services.visibility import can_see
     v = value.strip()
     if not v:
         return []
     col = Asset.attributes
-    q = select(Asset).where(
-        or_(Asset.workspace_id.in_(readable), Asset.is_global.is_(True)),
-        Asset.record_status.notin_(INACTIVE),
-        or_(col["serial"].astext == v, col["inventory_number"].astext == v,
-            col["mac"].astext == v.lower().replace("-", ":"))).order_by(Asset.key).limit(50)
-    return [a for a in db.scalars(q) if can_see(a, grants)]
+    visible = (or_(Asset.workspace_id.in_(readable), Asset.is_global.is_(True)), Asset.record_status.notin_(INACTIVE))
+
+    def holders(stmt) -> list[Asset]:
+        seen, out = set(), []
+        for a in db.scalars(stmt.where(*visible).order_by(Asset.key).limit(50)):
+            if a.uid not in seen and can_see(a, grants):
+                seen.add(a.uid)
+                out.append(a)
+        return out
+
+    def labelled(match, types=None, exclude=None):
+        q = select(Asset).join(AssetLabel, AssetLabel.asset_uid == Asset.uid).where(match)
+        if types is not None:
+            q = q.where(AssetLabel.type.in_(types))
+        if exclude is not None:
+            q = q.where(AssetLabel.type.notin_(exclude))
+        return holders(q)
+
+    def by_attribute(match_text):
+        return holders(select(Asset).where(or_(match_text(col["serial"].astext), match_text(col["inventory_number"].astext),
+                                               match_text(col["mac"].astext))))
+
+    mac = v.lower().replace("-", ":")
+    for found in (
+        lambda: labelled(AssetLabel.value == v, types=("qrcode",)),
+        lambda: _merge(labelled(AssetLabel.value == v, exclude=("qrcode",)),
+                       by_attribute(lambda c: or_(c == v, c == mac))),
+        lambda: _merge(labelled(func.lower(AssetLabel.value) == v.lower()),
+                       by_attribute(lambda c: func.lower(c) == v.lower())),
+    ):
+        hit = found()
+        if hit:
+            return hit
+    return []
+
+
+def _merge(*lists: list[Asset]) -> list[Asset]:
+    seen, out = set(), []
+    for rows in lists:
+        for a in rows:
+            if a.uid not in seen:
+                seen.add(a.uid)
+                out.append(a)
+    return out

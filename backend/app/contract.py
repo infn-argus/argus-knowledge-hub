@@ -69,6 +69,9 @@ FIELD_OPERATIONS = [
     ("get", "/v1/assets/{asset_uid}/comments"),
     ("post", "/v1/assets/{asset_uid}/comments"),
     ("get", "/v1/assets/{asset_uid}/history"),
+    ("get", "/v1/assets/{asset_uid}/labels"),
+    ("post", "/v1/assets/{asset_uid}/labels"),
+    ("delete", "/v1/assets/{asset_uid}/labels/{label_uid}"),
     ("get", "/v1/attachments"),
     ("get", "/v1/attachments/{uid}"),
     # Replacement and review (M3)

@@ -140,6 +140,38 @@ def asset_type_counts(
     return {uid: n for uid, n in rows if uid}
 
 
+def _shown(v) -> str:
+    if v is None or v == "" or v == []:
+        return "—"
+    text = ", ".join(map(str, v)) if isinstance(v, list) else str(v)
+    return text if len(text) <= 80 else text[:77] + "…"
+
+
+def _record_edit(db: Session, asset: Asset, changes: dict, before: dict, actor: str) -> None:
+    """A person's edit, in the record's history beside what was imported and added by hand: which fields
+    changed, from what to what. (The ledger keeps the full trail; this is the line a person reads.)"""
+    import uuid
+    from datetime import datetime, timezone
+    from app.models.asset_subresources import AssetHistory
+    names = {}
+    schema = db.get(Schema, asset.schema_uid)
+    for a in (schema.attributes if schema and isinstance(schema.attributes, list) else []):
+        if isinstance(a, dict) and a.get("key"):
+            names[a["key"]] = a.get("name") or a["key"]
+    parts = []
+    for k, v in changes.items():
+        if k == "name":
+            parts.append(f"Name: {_shown(before.get('name'))} → {_shown(v)}")
+        elif k.startswith("attr:"):
+            parts.append(f"{names.get(k[5:], k[5:])}: {_shown(before.get(k))} → {_shown(v)}")
+    if not parts:
+        return
+    details = "; ".join(parts)
+    db.add(AssetHistory(uid=str(uuid.uuid4()), asset_uid=asset.uid, type="edit", author=actor,
+                        details=details if len(details) <= 2000 else details[:1999] + "…",
+                        timestamp=datetime.now(timezone.utc)))
+
+
 def asset_out(db: Session, asset: Asset) -> AssetOut:
     """What the viewer may see of a record: no restricted field, and no
     restricted neighbour in its relation lists, not even by uid (I-ACL-1)."""
@@ -320,10 +352,12 @@ def update_asset(
     if changes:
         versions.check_asset(db, asset, if_match, changes, {"kind": "edit", "uid": uid, "changes": changes},
                              _actor(identity))
+        before = {"name": asset.name, **{f"attr:{k}": v for k, v in (asset.attributes or {}).items()}}
         try:
             ledger_service.edit_values(db, workspace_id, _actor(identity), uid, changes)
         except LedgerError as exc:
             _ledger_failed(db, exc)
+        _record_edit(db, asset, changes, before, _actor(identity))
     db.commit()
     if global_changed:
         # Cross-workspace visibility just changed — this asset's neighbors

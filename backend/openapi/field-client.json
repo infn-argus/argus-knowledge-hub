@@ -568,6 +568,167 @@
         "title": "AssetHistoryOut",
         "type": "object"
       },
+      "AssetLabelCreate": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "metadata_json": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Json"
+          },
+          "namespace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespace"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "uid": {
+            "title": "Uid",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          },
+          "verified": {
+            "default": false,
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "uid",
+          "type",
+          "value",
+          "issuer",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AssetLabelCreate",
+        "type": "object"
+      },
+      "AssetLabelOut": {
+        "properties": {
+          "asset_uid": {
+            "title": "Asset Uid",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "metadata_json": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Json"
+          },
+          "namespace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespace"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "uid": {
+            "title": "Uid",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          },
+          "verified": {
+            "default": false,
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "uid",
+          "type",
+          "value",
+          "issuer",
+          "created_at",
+          "updated_at",
+          "asset_uid"
+        ],
+        "title": "AssetLabelOut",
+        "type": "object"
+      },
       "AssetOut": {
         "properties": {
           "attributes": {
@@ -3895,6 +4056,257 @@
         "summary": "List History",
         "tags": [
           "asset-subresources"
+        ]
+      }
+    },
+    "/v1/assets/{asset_uid}/labels": {
+      "get": {
+        "operationId": "list_labels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_uid",
+            "required": true,
+            "schema": {
+              "title": "Asset Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AssetLabelOut"
+                  },
+                  "title": "Response List Labels V1 Assets  Asset Uid  Labels Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Labels",
+        "tags": [
+          "asset-subresources"
+        ]
+      },
+      "post": {
+        "operationId": "create_labels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_uid",
+            "required": true,
+            "schema": {
+              "title": "Asset Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetLabelCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetLabelOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Labels",
+        "tags": [
+          "asset-subresources"
+        ]
+      }
+    },
+    "/v1/assets/{asset_uid}/labels/{label_uid}": {
+      "delete": {
+        "operationId": "delete_label",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_uid",
+            "required": true,
+            "schema": {
+              "title": "Asset Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "label_uid",
+            "required": true,
+            "schema": {
+              "title": "Label Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Label",
+        "tags": [
+          "labels"
         ]
       }
     },
