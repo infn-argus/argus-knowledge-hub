@@ -11,7 +11,8 @@ class ArgusFieldApp extends ConsumerWidget {
   const ArgusFieldApp({super.key});
 
   static ThemeData _theme(Brightness b) {
-    final scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF0B5CAD), brightness: b);
+    // The ARGUS icon's blue.
+    final scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF0B55B5), brightness: b);
     return ThemeData(
       colorScheme: scheme,
       useMaterial3: true,

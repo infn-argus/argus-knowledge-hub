@@ -4,11 +4,29 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/problem.dart';
 
+/// The blue of the ARGUS artwork: launch screens and the app's colour scheme start from it.
+const argusBlue = Color(0xFF00428F);
+
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
 
+  /// The ARGUS splash, as the system launch screen shows it, while the session is read.
   @override
-  Widget build(BuildContext context) => const Scaffold(body: Center(child: CircularProgressIndicator()));
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: argusBlue,
+        body: Stack(fit: StackFit.expand, children: [
+          Image.asset('assets/branding/argus_splash.jpg', key: const Key('splash-art'), fit: BoxFit.cover),
+          const Align(
+            alignment: Alignment.bottomCenter,
+            child: SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(48, 0, 48, 24),
+                child: LinearProgressIndicator(color: Colors.white70, backgroundColor: Colors.transparent),
+              ),
+            ),
+          ),
+        ]),
+      );
 }
 
 /// Sign-in: the organization's identity provider in the system browser (§6.1). A token field
@@ -62,7 +80,12 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: ListView(padding: const EdgeInsets.all(24), shrinkWrap: true, children: [
-              Icon(Icons.qr_code_scanner, size: 56, color: theme.colorScheme.primary),
+              Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(22),
+                  child: Image.asset('assets/branding/argus_icon.png', key: const Key('signin-logo'), width: 96, height: 96),
+                ),
+              ),
               const SizedBox(height: 12),
               Text('ARGUS Field', textAlign: TextAlign.center, style: theme.textTheme.headlineSmall),
               const SizedBox(height: 4),

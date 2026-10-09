@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The ARGUS blue of the splash artwork (its top), behind the launch screen. -->
+    <color name="argus_splash">#00428F</color>
+</resources>

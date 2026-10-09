@@ -80,7 +80,10 @@ class AppDrawer extends ConsumerWidget {
         DrawerHeader(
           decoration: BoxDecoration(color: theme.colorScheme.primaryContainer),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.end, children: [
-            Icon(Icons.radar, size: 36, color: theme.colorScheme.onPrimaryContainer),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.asset('assets/branding/argus_icon.png', width: 48, height: 48),
+            ),
             const SizedBox(height: 8),
             Text('ARGUS Field', style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onPrimaryContainer)),
             if (session?.userLabel != null)
