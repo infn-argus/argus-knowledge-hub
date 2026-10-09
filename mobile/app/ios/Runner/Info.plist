@@ -3,9 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>NSCameraUsageDescription</key>
-	<string>The camera reads the QR code or barcode on an equipment or position label.</string>
+	<string>The camera reads the label on equipment, and takes the photos and videos you attach.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>The microphone hears a question you ask the assistant.</string>
+	<string>The microphone hears a question you ask the assistant, and records the notes you attach.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Where you are is attached to a ticket, equipment or a document when you choose "Where I am".</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Speech recognition turns a question you ask the assistant into text.</string>
 	<key>CFBundleURLTypes</key>

@@ -193,7 +193,8 @@ class UploadRepository {
 
   /// Upload, verify and attach. [key] is the command's own key: each step derives its key from it,
   /// so a retry of the whole command resumes rather than duplicates.
-  Future<String> uploadAndAttach(PickedPhoto photo, {String? ticketUid, String? assetUid, required String key}) async {
+  Future<String> uploadAndAttach(PickedPhoto photo,
+      {String? ticketUid, String? assetUid, String? documentUid, String? revisionUid, required String key}) async {
     final digest = sha256.convert(photo.bytes).toString();
     final created = _map(await _api.json(
         (c) => _api.uploads(c).createUploadWithHttpInfo(api.UploadIn(
@@ -220,7 +221,9 @@ class UploadRepository {
     final attached = _map(await _api.json(
         (c) => ticketUid != null
             ? _api.uploads(c).attachToTicketWithHttpInfo(uid, ticketUid)
-            : _api.uploads(c).attachToAssetWithHttpInfo(uid, assetUid!),
+            : documentUid != null
+                ? _api.uploads(c).attachToDocumentWithHttpInfo(uid, documentUid, revisionUid!)
+                : _api.uploads(c).attachToAssetWithHttpInfo(uid, assetUid!),
         idempotencyKey: '$key:attach'));
     return (attached['attachment_uid'] ?? uid).toString();
   }

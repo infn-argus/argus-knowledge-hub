@@ -9,6 +9,8 @@ import '../../data/command_queue.dart';
 import '../../core/problem.dart';
 import '../../domain/capture.dart';
 import '../../domain/models.dart';
+import '../../widgets/attach_menu.dart';
+import '../../widgets/attachment_open.dart';
 import '../../widgets/common.dart';
 import '../../widgets/type_tree.dart';
 import '../../widgets/rich_content.dart';
@@ -99,20 +101,16 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
           if (c.kind == 'ticket.create' && c.target == widget.uid && c.status != CommandStatus.accepted) c.id,
       ];
 
-  Future<void> _photo() => _run(() async {
-        final photo = await ref.read(photoSourceProvider).take();
-        if (photo == null) return;
-        final sent = await _command((q) => q.enqueue(
-            kind: 'attachment.upload',
-            key: 'photo:${widget.uid}:${const Uuid().v4()}',
-            target: widget.uid,
-            label: 'Photo for the ticket',
-            payload: {'ticket_uid': widget.uid},
-            attachments: [QueueController.photo(photo)],
-            dependsOn: _createOf(q)));
+  /// A photo, a video, a recorded note or where the person is (widgets/attach_menu.dart).
+  Future<void> _attach() => _run(() async {
+        final q = ref.read(queueProvider.notifier);
+        final sent = await attachTo(context, ref, AttachTarget.ticket(widget.uid), dependsOn: _createOf(q));
+        if (sent == null) return;
         if (sent.status == CommandStatus.accepted) {
           ref.invalidate(attachmentsProvider(widget.uid));
-          _say('Photo added.');
+          _say('${sent.label.split(' for ').first} added.');
+        } else {
+          _say(describe(sent));
         }
       });
 
@@ -200,7 +198,7 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
             ),
             _Unsent(uid: widget.uid),
             _Transitions(uid: widget.uid, onMove: (o) => _move(t, o), busy: _busy),
-            _Attachments(uid: widget.uid, onAdd: _busy ? null : _photo),
+            _Attachments(uid: widget.uid, onAdd: _busy ? null : _attach),
             _Comments(uid: widget.uid),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -267,20 +265,14 @@ class _Attachments extends ConsumerWidget {
     final files = ref.watch(attachmentsProvider(uid)).value ?? const <AttachmentInfo>[];
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       SectionHeader('Photos and files', trailing: '${files.length}'),
-      for (final f in files)
-        ListTile(
-          dense: true,
-          leading: Icon((f.mimeType ?? '').startsWith('image/') ? Icons.image_outlined : Icons.attach_file),
-          title: Text(f.filename),
-          subtitle: f.size == null ? null : Text('${(f.size! / 1024).ceil()} KB'),
-        ),
+      for (final f in files) AttachmentTile(f),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: TextButton.icon(
             key: const Key('ticket-add-photo'),
             onPressed: onAdd,
-            icon: const Icon(Icons.add_a_photo_outlined),
-            label: const Text('Add photo')),
+            icon: const Icon(Icons.attach_file),
+            label: const Text('Attach photo, video, note or place')),
       ),
     ]);
   }

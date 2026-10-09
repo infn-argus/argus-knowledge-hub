@@ -110,6 +110,8 @@ class FakeArgus {
       labels[labelDelete.group(1)!]?.removeWhere((l) => l['uid'] == labelDelete.group(2));
       return http.Response('', 204);
     }
+    final revFiles = RegExp(r'^/v1/documents/([^/]+)/revisions/([^/]+)/attachments$').firstMatch(p);
+    if (m == 'GET' && revFiles != null) return _json([]);
     if (m == 'POST') {
       switch (p) {
         case '/v1/devices':
@@ -190,7 +192,7 @@ class FakeArgus {
       }
       if (RegExp(r'^/v1/issues/[^/]+/transition$').hasMatch(p)) return _json(fixture('ticket'));
       if (RegExp(r'^/v1/notifications/\d+/read$').hasMatch(p)) return _json({'ok': true});
-      final upload = RegExp(r'^/v1/uploads/([^/]+)/(complete|attach/(ticket|asset)/.+)$').firstMatch(p);
+      final upload = RegExp(r'^/v1/uploads/([^/]+)/(complete|attach/(ticket|asset|document)/.+)$').firstMatch(p);
       if (upload != null) {
         final attach = upload.group(2)!.startsWith('attach');
         return _json({'uid': upload.group(1), 'state': attach ? 'attached' : 'complete',

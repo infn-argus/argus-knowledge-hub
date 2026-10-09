@@ -12,8 +12,10 @@ import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:argus_field/core/blob_store.dart';
 import 'package:argus_field/core/local_store.dart';
 
+import 'package:argus_field/features/capture/media_source.dart';
 import 'package:argus_field/features/scan/text_reader.dart';
 
 import 'fake_server.dart';
@@ -85,14 +87,17 @@ Future<Running> start(WidgetTester tester,
   prepare?.call(server);
   final photos = FakePhotos();
   final texts = FakeTextReader();
+  final media = FakeMedia();
   await tester.pumpWidget(ProviderScope(
     retry: retryPolicy,
     overrides: [
       configProvider.overrideWithValue(config),
       httpClientProvider.overrideWithValue(server.client),
       cacheStoreProvider.overrideWithValue(MemoryLocalStore()),
+      blobStoreProvider.overrideWithValue(MemoryBlobStore()),
       photoSourceProvider.overrideWithValue(photos),
       textReaderProvider.overrideWithValue(texts),
+      mediaSourceProvider.overrideWithValue(media),
       ...overrides,
     ],
     child: const ArgusFieldApp(),
@@ -112,4 +117,30 @@ class FakeTextReader implements TextReader {
 
   @override
   Future<String> read(PickedPhoto photo) async => text;
+}
+
+
+/// Video, recorded notes and places, in tests.
+class FakeMedia implements MediaSource {
+  @override
+  Future<PickedPhoto?> video() async =>
+      PickedPhoto(bytes: Uint8List.fromList(List.filled(4000, 7)), name: 'fault.mp4', mimeType: 'video/mp4');
+
+  @override
+  Future<PickedPhoto?> place() async => placeFile(41.8219, 12.6826, accuracy: 4);
+
+  @override
+  NoteRecorder recorder() => _FakeRecorder();
+}
+
+class _FakeRecorder implements NoteRecorder {
+  @override
+  Future<void> start() async {}
+
+  @override
+  Future<PickedPhoto?> stop() async =>
+      PickedPhoto(bytes: Uint8List.fromList(List.filled(900, 3)), name: 'note.m4a', mimeType: 'audio/mp4');
+
+  @override
+  Future<void> cancel() async {}
 }

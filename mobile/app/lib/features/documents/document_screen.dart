@@ -4,6 +4,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../core/problem.dart';
+import '../../app/queue.dart';
+import '../../data/command_queue.dart';
+import '../../domain/capture.dart';
+import '../../widgets/attach_menu.dart';
+import '../../widgets/attachment_open.dart';
 import '../../widgets/common.dart';
 import '../../widgets/rich_content.dart';
 import '../../widgets/type_tree.dart';
@@ -69,6 +74,7 @@ class DocumentScreen extends ConsumerWidget {
             ]),
           ),
           _Workflow(uid: uid),
+          _Files(uid: uid),
           if (d.steps.isNotEmpty) ...[
             const SectionHeader('Steps'),
             for (final (i, s) in d.steps.indexed)
@@ -190,5 +196,62 @@ class _WorkflowState extends ConsumerState<_Workflow> {
         ]),
       ),
     );
+  }
+}
+
+
+/// The files of the revision to work from, and of the draft being written — to which the field adds what
+/// it saw: a photo, a video, a recorded note, a place. A published revision's files are what it was
+/// approved with, and stay as they are.
+class _Files extends ConsumerWidget {
+  const _Files({required this.uid});
+
+  final String uid;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final revs = ref.watch(documentRevisionsProvider(uid)).value;
+    if (revs == null) return const SizedBox.shrink();
+    final published = revs.where((r) => r.state == 'published').firstOrNull;
+    final draft = revs.where((r) => r.state == 'draft').firstOrNull;
+    final current = published == null
+        ? const <AttachmentInfo>[]
+        : ref.watch(revisionAttachmentsProvider((uid, published.uid))).value ?? const <AttachmentInfo>[];
+    final drafted = draft == null
+        ? const <AttachmentInfo>[]
+        : ref.watch(revisionAttachmentsProvider((uid, draft.uid))).value ?? const <AttachmentInfo>[];
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SectionHeader('Files', trailing: '${current.length + drafted.length}'),
+      for (final f in current) AttachmentTile(f),
+      if (draft != null) ...[
+        if (drafted.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text('In the draft (revision ${draft.number})', style: Theme.of(context).textTheme.labelMedium),
+          ),
+        for (final f in drafted) AttachmentTile(f),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('doc-attach'),
+              onPressed: () async {
+                final sent = await attachTo(context, ref, AttachTarget.document(uid, draft.uid));
+                if (sent == null || !context.mounted) return;
+                if (sent.status == CommandStatus.accepted) ref.invalidate(revisionAttachmentsProvider((uid, draft.uid)));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(sent.status == CommandStatus.accepted
+                        ? '${sent.label.split(' for ').first} added to the draft.'
+                        : describe(sent))));
+              },
+              icon: const Icon(Icons.attach_file),
+              label: const Text('Attach to the draft'),
+            ),
+          ),
+        ),
+      ] else if (current.isEmpty)
+        const ListTile(title: Text('No files. Start a new revision to add some.')),
+    ]);
   }
 }

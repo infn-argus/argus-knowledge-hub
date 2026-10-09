@@ -84,6 +84,7 @@ Class | Method | HTTP request | Description
 *DocumentsApi* | [**getCurrentRevision**](doc//DocumentsApi.md#getcurrentrevision) | **GET** /v1/documents/{uid}/current | Get Current Revision
 *DocumentsApi* | [**getDocument**](doc//DocumentsApi.md#getdocument) | **GET** /v1/documents/{uid} | Get Document
 *DocumentsApi* | [**listDocuments**](doc//DocumentsApi.md#listdocuments) | **GET** /v1/documents | List Documents
+*DocumentsApi* | [**listRevisionAttachments**](doc//DocumentsApi.md#listrevisionattachments) | **GET** /v1/documents/{uid}/revisions/{rev_uid}/attachments | List Revision Attachments
 *DocumentsApi* | [**listRevisions**](doc//DocumentsApi.md#listrevisions) | **GET** /v1/documents/{uid}/revisions | List Revisions
 *DocumentsApi* | [**publishRevision**](doc//DocumentsApi.md#publishrevision) | **POST** /v1/documents/{uid}/revisions/{rev_uid}/publish | Publish Revision
 *DocumentsApi* | [**submitRevision**](doc//DocumentsApi.md#submitrevision) | **POST** /v1/documents/{uid}/revisions/{rev_uid}/submit | Submit Revision
@@ -129,6 +130,7 @@ Class | Method | HTTP request | Description
 *SchemasApi* | [**getSchema**](doc//SchemasApi.md#getschema) | **GET** /v1/schemas/{uid} | Get Schema
 *SchemasApi* | [**listSchemas**](doc//SchemasApi.md#listschemas) | **GET** /v1/schemas | List Schemas
 *UploadsApi* | [**attachToAsset**](doc//UploadsApi.md#attachtoasset) | **POST** /v1/uploads/{uid}/attach/asset/{asset_uid} | Attach To Asset
+*UploadsApi* | [**attachToDocument**](doc//UploadsApi.md#attachtodocument) | **POST** /v1/uploads/{uid}/attach/document/{doc_uid}/revision/{rev_uid} | Attach To Document
 *UploadsApi* | [**attachToTicket**](doc//UploadsApi.md#attachtoticket) | **POST** /v1/uploads/{uid}/attach/ticket/{issue_uid} | Attach To Ticket
 *UploadsApi* | [**completeUpload**](doc//UploadsApi.md#completeupload) | **POST** /v1/uploads/{uid}/complete | Complete Upload
 *UploadsApi* | [**createUpload**](doc//UploadsApi.md#createupload) | **POST** /v1/uploads | Create Upload

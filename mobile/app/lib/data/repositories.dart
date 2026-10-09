@@ -372,6 +372,17 @@ class DocumentRepository {
     );
   }
 
+  /// The files of one revision: the figures and attachments it was written, or approved, with.
+  Future<List<AttachmentInfo>> revisionAttachments(String uid, String revUid) async =>
+      _list(await _api.json((c) => _api.documents(c).listRevisionAttachmentsWithHttpInfo(uid, revUid)))
+          .map(_map)
+          .map((m) => AttachmentInfo(
+              uid: m['uid'].toString(),
+              filename: (m['filename'] ?? '').toString(),
+              mimeType: m['mime_type']?.toString(),
+              size: (m['file_size'] as num?)?.toInt()))
+          .toList();
+
   Future<List<DocumentListItem>> list() async =>
       _list(await _api.json((c) => _api.documents(c).listDocumentsWithHttpInfo()))
           .map(_map)

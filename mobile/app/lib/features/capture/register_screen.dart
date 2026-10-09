@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../app/providers.dart';
 import '../../core/problem.dart';
 import '../../domain/capture.dart';
+import '../../domain/models.dart' show RecordKind;
 import '../../widgets/common.dart';
 import 'proposal_tile.dart';
 
@@ -21,8 +22,9 @@ const baseFields = ['manufacturer', 'model', 'serial', 'inventory_number'];
 /// 4. Saving creates the unit with the person's values, attaches the photo as evidence, and records
 ///    what was kept.
 ///
-/// No Equipment is made from a Position, channel or scanned name (I-MOB-6): only from a photo or
-/// from values the person types.
+/// No Equipment is made from a Position, channel or scanned name (I-MOB-6): only from a photo, from
+/// values the person types, or from a similar unit the person scans (its kind and attributes, never its
+/// identifiers). A QR code read from the unit's own label becomes its label.
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key, this.label, this.pick = false});
 
@@ -42,8 +44,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _attrs = <String, TextEditingController>{
     for (final f in baseFields) f: TextEditingController(),
   };
+  final _qr = TextEditingController();
   EquipmentType? _type;
   PickedPhoto? _photo;
+  /// Attributes taken from a similar unit, beyond the fields shown: sent with the new one.
+  Map<String, Object?> _copied = const {};
+  String? _copiedFrom;
   AssistResult? _assist;
   final _taken = <String>{};
   List<GuideCheck> _checks = const [];
@@ -53,11 +59,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.label != null) _attrs['serial']!.text = widget.label!;
+    // A label that found nothing: a web address is a QR code printed for this unit, anything else its serial.
+    final label = widget.label;
+    if (label != null) (label.contains('://') ? _qr : _attrs['serial']!).text = label;
   }
 
   @override
   void dispose() {
+    _qr.dispose();
     _name.dispose();
     for (final c in _attrs.values) {
       c.dispose();
@@ -66,9 +75,58 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   }
 
   Map<String, Object?> get _attributes => {
+        ..._copied,
         for (final e in _attrs.entries)
           if (e.value.text.trim().isNotEmpty) e.key: e.value.text.trim(),
       };
+
+  /// What identifies one unit, and so is never copied from another.
+  static const identifiers = {
+    'serial', 'inventory_number', 'mac', 'qrcode', 'barcode', 'asset_tag', 'former_key', 'former_uid', 'alias',
+  };
+
+  /// Scans (or reads, or types) a similar unit's label, and starts from it: its kind and attributes, not
+  /// its identifiers — the person edits what differs.
+  Future<void> _copyFrom() async {
+    final path = await context.push<String>('/scan?pick=1');
+    if (path == null || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final target = await ref.read(lookupRepositoryProvider).resolveLink(path);
+      if (target.kind != RecordKind.asset) {
+        throw Problem(ProblemCode.invalid, 'That label is not on equipment. Scan the label of a similar unit.');
+      }
+      final a = await ref.read(assetRepositoryProvider).detail(target.uid);
+      setState(() {
+        _type = EquipmentType(a.schemaUid, a.type);
+        if (_name.text.trim().isEmpty) _name.text = a.name;
+        final copied = <String, Object?>{};
+        for (final e in a.attributes.entries) {
+          if (identifiers.contains(e.key) || e.key.startsWith('argus_') || e.value == null) continue;
+          if (_attrs.containsKey(e.key)) {
+            if (_attrs[e.key]!.text.trim().isEmpty) _attrs[e.key]!.text = e.value.toString();
+          } else {
+            copied[e.key] = e.value;
+          }
+        }
+        _copied = copied;
+        _copiedFrom = a.name;
+      });
+    } on Problem catch (p) {
+      setState(() => _error = p.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _scanQr() async {
+    final path = await context.push<String>('/scan?pick=1');
+    if (path == null || !mounted) return;
+    setState(() => _qr.text = path.startsWith('/lookup/') ? Uri.decodeComponent(path.substring(8)) : path);
+  }
 
   Map<String, Object?> get _draft => {
         'uid': _uid,
@@ -137,6 +195,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       if (checks.any((c) => c.blocking)) return;
       final uid = await ref.read(equipmentCommandsProvider).register(
           uid: _uid, typeUid: _type!.uid, name: _name.text.trim(), attributes: _attributes);
+      var labelled = true;
+      if (_qr.text.trim().isNotEmpty) {
+        try {
+          await ref.read(assetRepositoryProvider).addLabel(uid, const Uuid().v4(), 'qrcode', _qr.text.trim());
+        } on Problem {
+          labelled = false;
+        }
+      }
       var photoSent = true;
       if (_photo != null) {
         try {
@@ -153,9 +219,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         });
       }
       if (!mounted) return;
-      if (!photoSent) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Registered, but the nameplate photo was not sent.')));
+      if (!photoSent || !labelled) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(!labelled
+                ? 'Registered, but its QR code was not added: add it from its page.'
+                : 'Registered, but the nameplate photo was not sent.')));
       }
       widget.pick ? context.pop(uid) : context.pushReplacement('/asset/$uid');
     } on Problem catch (p) {
@@ -195,6 +263,25 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             ),
           ]),
         ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: OutlinedButton.icon(
+            key: const Key('register-copy'),
+            onPressed: _busy ? null : _copyFrom,
+            icon: const Icon(Icons.copy_all_outlined),
+            label: const Text('Copy from similar equipment (scan its label)'),
+          ),
+        ),
+        if (_copiedFrom != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: NoticeBar(
+              key: const Key('register-copied'),
+              icon: Icons.copy_all_outlined,
+              text: 'Started from $_copiedFrom: its kind, manufacturer, model and other attributes. Its serial, '
+                  'inventory number and labels are not copied — this unit has its own.',
+            ),
+          ),
         if (_busy) const LinearProgressIndicator(),
         if (_assist != null) ...[
           SectionHeader('Read from the photo', trailing: open.isEmpty ? null : 'not used until you take them'),
@@ -248,6 +335,21 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               key: const Key('register-name'),
               controller: _name,
               decoration: const InputDecoration(labelText: 'Name', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('register-qr'),
+              controller: _qr,
+              decoration: InputDecoration(
+                labelText: 'QR code on its label (optional)',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  key: const Key('register-qr-scan'),
+                  tooltip: 'Scan it',
+                  icon: const Icon(Icons.qr_code_scanner),
+                  onPressed: _busy ? null : _scanQr,
+                ),
+              ),
             ),
             for (final e in _attrs.entries) ...[
               const SizedBox(height: 12),

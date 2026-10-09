@@ -15,7 +15,7 @@ import 'providers.dart';
 /// in dependency order. A change is only a fact once the server has accepted it. Until then its
 /// author sees it as pending and nobody else sees it at all.
 class QueueController extends AsyncNotifier<List<PendingCommand>> {
-  CommandStore get _store => CommandStore(ref.read(localStoreProvider));
+  CommandStore get _store => CommandStore(ref.read(localStoreProvider), ref.read(blobStoreProvider));
   bool _syncing = false;
 
   @override

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
+import '../core/blob_store.dart';
 import '../core/file_cache_store.dart';
 import '../core/local_store.dart';
 import '../data/caching_client.dart';
@@ -21,6 +22,7 @@ import '../domain/capture.dart';
 import '../domain/models.dart';
 import '../features/ask/voice.dart';
 import '../features/auth/auth_service.dart';
+import '../features/capture/media_source.dart';
 import '../features/capture/photo_source.dart';
 import '../features/scan/text_reader.dart';
 import 'queue.dart';
@@ -43,6 +45,10 @@ final localStoreProvider = Provider<LocalStore>((_) => SecureLocalStore());
 /// records — core/file_cache_store.dart), the encrypted local store in a browser.
 final cacheStoreProvider =
     Provider<LocalStore>((ref) => kIsWeb ? ref.watch(localStoreProvider) : FileCacheStore());
+
+/// The files pending commands carry (core/blob_store.dart): encrypted files on a phone; in a browser, the
+/// local store as before.
+final blobStoreProvider = Provider<BlobStore?>((_) => kIsWeb ? null : FileBlobStore());
 
 /// How long a record just read is shown again without asking ARGUS (caching_client.dart).
 const freshCopies = Duration(seconds: 45);
@@ -143,6 +149,7 @@ class SessionController extends AsyncNotifier<Session?> {
       await _store.wipe();
       try {
         await ref.read(cacheStoreProvider).clear(CachingClient.prefix);
+        await ref.read(blobStoreProvider)?.clear();
       } catch (_) {}
     } else {
       await _store.save(s);
@@ -311,6 +318,12 @@ final documentListProvider = FutureProvider.autoDispose<List<DocumentListItem>>(
   return ref.watch(documentRepositoryProvider).list();
 });
 
+final revisionAttachmentsProvider =
+    FutureProvider.autoDispose.family<List<AttachmentInfo>, (String, String)>((ref, key) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(documentRepositoryProvider).revisionAttachments(key.$1, key.$2);
+});
+
 final documentRevisionsProvider = FutureProvider.autoDispose.family<List<DocumentRevision>, String>((ref, uid) {
   ref.watch(workspaceIdProvider);
   return ref.watch(documentRepositoryProvider).revisions(uid);
@@ -378,6 +391,7 @@ final serverMetaProvider = FutureProvider.autoDispose<Map<String, Object?>>((ref
 // --------------------------------------------------------------------------- capture and tickets (M2)
 
 final photoSourceProvider = Provider<PhotoSource>((_) => DevicePhotoSource());
+final mediaSourceProvider = Provider<MediaSource>((_) => DeviceMediaSource());
 
 /// Reads printed text from a photo, on the device (features/scan/text_reader.dart). Tests replace it.
 final textReaderProvider = Provider<TextReader>((_) => DeviceTextReader());

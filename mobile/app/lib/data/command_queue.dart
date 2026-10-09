@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:uuid/uuid.dart';
 
+import '../core/blob_store.dart';
 import '../core/local_store.dart';
 import '../core/problem.dart';
 import '../domain/capture.dart';
@@ -126,10 +127,12 @@ class PendingCommand {
       );
 }
 
-/// The queue on disk: one entry per command, one per attachment, all in the encrypted store.
+/// The queue on disk: one entry per command in the encrypted store, and the files they carry in the
+/// encrypted blob store (an attachment saved before there was one is still read from the store).
 class CommandStore {
-  CommandStore(this._store);
+  CommandStore(this._store, [BlobStore? files]) : _files = files;
   final LocalStore _store;
+  final BlobStore? _files;
 
   static const commands = 'argus.queue.';
   static const blobs = 'argus.blob.';
@@ -149,9 +152,12 @@ class CommandStore {
 
   Future<void> save(PendingCommand c) => _store.write('$commands${c.id}', jsonEncode(c.toJson()));
 
-  Future<void> saveBlob(String localId, Uint8List bytes) => _store.write('$blobs$localId', base64Encode(bytes));
+  Future<void> saveBlob(String localId, Uint8List bytes) =>
+      _files != null ? _files.put(localId, bytes) : _store.write('$blobs$localId', base64Encode(bytes));
 
   Future<Uint8List?> blob(String localId) async {
+    final file = await _files?.get(localId);
+    if (file != null) return file;
     final raw = await _store.read('$blobs$localId');
     return raw == null ? null : base64Decode(raw);
   }
@@ -159,6 +165,7 @@ class CommandStore {
   /// A command and its attachments leave the device: after `accepted`, or when the person discards it.
   Future<void> remove(PendingCommand c) async {
     for (final a in c.attachments) {
+      await _files?.delete(a.localId);
       await _store.delete('$blobs${a.localId}');
     }
     await _store.delete('$commands${c.id}');
@@ -197,9 +204,10 @@ class CommandExecutor {
       case 'attachment.upload':
         final a = c.attachments.single;
         final bytes = await _store.blob(a.localId);
-        if (bytes == null) throw Problem(ProblemCode.invalid, 'The photo is no longer on this device.');
+        if (bytes == null) throw Problem(ProblemCode.invalid, 'The file is no longer on this device.');
         await UploadRepository(api).uploadAndAttach(PickedPhoto(bytes: bytes, name: a.name, mimeType: a.mimeType),
-            ticketUid: p['ticket_uid'] as String?, assetUid: p['asset_uid'] as String?, key: c.key);
+            ticketUid: p['ticket_uid'] as String?, assetUid: p['asset_uid'] as String?,
+            documentUid: p['document_uid'] as String?, revisionUid: p['revision_uid'] as String?, key: c.key);
         return null;
       case 'replacement.submit':
         final d = ReplacementDraft(

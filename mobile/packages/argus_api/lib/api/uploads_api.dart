@@ -89,6 +89,88 @@ class UploadsApi {
     return null;
   }
 
+  /// Attach To Document
+  ///
+  /// A file of one revision of a document, while that revision is still being written: a published one is what was approved, figures included (documents.upload_revision_attachment).
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] docUid (required):
+  ///
+  /// * [String] revUid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Response> attachToDocumentWithHttpInfo(String uid, String docUid, String revUid, { String? authorization, String? xWorkspaceId, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/uploads/{uid}/attach/document/{doc_uid}/revision/{rev_uid}'
+      .replaceAll('{uid}', uid)
+      .replaceAll('{doc_uid}', docUid)
+      .replaceAll('{rev_uid}', revUid);
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// Attach To Document
+  ///
+  /// A file of one revision of a document, while that revision is still being written: a published one is what was approved, figures included (documents.upload_revision_attachment).
+  ///
+  /// Parameters:
+  ///
+  /// * [String] uid (required):
+  ///
+  /// * [String] docUid (required):
+  ///
+  /// * [String] revUid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Object?> attachToDocument(String uid, String docUid, String revUid, { String? authorization, String? xWorkspaceId, }) async {
+    final response = await attachToDocumentWithHttpInfo(uid, docUid, revUid,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+    
+    }
+    return null;
+  }
+
   /// Attach To Ticket
   ///
   /// Note: This method returns the HTTP [Response].

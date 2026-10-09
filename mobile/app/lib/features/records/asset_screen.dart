@@ -5,9 +5,13 @@ import '../../domain/capture.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/providers.dart';
+import '../../app/queue.dart';
+import '../../data/command_queue.dart';
 import '../../core/problem.dart';
 import '../../domain/models.dart';
 import '../../widgets/auth_image.dart';
+import '../../widgets/attach_menu.dart';
+import '../../widgets/attachment_open.dart';
 import '../../widgets/common.dart';
 import '../../widgets/rich_content.dart';
 import 'relation_graph_screen.dart';
@@ -234,6 +238,29 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
             for (final f in attachments) _attachmentTile(context, f),
           ]),
         ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: const Key('asset-attach'),
+            onPressed: () async {
+              final sent = await attachTo(context, ref, AttachTarget.asset(a.uid));
+              if (sent == null || !context.mounted) return;
+              if (sent.status == CommandStatus.accepted) {
+                ref.invalidate(assetAttachmentsProvider(a.uid));
+                refreshAsset(ref, a.uid);
+              }
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(sent.status == CommandStatus.accepted
+                      ? '${sent.label.split(' for ').first} added.'
+                      : describe(sent))));
+            },
+            icon: const Icon(Icons.attach_file),
+            label: const Text('Attach photo, video, note or place'),
+          ),
+        ),
+      ),
       if (attrs.isNotEmpty) ...[
         const SectionHeader('Attributes'),
         for (final e in attrs)
@@ -284,14 +311,8 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
   Widget _attachmentTile(BuildContext context, AttachmentInfo f) {
     final isImage = (f.mimeType ?? '').startsWith('image/');
     return InkWell(
-      onTap: () => showDialog(
-        context: context,
-        builder: (_) => Dialog(
-          child: isImage
-              ? InteractiveViewer(child: AuthImage(f.uid, fit: BoxFit.contain))
-              : Padding(padding: const EdgeInsets.all(16), child: Text(f.filename)),
-        ),
-      ),
+      key: Key('attachment-${f.uid}'),
+      onTap: () => openAttachment(context, ref, f),
       child: Container(
         width: 84,
         height: 84,
@@ -303,7 +324,7 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
                 child: Padding(
                   padding: const EdgeInsets.all(6),
                   child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    const Icon(Icons.attach_file),
+                    Icon(iconOf(f.mimeType)),
                     Text(f.filename, maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall, textAlign: TextAlign.center),
                   ]),
                 ),
