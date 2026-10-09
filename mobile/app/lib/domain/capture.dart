@@ -343,3 +343,27 @@ class TypeNode {
   final bool concrete;
   final List<TypeNode> children = [];
 }
+
+/// A label on a record: a QR code, a serial, a barcode… — what a scan finds it by.
+class AssetLabelInfo {
+  const AssetLabelInfo({required this.uid, required this.type, required this.value, this.verified = false});
+
+  final String uid;
+  final String type;
+  final String value;
+  final bool verified;
+
+  /// The kinds the app offers, a QR code first: the order a scan looks for them in.
+  static const kinds = {
+    'qrcode': 'QR code',
+    'serial': 'Serial number',
+    'barcode': 'Barcode',
+    'datamatrix': 'DataMatrix',
+    'inventory_number': 'Inventory number',
+    'asset_tag': 'Asset tag',
+    'rfid': 'RFID / NFC',
+    'alias': 'Other name',
+  };
+
+  String get kindLabel => kinds[type] ?? type.replaceAll('_', ' ');
+}

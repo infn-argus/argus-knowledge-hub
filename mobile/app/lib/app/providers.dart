@@ -325,6 +325,18 @@ final assetCommentsProvider = FutureProvider.autoDispose.family<List<Comment>, S
   return ref.watch(assetRepositoryProvider).comments(uid);
 });
 
+final assetLabelsProvider = FutureProvider.autoDispose.family<List<AssetLabelInfo>, String>((ref, uid) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(assetRepositoryProvider).labels(uid);
+});
+
+/// After the record changed here: what it shows, its labels and its history are read again.
+void refreshAsset(WidgetRef ref, String uid) {
+  ref.invalidate(assetDetailProvider(uid));
+  ref.invalidate(assetLabelsProvider(uid));
+  ref.invalidate(assetHistoryProvider(uid));
+}
+
 final assetHistoryProvider = FutureProvider.autoDispose.family<List<HistoryEntry>, String>((ref, uid) {
   ref.watch(workspaceIdProvider);
   return ref.watch(assetRepositoryProvider).history(uid);

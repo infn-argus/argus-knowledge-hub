@@ -88,6 +88,78 @@ class AssetSubresourcesApi {
     return null;
   }
 
+  /// Create Labels
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] assetUid (required):
+  ///
+  /// * [AssetLabelCreate] assetLabelCreate (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Response> createLabelsWithHttpInfo(String assetUid, AssetLabelCreate assetLabelCreate, { String? authorization, String? xWorkspaceId, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/assets/{asset_uid}/labels'
+      .replaceAll('{asset_uid}', assetUid);
+
+    // ignore: prefer_final_locals
+    Object? postBody = assetLabelCreate;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>['application/json'];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// Create Labels
+  ///
+  /// Parameters:
+  ///
+  /// * [String] assetUid (required):
+  ///
+  /// * [AssetLabelCreate] assetLabelCreate (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<AssetLabelOut?> createLabels(String assetUid, AssetLabelCreate assetLabelCreate, { String? authorization, String? xWorkspaceId, }) async {
+    final response = await createLabelsWithHttpInfo(assetUid, assetLabelCreate,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AssetLabelOut',) as AssetLabelOut;
+    
+    }
+    return null;
+  }
+
   /// List Comments
   ///
   /// Note: This method returns the HTTP [Response].
@@ -224,6 +296,77 @@ class AssetSubresourcesApi {
       final responseBody = await _decodeBodyBytes(response);
       return (await apiClient.deserializeAsync(responseBody, 'List<AssetHistoryOut>') as List)
         .cast<AssetHistoryOut>()
+        .toList(growable: false);
+
+    }
+    return null;
+  }
+
+  /// List Labels
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] assetUid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<Response> listLabelsWithHttpInfo(String assetUid, { String? authorization, String? xWorkspaceId, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/assets/{asset_uid}/labels'
+      .replaceAll('{asset_uid}', assetUid);
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// List Labels
+  ///
+  /// Parameters:
+  ///
+  /// * [String] assetUid (required):
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  Future<List<AssetLabelOut>?> listLabels(String assetUid, { String? authorization, String? xWorkspaceId, }) async {
+    final response = await listLabelsWithHttpInfo(assetUid,  authorization: authorization, xWorkspaceId: xWorkspaceId, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<AssetLabelOut>') as List)
+        .cast<AssetLabelOut>()
         .toList(growable: false);
 
     }

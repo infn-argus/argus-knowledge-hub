@@ -69,6 +69,9 @@ class FakeArgus {
   /// Serve these once, then lose the answer (the request reached the server; the reply did not).
   final Set<String> loseAnswer = {};
 
+  /// Labels on records, by record uid: put on and taken off by the app.
+  final Map<String, List<Map<String, dynamic>>> labels = {};
+
   late final http.Client client = MockClient((req) async {
     if (offline) throw http.ClientException('Network is unreachable', req.url);
     requests.add(req);
@@ -91,6 +94,18 @@ class FakeArgus {
     final m = req.method;
     Map<String, dynamic> body() => req.body.isEmpty ? {} : jsonDecode(req.body) as Map<String, dynamic>;
 
+    final labelPost = RegExp(r'^/v1/assets/([^/]+)/labels$').firstMatch(p);
+    if (m == 'POST' && labelPost != null) {
+      final b = body();
+      final row = {...b, 'asset_uid': labelPost.group(1)};
+      (labels[labelPost.group(1)!] ??= []).add(row);
+      return _json(row, 201);
+    }
+    final labelDelete = RegExp(r'^/v1/assets/([^/]+)/labels/([^/]+)$').firstMatch(p);
+    if (m == 'DELETE' && labelDelete != null) {
+      labels[labelDelete.group(1)!]?.removeWhere((l) => l['uid'] == labelDelete.group(2));
+      return http.Response('', 204);
+    }
     if (m == 'POST') {
       switch (p) {
         case '/v1/devices':
@@ -271,6 +286,8 @@ class FakeArgus {
       if (RegExp(r'^/v1/issues/[^/]+/attachments$').hasMatch(p)) return _json([]);
       if (RegExp(r'^/v1/assets/[^/]+/comments$').hasMatch(p)) return _json(fixture('asset_comments'));
       if (RegExp(r'^/v1/assets/[^/]+/history$').hasMatch(p)) return _json(fixture('asset_history'));
+      final labelsOf = RegExp(r'^/v1/assets/([^/]+)/labels$').firstMatch(p);
+      if (labelsOf != null) return _json(labels[labelsOf.group(1)] ?? []);
       if (p == '/v1/assets/type-counts') {
         return _json({'slice-20463f:argus-object:ion-pump': 2, 'slice-20463f:argus-object:vacuum-gauge': 1});
       }

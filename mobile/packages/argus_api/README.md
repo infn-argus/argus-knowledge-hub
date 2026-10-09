@@ -66,8 +66,10 @@ Class | Method | HTTP request | Description
 *AiApi* | [**listConversations**](doc//AiApi.md#listconversations) | **GET** /v1/ai/conversations | List Conversations
 *AiApi* | [**status**](doc//AiApi.md#status) | **GET** /v1/ai/status | Status
 *AssetSubresourcesApi* | [**createComments**](doc//AssetSubresourcesApi.md#createcomments) | **POST** /v1/assets/{asset_uid}/comments | Create Comments
+*AssetSubresourcesApi* | [**createLabels**](doc//AssetSubresourcesApi.md#createlabels) | **POST** /v1/assets/{asset_uid}/labels | Create Labels
 *AssetSubresourcesApi* | [**listComments**](doc//AssetSubresourcesApi.md#listcomments) | **GET** /v1/assets/{asset_uid}/comments | List Comments
 *AssetSubresourcesApi* | [**listHistory**](doc//AssetSubresourcesApi.md#listhistory) | **GET** /v1/assets/{asset_uid}/history | List History
+*AssetSubresourcesApi* | [**listLabels**](doc//AssetSubresourcesApi.md#listlabels) | **GET** /v1/assets/{asset_uid}/labels | List Labels
 *AssetsApi* | [**assetTypeCounts**](doc//AssetsApi.md#assettypecounts) | **GET** /v1/assets/type-counts | Asset Type Counts
 *AssetsApi* | [**createAsset**](doc//AssetsApi.md#createasset) | **POST** /v1/assets | Create Asset
 *AssetsApi* | [**getAsset**](doc//AssetsApi.md#getasset) | **GET** /v1/assets/{uid} | Get Asset
@@ -115,6 +117,7 @@ Class | Method | HTTP request | Description
 *IssuesApi* | [**listTransitions**](doc//IssuesApi.md#listtransitions) | **GET** /v1/issues/{uid}/transitions | List Transitions
 *IssuesApi* | [**transitionIssue**](doc//IssuesApi.md#transitionissue) | **POST** /v1/issues/{uid}/transition | Transition Issue
 *IssuesApi* | [**updateIssue**](doc//IssuesApi.md#updateissue) | **PUT** /v1/issues/{uid} | Update Issue
+*LabelsApi* | [**deleteLabel**](doc//LabelsApi.md#deletelabel) | **DELETE** /v1/assets/{asset_uid}/labels/{label_uid} | Delete Label
 *LedgerApi* | [**closeStaleCommand**](doc//LedgerApi.md#closestalecommand) | **POST** /v1/ledger/review/stale/{conflict_id}/close | Close Stale Command
 *LedgerApi* | [**confirmReplacement**](doc//LedgerApi.md#confirmreplacement) | **POST** /v1/ledger/review/replacements/{conflict_id}/confirm | Confirm Replacement
 *LedgerApi* | [**myReviewItems**](doc//LedgerApi.md#myreviewitems) | **GET** /v1/ledger/review/mine | My Review Items
@@ -147,6 +150,8 @@ Class | Method | HTTP request | Description
  - [AssetCommentOut](doc//AssetCommentOut.md)
  - [AssetCreate](doc//AssetCreate.md)
  - [AssetHistoryOut](doc//AssetHistoryOut.md)
+ - [AssetLabelCreate](doc//AssetLabelCreate.md)
+ - [AssetLabelOut](doc//AssetLabelOut.md)
  - [AssetOut](doc//AssetOut.md)
  - [AssetUpdate](doc//AssetUpdate.md)
  - [AssistIn](doc//AssistIn.md)

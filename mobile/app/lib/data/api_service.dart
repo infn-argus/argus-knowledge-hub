@@ -201,5 +201,6 @@ class ApiService {
   api.SchemasApi schemas(api.ApiClient c) => api.SchemasApi(c);
   api.AiApi ai(api.ApiClient c) => api.AiApi(c);
   api.AssetSubresourcesApi assetSubresources(api.ApiClient c) => api.AssetSubresourcesApi(c);
+  api.LabelsApi labels(api.ApiClient c) => api.LabelsApi(c);
   api.AttachmentsApi attachments(api.ApiClient c) => api.AttachmentsApi(c);
 }

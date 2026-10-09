@@ -202,6 +202,10 @@ class ApiClient {
           return AssetCreate.fromJson(value);
         case 'AssetHistoryOut':
           return AssetHistoryOut.fromJson(value);
+        case 'AssetLabelCreate':
+          return AssetLabelCreate.fromJson(value);
+        case 'AssetLabelOut':
+          return AssetLabelOut.fromJson(value);
         case 'AssetOut':
           return AssetOut.fromJson(value);
         case 'AssetUpdate':

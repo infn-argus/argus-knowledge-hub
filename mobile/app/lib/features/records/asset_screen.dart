@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../domain/capture.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/providers.dart';
 import '../../core/problem.dart';
-import '../../domain/capture.dart' show AttachmentInfo;
 import '../../domain/models.dart';
 import '../../widgets/auth_image.dart';
 import '../../widgets/common.dart';
@@ -147,6 +147,7 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
           ),
         ]),
       ),
+      _Labels(asset: a),
       SectionHeader(a.isPosition ? 'Installed here now' : 'Installed at now'),
       if (current.isEmpty)
         ListTile(
@@ -399,4 +400,164 @@ class _RelationGroup extends StatelessWidget {
       ]),
     );
   }
+}
+
+
+/// What a scan finds this record by — its QR code, serial, barcode… — and putting another on it: typed, or
+/// read from the label in front of you.
+class _Labels extends ConsumerWidget {
+  const _Labels({required this.asset});
+
+  final AssetDetail asset;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final labels = ref.watch(assetLabelsProvider(asset.uid)).value ?? const <AssetLabelInfo>[];
+    final kinds = AssetLabelInfo.kinds.keys.toList();
+    final sorted = [...labels]..sort((x, y) {
+        int rank(String t) => kinds.contains(t) ? kinds.indexOf(t) : kinds.length;
+        return rank(x.type).compareTo(rank(y.type));
+      });
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SectionHeader('Labels', trailing: '${labels.length}'),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Wrap(spacing: 8, runSpacing: 4, children: [
+          for (final l in sorted)
+            InputChip(
+              key: Key('label-${l.uid}'),
+              avatar: Icon(l.type == 'qrcode' ? Icons.qr_code_2 : Icons.label_outline, size: 18),
+              label: Text('${l.kindLabel}: ${l.value}'),
+              onDeleted: () => _remove(context, ref, l),
+            ),
+          ActionChip(
+            key: const Key('label-add'),
+            avatar: const Icon(Icons.add, size: 18),
+            label: const Text('Add label'),
+            onPressed: () => _add(context, ref),
+          ),
+        ]),
+      ),
+    ]);
+  }
+
+  Future<void> _remove(BuildContext context, WidgetRef ref, AssetLabelInfo l) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Remove this label?'),
+        content: Text('${l.kindLabel} ${l.value} will no longer find ${asset.name}.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Keep')),
+          FilledButton(key: const Key('label-remove-confirm'), onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ref.read(assetRepositoryProvider).removeLabel(asset.uid, l.uid);
+    } on Problem catch (p) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(p.message)));
+    }
+    refreshAsset(ref, asset.uid);
+  }
+
+  Future<void> _add(BuildContext context, WidgetRef ref) async {
+    final added = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _AddLabelSheet(assetUid: asset.uid),
+    );
+    if (added == true) refreshAsset(ref, asset.uid);
+  }
+}
+
+class _AddLabelSheet extends ConsumerStatefulWidget {
+  const _AddLabelSheet({required this.assetUid});
+
+  final String assetUid;
+
+  @override
+  ConsumerState<_AddLabelSheet> createState() => _AddLabelSheetState();
+}
+
+class _AddLabelSheetState extends ConsumerState<_AddLabelSheet> {
+  final _value = TextEditingController();
+  String _type = 'qrcode';
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _value.dispose();
+    super.dispose();
+  }
+
+  Future<void> _scan() async {
+    final path = await context.push<String>('/scan?pick=1');
+    if (path == null || !mounted) return;
+    // What the scanner read: a label's value as printed, or a link to a record in ARGUS, kept whole.
+    final value = path.startsWith('/lookup/') ? Uri.decodeComponent(path.substring('/lookup/'.length)) : path;
+    setState(() => _value.text = value);
+  }
+
+  Future<void> _save() async {
+    final value = _value.text.trim();
+    if (value.isEmpty) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ref.read(assetRepositoryProvider).addLabel(widget.assetUid, const Uuid().v4(), _type, value);
+      if (mounted) Navigator.pop(context, true);
+    } on Problem catch (p) {
+      if (mounted) setState(() => _error = p.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('Add a label', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            key: const Key('label-type'),
+            initialValue: _type,
+            decoration: const InputDecoration(labelText: 'Kind', border: OutlineInputBorder()),
+            items: [
+              for (final e in AssetLabelInfo.kinds.entries) DropdownMenuItem(value: e.key, child: Text(e.value)),
+            ],
+            onChanged: (v) => setState(() => _type = v ?? _type),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('label-value'),
+            controller: _value,
+            decoration: InputDecoration(
+              labelText: 'Value',
+              border: const OutlineInputBorder(),
+              errorText: _error,
+              suffixIcon: IconButton(
+                key: const Key('label-scan'),
+                tooltip: 'Read it from the label',
+                icon: const Icon(Icons.qr_code_scanner),
+                onPressed: _scan,
+              ),
+            ),
+            onSubmitted: (_) => _save(),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            key: const Key('label-save'),
+            onPressed: _saving ? null : _save,
+            child: Text(_saving ? 'Saving…' : 'Add label'),
+          ),
+        ]),
+      );
 }

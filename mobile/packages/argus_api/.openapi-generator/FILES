@@ -16,6 +16,7 @@ lib/api/hub_api.dart
 lib/api/installations_api.dart
 lib/api/intake_api.dart
 lib/api/issues_api.dart
+lib/api/labels_api.dart
 lib/api/ledger_api.dart
 lib/api/lookup_api.dart
 lib/api/meta_api.dart
@@ -41,6 +42,8 @@ lib/model/asset_comment_create.dart
 lib/model/asset_comment_out.dart
 lib/model/asset_create.dart
 lib/model/asset_history_out.dart
+lib/model/asset_label_create.dart
+lib/model/asset_label_out.dart
 lib/model/asset_out.dart
 lib/model/asset_update.dart
 lib/model/assist_in.dart

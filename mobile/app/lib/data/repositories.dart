@@ -1,7 +1,7 @@
 import 'package:argus_api/api.dart' as api;
 
 import '../core/problem.dart';
-import '../domain/capture.dart' show AttachmentInfo, Comment;
+import '../domain/capture.dart' show AssetLabelInfo, AttachmentInfo, Comment;
 import '../domain/models.dart';
 import 'api_service.dart';
 
@@ -210,6 +210,30 @@ class AssetRepository {
             assetUid, api.AssetCommentCreate(uid: commentUid, author: author, text: body, created: now, updated: now)),
         idempotencyKey: 'asset-comment:$commentUid');
   }
+
+  Future<List<AssetLabelInfo>> labels(String assetUid) async =>
+      _list(await _api.json((c) => _api.assetSubresources(c).listLabelsWithHttpInfo(assetUid)))
+          .map(_map)
+          .map((m) => AssetLabelInfo(
+              uid: m['uid'].toString(),
+              type: (m['type'] ?? '').toString(),
+              value: (m['value'] ?? '').toString(),
+              verified: m['verified'] == true))
+          .toList();
+
+  /// Puts a label on the record — written by a person in the field, so not yet verified.
+  Future<void> addLabel(String assetUid, String labelUid, String type, String value) async {
+    final now = DateTime.now().toUtc();
+    await _api.json(
+        (c) => _api.assetSubresources(c).createLabelsWithHttpInfo(
+            assetUid,
+            api.AssetLabelCreate(
+                uid: labelUid, type: type, value: value.trim(), issuer: 'field', createdAt: now, updatedAt: now)),
+        idempotencyKey: 'asset-label:$labelUid');
+  }
+
+  Future<void> removeLabel(String assetUid, String labelUid) async =>
+      _api.json((c) => _api.labels(c).deleteLabelWithHttpInfo(assetUid, labelUid));
 
   Future<List<HistoryEntry>> history(String assetUid) async =>
       _list(await _api.json((c) => _api.assetSubresources(c).listHistoryWithHttpInfo(assetUid)))
