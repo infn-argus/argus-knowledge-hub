@@ -8,12 +8,14 @@
 3. `POST /v1/uploads/{uid}/complete`: the server checks the size and recomputes the SHA-256. A
    mismatch discards the bytes, so the client starts again. Location metadata (EXIF GPS) is
    removed from images.
-4. `POST /v1/uploads/{uid}/attach/ticket/{issue_uid}` or `.../attach/asset/{asset_uid}` makes it
-   an attachment of the record.
+4. `POST /v1/uploads/{uid}/attach/ticket/{issue_uid}`, `.../attach/asset/{asset_uid}` or
+   `.../attach/document/{doc_uid}/revision/{rev_uid}` makes it an attachment of the record. A photo,
+   a video, a recorded note, or a place (`application/geo+json`, where the person was when they sent it).
 
 The limits are decision U23. Until it is taken, they are set per environment:
 - `ARGUS_UPLOAD_MAX_IMAGE`, 25 MB by default;
 - `ARGUS_UPLOAD_MAX_VIDEO`, 200 MB by default;
+- `ARGUS_UPLOAD_MAX_AUDIO`, 100 MB by default (a recorded note);
 - `ARGUS_UPLOAD_MAX_OTHER`, 50 MB by default;
 - `ARGUS_UPLOAD_TYPES`, the accepted types.
 """
@@ -38,14 +40,16 @@ router = APIRouter(prefix="/v1/uploads", tags=["uploads"])
 
 MB = 1024 * 1024
 CHUNK = 8 * MB
-DEFAULT_TYPES = ("image/jpeg,image/png,image/heic,image/heif,image/webp,video/mp4,video/quicktime,"
-                 "application/pdf,text/plain,text/csv")
+DEFAULT_TYPES = ("image/jpeg,image/png,image/heic,image/heif,image/webp,video/mp4,video/quicktime,video/3gpp,"
+                 "audio/mp4,audio/m4a,audio/x-m4a,audio/aac,audio/mpeg,audio/ogg,audio/webm,audio/wav,"
+                 "application/geo+json,application/pdf,text/plain,text/csv")
 
 
 def _limit(content_type: str) -> int:
     kind = content_type.split("/", 1)[0]
     env, default = {"image": ("ARGUS_UPLOAD_MAX_IMAGE", 25 * MB),
-                    "video": ("ARGUS_UPLOAD_MAX_VIDEO", 200 * MB)}.get(kind, ("ARGUS_UPLOAD_MAX_OTHER", 50 * MB))
+                    "video": ("ARGUS_UPLOAD_MAX_VIDEO", 200 * MB),
+                    "audio": ("ARGUS_UPLOAD_MAX_AUDIO", 100 * MB)}.get(kind, ("ARGUS_UPLOAD_MAX_OTHER", 50 * MB))
     return int(os.environ.get(env, default))
 
 
@@ -241,7 +245,33 @@ def attach_to_asset(uid: str, asset_uid: str, identity=Depends(get_identity),
     from app.routers.assets import _get_owned_asset
     u = _own(db, uid, identity, workspace_id)
     asset = _get_owned_asset(asset_uid, workspace_id, db)
+    already = u.state == "attached"
     out = _attach(db, u, workspace_id, current_user_id, asset_uid=asset.uid)
+    if not already:
+        from app.models.asset_subresources import AssetHistory
+        from app.routers.ledger import actor_of
+        now = datetime.now(timezone.utc)
+        db.add(AssetHistory(uid=str(uuid.uuid4()), asset_uid=asset.uid, type="attachment", author=actor_of(identity),
+                            details=f"Attached {u.filename}", timestamp=now))
+        asset.updated_at = now
+    db.commit()
+    return out
+
+
+@router.post("/{uid}/attach/document/{doc_uid}/revision/{rev_uid}")
+def attach_to_document(uid: str, doc_uid: str, rev_uid: str, identity=Depends(get_identity),
+                       workspace_id: str = Depends(require_permission("modify", resource="documents")),
+                       current_user_id: Optional[str] = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """A file of one revision of a document, while that revision is still being written: a published one is
+    what was approved, figures included (documents.upload_revision_attachment)."""
+    from app.routers.documents import _get_owned_document, _get_revision
+    u = _own(db, uid, identity, workspace_id)
+    doc = _get_owned_document(doc_uid, workspace_id, db)
+    revision = _get_revision(doc.uid, rev_uid, db)
+    if u.state != "attached" and revision.state in ("published", "superseded", "retired"):
+        raise HTTPException(status_code=409, detail={
+            "error": "That revision is closed — start a new revision to add files.", "code": "conflict"})
+    out = _attach(db, u, workspace_id, current_user_id, document_revision_uid=revision.uid)
     db.commit()
     return out
 

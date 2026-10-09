@@ -46183,6 +46183,102 @@
         ]
       }
     },
+    "/v1/uploads/{uid}/attach/document/{doc_uid}/revision/{rev_uid}": {
+      "post": {
+        "description": "A file of one revision of a document, while that revision is still being written: a published one is\nwhat was approved, figures included (documents.upload_revision_attachment).",
+        "operationId": "attach_to_document_v1_uploads__uid__attach_document__doc_uid__revision__rev_uid__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "title": "Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "doc_uid",
+            "required": true,
+            "schema": {
+              "title": "Doc Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rev_uid",
+            "required": true,
+            "schema": {
+              "title": "Rev Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Attach To Document",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
     "/v1/uploads/{uid}/attach/ticket/{issue_uid}": {
       "post": {
         "operationId": "attach_to_ticket_v1_uploads__uid__attach_ticket__issue_uid__post",

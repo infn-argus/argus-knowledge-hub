@@ -419,3 +419,42 @@ def test_the_field_client_does_not_confirm_root_causes_or_retire_equipment():
                       json={"attributes": {"argus_root_cause": "bearing"}}).status_code == 200
     pump = _pump(ws, h, {})
     assert client.delete(f"/v1/assets/{pump}", headers={**h, **FIELD}).status_code == 403
+
+
+def _upload(h, data: bytes, filename: str, content_type: str) -> str:
+    import hashlib
+    u = client.post("/v1/uploads", headers=h, json={"filename": filename, "content_type": content_type,
+                                                    "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+    assert u.status_code == 201, u.text
+    uid = u.json()["uid"]
+    assert client.put(f"/v1/uploads/{uid}?offset=0", headers=h, content=data).status_code == 200
+    assert client.post(f"/v1/uploads/{uid}/complete", headers=h).status_code == 200
+    return uid
+
+
+def test_a_recorded_note_on_equipment_and_a_place_on_a_draft_are_attached(tmp_path, monkeypatch):
+    import json as _json
+    from tests.test_field_client import world
+    monkeypatch.setattr("app.routers.issues.ATTACHMENTS_DIR", str(tmp_path))
+    w = world()
+    h = w["headers"]
+    note = _upload(h, b"\x00\x00\x00\x18ftypM4A " + b"\x00" * 64, "note.m4a", "audio/mp4")
+    assert client.post(f"/v1/uploads/{note}/attach/asset/{w['pump']}", headers=h).status_code == 200
+    history = client.get(f"/v1/assets/{w['pump']}/history", headers=h).json()
+    assert [x["details"] for x in history] == ["Attached note.m4a"]
+
+    doc = str(uuid.uuid4())
+    assert client.post("/v1/documents", headers=h, json={"uid": doc, "title": "Bake-out", "body_markdown": "Heat"}).status_code == 201
+    [draft] = client.get(f"/v1/documents/{doc}/revisions", headers=h).json()
+    place = _json.dumps({"type": "Feature", "geometry": {"type": "Point", "coordinates": [12.68, 41.82]},
+                         "properties": {"accuracy_m": 5}}).encode()
+    up = _upload(h, place, "location.geojson", "application/geo+json")
+    assert client.post(f"/v1/uploads/{up}/attach/document/{doc}/revision/{draft['uid']}", headers=h).status_code == 200
+    [row] = client.get(f"/v1/documents/{doc}/revisions/{draft['uid']}/attachments", headers=h).json()
+    assert row["mime_type"] == "application/geo+json"
+
+    for step in ("submit", "approve", "publish"):
+        client.post(f"/v1/documents/{doc}/revisions/{draft['uid']}/{step}", headers=h, json={"comment": "ok"})
+    late = _upload(h, b"%PDF-1.4 x", "late.pdf", "application/pdf")
+    refused = client.post(f"/v1/uploads/{late}/attach/document/{doc}/revision/{draft['uid']}", headers=h)
+    assert refused.status_code == 409, "a published revision is what was approved"
