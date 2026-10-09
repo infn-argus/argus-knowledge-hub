@@ -173,3 +173,11 @@ def test_an_edit_is_in_the_records_history_from_what_to_what():
     history = client.get(f"/v1/assets/{w['pump']}/history", headers=w["headers"]).json()
     assert len(history) == 1 and history[0]["type"] == "edit"
     assert "Agilent → Pfeiffer" in history[0]["details"]
+
+
+def test_what_a_nameplate_prints_around_a_serial_is_left_out():
+    w = world()
+    tag = secrets.token_hex(3)
+    _label(w, w["pump"], "serial", f"4711{tag}")
+    for scanned in (f"S/N: 4711{tag}", f"SN 4711{tag}", f"(21)4711{tag}", f"Serial No. 4711{tag}"):
+        assert resolve(w, f"/lookup/{scanned}").json().get("uid") == w["pump"], scanned

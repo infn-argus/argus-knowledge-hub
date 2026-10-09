@@ -10,6 +10,7 @@
   open, for the web application and the field client alike. A record the
   caller may not read answers exactly as a missing one (I-ACL-1).
 """
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -266,17 +267,33 @@ def _label_holders(db: Session, value: str, readable: list[str], grants) -> list
                                                match_text(col["mac"].astext))))
 
     mac = v.lower().replace("-", ":")
+    bare = _bare_label(v)
     for found in (
         lambda: labelled(AssetLabel.value == v, types=("qrcode",)),
         lambda: _merge(labelled(AssetLabel.value == v, exclude=("qrcode",)),
                        by_attribute(lambda c: or_(c == v, c == mac))),
         lambda: _merge(labelled(func.lower(AssetLabel.value) == v.lower()),
                        by_attribute(lambda c: func.lower(c) == v.lower())),
+        # What a nameplate prints around the value ("S/N: 4711", a GS1 barcode's "(21)4711"), left out.
+        lambda: [] if bare == v else _merge(labelled(func.lower(AssetLabel.value) == bare.lower()),
+                                            by_attribute(lambda c: func.lower(c) == bare.lower())),
     ):
         hit = found()
         if hit:
             return hit
     return []
+
+
+_LABEL_PREFIX = re.compile(
+    r"^(?:\(21\)|\]C1|\]d2|\]Q3|(?:S\s*/\s*N|SN|SER(?:IAL)?(?:\s*(?:NO|NR|N°|NUMBER|#))?|MATR(?:ICOLA)?|P\s*/\s*N|"
+    r"INV(?:ENTAR(?:Y|IO))?(?:\s*(?:NO|NR|N°|#))?|ASSET\s*TAG)\s*[.:#]?)\s*", re.I)
+
+
+def _bare_label(value: str) -> str:
+    """A scanned value without what is printed around it: "S/N: 4711" → "4711", a GS1 serial "(21)4711" →
+    "4711"."""
+    bare = _LABEL_PREFIX.sub("", value.strip(), count=1).strip()
+    return bare or value.strip()
 
 
 def _merge(*lists: list[Asset]) -> list[Asset]:
