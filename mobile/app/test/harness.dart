@@ -14,6 +14,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:argus_field/core/local_store.dart';
 
+import 'package:argus_field/features/scan/text_reader.dart';
+
 import 'fake_server.dart';
 
 const testConfig = AppConfig(
@@ -44,10 +46,11 @@ class FakePhotos implements PhotoSource {
 }
 
 class Running {
-  Running(this.server, this.photos, this.tester);
+  Running(this.server, this.photos, this.tester, [FakeTextReader? texts]) : texts = texts ?? FakeTextReader();
 
   final FakeArgus server;
   final FakePhotos photos;
+  final FakeTextReader texts;
   final WidgetTester tester;
 
   Future<void> go(String path) async {
@@ -81,6 +84,7 @@ Future<Running> start(WidgetTester tester,
   final server = FakeArgus();
   prepare?.call(server);
   final photos = FakePhotos();
+  final texts = FakeTextReader();
   await tester.pumpWidget(ProviderScope(
     retry: retryPolicy,
     overrides: [
@@ -88,11 +92,24 @@ Future<Running> start(WidgetTester tester,
       httpClientProvider.overrideWithValue(server.client),
       cacheStoreProvider.overrideWithValue(MemoryLocalStore()),
       photoSourceProvider.overrideWithValue(photos),
+      textReaderProvider.overrideWithValue(texts),
       ...overrides,
     ],
     child: const ArgusFieldApp(),
   ));
   await tester.pumpAndSettle();
-  return Running(server, photos, tester);
+  return Running(server, photos, tester, texts);
 }
 
+
+
+/// What the camera "reads" on a nameplate, in tests.
+class FakeTextReader implements TextReader {
+  String text = '';
+
+  @override
+  bool get available => true;
+
+  @override
+  Future<String> read(PickedPhoto photo) async => text;
+}

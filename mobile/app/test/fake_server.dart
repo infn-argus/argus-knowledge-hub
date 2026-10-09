@@ -69,6 +69,10 @@ class FakeArgus {
   /// Serve these once, then lose the answer (the request reached the server; the reply did not).
   final Set<String> loseAnswer = {};
 
+  /// What a scanned label value resolves to (`/v1/links/resolve?path=/lookup/<value>`); others are not found.
+  final Map<String, Map<String, Object?>> labelLookups = {};
+  final List<String> lookedUp = [];
+
   /// Labels on records, by record uid: put on and taken off by the app.
   final Map<String, List<Map<String, dynamic>>> labels = {};
 
@@ -240,6 +244,13 @@ class FakeArgus {
       _ => null,
     };
     if (name == 'draft_current') status = 404;
+    final looked = q['path'] != null && q['path']!.startsWith('/lookup/')
+        ? Uri.decodeComponent(q['path']!.substring('/lookup/'.length))
+        : null;
+    if (m == 'GET' && p == '/v1/links/resolve' && looked != null && labelLookups.isNotEmpty) {
+      lookedUp.add(looked);
+      return labelLookups.containsKey(looked) ? _json(labelLookups[looked]) : problem(404, 'not_found');
+    }
     if (m == 'GET' && p == '/v1/links/resolve' && q['path'] == '/lookup/IP-NEW-1') {
       return _json({'kind': 'asset', 'uid': incomingUnit, 'key': 'SLICE-20463F-IP-0001', 'name': 'Ion pump gun area 2',
         'type': 'Ion Pump', 'web_path': '/assets/$incomingUnit'});

@@ -33,6 +33,7 @@ dependencies:
   url_launcher: ^6.3.3
   cryptography: ^2.9.0
   path_provider: ^2.1.6
+  google_mlkit_text_recognition: ^0.17.1
 
 dev_dependencies:
   flutter_test:

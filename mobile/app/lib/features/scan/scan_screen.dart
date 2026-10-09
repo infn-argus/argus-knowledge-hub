@@ -5,10 +5,14 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../app/providers.dart';
 import '../../core/link_parser.dart';
+import '../../core/problem.dart';
+import 'text_reader.dart';
 
-/// Scan a QR code, a DataMatrix or a barcode on a label (flutter-app-design §5.2). What was read
-/// is parsed before anything happens: only ARGUS links are followed, other links are refused and
-/// plain values are looked up. Typing the label is always possible (a damaged label, no camera).
+/// Scan a label (flutter-app-design §5.2): a QR code, a DataMatrix or a barcode of any kind, or — with
+/// "Read text" — what is printed on a nameplate (a serial, an inventory number), read on the device. What
+/// was read is parsed before anything happens: only ARGUS links are followed, other links are refused and
+/// plain values are looked up among every kind of label, QR codes first. Typing the label is always
+/// possible (a damaged label, no camera).
 class ScanScreen extends ConsumerStatefulWidget {
   const ScanScreen({super.key, this.pick = false});
 
@@ -21,7 +25,8 @@ class ScanScreen extends ConsumerStatefulWidget {
 
 class _ScanScreenState extends ConsumerState<ScanScreen> {
   final _controller = MobileScannerController(
-    formats: const [BarcodeFormat.qrCode, BarcodeFormat.dataMatrix, BarcodeFormat.code128, BarcodeFormat.code39],
+    // Every format: a serial is often an EAN, ITF or Code 93 barcode, not only a QR code.
+    formats: const [BarcodeFormat.all],
   );
   final _typed = TextEditingController();
   bool _handling = false;
@@ -50,8 +55,95 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     }
   }
 
+  bool _reading = false;
+
+  /// A photo of the printed text, read on the device; the values that look like a label are looked up in
+  /// turn, and the first that finds a record opens it. None found: the person chooses what to look up.
+  Future<void> _readText() async {
+    final reader = ref.read(textReaderProvider);
+    setState(() {
+      _reading = true;
+      _refusal = null;
+    });
+    try {
+      try {
+        await _controller.stop(); // one camera at a time
+      } catch (_) {}
+      final photo = await ref.read(photoSourceProvider).take();
+      if (photo == null || !mounted) return;
+      final candidates = labelCandidates(await reader.read(photo));
+      if (!mounted) return;
+      if (candidates.isEmpty) {
+        setState(() => _refusal = 'No serial, code or number could be read. Try closer, or type it below.');
+        return;
+      }
+      if (widget.pick) {
+        final chosen = await _choose(candidates, 'Which is the label?');
+        if (chosen != null && mounted) context.pop('/lookup/${Uri.encodeComponent(chosen)}');
+        return;
+      }
+      for (final c in candidates.take(8)) {
+        try {
+          final target = await ref.read(lookupRepositoryProvider).lookup(c);
+          if (!mounted) return;
+          _handling = true;
+          context.pushReplacement(target.route);
+          return;
+        } on Problem catch (p) {
+          if (p.code == ProblemCode.ambiguous) {
+            if (!mounted) return;
+            _handling = true;
+            context.pushReplacement('/lookup/${Uri.encodeComponent(c)}'); // the person chooses among them
+            return;
+          }
+          if (p.code != ProblemCode.notFound) rethrow;
+        }
+      }
+      final chosen = await _choose(candidates, 'No record carries these. Look one up anyway?');
+      if (chosen != null && mounted) {
+        _handling = true;
+        context.pushReplacement('/lookup/${Uri.encodeComponent(chosen)}');
+      }
+    } on Problem catch (p) {
+      if (mounted) setState(() => _refusal = p.message);
+    } finally {
+      if (mounted) {
+        setState(() => _reading = false);
+        if (!_handling) {
+          try {
+            await _controller.start();
+          } catch (_) {}
+        }
+      }
+    }
+  }
+
+  Future<String?> _choose(List<String> candidates, String title) {
+    setState(() => _reading = false); // read: what is left is the person's choice
+    return showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: ListView(shrinkWrap: true, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(title, style: Theme.of(sheet).textTheme.titleMedium),
+          ),
+          for (final c in candidates)
+            ListTile(
+              key: Key('scan-candidate-$c'),
+              leading: const Icon(Icons.label_outline),
+              title: Text(c),
+              onTap: () => Navigator.pop(sheet, c),
+            ),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final canRead = ref.watch(textReaderProvider).available;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Scan label'),
@@ -97,6 +189,21 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
             ),
           ]),
         ),
+        if (canRead)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const Key('scan-read-text'),
+                onPressed: _reading ? null : _readText,
+                icon: _reading
+                    ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.document_scanner_outlined),
+                label: Text(_reading ? 'Reading…' : 'Read printed text (serial, inventory number)'),
+              ),
+            ),
+          ),
         if (_refusal != null)
           Container(
             key: const Key('scan-refusal'),

@@ -22,6 +22,7 @@ import '../domain/models.dart';
 import '../features/ask/voice.dart';
 import '../features/auth/auth_service.dart';
 import '../features/capture/photo_source.dart';
+import '../features/scan/text_reader.dart';
 import 'queue.dart';
 
 /// Riverpod retries a failed provider by default. A refusal (not found, forbidden, invalid,
@@ -377,6 +378,9 @@ final serverMetaProvider = FutureProvider.autoDispose<Map<String, Object?>>((ref
 // --------------------------------------------------------------------------- capture and tickets (M2)
 
 final photoSourceProvider = Provider<PhotoSource>((_) => DevicePhotoSource());
+
+/// Reads printed text from a photo, on the device (features/scan/text_reader.dart). Tests replace it.
+final textReaderProvider = Provider<TextReader>((_) => DeviceTextReader());
 final intakeRepositoryProvider = Provider((ref) => IntakeRepository(ref.watch(apiServiceProvider)));
 final schemaRepositoryProvider = Provider((ref) => SchemaRepository(ref.watch(apiServiceProvider)));
 final browseRepositoryProvider = Provider((ref) => BrowseRepository(ref.watch(apiServiceProvider)));
