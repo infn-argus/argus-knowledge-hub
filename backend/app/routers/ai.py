@@ -385,6 +385,36 @@ async def identify_object(
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
+MAX_AUDIO_BYTES = 25 * 1024 * 1024    # what a Whisper endpoint takes in one request: about 25 minutes of a note
+
+
+@router.post("/transcribe")
+async def transcribe_recording(
+    file: UploadFile = File(description="A recording: a dictated note or document"),
+    language: Optional[str] = None,
+    workspace_id: str = Depends(require_permission("read")),
+    db: Session = Depends(get_db),
+):
+    """What was said in a recording, as text, by the workspace's speech-to-text model. Keeps nothing: the
+    person edits the text, and what they save is what is kept."""
+    from app.services.llm import transcribe
+    config = _usable_config(db, workspace_id)
+    if not config.asr_model:
+        raise HTTPException(status_code=409, detail="No speech-to-text model is configured for this workspace's "
+                                                    "AI endpoint (Administration → AI).")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="The recording was empty.")
+    if len(content) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail=f"That recording is larger than {MAX_AUDIO_BYTES // (1024 * 1024)} MB.")
+    try:
+        text = transcribe(endpoint_for(config), content, file.filename or "recording.m4a",
+                          file.content_type or "audio/mp4", language)
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"text": text}
+
+
 @router.post("/draft-document", response_model=DraftDocumentOut)
 def draft_a_document(
     body: DraftDocumentIn,

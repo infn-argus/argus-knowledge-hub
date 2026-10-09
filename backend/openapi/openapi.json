@@ -1890,6 +1890,21 @@
         "title": "Body_receive_attachment_v1_logbook_olog_entries__facility___entry_id__attachments_post",
         "type": "object"
       },
+      "Body_transcribe_recording_v1_ai_transcribe_post": {
+        "properties": {
+          "file": {
+            "description": "A recording: a dictated note or document",
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_transcribe_recording_v1_ai_transcribe_post",
+        "type": "object"
+      },
       "Body_upload_asset_avatar_v1_assets__uid__avatar_post": {
         "properties": {
           "file": {
@@ -14532,6 +14547,101 @@
           }
         ],
         "summary": "Reject Suggestions",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/transcribe": {
+      "post": {
+        "description": "What was said in a recording, as text, by the workspace's speech-to-text model. Keeps nothing: the\nperson edits the text, and what they save is what is kept.",
+        "operationId": "transcribe_recording_v1_ai_transcribe_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_transcribe_recording_v1_ai_transcribe_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Transcribe Recording",
         "tags": [
           "ai"
         ]

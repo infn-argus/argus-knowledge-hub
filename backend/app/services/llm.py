@@ -376,6 +376,29 @@ def embed(endpoint: Endpoint, texts: list[str]) -> list[list[float]]:
         raise LLMError("The endpoint's embeddings reply was not in the expected shape.") from e
 
 
+def transcribe(endpoint: Endpoint, audio: bytes, filename: str, mime_type: str,
+               language: Optional[str] = None) -> str:
+    """What was said in a recording, as text: the endpoint's speech-to-text model (a Whisper), through the
+    OpenAI-compatible /audio/transcriptions."""
+    if not endpoint.asr_model:
+        raise LLMError("No speech-to-text model is configured for this endpoint.")
+    headers = {k: v for k, v in endpoint.headers().items() if k != "Content-Type"}  # multipart sets its own
+    data = {"model": endpoint.asr_model, "response_format": "json"}
+    if language:
+        data["language"] = language
+    try:
+        resp = requests.post(f"{endpoint.root}/audio/transcriptions", headers=headers, data=data,
+                             files={"file": (filename, audio, mime_type)}, timeout=COMPLETION_TIMEOUT_SECONDS * 3)
+    except requests.RequestException as e:
+        raise LLMError(f"Could not reach {endpoint.root}: {e}") from e
+    if resp.status_code >= 400:
+        raise LLMError(f"The endpoint answered {resp.status_code}: {(resp.text or '')[:200]}")
+    try:
+        return (resp.json().get("text") or "").strip()
+    except ValueError:
+        return (resp.text or "").strip()
+
+
 def look(endpoint: Endpoint, image: bytes, mime_type: str, system: str, user: str) -> str:
     """Ask the vision model about a picture.
 

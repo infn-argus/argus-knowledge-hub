@@ -1090,6 +1090,21 @@
         "title": "Body_assist_from_file_v1_intake_assist__kind__file_post",
         "type": "object"
       },
+      "Body_transcribe_recording_v1_ai_transcribe_post": {
+        "properties": {
+          "file": {
+            "description": "A recording: a dictated note or document",
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_transcribe_recording_v1_ai_transcribe_post",
+        "type": "object"
+      },
       "ChatIn": {
         "properties": {
           "conversation_id": {
@@ -1958,6 +1973,62 @@
         "title": "DocumentUpdate",
         "type": "object"
       },
+      "DraftDocumentIn": {
+        "properties": {
+          "document_type_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Type Uid"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "DraftDocumentIn",
+        "type": "object"
+      },
+      "DraftDocumentOut": {
+        "properties": {
+          "body_markdown": {
+            "title": "Body Markdown",
+            "type": "string"
+          },
+          "mentioned_objects": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MentionedObject"
+            },
+            "title": "Mentioned Objects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "body_markdown"
+        ],
+        "title": "DraftDocumentOut",
+        "type": "object"
+      },
       "GlobalValueOut": {
         "properties": {
           "allowed_egu_list": {
@@ -2682,6 +2753,46 @@
         "title": "MeOut",
         "type": "object"
       },
+      "MentionedObject": {
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "matched_on": {
+            "title": "Matched On",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "uid": {
+            "title": "Uid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uid",
+          "matched_on"
+        ],
+        "title": "MentionedObject",
+        "type": "object"
+      },
       "MyWorkspaceOut": {
         "properties": {
           "can_approve_documents": {
@@ -3403,6 +3514,87 @@
         ]
       }
     },
+    "/v1/ai/draft-document": {
+      "post": {
+        "description": "A first draft for the editor. Saves nothing.",
+        "operationId": "draft_a_document",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftDocumentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftDocumentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Draft A Document",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
     "/v1/ai/status": {
       "get": {
         "description": "What the application asks before offering an AI action.\n\nA feature that cannot work should not be presented as if it could, and\nthe reason belongs here rather than in a failed request later.",
@@ -3469,6 +3661,101 @@
           }
         ],
         "summary": "Status",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/transcribe": {
+      "post": {
+        "description": "What was said in a recording, as text, by the workspace's speech-to-text model. Keeps nothing: the\nperson edits the text, and what they save is what is kept.",
+        "operationId": "transcribe_recording",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_transcribe_recording_v1_ai_transcribe_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Transcribe Recording",
         "tags": [
           "ai"
         ]
