@@ -6,6 +6,7 @@ import {
 
 export const IN = "#d97706"; // amber: points at the selected node
 export const OUT = "#4f46e5"; // indigo: the selected node points at it
+export const SEMANTIC = "#0d9488"; // teal, dashed: about the same thing, by meaning
 const OTHER = "#cbd5e1";
 
 /** Draws a directed graph of hub records at a readable scale, over a camera the person pans and zooms.
@@ -157,9 +158,12 @@ export function GraphCanvas({
           const fanIn = degree.inn.get(e.to) ?? 1;
           const { d, mx, my } = curve(pos(a), pos(b), fanIn > fanOut ? 0.3 : fanOut > fanIn ? 0.7 : 0.5);
           const quiet = colouring === "direction" && kind === "other";
+          // About the same thing, by meaning: no direction, and drawn apart from the relations people made.
+          const semantic = e.via === "semantic";
           return (
             <g key={edgeKey(e)}>
-              <path d={d} fill="none" stroke={color} strokeWidth={quiet ? 1.2 : 2} markerEnd={`url(#arrow-${kind})`} />
+              <path d={d} fill="none" stroke={semantic ? SEMANTIC : color} strokeWidth={semantic ? 1.6 : quiet ? 1.2 : 2}
+                    strokeDasharray={semantic ? "6 4" : undefined} markerEnd={semantic ? undefined : `url(#arrow-${kind})`} />
               <text x={mx} y={my - 4} textAnchor="middle" fontSize={10} className={quiet ? "fill-slate-400" : "fill-slate-700"}
                     stroke="#f8fafc" strokeWidth={3} paintOrder="stroke">
                 {e.relation}

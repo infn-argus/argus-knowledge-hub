@@ -22,6 +22,7 @@ import { effectiveAttributes } from "../../lib/schemaAttributes";
 import { TicketContextPanel } from "../../components/hub/ContextPanels";
 import { TicketWorkflowCard, WatchersCard } from "../../components/hub/WorkflowPanels";
 import { workflowApi } from "../../api/client";
+import { SemanticRelated } from "../../components/SemanticRelated";
 
 const STATE_STYLES: Record<string, string> = {
   new: "bg-slate-100 text-slate-600",
@@ -772,6 +773,10 @@ export function IssueDetail() {
                 <FieldRow label="Resolved">{new Date(i.closed_at).toLocaleString()}</FieldRow>
               )}
             </dl>
+          </Panel>
+
+          <Panel title="Related by meaning">
+            <SemanticRelated kind="ticket" uid={i.uid} />
           </Panel>
 
           <Panel title="History">

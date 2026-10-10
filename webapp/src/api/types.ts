@@ -1830,3 +1830,13 @@ export interface BeamVocabulary {
   shapes: string[];
   virtual_families: string[];
 }
+
+/** The semantic graph around a record: what is about the same thing, by the knowledge index. */
+export interface SemanticGraph {
+  nodes: { kind: string; uid: string; label: string; sublabel: string | null; depth: number }[];
+  edges: { from_kind: string; from_uid: string; to_kind: string; to_uid: string; relation: string; score: number;
+           excerpt: string; matched: string }[];
+  available: boolean;
+  reason: string | null;
+  basis: string | null;
+}

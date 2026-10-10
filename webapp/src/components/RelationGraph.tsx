@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { graphApi } from "../api/client";
 import { GraphCanvas, IN, OUT } from "./graph/GraphCanvas";
-import { edgeKey, type GEdge } from "./graph/model";
+import { edgeKey, nodeId, STEP, type GEdge, type GNode } from "./graph/model";
 import { useBranches } from "./graph/useBranches";
 
 /* An asset's relations as a directed graph that grows on demand: what points at a node to its left, what it
@@ -14,10 +16,35 @@ export function RelationGraph({ assetUid, onClose }: { assetUid: string; onClose
   const [selected, setSelected] = useState<string | null>(null);
   const [showIn, setShowIn] = useState(true);
   const [showOut, setShowOut] = useState(true);
+  const [byMeaning, setByMeaning] = useState(false);
+  const semantic = useQuery({
+    queryKey: ["semantic", "asset", rootUid],
+    queryFn: () => graphApi.semantic("asset", rootUid),
+    enabled: byMeaning,
+    staleTime: 60_000,
+  });
   const current = selected && graph.nodes.has(selected) ? selected : graph.rootId;
-  const sel = current ? graph.nodes.get(current) : undefined;
+  const sel = current ? (graph.nodes.get(current) ?? undefined) : undefined;
 
-  const edges = graph.edges.filter((e) => (e.to === current ? showIn : e.from === current ? showOut : true));
+  // Related by meaning: drawn in a column of their own, right of everything else, joined by dashed lines.
+  const { nodes, extra } = useMemo(() => {
+    if (!byMeaning || !semantic.data || !graph.rootId) return { nodes: graph.nodes, extra: [] as GEdge[] };
+    const all = new Map(graph.nodes);
+    const col = Math.max(0, ...[...graph.nodes.values()].map((n) => n.col)) + 1;
+    const fresh = semantic.data.edges.filter((e) => !all.has(nodeId(e.to_kind, e.to_uid)));
+    fresh.forEach((e, i) => {
+      const n = semantic.data!.nodes.find((x) => x.kind === e.to_kind && x.uid === e.to_uid);
+      all.set(nodeId(e.to_kind, e.to_uid), {
+        id: nodeId(e.to_kind, e.to_uid), kind: e.to_kind as GNode["kind"], uid: e.to_uid, label: n?.label ?? e.to_uid,
+        sub: n?.sublabel ?? null, col, y: (i - (fresh.length - 1) / 2) * STEP, parent: graph.rootId, seq: 10_000 + i,
+      });
+    });
+    const extra = semantic.data.edges.map((e): GEdge => ({
+      from: graph.rootId!, to: nodeId(e.to_kind, e.to_uid), relation: e.score.toFixed(2), via: "semantic",
+    }));
+    return { nodes: all, extra };
+  }, [byMeaning, semantic.data, graph.nodes, graph.rootId]);
+  const edges = [...graph.edges.filter((e) => (e.to === current ? showIn : e.from === current ? showOut : true)), ...extra];
   const selIn = graph.edges.filter((e) => e.to === current && graph.nodes.has(e.from));
   const selOut = graph.edges.filter((e) => e.from === current && graph.nodes.has(e.to));
   const name = (id: string) => graph.nodes.get(id)?.label ?? id;
@@ -35,13 +62,17 @@ export function RelationGraph({ assetUid, onClose }: { assetUid: string; onClose
           <label className="flex items-center gap-1 text-xs text-slate-600">
             <input type="checkbox" checked={showOut} onChange={(e) => setShowOut(e.target.checked)} /> outbound
           </label>
+          <label className="flex items-center gap-1 text-xs text-teal-700" title="From the knowledge index: records whose written knowledge is about the same thing">
+            <input type="checkbox" checked={byMeaning} onChange={(e) => setByMeaning(e.target.checked)} /> related by meaning
+            {byMeaning && semantic.isFetching && " …"}
+          </label>
           <span className="text-xs text-slate-400">Click to select · double-click to open or fold · drag to pan · scroll to zoom</span>
           <button onClick={onClose} className="ml-auto rounded px-2 py-1 text-sm text-slate-500 hover:bg-slate-100">Close</button>
         </div>
         {graph.error && <p className="px-4 py-2 text-sm text-red-600">{graph.error}</p>}
         <div className="flex min-h-0 flex-1">
           <div className="min-w-0 flex-1">
-            <GraphCanvas nodes={graph.nodes} edges={edges} rootId={graph.rootId} selected={current}
+            <GraphCanvas nodes={nodes} edges={edges} rootId={graph.rootId} selected={current}
                          onSelect={setSelected} onOpen={graph.toggle} open={graph.open} loading={graph.loading} />
           </div>
           {sel && (

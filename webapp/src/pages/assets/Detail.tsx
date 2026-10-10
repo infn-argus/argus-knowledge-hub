@@ -22,6 +22,7 @@ import { RelationGraph } from "../../components/RelationGraph";
 import { TransferItemAction } from "../../components/TransferItemAction";
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
 import { AssetContextPanel } from "../../components/hub/ContextPanels";
+import { SemanticRelated } from "../../components/SemanticRelated";
 
 function SectionCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
@@ -562,6 +563,10 @@ export function AssetDetail() {
               Add
             </button>
           </form>
+        </SectionCard>
+
+        <SectionCard title="Related by meaning">
+          <SemanticRelated kind="asset" uid={a.uid} />
         </SectionCard>
 
         <SectionCard title="History">

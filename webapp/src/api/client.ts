@@ -91,6 +91,7 @@ import type {
   AskConversationDetail,
   ChatEvent,
   KnowledgeStatus,
+  SemanticGraph,
   ImpactResult,
   RootCauseResult,
   BeamSystem,
@@ -828,6 +829,9 @@ export const directoryApi = {
 
 export const graphApi = {
   summary: () => request<GraphSummary>("/v1/graph/summary"),
+  /** The records whose written knowledge is about the same thing as this one's (the knowledge index). */
+  semantic: (kind: "asset" | "ticket" | "document", uid: string, limit = 10) =>
+    request<SemanticGraph>(`/v1/graph/semantic?${new URLSearchParams({ kind, uid, limit: String(limit) }).toString()}`),
   /** This failed: what it takes with it, how, and by which path. */
   impact: (uid: string, layers?: string[]) => {
     const q = new URLSearchParams({ uid });
