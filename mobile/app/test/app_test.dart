@@ -65,7 +65,8 @@ void main() {
     await tester.enterText(find.byKey(const Key('home-search')), 'GUNSIP');
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
-    expect(find.text('S7C415E:POS:GUNSIP02 · GUNSIP02'), findsOneWidget);
+    expect(find.text('GUNSIP02'), findsWidgets); // by name, the key beside it
+    expect(find.textContaining('S7C415E:POS:GUNSIP02'), findsOneWidget);
     expect(server.requests.last.headers['X-Workspace-Id'], workspaceId);
   });
 

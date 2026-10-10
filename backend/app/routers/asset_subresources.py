@@ -87,6 +87,11 @@ def _make_subresource_routes(
         db.add(item)
         if after_create is not None:
             after_create(db, asset_uid, item, identity)
+        if model is AssetComment:
+            from app.routers.ledger import actor_of
+            from app.services import notify
+            notify.asset_changed(db, asset_uid, f"comment: {(item.text or '')[:120]}",
+                                 actor_of(identity))
         db.commit()
         db.refresh(item)
         return item
@@ -130,6 +135,8 @@ def record_label_change(db: Session, asset_uid: str, label, identity, change: st
     asset = db.get(Asset, asset_uid)
     if asset is not None:
         asset.updated_at = now
+    from app.services import notify
+    notify.asset_changed(db, asset_uid, f"{change} {label.type} label {label.value}", actor_of(identity))
 
 
 _make_subresource_routes(

@@ -86,16 +86,25 @@ A label is how a unit in front of you is found: its **QR code**, **serial number
   that is wrong. On the phone: the asset's **Labels** section, **Add label** (the kind, then type or scan the
   value).
 
-When anyone scans or types a value, ARGUS looks for it in this order:
+When anyone scans or types a value, ARGUS looks for **every record it names**, in every workspace you can
+open, ignoring capital letters:
 
-1. a **QR code** label, exactly as printed (a web address, a number);
-2. any other **label** (serial, barcode, inventory number, asset tag, alias), and the serial, inventory
-   number and MAC fields of the equipment;
-3. the same **ignoring capital letters**;
-4. the same **without what a nameplate prints around it**: *S/N:*, *Serial No.*, *Matricola*, *P/N*, or a
-   GS1 barcode's *(21)*.
+- its **key**, and a **former key** it had before a rename, a merge or a migration;
+- a **label** of any kind: QR code, barcode, serial, inventory number, asset tag, an **alias** such as an old
+  Service Desk address (`…/ShowObject.jspa?id=…`), an old Insight object number;
+- the **serial**, **inventory** number and **MAC** written in its fields.
 
-A value held by two units opens neither: you choose the one in front of you.
+When nothing carries the value as written, ARGUS tries it again **without what a nameplate prints around
+it**: *S/N:*, *Serial No.*, *Matricola*, *Inv.*, *P/N*, or a GS1 barcode's *(21)*.
+
+- One record carries it: it opens, in its own workspace (the app moves there and says so).
+- A QR code carried by one record opens that record, even if another unit has the same value as a serial.
+- Several records carry it — a serial on two units, an old record and the one it was migrated to (one has
+  the key, the other has it as a former key or alias) — then none opens: you **choose** the one in front of
+  you, with each one's key, type, workspace and identifiers.
+
+The search boxes (on the web, *Browse & search* and the search at the top; on the phone, Home and Assets) find
+equipment by the same names: key, name, former key, alias, any label, serial and inventory number.
 
 ## Change many at once
 

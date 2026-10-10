@@ -46,6 +46,7 @@ part 'api/lookup_api.dart';
 part 'api/meta_api.dart';
 part 'api/notifications_api.dart';
 part 'api/schemas_api.dart';
+part 'api/search_api.dart';
 part 'api/uploads_api.dart';
 part 'api/workspaces_api.dart';
 

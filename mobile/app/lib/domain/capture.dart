@@ -3,6 +3,8 @@ library;
 
 import 'dart:typed_data';
 
+import 'models.dart' show inWorkspace;
+
 /// A photo taken or chosen on the device, before it is uploaded.
 class PickedPhoto {
   const PickedPhoto({required this.bytes, required this.name, required this.mimeType});
@@ -182,11 +184,14 @@ class NotificationItem {
   final String? workspaceName;
 
   /// Where tapping it leads.
-  String? get route => switch (subject) {
-        'document' => '/document/$subjectUid',
-        'asset' => '/asset/$subjectUid',
-        _ => issueUid != null ? '/ticket/$issueUid' : (subject == 'ticket' ? '/ticket/$subjectUid' : null),
-      };
+  String? get route {
+    final path = switch (subject) {
+      'document' => '/document/$subjectUid',
+      'asset' => '/asset/$subjectUid',
+      _ => issueUid != null ? '/ticket/$issueUid' : (subject == 'ticket' ? '/ticket/$subjectUid' : null),
+    };
+    return path == null ? null : inWorkspace(path, workspaceId);
+  }
 }
 
 /// What a person hears about in one workspace (subscriptions).

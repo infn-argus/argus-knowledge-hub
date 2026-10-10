@@ -6,6 +6,7 @@ import { BulkActionsBar } from "../../components/BulkActionsBar";
 import { useWorkspaceNames } from "../../api/useWorkspaceNames";
 import { ListDate, SortHeader, useSort } from "../../components/SortableTable";
 import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
+import { useShowKeys } from "../../api/displayPrefs";
 
 const AUTHORITY_STYLES: Record<string, string> = {
   ufficiale: "bg-indigo-100 text-indigo-700",
@@ -14,6 +15,7 @@ const AUTHORITY_STYLES: Record<string, string> = {
 };
 
 export function DocumentList() {
+  const showKeys = useShowKeys();
   const queryClient = useQueryClient();
   const workspaceId = useCurrentWorkspaceId();
   const workspaceName = useWorkspaceNames();
@@ -151,7 +153,7 @@ export function DocumentList() {
                     aria-label="Select all documents"
                   />
                 </th>
-                <SortHeader label="Code" column="code" sort={sort} onSort={sortBy} />
+                {showKeys && <SortHeader label="Code" column="code" sort={sort} onSort={sortBy} />}
                 <SortHeader label="Title" column="title" sort={sort} onSort={sortBy} />
                 <SortHeader label="Type" column="type" sort={sort} onSort={sortBy} />
                 <SortHeader label="Authority" column="authority" sort={sort} onSort={sortBy} />
@@ -175,11 +177,13 @@ export function DocumentList() {
                       aria-label={`Select ${d.title}`}
                     />
                   </td>
+                  {showKeys && (
                   <td className="px-4 py-2 font-mono text-xs text-slate-500">
-                    <Link to={`/documents/${d.uid}`} className="hover:underline">
-                      {d.code}
-                    </Link>
-                  </td>
+                      <Link to={`/documents/${d.uid}`} className="hover:underline">
+                        {d.code}
+                      </Link>
+                    </td>
+                  )}
                   <td className="px-4 py-2 font-medium text-slate-900">
                     <Link to={`/documents/${d.uid}`} className="hover:underline">
                       {d.title}

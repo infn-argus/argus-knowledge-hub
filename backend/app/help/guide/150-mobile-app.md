@@ -36,7 +36,7 @@ Six tabs along the bottom, each keeping its place while you use another:
 
 | Tab | What it is for |
 |---|---|
-| **Home** | search, **Scan label**, and the cockpit: open tickets and the counts that need attention, what is assigned to you, equipment with most open tickets, knowledge health, recent activity |
+| **Home** | search (and **Advanced search**, the icon in the search box), **Scan label**, and the cockpit: open tickets and the counts that need attention, **your tickets in every workspace**, equipment with most open tickets, knowledge health, recent activity |
 | **Tickets** | open, yours or all; search; sort by title, creation or change; narrow to a kind |
 | **Docs** | documents: search, sort, narrow to a type; which have nothing published yet |
 | **Assets** | the workspace's equipment, a page at a time: search by key or name, sort, narrow to a type and the types under it |
@@ -62,8 +62,10 @@ their type sits in the type tree (*Equipment › Vacuum › Ion Pump*).
   what to look up, or register the unit;
 - **Or type the label** when the label is damaged or there is no camera.
 
-ARGUS looks the value up among every kind of label, a QR code first (see *Equipment*, *Labels and QR codes*). Only an
-ARGUS link opens directly; another web address on a label is looked up as a label, never opened.
+ARGUS looks the value up as a key, a former key, an alias, a label of any kind, a serial or an inventory number, in
+every workspace you can open (see *Equipment*, *Labels and QR codes*). A record of another workspace opens there: the
+app moves to that workspace and says so. When several records carry the value, you choose. Only an ARGUS link opens
+directly; another web address on a label is looked up as a label, never opened.
 
 ## Register equipment
 
@@ -116,8 +118,10 @@ a photo of a page; **Tidy with AI** writes rough text up (see *Guided and AI-ass
   system allows on iOS, and shows each as a phone notification; tapping it opens what it is about. Turning it on asks
   the phone's permission; news from before is not shown again.
 
-The bell on **Home** lists your notifications. You are never told about what you did yourself, nor about what you may
-not read.
+The bell on **Home** lists your notifications from every workspace, each with the workspace it is from; tapping one
+opens it there. **Follow** (the bell icon on a piece of equipment's or a document's page) tells you of each change to
+it. While the app is open it checks every couple of minutes. You are never told about what you did yourself, nor
+about what you may not read. Until **Show news on this phone** is on, Home offers it.
 
 ## Working offline
 
@@ -129,7 +133,8 @@ not read.
   are sent in order when ARGUS is reachable again. A change is only a fact once ARGUS accepts it; the outbox says if
   one was refused, and why.
 
-**Settings** also has the theme (system, light, dark) and **Remove saved copies** (unsent changes are kept).
+**Settings** also has the theme (system, light, dark), **Show keys** (off: equipment and documents by name and title
+only) and **Remove saved copies** (unsent changes are kept).
 
 ## Signing out, and withdrawing a phone
 

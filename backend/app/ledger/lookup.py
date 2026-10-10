@@ -40,6 +40,8 @@ def parse(identifier: str) -> dict:
             return {"key": qs["selectedIssue"][0], "source": "jira-url"}
         if "objectId" in qs:
             return {"object_id": qs["objectId"][0], "source": "insight-url"}
+        if "id" in qs and url.path.endswith("ShowObject.jspa"):
+            return {"object_id": qs["id"][0], "source": "insight-url"}
         return {"key": url.path.rstrip("/").rsplit("/", 1)[-1], "source": "url"}
     return {"key": raw, "source": "key"}
 

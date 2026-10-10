@@ -10,8 +10,10 @@ import { BulkActionsBar } from "../../components/BulkActionsBar";
 import { OwnerBadge } from "../../components/OwnerBadge";
 import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
+import { useShowKeys } from "../../api/displayPrefs";
 
 export function AssetSearch() {
+  const showKeys = useShowKeys();
   const queryClient = useQueryClient();
   const [q, setQ] = useState("");
   const [schemaUid, setSchemaUid] = useState("");
@@ -55,11 +57,20 @@ export function AssetSearch() {
   const schema = objectSchemas.find((s) => s.uid === schemaUid);
   const attrDefs = effectiveAttributes(schema, schemas.data);
 
+  // Beyond the key and the name: labels (QR codes, barcodes, former keys, aliases), serial, inventory number.
+  const needleText = q.trim();
+  const byIdentifier = useQuery({
+    queryKey: ["asset-match", needleText],
+    queryFn: () => assetsApi.matching(needleText),
+    enabled: needleText.length >= 2,
+    staleTime: 30_000,
+  });
   const matched = useMemo(() => {
     if (!assets.data) return [];
     const needle = q.trim().toLowerCase();
     return assets.data.filter((a) => {
-      if (needle && !a.name.toLowerCase().includes(needle) && !a.key.toLowerCase().includes(needle)) {
+      if (needle && !a.name.toLowerCase().includes(needle) && !a.key.toLowerCase().includes(needle)
+          && !byIdentifier.data?.has(a.uid)) {
         return false;
       }
       if (familyUids && !familyUids.has(a.schema_uid)) return false;
@@ -72,7 +83,7 @@ export function AssetSearch() {
       }
       return true;
     });
-  }, [assets.data, q, familyUids, schema, filters, owner, currentWorkspaceId]);
+  }, [assets.data, q, familyUids, schema, filters, owner, currentWorkspaceId, byIdentifier.data]);
   const { sorted: results, sort, toggle: sortBy } = useSort(
     matched,
     {
@@ -123,7 +134,7 @@ export function AssetSearch() {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by name or key…"
+          placeholder="Search by name, key, label, serial or inventory number…"
           className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm"
         />
         <select
@@ -233,7 +244,7 @@ export function AssetSearch() {
                     />
                   </th>
                   <SortHeader label="Name" column="name" sort={sort} onSort={sortBy} />
-                  <SortHeader label="Key" column="key" sort={sort} onSort={sortBy} />
+                  {showKeys && <SortHeader label="Key" column="key" sort={sort} onSort={sortBy} />}
                   <SortHeader label="Type" column="type" sort={sort} onSort={sortBy} />
                   <SortHeader label="Created" column="created" sort={sort} onSort={sortBy} time />
                   <SortHeader label="Updated" column="updated" sort={sort} onSort={sortBy} time />
@@ -255,7 +266,7 @@ export function AssetSearch() {
                         {a.name}
                       </Link>
                     </td>
-                    <td className="px-4 py-2 text-slate-500">{a.key}</td>
+                    {showKeys && <td className="px-4 py-2 text-slate-500">{a.key}</td>}
                     <td className="px-4 py-2 text-slate-500">
                       {a.type}
                       <OwnerBadge workspaceId={a.workspace_id} />

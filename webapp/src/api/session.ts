@@ -168,3 +168,13 @@ export function clearSession(): void {
   localStorage.removeItem(PROFILES_KEY);
   localStorage.removeItem(ACTIVE_KEY);
 }
+
+
+/** Opens a page of another workspace: the profile moves there first (as the workspace switcher does). */
+export function openInWorkspace(workspaceId: string | null | undefined, path: string, current: string | null): boolean {
+  const profile = getActiveProfile();
+  if (!workspaceId || workspaceId === current || profile?.authType !== "oidc") return false;
+  updateProfile(profile.id, { activeWorkspaceId: workspaceId });
+  window.location.assign(path);
+  return true;
+}

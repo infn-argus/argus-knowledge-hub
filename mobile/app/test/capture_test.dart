@@ -136,7 +136,7 @@ void main() {
     expect(find.text('1'), findsOneWidget); // the badge
     await app.tap('home-inbox');
     await app.tap('notification-12');
-    expect(app.server.requests.any((r) => r.url.path == '/v1/notifications/12/read'), isTrue);
+    expect(app.server.requests.any((r) => r.url.path == '/v1/notifications/everywhere/12/read'), isTrue);
     expect(find.byKey(const Key('ticket-title')), findsOneWidget);
   });
 }

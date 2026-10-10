@@ -79,7 +79,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               hintText: 'Key, name, serial, ticket or document',
               border: const OutlineInputBorder(),
               suffixIcon: _query.text.isEmpty
-                  ? null
+                  ? IconButton(
+                      key: const Key('home-advanced-search'),
+                      tooltip: 'Advanced search (JQL)',
+                      icon: const Icon(Icons.manage_search),
+                      onPressed: () => context.push('/query'))
                   : IconButton(
                       icon: const Icon(Icons.clear),
                       onPressed: () {
@@ -168,16 +172,18 @@ class _Cockpit extends ConsumerWidget {
         ? const <CockpitItem>[]
         : [...c.reviewOverdue, ...c.awaitingReview.where((d) => !c.reviewOverdue.any((o) => o.uid == d.uid))];
     return RefreshIndicator(
-      onRefresh: () async => ref.invalidate(cockpitProvider),
+      onRefresh: () async {
+        ref.invalidate(cockpitProvider);
+        ref.invalidate(myWorkProvider);
+        ref.invalidate(notificationsProvider);
+      },
       child: ListView(key: const Key('home-cockpit'), padding: const EdgeInsets.only(bottom: 88), children: [
         if (r.isLoading && c == null) const LinearProgressIndicator(),
         if (c == null) const _Hint(),
+        const _PhoneNewsOffer(),
         if (c != null) ...[
           _Kpis(c),
-          if (c.mine.isNotEmpty) ...[
-            SectionHeader('Assigned to me', trailing: '${c.mine.length}'),
-            for (final t in c.mine) _CockpitTile(t),
-          ],
+          _MyWork(fallback: c.mine),
           if (c.openTickets != null) ...[
             const SectionHeader('Equipment needing attention'),
             if (c.hotspots.isEmpty) const _Empty('No equipment has open tickets.'),
@@ -315,7 +321,93 @@ class _Empty extends StatelessWidget {
       );
 }
 
-class _CockpitTile extends StatelessWidget {
+/// The person's open tickets in every workspace — assigned to them, reported by them, watched — whichever
+/// workspace the app is in; one from another workspace opens there. Until it loads (or offline), this
+/// workspace's own "assigned to me".
+class _MyWork extends ConsumerWidget {
+  const _MyWork({required this.fallback});
+
+  final List<CockpitItem> fallback;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final items = ref.watch(myWorkProvider).value ?? fallback;
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SectionHeader('Your tickets', trailing: '${items.length}'),
+      for (final t in items.take(12)) _CockpitTile(t),
+      if (items.length > 12)
+        ListTile(
+          dense: true,
+          title: Text('${items.length - 12} more in the Tickets tab of each workspace'),
+        ),
+    ]);
+  }
+}
+
+/// News on this phone is off until the person turns it on; until then the cockpit offers it, once.
+class _PhoneNewsOffer extends ConsumerStatefulWidget {
+  const _PhoneNewsOffer();
+
+  @override
+  ConsumerState<_PhoneNewsOffer> createState() => _PhoneNewsOfferState();
+}
+
+class _PhoneNewsOfferState extends ConsumerState<_PhoneNewsOffer> {
+  static const _dismissedKey = 'argus.notify.offer-dismissed';
+  bool _show = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _decide();
+  }
+
+  Future<void> _decide() async {
+    final notifier = ref.read(phoneNotifierProvider);
+    if (!notifier.supported || await notifier.enabled) return;
+    final dismissed = await ref.read(localStoreProvider).read(_dismissedKey);
+    if (mounted && dismissed != '1') setState(() => _show = true);
+  }
+
+  Future<void> _dismiss() async {
+    await ref.read(localStoreProvider).write(_dismissedKey, '1');
+    if (mounted) setState(() => _show = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_show) return const SizedBox.shrink();
+    return Card(
+      key: const Key('home-news-offer'),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Be told on this phone when a ticket is assigned to you, or something you follow changes — '
+              'also while the app is closed.'),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            TextButton(onPressed: _dismiss, child: const Text('Not now')),
+            FilledButton.tonal(
+              key: const Key('home-news-on'),
+              onPressed: () async {
+                final on = await ref.read(phoneNotifierProvider).enable(ref.read(configProvider));
+                if (on) await _dismiss();
+                if (!on && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Notifications are not allowed for ARGUS Field in the phone\'s settings.')));
+                }
+              },
+              child: const Text('Turn on'),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
+
+class _CockpitTile extends ConsumerWidget {
   const _CockpitTile(this.item, {this.warning, this.showWhen = false});
 
   final CockpitItem item;
@@ -323,7 +415,7 @@ class _CockpitTile extends StatelessWidget {
   final bool showWhen;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final icon = switch (item.kind) {
       RecordKind.ticket => Icons.confirmation_number_outlined,
@@ -337,8 +429,8 @@ class _CockpitTile extends StatelessWidget {
       title: Text(item.label, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text([
         ?warning,
-        if ((item.sub ?? '').isNotEmpty) item.sub!,
-      ].join(' · ')),
+        keyed(ref.watch(showKeysProvider), item.key, [item.sub]),
+      ].where((e) => e.isNotEmpty).join(' · ')),
       trailing: item.count != null
           ? Badge(label: Text('${item.count}'))
           : showWhen && item.at != null
@@ -437,10 +529,15 @@ class _Results extends ConsumerWidget {
     );
   }
 
-  Widget _hit(BuildContext context, LinkTarget t, IconData icon) => ListTile(
-        leading: Icon(icon),
-        title: Text(t.title ?? t.uid, maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: t.subtitle == null ? null : Text(t.subtitle!),
-        onTap: () => context.push(t.route),
+  Widget _hit(BuildContext context, LinkTarget t, IconData icon) => Consumer(
+        builder: (context, ref, _) {
+          final sub = keyed(ref.watch(showKeysProvider), t.key, [t.subtitle]);
+          return ListTile(
+            leading: Icon(icon),
+            title: Text(t.title ?? t.uid, maxLines: 2, overflow: TextOverflow.ellipsis),
+            subtitle: sub.isEmpty ? null : Text(sub),
+            onTap: () => context.push(t.route),
+          );
+        },
       );
 }

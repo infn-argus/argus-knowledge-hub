@@ -7,8 +7,10 @@ import { activeFilterCount, defaultFilterFor, FilterState, matchesFilters } from
 import { effectiveAttributes } from "../../lib/schemaAttributes";
 import { ListDate, SortHeader, useSort } from "../../components/SortableTable";
 import { SchemaTree } from "../../components/SchemaTree";
+import { useShowKeys } from "../../api/displayPrefs";
 
 export function DocumentSearch() {
+  const showKeys = useShowKeys();
   const [q, setQ] = useState("");
   const [schemaUid, setSchemaUid] = useState("");
   const [filters, setFilters] = useState<FilterState>({});
@@ -174,7 +176,7 @@ export function DocumentSearch() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <SortHeader label="Code" column="code" sort={sort} onSort={sortBy} />
+                  {showKeys && <SortHeader label="Code" column="code" sort={sort} onSort={sortBy} />}
                   <SortHeader label="Title" column="title" sort={sort} onSort={sortBy} />
                   <SortHeader label="Status" column="status" sort={sort} onSort={sortBy} />
                   <SortHeader label="Created" column="created" sort={sort} onSort={sortBy} time />
@@ -184,11 +186,13 @@ export function DocumentSearch() {
               <tbody className="divide-y divide-slate-100">
                 {results.map((d) => (
                   <tr key={d.uid} className="hover:bg-slate-50">
+                    {showKeys && (
                     <td className="px-4 py-2 font-mono text-xs text-slate-500">
-                      <Link to={`/documents/${d.uid}`} className="hover:underline">
-                        {d.code}
-                      </Link>
-                    </td>
+                        <Link to={`/documents/${d.uid}`} className="hover:underline">
+                          {d.code}
+                        </Link>
+                      </td>
+                    )}
                     <td className="px-4 py-2 font-medium text-slate-900">
                       <Link to={`/documents/${d.uid}`} className="hover:underline">
                         {d.title}

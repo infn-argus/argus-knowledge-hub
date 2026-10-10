@@ -5,9 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../widgets/common.dart';
 
-/// What happened to the person's tickets (flutter-app-design §11). Push is decision U21; until it is
-/// taken, the inbox is read when the app opens and when the person looks. A notification says
-/// only what the person may see.
+/// What happened to the person's tickets, and to the equipment and documents they follow, in every workspace
+/// they can open (flutter-app-design §11): a notification from another workspace opens its record there. A
+/// notification says only what the person may see.
 class InboxScreen extends ConsumerWidget {
   const InboxScreen({super.key});
 
@@ -15,7 +15,19 @@ class InboxScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final r = ref.watch(notificationsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Notifications')),
+      appBar: AppBar(title: const Text('Notifications'), actions: [
+        if ((r.value ?? const []).any((n) => !n.read))
+          TextButton(
+            key: const Key('inbox-read-all'),
+            onPressed: () async {
+              try {
+                await ref.read(notificationRepositoryProvider).markAllRead();
+              } catch (_) {}
+              ref.invalidate(notificationsProvider);
+            },
+            child: const Text('Mark all read'),
+          ),
+      ]),
       body: r.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => ProblemView(e, onRetry: () => ref.invalidate(notificationsProvider)),
@@ -31,7 +43,10 @@ class InboxScreen extends ConsumerWidget {
                           color: n.read ? null : Theme.of(context).colorScheme.primary),
                       title: Text(n.title,
                           style: n.read ? null : const TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text([n.kind, if (n.at != null) formatWhenDate(n.at)].whereType<String>().join(' · ')),
+                      subtitle: Text([
+                        n.workspaceName,
+                        if (n.at != null) formatWhenDate(n.at),
+                      ].whereType<String>().join(' · ')),
                       onTap: n.route == null
                           ? null
                           : () async {

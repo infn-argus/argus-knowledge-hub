@@ -93,7 +93,9 @@ def list_assets(
     response: Response,
     schema_uid: Optional[str] = None,
     include_subtypes: bool = Query(False, description="With schema_uid: also the records of every type below it."),
-    q: Optional[str] = Query(None, description="Only records whose key or name contains this, ignoring case."),
+    q: Optional[str] = Query(None, description="Only records whose key, name, a label (a QR code, a barcode, a "
+                                               "former key, an alias), serial, inventory number or MAC contains "
+                                               "this, ignoring case."),
     sort: Optional[str] = Query(None, pattern="^(name|key|created|updated)$"),
     order: str = Query("asc", pattern="^(asc|desc)$"),
     limit: Optional[int] = Query(None, ge=1, le=500,
@@ -112,8 +114,8 @@ def list_assets(
         stmt = stmt.where(Asset.schema_uid.in_(_with_subtypes(db, schema_uid)) if include_subtypes
                           else Asset.schema_uid == schema_uid)
     if q and q.strip():
-        like = f"%{q.strip()}%"
-        stmt = stmt.where(or_(Asset.key.ilike(like), Asset.name.ilike(like)))
+        from app.services.identifiers import text_clause
+        stmt = stmt.where(text_clause(db, grants, q))
     if limit is None and not sort:
         return [asset_out(db, a) for a in db.scalars(stmt).all()]
     if limit is not None:
@@ -170,6 +172,8 @@ def _record_edit(db: Session, asset: Asset, changes: dict, before: dict, actor: 
     db.add(AssetHistory(uid=str(uuid.uuid4()), asset_uid=asset.uid, type="edit", author=actor,
                         details=details if len(details) <= 2000 else details[:1999] + "…",
                         timestamp=datetime.now(timezone.utc)))
+    from app.services import notify
+    notify.asset_changed(db, asset.uid, details, actor)
 
 
 def asset_out(db: Session, asset: Asset) -> AssetOut:

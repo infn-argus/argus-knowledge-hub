@@ -23,6 +23,8 @@ import { TransferItemAction } from "../../components/TransferItemAction";
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
 import { AssetContextPanel } from "../../components/hub/ContextPanels";
 import { SemanticRelated } from "../../components/SemanticRelated";
+import { FollowButton } from "../../components/FollowButton";
+import { useShowKeys } from "../../api/displayPrefs";
 
 function SectionCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
@@ -48,6 +50,7 @@ async function downloadAttachment(uid: string, filename: string) {
 }
 
 export function AssetDetail() {
+  const showKeys = useShowKeys();
   const { uid } = useParams<{ uid: string }>();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -221,7 +224,7 @@ export function AssetDetail() {
               <OwnerBadge workspaceId={a.workspace_id} />
             </h1>
             <p className="text-sm text-slate-500">
-              {a.key} · {a.type} · schema:{" "}
+              {showKeys && <>{a.key} · </>}{a.type} · schema:{" "}
               <Link to={`/schemas/${a.schema_uid}`} className="hover:underline">
                 {schema.data?.name ?? a.schema_uid}
               </Link>
@@ -229,6 +232,7 @@ export function AssetDetail() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <FollowButton subject="asset" uid={a.uid} />
           <Link
             to={`/assets/${a.uid}/edit`}
             className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"

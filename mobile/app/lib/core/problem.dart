@@ -22,7 +22,7 @@ enum ProblemCode {
 
 class Problem implements Exception {
   Problem(this.code, this.message,
-      {this.status, this.minimum, this.candidates = const [], this.field, this.current, this.reviewItem});
+      {this.status, this.minimum, this.candidates = const [], this.field, this.current, this.reviewItem, this.position});
 
   final ProblemCode code;
   final String message;
@@ -40,6 +40,9 @@ class Problem implements Exception {
 
   /// When the server turned the command into a review item instead of applying it.
   final String? reviewItem;
+
+  /// For a query that cannot be read: where in it (0-based).
+  final int? position;
 
   static const _codes = {
     'stale': ProblemCode.stale,
@@ -75,6 +78,7 @@ class Problem implements Exception {
     String? field;
     Map<String, Object?>? current;
     String? reviewItem;
+    int? position;
     if (detail is String) {
       message = detail;
     } else if (detail is Map) {
@@ -83,6 +87,8 @@ class Problem implements Exception {
       minimum = detail['minimum']?.toString();
       field = detail['field']?.toString();
       reviewItem = detail['review_item']?.toString();
+      final pos = detail['position'];
+      if (pos is num) position = pos.toInt();
       final cur = detail['current'];
       if (cur is Map) current = cur.map((k, v) => MapEntry(k.toString(), v));
       final c = detail['candidates'];
@@ -101,7 +107,13 @@ class Problem implements Exception {
       _ => ProblemCode.unknown,
     };
     return Problem(_codes[code] ?? byStatus, message,
-        status: status, minimum: minimum, candidates: candidates, field: field, current: current, reviewItem: reviewItem);
+        status: status,
+        minimum: minimum,
+        candidates: candidates,
+        field: field,
+        current: current,
+        reviewItem: reviewItem,
+        position: position);
   }
 
   @override

@@ -8,6 +8,7 @@ import { CommandPalette, useCommandPaletteShortcut } from "../components/hub/Com
 import { SchemaTree } from "../components/SchemaTree";
 import { WorkspaceSwitcher } from "../components/WorkspaceSwitcher";
 import { NotificationBell } from "../components/hub/WorkflowPanels";
+import { setShowKeys, useShowKeys } from "../api/displayPrefs";
 
 /**
  * One application, three kinds of record. Assets, the service desk and the
@@ -39,6 +40,7 @@ const SECTIONS: Record<SectionKey, SectionConfig> = {
     landing: "/assets/search",
     links: [
       { to: "/assets/search", label: "Browse & search" },
+      { to: "/search/advanced?entity=assets", label: "Advanced search (JQL)" },
       { to: "/catalogue/types", label: "Type catalogue" },
       { to: "/labels", label: "Labels & QR codes" },
       { to: "/global-values", label: "Global values" },
@@ -62,6 +64,7 @@ const SECTIONS: Record<SectionKey, SectionConfig> = {
       { to: "/tickets", label: "All tickets", end: true },
       { to: "/tickets/board", label: "Board" },
       { to: "/tickets/search", label: "Search" },
+      { to: "/search/advanced?entity=tickets", label: "Advanced search (JQL)" },
       { to: "/tickets/workflows", label: "Workflows" },
     ],
     treeLabel: "Ticket types",
@@ -77,6 +80,7 @@ const SECTIONS: Record<SectionKey, SectionConfig> = {
     landing: "/documents",
     links: [
       { to: "/documents", label: "All documents", end: true },
+      { to: "/search/advanced?entity=documents", label: "Advanced search (JQL)" },
       { to: "/documents/search", label: "Search" },
       { to: "/documents/suggestions", label: "Type suggestions" },
     ],
@@ -392,6 +396,7 @@ export function AppShell() {
             </kbd>
           </button>
           <div className="ml-auto flex items-center gap-3">
+            <ShowKeysToggle />
             <NotificationBell />
             <NewMenu />
             {me.data && (
@@ -408,5 +413,18 @@ export function AppShell() {
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
+  );
+}
+
+
+/** Show records with their key (SPARC-IP-01 · Ion pump) or by name and title only; kept in this browser. */
+function ShowKeysToggle() {
+  const show = useShowKeys();
+  return (
+    <label className="hidden cursor-pointer items-center gap-1 text-xs text-slate-500 md:flex"
+           title="Show keys and codes beside names and titles, in lists and on record pages">
+      <input type="checkbox" checked={show} onChange={(e) => setShowKeys(e.target.checked)} />
+      Show keys
+    </label>
   );
 }

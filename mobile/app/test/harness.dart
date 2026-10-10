@@ -163,4 +163,12 @@ class FakePhoneNotifier implements PhoneNotifier {
 
   @override
   Future<void> disable() async => on = false;
+
+  int checks = 0;
+
+  @override
+  Future<void> checkNow(AppConfig config) async => checks++;
+
+  @override
+  Duration? get whileOpenEvery => null;
 }

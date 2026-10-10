@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../widgets/follow_button.dart';
 import '../../app/providers.dart';
 import '../../core/problem.dart';
 import '../../app/queue.dart';
@@ -27,7 +28,10 @@ class DocumentScreen extends ConsumerWidget {
     final r = ref.watch(documentDetailProvider(uid));
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(r.value?.code ?? 'Document')),
+      appBar: AppBar(
+          title: Text((ref.watch(showKeysProvider) ? r.value?.code : r.value?.title) ?? r.value?.code ?? 'Document',
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          actions: [if (r.value != null) FollowButton(subject: 'document', uid: uid)]),
       body: r.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => ProblemView(e, onRetry: () => ref.invalidate(documentDetailProvider(uid))),

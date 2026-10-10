@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -28,7 +30,7 @@ class AppShell extends ConsumerWidget {
     return Scaffold(
       key: shellScaffoldKey,
       drawer: const AppDrawer(),
-      body: shell,
+      body: _NewsWhileOpen(child: shell),
       bottomNavigationBar: NavigationBar(
         key: const Key('nav-bar'),
         selectedIndex: shell.currentIndex,
@@ -104,6 +106,7 @@ class AppDrawer extends ConsumerWidget {
         }),
         const Divider(indent: 28, endIndent: 28),
         const _Section('App'),
+        _Item('drawer-query', Icons.manage_search, 'Advanced search (JQL)', () => open('/query')),
         _Item('drawer-settings', Icons.settings_outlined, 'Settings', () => open('/settings')),
         _Item('drawer-help', Icons.help_outline, 'Help', () {
           Navigator.pop(context);
@@ -153,4 +156,52 @@ class _Item extends StatelessWidget {
           onTap: onTap,
         ),
       );
+}
+
+
+/// While the app is open — when it comes back to the front, and every couple of minutes — it asks for news:
+/// the bell, "Your tickets" and, when the person turned it on, a phone notification for what is new. The
+/// background check (phone_notifications.dart) covers the app closed.
+class _NewsWhileOpen extends ConsumerStatefulWidget {
+  const _NewsWhileOpen({required this.child});
+
+  final Widget child;
+
+  @override
+  ConsumerState<_NewsWhileOpen> createState() => _NewsWhileOpenState();
+}
+
+class _NewsWhileOpenState extends ConsumerState<_NewsWhileOpen> with WidgetsBindingObserver {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    final every = ref.read(phoneNotifierProvider).whileOpenEvery;
+    if (every != null) _timer = Timer.periodic(every, (_) => _check());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _check();
+  }
+
+  Future<void> _check() async {
+    if (!mounted) return;
+    await ref.read(phoneNotifierProvider).checkNow(ref.read(configProvider));
+    if (!mounted) return;
+    ref.invalidate(notificationsProvider);
+    ref.invalidate(myWorkProvider);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

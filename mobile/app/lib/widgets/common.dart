@@ -113,3 +113,10 @@ class StatusChip extends StatelessWidget {
 
 String formatWhenDate(DateTime? d) =>
     d == null ? '' : '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+
+/// A line naming a record: its key first when keys are shown (Settings → Show keys), then the rest.
+String keyed(bool showKeys, String? key, Iterable<Object?> rest) => [
+      if (showKeys && key != null && key.isNotEmpty) key,
+      ...rest.whereType<Object>().map((e) => e.toString()).where((e) => e.isNotEmpty),
+    ].join(' · ');

@@ -208,16 +208,21 @@ def set_subscription(workspace_id: str, body: SubscriptionIn, identity=Depends(g
 
 
 @notifications_router.get("/everywhere")
-def my_notifications_everywhere(after: int = 0, identity=Depends(get_identity), db: Session = Depends(get_db)):
-    """This person's unread notifications in every workspace they can still open, newer than `after` (the
-    last id the phone has shown): what a background check turns into phone notifications."""
+def my_notifications_everywhere(after: int = 0, include_read: bool = Query(False), identity=Depends(get_identity),
+                                db: Session = Depends(get_db)):
+    """This person's notifications in every workspace they can still open. Unread and newer than `after` (the
+    last id the phone has shown): what a background check turns into phone notifications. With
+    `include_read`: the latest hundred, read or not, newest first — the inbox."""
     from app.models.workspace import Workspace
     from app.services.permissions import resolve_permission
     if not isinstance(identity, OidcIdentity):
         return []
-    rows = list(db.scalars(select(Notification).where(
-        Notification.recipient.in_(_me(db, identity, None)), Notification.read_at.is_(None), Notification.id > after)
-        .order_by(Notification.id).limit(50)))
+    q = select(Notification).where(Notification.recipient.in_(_me(db, identity, None)), Notification.id > after)
+    if include_read:
+        q = q.order_by(Notification.id.desc()).limit(100)
+    else:
+        q = q.where(Notification.read_at.is_(None)).order_by(Notification.id).limit(50)
+    rows = list(db.scalars(q))
     out, names, allowed = [], {}, {}
     for n in rows:
         if n.workspace_id not in allowed:
@@ -225,8 +230,108 @@ def my_notifications_everywhere(after: int = 0, identity=Depends(get_identity), 
                 resolve_permission(db, identity.user, n.workspace_id, "read", "objects")
             ws = db.get(Workspace, n.workspace_id)
             names[n.workspace_id] = ws.name if ws else n.workspace_id
-        if allowed[n.workspace_id]:
+        if allowed[n.workspace_id] or _shared_subject(db, identity, n):
             out.append({"id": n.id, "workspace_id": n.workspace_id, "workspace_name": names[n.workspace_id],
                         "kind": n.kind, "title": n.title, "issue_uid": n.issue_uid, "detail": n.detail,
-                        "created_at": n.created_at})
+                        "actor": n.actor, "created_at": n.created_at, "read": n.read_at is not None})
+    return out
+
+
+def _shared_subject(db: Session, identity, n) -> bool:
+    """A notification about shared equipment or a shared document this person may read, from a workspace they
+    have no role in."""
+    from app.models.asset import Asset
+    from app.models.document import Document
+    subject, uid = (n.detail or {}).get("subject"), (n.detail or {}).get("uid")
+    if subject not in ("asset", "document") or not uid:
+        return False
+    record = db.get(Asset if subject == "asset" else Document, uid)
+    return record is not None and notify.may_read_record(db, identity.user, subject, record)
+
+
+@notifications_router.post("/everywhere/{nid}/read")
+def mark_read_everywhere(nid: int, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """One of this person's notifications read, whichever workspace it is from."""
+    n = db.get(Notification, nid)
+    if n is None or not isinstance(identity, OidcIdentity) or n.recipient not in _me(db, identity, None):
+        raise HTTPException(status_code=404, detail="Notification not found")
+    n.read_at = n.read_at or notify.now()
+    db.commit()
+    return {"ok": True}
+
+
+@notifications_router.post("/everywhere/read-all")
+def mark_all_read_everywhere(identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Every one of this person's notifications read, in every workspace."""
+    if not isinstance(identity, OidcIdentity):
+        raise HTTPException(status_code=422, detail="Notifications belong to a person, not an API token.")
+    for n in db.scalars(select(Notification).where(Notification.recipient.in_(_me(db, identity, None)),
+                                                   Notification.read_at.is_(None))):
+        n.read_at = notify.now()
+    db.commit()
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- following equipment and documents
+
+_FOLLOWABLE = {"asset", "document"}
+
+
+def _followable(db: Session, identity, subject: str, uid: str):
+    from app.models.asset import Asset
+    from app.models.document import Document
+    if subject not in _FOLLOWABLE:
+        raise HTTPException(status_code=404, detail="Only equipment and documents are followed here; a ticket has watchers.")
+    if not isinstance(identity, OidcIdentity):
+        raise HTTPException(status_code=422, detail="Following belongs to a person, not an API token.")
+    record = db.get(Asset if subject == "asset" else Document, uid)
+    if record is None or getattr(record, "deleted_at", None) is not None or \
+            not notify.may_read_record(db, identity.user, subject, record):
+        raise HTTPException(status_code=404, detail="Not found")
+    return record
+
+
+@notifications_router.get("/following/{subject}/{uid}")
+def following_state(subject: str, uid: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Whether this person follows this piece of equipment or document, and how many do."""
+    _followable(db, identity, subject, uid)
+    people = notify.followers(db, subject, uid)
+    return {"subject": subject, "uid": uid, "following": identity.user.id in people, "followers": len(people)}
+
+
+@notifications_router.put("/following/{subject}/{uid}")
+def follow_record(subject: str, uid: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Follow a piece of equipment or a document: each change to it becomes a notification, in whichever
+    workspace it is."""
+    _followable(db, identity, subject, uid)
+    notify.follow(db, subject, uid, identity.user.id)
+    db.commit()
+    return following_state(subject, uid, identity, db)
+
+
+@notifications_router.delete("/following/{subject}/{uid}")
+def unfollow_record(subject: str, uid: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    _followable(db, identity, subject, uid)
+    notify.unfollow(db, subject, uid, identity.user.id)
+    db.commit()
+    return following_state(subject, uid, identity, db)
+
+
+@notifications_router.get("/following")
+def my_following(identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """What this person follows: equipment and documents, in every workspace."""
+    from app.models.asset import Asset
+    from app.models.document import Document
+    from app.models.workflow import RecordWatcher
+    if not isinstance(identity, OidcIdentity):
+        return []
+    out = []
+    for w in db.scalars(select(RecordWatcher).where(RecordWatcher.user_id == identity.user.id)
+                        .order_by(RecordWatcher.id.desc())):
+        record = db.get(Asset if w.subject == "asset" else Document, w.subject_uid)
+        if record is None or not notify.may_read_record(db, identity.user, w.subject, record):
+            continue
+        out.append({"subject": w.subject, "uid": record.uid, "workspace_id": record.workspace_id,
+                    "key": record.key if w.subject == "asset" else record.code,
+                    "name": record.name if w.subject == "asset" else record.title})
     return out

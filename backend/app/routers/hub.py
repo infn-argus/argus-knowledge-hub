@@ -98,3 +98,40 @@ def document_context(uid: str, s: _Scope = Depends(scope), db: Session = Depends
     if not readable:
         raise HTTPException(status_code=404, detail="Document not found")
     return hub.document_context(db, s.workspace_id, doc, s.access)
+
+
+@router.get("/my-work")
+def my_work(identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """This person's open tickets in every workspace they can open — assigned to them, reported by them or
+    watched — whichever workspace the app is in: what the phone's home shows under "Your tickets"."""
+    from sqlalchemy import or_, select
+    from app.models.workflow import TicketWatcher
+    from app.models.workspace import Workspace
+    from app.services.notify import may_see
+    if not isinstance(identity, OidcIdentity):
+        raise HTTPException(status_code=422, detail="Your work belongs to a person, not an API token.")
+    me = [x for x in (identity.user.id, identity.user.email) if x]
+    watched = select(TicketWatcher.issue_uid).where(TicketWatcher.user.in_(me))
+    rows = db.scalars(select(Issue).where(
+        Issue.deleted_at.is_(None), Issue.closed_at.is_(None),
+        or_(Issue.assignee.in_(me), Issue.created_by.in_(me), Issue.uid.in_(watched)))
+        .order_by(Issue.updated_at.desc().nulls_last()).limit(300))
+    allowed: dict[str, bool] = {}
+    names: dict[str, str] = {}
+    out = []
+    for i in rows:
+        if not hub.is_open(i):
+            continue
+        if i.workspace_id not in allowed:
+            allowed[i.workspace_id] = resolve_permission(db, identity.user, i.workspace_id, "read", "tickets")
+            ws = db.get(Workspace, i.workspace_id)
+            names[i.workspace_id] = ws.name if ws else i.workspace_id
+        if not allowed[i.workspace_id] or not may_see(db, i, identity.user.id):
+            continue
+        why = "assigned" if i.assignee in me else ("reported" if i.created_by in me else "watching")
+        out.append({**hub.ticket_summary(i), "workspace_id": i.workspace_id,
+                    "workspace_name": names[i.workspace_id], "why": why})
+        if len(out) >= 100:
+            break
+    order = {"assigned": 0, "reported": 1, "watching": 2}
+    return sorted(out, key=lambda t: order[t["why"]])

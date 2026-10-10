@@ -146,7 +146,8 @@ def resolve_link(path: str = Query(..., description="e.g. /asset/<uid> or https:
     """The record a universal link opens, if the caller may read it."""
     from urllib.parse import unquote, urlparse
     from app.routers.ledger import _readable_workspaces, _resolve_one
-    raw = urlparse(path).path if "://" in path else path
+    # A label sent unencoded after /lookup/ (a web address with its ?id=…) is kept whole, not parsed as a URL.
+    raw = path if path.lstrip("/").startswith("lookup/") else (urlparse(path).path if "://" in path else path)
     head, _, rest = raw.lstrip("/").partition("/")
     if head == "lookup" and rest:
         # A label value (a key, a web address on a printed code) is taken exactly as it was sent: splitting it
@@ -207,81 +208,96 @@ def resolve_link(path: str = Query(..., description="e.g. /asset/<uid> or https:
             _not_found()
         return {"kind": "review", "uid": ident, "record_uid": a.uid, "workspace_id": a.workspace_id,
                 "web_path": "/review"}
-    # lookup: an external key (Jira, Insight, a former key), else a label value
+    # lookup: every record the value names — as a QR code, a key in any case, a former key, an alias (an old
+    # Service Desk address), a label of any kind, a serial, an inventory number or an old Insight
+    # identifier. A QR code is what a scan means, unless another record names the value as its former key
+    # or alias (the record an old one was migrated to): then, as whenever several records carry the value,
+    # they are offered to choose from. A Jira key opens the ticket it became.
+    qr = _qr_holders(db, ident, readable, grants)
+    successors = _alias_holders(db, ident, readable, grants)
+    if len(qr) == 1 and all(a.uid == qr[0].uid for a in successors):
+        a = qr[0]
+        return _asset_link(db, a.uid, a.workspace_id if a.workspace_id in readable else (ws or ""), grants, "asset")
     hit = _resolve_one(db, ident, readable)
-    if hit.get("status") == "migrated":
-        target = "ticket" if hit.get("kind") == "ticket" else "asset"
-        return resolve_link(f"/{target}/{hit['uid']}", identity, grants, db, workspace_id)
-    holders = _label_holders(db, ident, readable, grants)
+    if hit.get("status") == "migrated" and hit.get("kind") == "ticket":
+        return resolve_link(f"/ticket/{hit['uid']}", identity, grants, db, workspace_id)
+    holders = _merge(qr, successors, _label_holders(db, ident, readable, grants))
+    if hit.get("status") == "migrated" and hit.get("kind") == "asset":
+        found = db.get(Asset, hit["uid"])
+        holders = _merge([found] if found is not None else [], holders)
     if len(holders) == 1:
         a = holders[0]
         return _asset_link(db, a.uid, a.workspace_id if a.workspace_id in readable else (ws or ""), grants, "asset")
     if len(holders) > 1:
-        # A serial held by two units opens neither: the person chooses (A67).
+        # A value held by two units (a serial, a key one has and the other had) opens neither: the person
+        # chooses (A67).
         raise HTTPException(status_code=409, detail={
             "error": "This label matches more than one record. Choose the one in front of you.",
             "code": "ambiguous",
             "candidates": [{"uid": a.uid, "key": a.key, "name": a.name, "type": a.type,
+                            "workspace_id": a.workspace_id,
                             "attributes": {k: (a.attributes or {}).get(k) for k in LABEL_FIELDS
                                            if (a.attributes or {}).get(k)}} for a in holders[:20]]})
     raise HTTPException(status_code=404, detail={"error": "Not found, or not visible to you.", "code": "not_found",
                                                  "archive": hit.get("archive")})
 
 
-LABEL_FIELDS = ("serial", "inventory_number", "mac", "manufacturer")
+LABEL_FIELDS = ("serial", "inventory_number", "inventory", "mac", "manufacturer")
 
 
-def _label_holders(db: Session, value: str, readable: list[str], grants) -> list[Asset]:
-    """Active records this person may see that carry the value: as a label of any type — a QR code first,
-    then every other kind a record is labelled with (a serial, a barcode, an inventory or asset tag, an
-    alias) — or as their serial, inventory number or MAC. Exactly as scanned, then ignoring case, which is
-    how a serial read by a camera or typed by hand usually differs."""
-    from sqlalchemy import func, or_
+def _visible_holders(db: Session, stmt, readable: list[str], grants) -> list[Asset]:
+    """Active records this person may see among those `stmt` selects; a merged record stands for its survivor."""
+    from sqlalchemy import or_
     from app.ledger.identity import INACTIVE
-    from app.models.asset_subresources import AssetLabel
+    from app.ledger.lookup import _survivor
     from app.services.visibility import can_see
+    seen, out = set(), []
+    for a in db.scalars(stmt.order_by(Asset.key).limit(50)):
+        a = _survivor(db, a) if a.merged_into_uid else a
+        if a is None or a.uid in seen or a.deleted_at is not None or a.record_status in INACTIVE:
+            continue
+        if (a.workspace_id in readable or a.is_global) and can_see(a, grants):
+            seen.add(a.uid)
+            out.append(a)
+    return out
+
+
+def _qr_holders(db: Session, value: str, readable: list[str], grants) -> list[Asset]:
+    """What carries this exact QR code."""
+    from app.models.asset_subresources import AssetLabel
     v = value.strip()
     if not v:
         return []
-    col = Asset.attributes
-    visible = (or_(Asset.workspace_id.in_(readable), Asset.is_global.is_(True)), Asset.record_status.notin_(INACTIVE))
+    return _visible_holders(db, select(Asset).join(AssetLabel, AssetLabel.asset_uid == Asset.uid)
+                            .where(AssetLabel.type == "qrcode", AssetLabel.value == v), readable, grants)
 
-    def holders(stmt) -> list[Asset]:
-        seen, out = set(), []
-        for a in db.scalars(stmt.where(*visible).order_by(Asset.key).limit(50)):
-            if a.uid not in seen and can_see(a, grants):
-                seen.add(a.uid)
-                out.append(a)
-        return out
 
-    def labelled(match, types=None, exclude=None):
-        q = select(Asset).join(AssetLabel, AssetLabel.asset_uid == Asset.uid).where(match)
-        if types is not None:
-            q = q.where(AssetLabel.type.in_(types))
-        if exclude is not None:
-            q = q.where(AssetLabel.type.notin_(exclude))
-        return holders(q)
+def _alias_holders(db: Session, value: str, readable: list[str], grants) -> list[Asset]:
+    """What names this value as its former key, former uid or alias, ignoring case."""
+    from sqlalchemy import func
+    from app.ledger.lookup import ALIAS_LABELS
+    from app.models.asset_subresources import AssetLabel
+    v = value.strip().lower()
+    if not v:
+        return []
+    return _visible_holders(db, select(Asset).join(AssetLabel, AssetLabel.asset_uid == Asset.uid)
+                            .where(AssetLabel.type.in_(ALIAS_LABELS), func.lower(AssetLabel.value) == v),
+                            readable, grants)
 
-    def by_attribute(match_text):
-        return holders(select(Asset).where(or_(match_text(col["serial"].astext), match_text(col["inventory_number"].astext),
-                                               match_text(col["mac"].astext))))
 
-    mac = v.lower().replace("-", ":")
+def _label_holders(db: Session, value: str, readable: list[str], grants) -> list[Asset]:
+    """Records this person may see that carry the value, whole and ignoring case: as their key, as a label of
+    any type (a QR code, a barcode, a former key, an alias, an inventory tag) or as their serial, inventory
+    number or MAC. When nothing does, the value without what a nameplate prints around it ("S/N: 4711")."""
+    from app.services.identifiers import exact_clause
+    v = value.strip()
+    if not v:
+        return []
+    found = _visible_holders(db, select(Asset).where(exact_clause(db, grants, v)), readable, grants)
     bare = _bare_label(v)
-    for found in (
-        lambda: labelled(AssetLabel.value == v, types=("qrcode",)),
-        lambda: _merge(labelled(AssetLabel.value == v, exclude=("qrcode",)),
-                       by_attribute(lambda c: or_(c == v, c == mac))),
-        lambda: _merge(labelled(func.lower(AssetLabel.value) == v.lower()),
-                       by_attribute(lambda c: func.lower(c) == v.lower())),
-        # What a nameplate prints around the value ("S/N: 4711", a GS1 barcode's "(21)4711"), left out.
-        lambda: [] if bare == v else _merge(labelled(func.lower(AssetLabel.value) == bare.lower()),
-                                            by_attribute(lambda c: func.lower(c) == bare.lower())),
-    ):
-        hit = found()
-        if hit:
-            return hit
-    return []
+    if not found and bare != v:
+        found = _visible_holders(db, select(Asset).where(exact_clause(db, grants, bare)), readable, grants)
+    return found
 
 
 _LABEL_PREFIX = re.compile(

@@ -108,7 +108,7 @@ class _AssetListScreenState extends ConsumerState<AssetListScreen> {
             key: const Key('assets-search'),
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search),
-              hintText: 'Key or name',
+              hintText: 'Key, name, label, serial or inventory',
               border: OutlineInputBorder(),
               isDense: true,
             ),
@@ -171,21 +171,21 @@ class _AssetListScreenState extends ConsumerState<AssetListScreen> {
   }
 }
 
-class _AssetTile extends StatelessWidget {
+class _AssetTile extends ConsumerWidget {
   const _AssetTile(this.a, {required this.order});
 
   final AssetRow a;
   final ListOrder order;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final when = order.by == SortBy.created ? a.createdAt : a.updatedAt;
     final retired = a.status == 'Retired';
     return ListTile(
       key: Key('asset-${a.uid}'),
       leading: Icon(Icons.memory, color: retired ? Theme.of(context).colorScheme.outline : null),
       title: Text(a.name.isEmpty ? a.key : a.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text([a.key, a.type, if (a.shared) 'shared', if (retired) 'retired'].join(' · '),
+      subtitle: Text(keyed(ref.watch(showKeysProvider), a.key, [a.type, if (a.shared) 'shared', if (retired) 'retired']),
           maxLines: 1, overflow: TextOverflow.ellipsis),
       trailing: when == null || order.by == SortBy.name
           ? null

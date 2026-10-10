@@ -159,6 +159,7 @@ import type {
   SegmentPort,
   TemporalValue,
   TicketLinkView,
+  FollowState,
 } from "./ledgerTypes";
 
 export class ApiError extends Error {
@@ -258,6 +259,12 @@ export const schemasApi = {
 export const assetsApi = {
   list: (schemaUid?: string) =>
     request<Asset[]>(`/v1/assets${schemaUid ? `?schema_uid=${schemaUid}` : ""}`),
+  /** The uids of the records whose key, name, a label (QR code, barcode, former key, alias), serial,
+   *  inventory number or MAC contains this. */
+  matching: (q: string) =>
+    request<{ uid: string }[]>(`/v1/assets?q=${encodeURIComponent(q)}&sort=key&limit=500`).then(
+      (rows) => new Set(rows.map((r) => r.uid)),
+    ),
   get: (uid: string) => request<Asset>(`/v1/assets/${uid}`),
   create: (input: AssetInput) =>
     request<Asset>("/v1/assets", { method: "POST", body: json(input) }),
@@ -1264,10 +1271,17 @@ export const workflowApi = {
     request<{ ok: boolean }>(`/v1/workflows/${uid}/bind`, { method: "POST", body: json({ schema_uid }) }),
   rehearsal: (uid: string) => request<Rehearsal>(`/v1/workflows/${uid}/rehearsal`),
   escalate: () => request<{ escalated: number }>("/v1/workflows/escalate", { method: "POST" }),
-  notifications: (unread = false) =>
-    request<NotificationView[]>(`/v1/notifications${unread ? "?unread=true" : ""}`),
-  readNotification: (id: number) => request<{ ok: boolean }>(`/v1/notifications/${id}/read`, { method: "POST" }),
-  readAll: () => request<{ ok: boolean }>("/v1/notifications/read-all", { method: "POST" }),
+  /** The latest hundred, read or not, from every workspace the person can open. */
+  notifications: () => request<NotificationView[]>("/v1/notifications/everywhere?include_read=true"),
+  readNotification: (id: number) =>
+    request<{ ok: boolean }>(`/v1/notifications/everywhere/${id}/read`, { method: "POST" }),
+  readAll: () => request<{ ok: boolean }>("/v1/notifications/everywhere/read-all", { method: "POST" }),
+  /** Following a piece of equipment ("asset") or a document: each change to it becomes a notification. */
+  following: (subject: "asset" | "document", uid: string) =>
+    request<FollowState>(`/v1/notifications/following/${subject}/${encodeURIComponent(uid)}`),
+  follow: (subject: "asset" | "document", uid: string, on: boolean) =>
+    request<FollowState>(`/v1/notifications/following/${subject}/${encodeURIComponent(uid)}`,
+                         { method: on ? "PUT" : "DELETE" }),
 };
 
 export const accessReviewsApi = {
@@ -1724,4 +1738,61 @@ export const metaApi = {
   version: () =>
     request<{ version: string; commit: string | null; built_at: string | null; api_version: string }>(
       "/v1/meta/version"),
+};
+
+/** Advanced search in the Jira Query Language (backend services/jql.py). */
+export type JqlEntity = "tickets" | "assets" | "documents";
+
+export interface JqlItem {
+  uid: string;
+  key?: string;
+  code?: string;
+  name?: string;
+  title?: string;
+  type?: string;
+  state?: string | null;
+  priority?: string | null;
+  source_key?: string | null;
+  workspace_id?: string;
+  workspace_name?: string;
+  updated_at?: string | null;
+}
+
+export interface JqlResult {
+  entity: JqlEntity;
+  jql: string;
+  total: number;
+  capped: boolean;
+  offset: number;
+  items: JqlItem[];
+}
+
+export interface JqlField {
+  field: string;
+  kind: string;
+  help: string;
+  orderable: boolean;
+}
+
+/** A query that cannot be read: what went wrong, and where in it (0-based). */
+export class JqlError extends Error {
+  detail: { error?: string; position?: number | null };
+  constructor(detail: { error?: string; position?: number | null }) {
+    super(detail.error ?? "The query cannot be read");
+    this.detail = detail;
+  }
+}
+
+export const jqlApi = {
+  search: async (entity: JqlEntity, jql: string, limit = 50, offset = 0): Promise<JqlResult> => {
+    const qs = new URLSearchParams({ entity, jql, limit: String(limit), offset: String(offset) });
+    try {
+      return await request<JqlResult>(`/v1/search/jql?${qs}`);
+    } catch (e) {
+      const detail = e instanceof ApiError && e.status === 422 ? (e.body as { detail?: unknown })?.detail : null;
+      if (detail && typeof detail === "object") throw new JqlError(detail as JqlError["detail"]);
+      throw e;
+    }
+  },
+  fields: () => request<Record<JqlEntity, JqlField[]>>("/v1/search/jql/fields"),
 };

@@ -189,6 +189,7 @@ def create_document(
         next_review_due=body.next_review_due, authored_by=_actor_user_id(identity),
     )
     db.add(revision)
+    notify.follow(db, "document", doc.uid, _actor_user_id(identity))
     if doc.confidentiality != "riservato":
         notify.announce(db, workspace_id, "documents", "new_document", f"New document: {doc.code} {doc.title}",
                         _actor_user_id(identity), doc.uid)
@@ -282,6 +283,7 @@ def update_document(
     body: DocumentUpdate,
     workspace_id: str = Depends(require_permission("modify", resource="documents")),
     db: Session = Depends(get_db),
+    identity: Identity = Depends(get_identity),
 ):
     doc = _get_owned_document(uid, workspace_id, db)
     patch = body.model_dump(exclude_unset=True)
@@ -296,6 +298,7 @@ def update_document(
         )
     for field, value in patch.items():
         setattr(doc, field, value)
+    notify.document_changed(db, doc, f"details changed ({', '.join(sorted(patch))})", _actor_user_id(identity))
     db.commit()
     db.refresh(doc)
     return doc
@@ -352,6 +355,7 @@ def retire_document(
     body: RetireAction,
     workspace_id: str = Depends(require_permission("delete", resource="documents")),
     db: Session = Depends(get_db),
+    identity: Identity = Depends(get_identity),
 ):
     doc = _get_owned_document(uid, workspace_id, db)
     if doc.current_revision_uid:
@@ -361,6 +365,7 @@ def retire_document(
             current.review_comment = body.reason
     doc.current_revision_uid = None
     doc.retired_at = datetime.now(timezone.utc)
+    notify.document_changed(db, doc, "retired" + (f": {body.reason}" if getattr(body, "reason", None) else ""), _actor_user_id(identity))
     db.commit()
     db.refresh(doc)
     knowledge_schedule.after_document_change(db, workspace_id)
@@ -432,6 +437,7 @@ def create_revision(
         next_review_due=body.next_review_due, authored_by=_actor_user_id(identity),
     )
     db.add(revision)
+    notify.document_changed(db, doc, f"revision {revision.revision_number} started", _actor_user_id(identity))
     db.commit()
     db.refresh(revision)
     return revision
@@ -483,13 +489,15 @@ def submit_revision(
     rev_uid: str,
     workspace_id: str = Depends(require_permission("modify", resource="documents")),
     db: Session = Depends(get_db),
+    identity: Identity = Depends(get_identity),
 ):
-    _get_owned_document(uid, workspace_id, db)
+    doc = _get_owned_document(uid, workspace_id, db)
     revision = _get_revision(uid, rev_uid, db)
     if revision.state != "draft":
         raise HTTPException(status_code=409, detail="Only a draft revision can be submitted")
     revision.state = "in_review"
     revision.submitted_at = datetime.now(timezone.utc)
+    notify.document_changed(db, doc, f"revision {revision.revision_number} sent for review", _actor_user_id(identity))
     db.commit()
     db.refresh(revision)
     return revision
@@ -504,7 +512,7 @@ def approve_revision(
     identity: Identity = Depends(get_identity),
     db: Session = Depends(get_db),
 ):
-    _get_owned_document(uid, workspace_id, db)
+    doc = _get_owned_document(uid, workspace_id, db)
     revision = _get_revision(uid, rev_uid, db)
     if revision.state != "in_review":
         raise HTTPException(status_code=409, detail="Only an in-review revision can be approved")
@@ -516,6 +524,7 @@ def approve_revision(
     revision.approved_by = _actor_user_id(identity)
     revision.approved_at = datetime.now(timezone.utc)
     revision.review_comment = body.comment
+    notify.document_changed(db, doc, f"revision {revision.revision_number} approved", _actor_user_id(identity))
     db.commit()
     db.refresh(revision)
     return revision
@@ -528,13 +537,15 @@ def reject_revision(
     body: RejectAction,
     workspace_id: str = Depends(require_permission("approve", resource="documents")),
     db: Session = Depends(get_db),
+    identity: Identity = Depends(get_identity),
 ):
-    _get_owned_document(uid, workspace_id, db)
+    doc = _get_owned_document(uid, workspace_id, db)
     revision = _get_revision(uid, rev_uid, db)
     if revision.state != "in_review":
         raise HTTPException(status_code=409, detail="Only an in-review revision can be rejected")
     revision.state = "draft"
     revision.review_comment = body.comment
+    notify.document_changed(db, doc, f"revision {revision.revision_number} sent back to draft", _actor_user_id(identity))
     db.commit()
     db.refresh(revision)
     return revision
@@ -566,6 +577,7 @@ def publish_revision(
         notify.announce(db, workspace_id, "documents", "document_published",
                         f"Published: {doc.code} {doc.title} (revision {revision.revision_number})",
                         _actor_user_id(identity), doc.uid)
+    notify.document_changed(db, doc, f"revision {revision.revision_number} published", _actor_user_id(identity))
     db.commit()
     db.refresh(revision)
     knowledge_schedule.after_document_change(db, workspace_id)

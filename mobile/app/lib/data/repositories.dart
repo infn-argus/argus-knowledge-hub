@@ -72,8 +72,10 @@ class LookupRepository {
       kind: _kind(r['kind']?.toString()),
       uid: r['uid'].toString(),
       title: (r['name'] ?? r['key'])?.toString(),
+      key: r['key']?.toString(),
       subtitle: r['type']?.toString(),
       recordUid: (r['record_uid'] ?? r['position_uid'])?.toString(),
+      workspaceId: r['workspace_id']?.toString(),
     );
   }
 
@@ -86,7 +88,8 @@ class LookupRepository {
       assets: _list(r['assets']).map(_map).map((a) => LinkTarget(
             kind: RecordKind.asset,
             uid: a['uid'].toString(),
-            title: '${a['key']} · ${a['name']}',
+            title: (a['name'] ?? a['key'])?.toString(),
+            key: a['key']?.toString(),
             subtitle: a['type']?.toString(),
           )).toList(),
       tickets: _list(r['tickets']).map(_map).map((t) => LinkTarget(
@@ -98,7 +101,8 @@ class LookupRepository {
       documents: _list(r['documents']).map(_map).map((d) => LinkTarget(
             kind: RecordKind.document,
             uid: d['uid'].toString(),
-            title: '${d['code']} · ${d['title']}',
+            title: (d['title'] ?? d['code'])?.toString(),
+            key: d['code']?.toString(),
             subtitle: d['state']?.toString(),
           )).toList(),
     );
@@ -485,14 +489,16 @@ class CockpitRepository {
     CockpitItem document(Map<String, Object?> d) => CockpitItem(
         kind: RecordKind.document,
         uid: d['uid'].toString(),
-        label: '${d['code'] ?? ''} · ${d['title'] ?? ''}',
+        label: (d['title'] ?? d['code'] ?? '').toString(),
+        key: d['code']?.toString(),
         sub: d['state']?.toString(),
         at: _date(d['updated_at']));
     CockpitItem asset(Map<String, Object?> a) => CockpitItem(
         kind: RecordKind.asset,
         uid: a['uid'].toString(),
         label: (a['name'] ?? a['key'] ?? '').toString(),
-        sub: [a['key'], a['type']].whereType<Object>().join(' · '),
+        key: a['key']?.toString(),
+        sub: a['type']?.toString(),
         at: _date(a['updated_at']),
         count: (a['open_tickets'] as num?)?.toInt());
     final recent = [

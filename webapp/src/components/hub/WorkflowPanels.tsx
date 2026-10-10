@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { workflowApi } from "../../api/client";
-import type { WorkflowTransition } from "../../api/ledgerTypes";
+import type { NotificationView, WorkflowTransition } from "../../api/ledgerTypes";
+import { openInWorkspace } from "../../api/session";
+import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 import { errorText } from "./LedgerPanels";
 import { Card } from "./ui";
 
@@ -123,8 +125,19 @@ export function WatchersCard({ ticketUid }: { ticketUid: string }) {
   );
 }
 
+function notificationPath(n: NotificationView): string | null {
+  if (n.issue_uid) return `/tickets/${n.issue_uid}`;
+  const uid = typeof n.detail?.uid === "string" ? n.detail.uid : null;
+  if (n.detail?.subject === "asset" && uid) return `/assets/${uid}`;
+  if (n.detail?.subject === "document" && uid) return `/documents/${uid}`;
+  if (n.detail?.subject === "ticket" && uid) return `/tickets/${uid}`;
+  return typeof n.detail?.path === "string" ? n.detail.path : null;
+}
+
+/** Notifications from every workspace the person can open; one from another workspace opens there. */
 export function NotificationBell() {
   const queryClient = useQueryClient();
+  const currentWorkspaceId = useCurrentWorkspaceId();
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   // Personal notifications need a signed-in person; an API-token profile has none.
@@ -161,15 +174,23 @@ export function NotificationBell() {
             {items.data.length === 0 && <li className="px-3 py-4 text-sm text-slate-500">Nothing yet.</li>}
             {items.data.map((n) => (
               <li key={n.id} className={`px-3 py-2 text-sm ${n.read ? "text-slate-500" : "text-slate-900"}`}>
-                {n.issue_uid || typeof n.detail?.path === "string" ? (
-                  <Link to={n.issue_uid ? `/tickets/${n.issue_uid}` : String(n.detail.path)} onClick={() => { workflowApi.readNotification(n.id); setOpen(false); }} className="hover:underline">
+                {notificationPath(n) ? (
+                  <Link to={notificationPath(n)!}
+                        onClick={(e) => {
+                          workflowApi.readNotification(n.id);
+                          setOpen(false);
+                          // From another workspace: open it there.
+                          if (openInWorkspace(n.workspace_id, notificationPath(n)!, currentWorkspaceId)) e.preventDefault();
+                        }}
+                        className="hover:underline">
                     {n.title}
                   </Link>
                 ) : (
                   n.title
                 )}
                 <span className="block text-[11px] text-slate-400">
-                  {n.kind} · {new Date(n.created_at).toLocaleString()}
+                  {n.workspace_name && n.workspace_id !== currentWorkspaceId ? `${n.workspace_name} · ` : ""}
+                  {new Date(n.created_at).toLocaleString()}
                   {n.actor ? ` · ${n.actor}` : ""}
                 </span>
               </li>

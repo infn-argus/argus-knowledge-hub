@@ -76,6 +76,27 @@ class ThemeModeController extends Notifier<ThemeMode> {
 
 final themeModeProvider = NotifierProvider<ThemeModeController, ThemeMode>(ThemeModeController.new);
 
+/// Whether records are shown with their key (`SPARC-IP-01 · Ion pump`) or by name or title alone; kept on the
+/// device (Settings → Show keys).
+class ShowKeysController extends Notifier<bool> {
+  static const _key = 'argus.pref.show-keys';
+
+  @override
+  bool build() {
+    ref.read(localStoreProvider).read(_key).then((v) {
+      if (v != null && (v == '1') != state) state = v == '1';
+    }).catchError((_) {});
+    return true;
+  }
+
+  Future<void> set(bool show) async {
+    state = show;
+    await ref.read(localStoreProvider).write(_key, show ? '1' : '0');
+  }
+}
+
+final showKeysProvider = NotifierProvider<ShowKeysController, bool>(ShowKeysController.new);
+
 /// Whether ARGUS answered the last request, and the device's offset from the server's clock.
 class Reachability {
   const Reachability({this.reachable = true, this.serverOffset = Duration.zero, this.since});
@@ -465,6 +486,18 @@ final notificationsProvider = FutureProvider.autoDispose<List<NotificationItem>>
   ref.watch(workspaceIdProvider);
   return ref.watch(notificationRepositoryProvider).mine();
 });
+
+/// The person's open tickets in every workspace (Home, "Your tickets").
+final myWorkProvider = FutureProvider.autoDispose<List<CockpitItem>>((ref) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(notificationRepositoryProvider).myWork();
+});
+
+/// Whether the person follows a piece of equipment or a document: (subject, uid).
+final followingProvider = FutureProvider.autoDispose.family<bool, (String, String)>(
+    (ref, key) => ref.watch(notificationRepositoryProvider).following(key.$1, key.$2));
+
+final queryRepositoryProvider = Provider((ref) => QueryRepository(ref.watch(apiServiceProvider)));
 
 // --------------------------------------------------------------------------- replacement and review (M3)
 

@@ -101,6 +101,7 @@ Class | Method | HTTP request | Description
 *GraphApi* | [**getSemanticGraph**](doc//GraphApi.md#getsemanticgraph) | **GET** /v1/graph/semantic | Get Semantic Graph
 *HubApi* | [**assetContext**](doc//HubApi.md#assetcontext) | **GET** /v1/hub/assets/{uid}/context | Asset Context
 *HubApi* | [**documentContext**](doc//HubApi.md#documentcontext) | **GET** /v1/hub/documents/{uid}/context | Document Context
+*HubApi* | [**myWork**](doc//HubApi.md#mywork) | **GET** /v1/hub/my-work | My Work
 *HubApi* | [**overview**](doc//HubApi.md#overview) | **GET** /v1/hub/overview | Overview
 *HubApi* | [**search**](doc//HubApi.md#search) | **GET** /v1/hub/search | Search
 *HubApi* | [**ticketContext**](doc//HubApi.md#ticketcontext) | **GET** /v1/hub/tickets/{uid}/context | Ticket Context
@@ -129,13 +130,21 @@ Class | Method | HTTP request | Description
 *LedgerApi* | [**rejectReplacement**](doc//LedgerApi.md#rejectreplacement) | **POST** /v1/ledger/review/replacements/{conflict_id}/reject | Reject Replacement
 *LookupApi* | [**lookup**](doc//LookupApi.md#lookup) | **GET** /v1/lookup/{identifier} | Lookup
 *MetaApi* | [**apiMeta**](doc//MetaApi.md#apimeta) | **GET** /v1/meta/api | Api Meta
+*NotificationsApi* | [**followRecord**](doc//NotificationsApi.md#followrecord) | **PUT** /v1/notifications/following/{subject}/{uid} | Follow Record
+*NotificationsApi* | [**followingState**](doc//NotificationsApi.md#followingstate) | **GET** /v1/notifications/following/{subject}/{uid} | Following State
+*NotificationsApi* | [**markAllReadEverywhere**](doc//NotificationsApi.md#markallreadeverywhere) | **POST** /v1/notifications/everywhere/read-all | Mark All Read Everywhere
 *NotificationsApi* | [**markRead**](doc//NotificationsApi.md#markread) | **POST** /v1/notifications/{nid}/read | Mark Read
+*NotificationsApi* | [**markReadEverywhere**](doc//NotificationsApi.md#markreadeverywhere) | **POST** /v1/notifications/everywhere/{nid}/read | Mark Read Everywhere
+*NotificationsApi* | [**myFollowing**](doc//NotificationsApi.md#myfollowing) | **GET** /v1/notifications/following | My Following
 *NotificationsApi* | [**myNotifications**](doc//NotificationsApi.md#mynotifications) | **GET** /v1/notifications | My Notifications
 *NotificationsApi* | [**myNotificationsEverywhere**](doc//NotificationsApi.md#mynotificationseverywhere) | **GET** /v1/notifications/everywhere | My Notifications Everywhere
 *NotificationsApi* | [**mySubscriptions**](doc//NotificationsApi.md#mysubscriptions) | **GET** /v1/notifications/subscriptions | My Subscriptions
 *NotificationsApi* | [**setSubscription**](doc//NotificationsApi.md#setsubscription) | **PUT** /v1/notifications/subscriptions/{workspace_id} | Set Subscription
+*NotificationsApi* | [**unfollowRecord**](doc//NotificationsApi.md#unfollowrecord) | **DELETE** /v1/notifications/following/{subject}/{uid} | Unfollow Record
 *SchemasApi* | [**getSchema**](doc//SchemasApi.md#getschema) | **GET** /v1/schemas/{uid} | Get Schema
 *SchemasApi* | [**listSchemas**](doc//SchemasApi.md#listschemas) | **GET** /v1/schemas | List Schemas
+*SearchApi* | [**jqlFields**](doc//SearchApi.md#jqlfields) | **GET** /v1/search/jql/fields | Jql Fields
+*SearchApi* | [**searchJql**](doc//SearchApi.md#searchjql) | **GET** /v1/search/jql | Search Jql
 *UploadsApi* | [**attachToAsset**](doc//UploadsApi.md#attachtoasset) | **POST** /v1/uploads/{uid}/attach/asset/{asset_uid} | Attach To Asset
 *UploadsApi* | [**attachToDocument**](doc//UploadsApi.md#attachtodocument) | **POST** /v1/uploads/{uid}/attach/document/{doc_uid}/revision/{rev_uid} | Attach To Document
 *UploadsApi* | [**attachToTicket**](doc//UploadsApi.md#attachtoticket) | **POST** /v1/uploads/{uid}/attach/ticket/{issue_uid} | Attach To Ticket

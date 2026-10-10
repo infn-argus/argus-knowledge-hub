@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../domain/capture.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../widgets/follow_button.dart';
 import '../../app/providers.dart';
 import '../../app/queue.dart';
 import '../../data/command_queue.dart';
@@ -30,6 +31,7 @@ class AssetScreen extends ConsumerWidget {
     final r = ref.watch(assetDetailProvider(uid));
     return Scaffold(
       appBar: AppBar(title: Text(r.value?.name ?? 'Record'), actions: [
+        if (r.value != null) FollowButton(subject: 'asset', uid: uid),
         if (r.value != null && r.value!.recordStatus != 'Merged')
           IconButton(
             key: const Key('asset-edit'),
@@ -142,7 +144,7 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
                 StatusChip(a.isPosition ? 'Position' : 'Equipment', tone: theme.colorScheme.primary),
                 StatusChip(a.type),
                 if (a.recordStatus != 'Active') StatusChip(a.recordStatus, tone: theme.colorScheme.error),
-                SelectableText(a.key, style: theme.textTheme.bodySmall),
+                if (ref.watch(showKeysProvider)) SelectableText(a.key, style: theme.textTheme.bodySmall),
               ]),
               if (a.typePath.length > 1) ...[
                 const SizedBox(height: 6),
@@ -214,7 +216,7 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
         ListTile(
           leading: Icon(d.reviewOverdue ? Icons.warning_amber : Icons.description_outlined,
               color: d.reviewOverdue ? theme.colorScheme.error : null),
-          title: Text('${d.code} · ${d.title}', maxLines: 2, overflow: TextOverflow.ellipsis),
+          title: Text(keyed(ref.watch(showKeysProvider), d.code, [d.title]), maxLines: 2, overflow: TextOverflow.ellipsis),
           subtitle: Text([d.state ?? 'no revision', if (d.reviewOverdue) 'review overdue'].join(' · ')),
           onTap: () => context.push('/document/${d.uid}'),
         ),

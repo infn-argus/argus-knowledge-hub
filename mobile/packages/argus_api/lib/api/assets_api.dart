@@ -230,7 +230,7 @@ class AssetsApi {
   ///   With schema_uid: also the records of every type below it.
   ///
   /// * [String] q:
-  ///   Only records whose key or name contains this, ignoring case.
+  ///   Only records whose key, name, a label (a QR code, a barcode, a former key, an alias), serial, inventory number or MAC contains this, ignoring case.
   ///
   /// * [String] sort:
   ///
@@ -308,7 +308,7 @@ class AssetsApi {
   ///   With schema_uid: also the records of every type below it.
   ///
   /// * [String] q:
-  ///   Only records whose key or name contains this, ignoring case.
+  ///   Only records whose key, name, a label (a QR code, a barcode, a former key, an alias), serial, inventory number or MAC contains this, ignoring case.
   ///
   /// * [String] sort:
   ///

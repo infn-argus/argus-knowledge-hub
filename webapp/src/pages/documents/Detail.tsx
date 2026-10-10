@@ -26,6 +26,8 @@ import { DocumentContextPanel } from "../../components/hub/ContextPanels";
 import { DocumentControlCard, SupersededBanner, VerifyAttachment } from "../../components/hub/DocumentControl";
 import { errorText } from "../../components/hub/LedgerPanels";
 import { SemanticRelated } from "../../components/SemanticRelated";
+import { FollowButton } from "../../components/FollowButton";
+import { useShowKeys } from "../../api/displayPrefs";
 
 const STATE_STYLES: Record<string, string> = {
   draft: "bg-slate-100 text-slate-600",
@@ -37,6 +39,7 @@ const STATE_STYLES: Record<string, string> = {
 };
 
 export function DocumentDetail() {
+  const showKeys = useShowKeys();
   const { uid } = useParams<{ uid: string }>();
   const workspaceId = useCurrentWorkspaceId();
   const navigate = useNavigate();
@@ -310,7 +313,7 @@ export function DocumentDetail() {
     <div className="max-w-4xl">
       <div className="flex items-start justify-between">
         <div>
-          <p className="font-mono text-xs text-slate-400">{doc.code}</p>
+          {showKeys && <p className="font-mono text-xs text-slate-400">{doc.code}</p>}
           <h1 className="text-2xl font-semibold text-slate-900">{doc.title}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             {/* An import has to guess the type from a label or a title, so
@@ -358,6 +361,7 @@ export function DocumentDetail() {
           </p>
         </div>
         <div className="flex gap-2">
+          <FollowButton subject="document" uid={doc.uid} />
           {doc.current_revision_uid && (
             <button
               onClick={() => {

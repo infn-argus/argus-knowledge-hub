@@ -206,6 +206,8 @@ def update_issue(
     # Captured before anything is written, so the entry says what actually
     # changed rather than comparing a value with itself.
     before = {field: getattr(issue, field, None) for field in TRACKED_FIELDS}
+    edited_from = {field: (dict(v) if isinstance(v := getattr(issue, field, None), dict) else v)
+                   for field in notify.EDIT_FIELDS}
     previous_asset_uid = issue.asset_uid
     if patch.get("attributes") is not None:
         hidden = hidden_fields(db, issue)
@@ -225,6 +227,7 @@ def update_issue(
 
     record_issue_changes(db, issue, before, current_user_id)
     sync_subject_link(db, issue, previous_asset_uid)
+    notify.on_edited(db, issue, current_user_id, edited_from, previous_assignee)
 
     schema = db.get(Schema, issue.schema_uid) if issue.schema_uid else None
     stamp_current_user_attributes(db, schema, issue.attributes, current_user_id)

@@ -11,6 +11,8 @@ import '../features/ask/ask_screen.dart';
 import '../features/assets/asset_list_screen.dart';
 import '../features/graph/graph_record_screen.dart';
 import '../features/graph/graph_screen.dart';
+import '../features/search/query_screen.dart';
+import '../widgets/in_workspace.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/shell/app_shell.dart';
 import '../features/auth/signin_screen.dart';
@@ -123,8 +125,15 @@ final routerProvider = Provider<GoRouter>((ref) {
                   photoFirst: st.uri.queryParameters['photo'] == '1')),
       GoRoute(path: '/replace/:uid', builder: (_, st) => ReplaceScreen(positionUid: st.pathParameters['uid']!)),
       GoRoute(path: '/reviews', builder: (_, _) => const ReviewScreen()),
+      GoRoute(
+          path: '/query',
+          builder: (_, st) => QueryScreen(
+              entity: st.uri.queryParameters['entity'] ?? 'tickets', jql: st.uri.queryParameters['jql'])),
       GoRoute(path: '/outbox', builder: (_, _) => const OutboxScreen()),
-      GoRoute(path: '/asset/:uid', builder: (_, st) => AssetScreen(uid: st.pathParameters['uid']!)),
+      GoRoute(
+          path: '/asset/:uid',
+          builder: (_, st) => InWorkspace(
+              workspaceId: st.uri.queryParameters['ws'], child: () => AssetScreen(uid: st.pathParameters['uid']!))),
       GoRoute(path: '/asset/:uid/edit', builder: (_, st) => AssetEditScreen(uid: st.pathParameters['uid']!)),
       GoRoute(path: '/ticket/:uid/edit', builder: (_, st) => TicketEditScreen(uid: st.pathParameters['uid']!)),
       GoRoute(
@@ -138,16 +147,20 @@ final routerProvider = Provider<GoRouter>((ref) {
       // A document code or a Jira key in the link is resolved first; a uid opens directly.
       GoRoute(
           path: '/document/:id',
-          builder: (_, st) => OpenOrResolve(
-              path: st.uri.path,
-              detail: documentDetailProvider(st.pathParameters['id']!),
-              screen: () => DocumentScreen(uid: st.pathParameters['id']!))),
+          builder: (_, st) => InWorkspace(
+              workspaceId: st.uri.queryParameters['ws'],
+              child: () => OpenOrResolve(
+                  path: st.uri.path,
+                  detail: documentDetailProvider(st.pathParameters['id']!),
+                  screen: () => DocumentScreen(uid: st.pathParameters['id']!)))),
       GoRoute(
           path: '/ticket/:id',
-          builder: (_, st) => OpenOrResolve(
-              path: st.uri.path,
-              detail: ticketDetailProvider(st.pathParameters['id']!),
-              screen: () => TicketScreen(uid: st.pathParameters['id']!))),
+          builder: (_, st) => InWorkspace(
+              workspaceId: st.uri.queryParameters['ws'],
+              child: () => OpenOrResolve(
+                  path: st.uri.path,
+                  detail: ticketDetailProvider(st.pathParameters['id']!),
+                  screen: () => TicketScreen(uid: st.pathParameters['id']!)))),
       for (final kind in const ['position', 'installation', 'review', 'lookup'])
         GoRoute(path: '/$kind/:id', builder: (_, st) => ResolveScreen(path: st.uri.path)),
     ],

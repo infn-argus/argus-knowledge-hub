@@ -182,6 +182,8 @@ from app.routers import tokens as tokens_router  # noqa: E402
 app.include_router(tokens_router.router)
 from app.routers import logbook as logbook_router  # noqa: E402
 app.include_router(logbook_router.router)
+from app.routers import jql as jql_router  # noqa: E402
+app.include_router(jql_router.router)
 app.include_router(mcp.router)
 app.include_router(groups.router)
 app.include_router(icons.router)

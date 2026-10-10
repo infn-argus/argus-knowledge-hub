@@ -46,6 +46,19 @@ class TicketWatcher(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class RecordWatcher(Base):
+    """A person following a piece of equipment or a document, in whichever workspace it is: each change to it
+    is a notification (tickets have their own watchers, TicketWatcher)."""
+    __tablename__ = "record_watchers"
+    __table_args__ = (UniqueConstraint("subject", "subject_uid", "user_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    subject: Mapped[str] = mapped_column(String)                   # asset | document
+    subject_uid: Mapped[str] = mapped_column(String, index=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 

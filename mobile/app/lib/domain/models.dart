@@ -15,22 +15,29 @@ enum RecordKind { asset, position, installation, document, ticket, review }
 
 /// Where a link, a scanned label or a search hit leads.
 class LinkTarget {
-  const LinkTarget({required this.kind, required this.uid, this.title, this.subtitle, this.recordUid});
+  const LinkTarget(
+      {required this.kind, required this.uid, this.title, this.subtitle, this.recordUid, this.workspaceId, this.key});
 
   final RecordKind kind;
   final String uid;
   final String? title;
   final String? subtitle;
   final String? recordUid; // for a review item: the record it is about
+  final String? workspaceId; // the workspace it is opened in, when the server said
+  final String? key; // its key or code, shown beside the title when keys are shown
 
-  String get route => switch (kind) {
+  String get route => inWorkspace(switch (kind) {
         RecordKind.asset || RecordKind.position => '/asset/$uid',
         RecordKind.installation => '/asset/${recordUid ?? uid}',
         RecordKind.document => '/document/$uid',
         RecordKind.ticket => '/ticket/$uid',
         RecordKind.review => '/asset/${recordUid ?? uid}',
-      };
+      }, workspaceId);
 }
+
+/// A record's route that opens it in its own workspace (`?ws=`): the app moves there when it is another.
+String inWorkspace(String route, String? workspaceId) =>
+    workspaceId == null || workspaceId.isEmpty ? route : '$route?ws=${Uri.encodeQueryComponent(workspaceId)}';
 
 class SearchResults {
   const SearchResults({this.assets = const [], this.tickets = const [], this.documents = const []});
@@ -399,7 +406,9 @@ class DocumentRevision {
 
 /// One line of the cockpit: a record, ticket or document and where it leads.
 class CockpitItem {
-  const CockpitItem({required this.kind, required this.uid, required this.label, this.sub, this.at, this.count});
+  const CockpitItem(
+      {required this.kind, required this.uid, required this.label, this.sub, this.at, this.count, this.workspaceId,
+      this.key});
 
   final RecordKind kind;
   final String uid;
@@ -407,12 +416,38 @@ class CockpitItem {
   final String? sub;
   final DateTime? at;
   final int? count; // a hotspot's open tickets
+  final String? workspaceId; // set when it may be in another workspace than the app's
+  final String? key; // its key or code, shown when keys are shown
 
-  String get path => switch (kind) {
+  String get path => inWorkspace(switch (kind) {
         RecordKind.ticket => '/ticket/$uid',
         RecordKind.document => '/document/$uid',
         _ => '/asset/$uid',
-      };
+      }, workspaceId);
+}
+
+/// A row of an advanced (JQL) search.
+class QueryHit {
+  const QueryHit({required this.kind, required this.uid, required this.key, required this.title, this.sub,
+      this.workspaceId, this.workspaceName});
+
+  final RecordKind kind;
+  final String uid;
+  final String? key;
+  final String title;
+  final String? sub;
+  final String? workspaceId;
+  final String? workspaceName;
+
+  String get route => LinkTarget(kind: kind, uid: uid, workspaceId: workspaceId).route;
+}
+
+class QueryResult {
+  const QueryResult({required this.total, required this.items, this.capped = false});
+
+  final int total;
+  final List<QueryHit> items;
+  final bool capped;
 }
 
 /// The operations cockpit (the web's home): what is assigned to me, where tickets pile up, what waits for

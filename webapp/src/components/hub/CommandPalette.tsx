@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { hubApi } from "../../api/client";
 import { KindBadge, Priority, TicketState, type Kind } from "./ui";
+import { useShowKeys } from "../../api/displayPrefs";
 
 interface Item {
   id: string;
@@ -53,6 +54,7 @@ export function useCommandPaletteShortcut(open: () => void) {
 }
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const showKeys = useShowKeys();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -85,7 +87,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             id: `as-${a.uid}`,
             kind: "asset",
             title: a.name,
-            subtitle: `${a.key} · ${a.type}`,
+            subtitle: showKeys ? `${a.key} · ${a.type}` : a.type,
             to: `/assets/${a.uid}`,
           })),
         });
@@ -113,7 +115,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             id: `dc-${d.uid}`,
             kind: "document",
             title: d.title,
-            subtitle: d.code,
+            subtitle: showKeys ? d.code : undefined,
             to: `/documents/${d.uid}`,
           })),
         });
@@ -137,7 +139,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     );
     if (actions.length) out.push({ label: q ? "Actions" : "Quick actions", items: actions });
     return out;
-  }, [results.data, debounced, query]);
+  }, [showKeys, results.data, debounced, query]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
 

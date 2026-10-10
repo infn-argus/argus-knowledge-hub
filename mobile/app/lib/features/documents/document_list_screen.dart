@@ -116,7 +116,7 @@ class _DocumentTile extends ConsumerWidget {
       leading: Icon(d.published ? Icons.description_outlined : Icons.edit_note,
           color: d.published ? theme.colorScheme.primary : theme.colorScheme.outline),
       title: Text(d.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: Text([d.code, d.published ? 'published' : 'not published yet', ?shared].join(' · ')),
+      subtitle: Text(keyed(ref.watch(showKeysProvider), d.code, [d.published ? 'published' : 'not published yet', shared])),
       onTap: () => context.push('/document/${d.uid}'),
     );
   }

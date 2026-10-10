@@ -66,17 +66,29 @@ or the applicable check, and record the result.
 ## Notifications
 
 You are told about a ticket you **reported**, are **assigned**, **watch**, or are **@mentioned** in: a new
-assignment, a move to another state, a comment. Watch or stop watching any ticket from its page. You are
-never told about a ticket you may not read, nor about what you did yourself.
+assignment, a move to another state, a comment, and a change to its title, description, priority, due date,
+equipment or fields. Watch or stop watching any ticket from its page. You are never told about a ticket you
+may not read, nor about what you did yourself.
+
+**Follow** a piece of equipment or a document (the **Follow** button on its page, the bell icon in the app) to
+be told of each change to it: an edit, a label, a file, a comment; for a document, a new revision, a review,
+an approval, a publication, a retirement. The author of a document follows it from the start.
+
+Your notifications come from **every workspace** you can open, whichever workspace you are in: each says
+which workspace it is from, and opens there.
 
 You can also ask to hear about **everything new** in a workspace. In the mobile app, **Settings →
 Notifications**: for each workspace you can open, switch on **New tickets**, **New and published documents**
 or **New equipment**. They are off until you choose them.
 
 - On the web, the **bell** at the top lists your notifications.
-- On the phone, the bell on **Home** lists them, and **Show news on this phone** (same Settings page) shows
-  them as phone notifications while the app is closed: the app checks about every 15 minutes on Android, and
-  when the system allows on iOS. Tapping one opens what it is about.
+- On the phone, the bell on **Home** lists them, and **Show news on this phone** (same Settings page, or
+  **Turn on** on Home) shows them as phone notifications: while the app is open, every couple of minutes and
+  when it comes back to the front; while it is closed, about every 15 minutes on Android, and when the system
+  allows on iOS. Tapping one opens what it is about. It is **off** until you turn it on: without it, the
+  phone shows nothing outside the app.
+- On the phone, **Your tickets** on Home lists your open tickets in every workspace: assigned to you, reported
+  by you, watched.
 
 ## On the equipment's side
 

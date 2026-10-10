@@ -375,6 +375,15 @@ export interface NotificationView {
   actor: string | null;
   created_at: string;
   read: boolean;
+  workspace_id?: string;
+  workspace_name?: string;
+}
+
+export interface FollowState {
+  subject: "asset" | "document";
+  uid: string;
+  following: boolean;
+  followers: number;
 }
 
 export type RetentionClass = "permanent" | "10y" | "5y" | "2y" | "none";

@@ -23,6 +23,7 @@ lib/api/lookup_api.dart
 lib/api/meta_api.dart
 lib/api/notifications_api.dart
 lib/api/schemas_api.dart
+lib/api/search_api.dart
 lib/api/uploads_api.dart
 lib/api/workspaces_api.dart
 lib/api_client.dart

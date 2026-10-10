@@ -136,7 +136,7 @@ void main() {
   test('a link is resolved by the server, which says it is a Position', () async {
     final t = await LookupRepository(api).resolveLink('/position/$positionUid');
     expect(t.kind, RecordKind.position);
-    expect(t.route, '/asset/$positionUid');
+    expect(t.route, startsWith('/asset/$positionUid')); // opened in its own workspace (?ws=)
   });
 
   test('a missing or invisible record is one problem: not found', () async {

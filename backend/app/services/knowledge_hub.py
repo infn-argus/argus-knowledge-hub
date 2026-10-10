@@ -385,15 +385,25 @@ def unified_search(db: Session, workspace_id: str, access: Access, q: str, limit
     fetch = limit * 4
     result = dict(empty)
     if access.assets:
+        from app.models.asset_subresources import AssetLabel
+        from app.services.identifiers import label_match
         rows = db.scalars(select(Asset).where(
             visible_assets_clause(workspace_id), Asset.deleted_at.is_(None),
             or_(Asset.key.ilike(like), Asset.name.ilike(like), Asset.type.ilike(like),
+                label_match(lambda c: c.ilike(like)),
                 cast(Asset.attributes, String).ilike(like))).limit(fetch)).all()
+        # Its labels: a QR code, a barcode, a former key, an alias.
+        labels: dict[str, list[str]] = {}
+        for uid, value in db.execute(select(AssetLabel.asset_uid, AssetLabel.value)
+                                     .where(AssetLabel.asset_uid.in_([a.uid for a in rows]))):
+            labels.setdefault(uid, []).append(value or "")
         # A match only inside a field the viewer may not see is no match (I-ACL-1).
         ql = q.lower()
         rows = [a for a in rows if ql in f"{a.key} {a.name} {a.type}".lower()
+                or any(ql in v.lower() for v in labels.get(a.uid, []))
                 or ql in json.dumps(redacted_attributes(db, a), default=str).lower()]
-        ranked = sorted(rows, key=lambda a: -max(_score(q, a.key, a.name), 10 if q.lower() in (a.type or "").lower() else 1))
+        ranked = sorted(rows, key=lambda a: -max(_score(q, a.key, a.name, *labels.get(a.uid, [])),
+                                                 10 if q.lower() in (a.type or "").lower() else 1))
         result["assets"] = [asset_summary(a) for a in ranked[:limit]]
     if access.tickets:
         source_key = Issue.attributes["argus_source_key"].astext

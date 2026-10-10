@@ -7,7 +7,7 @@ import 'package:http_parser/http_parser.dart' show MediaType;
 
 import '../core/problem.dart';
 import '../domain/capture.dart';
-import '../domain/models.dart' show AttributeDef;
+import '../domain/models.dart' show AttributeDef, CockpitItem, QueryHit, QueryResult, RecordKind;
 import 'api_service.dart';
 
 Map<String, Object?> _map(Object? o) => o is Map ? o.map((k, v) => MapEntry(k.toString(), v)) : const {};
@@ -327,8 +327,10 @@ class NotificationRepository {
   NotificationRepository(this._api);
   final ApiService _api;
 
-  Future<List<NotificationItem>> mine({bool unreadOnly = false}) async =>
-      _list(await _api.json((c) => _api.notifications(c).myNotificationsWithHttpInfo(unread: unreadOnly)))
+  /// The inbox: the latest hundred, read or not, from every workspace the person can open — a ticket assigned
+  /// in another workspace is here whichever workspace the app is in.
+  Future<List<NotificationItem>> mine() async =>
+      _list(await _api.json((c) => _api.notifications(c).myNotificationsEverywhereWithHttpInfo(includeRead: true)))
           .map(_map)
           .map((n) => NotificationItem(
               id: (n['id'] as num).toInt(),
@@ -338,7 +340,9 @@ class NotificationRepository {
               read: n['read'] == true,
               at: _date(n['created_at']),
               subject: _map(n['detail'])['subject']?.toString(),
-              subjectUid: _map(n['detail'])['uid']?.toString()))
+              subjectUid: _map(n['detail'])['uid']?.toString(),
+              workspaceId: n['workspace_id']?.toString(),
+              workspaceName: n['workspace_name']?.toString()))
           .toList();
 
   /// Unread news in every workspace, newer than [after]: what the background check shows on the phone.
@@ -374,6 +378,59 @@ class NotificationRepository {
   }
 
   Future<void> markRead(int id) async {
-    await _api.json((c) => _api.notifications(c).markReadWithHttpInfo(id));
+    await _api.json((c) => _api.notifications(c).markReadEverywhereWithHttpInfo(id));
+  }
+
+  Future<void> markAllRead() async {
+    await _api.json((c) => _api.notifications(c).markAllReadEverywhereWithHttpInfo());
+  }
+
+  /// Whether the person follows this piece of equipment ('asset') or document ('document').
+  Future<bool> following(String subject, String uid) async =>
+      _map(await _api.json((c) => _api.notifications(c).followingStateWithHttpInfo(subject, uid)))['following'] ==
+      true;
+
+  Future<bool> setFollowing(String subject, String uid, bool follow) async => _map(await _api.json((c) => follow
+          ? _api.notifications(c).followRecordWithHttpInfo(subject, uid)
+          : _api.notifications(c).unfollowRecordWithHttpInfo(subject, uid)))['following'] ==
+      true;
+
+  /// The person's open tickets in every workspace: assigned to them, reported by them, or watched.
+  Future<List<CockpitItem>> myWork() async =>
+      _list(await _api.json((c) => _api.hub(c).myWorkWithHttpInfo())).map(_map).map((t) => CockpitItem(
+            kind: RecordKind.ticket,
+            uid: t['uid'].toString(),
+            label: (t['title'] ?? t['uid']).toString(),
+            sub: [
+              switch (t['why']) { 'assigned' => 'assigned to you', 'reported' => 'you reported it', _ => 'watching' },
+              t['state'],
+              t['workspace_name'],
+            ].whereType<Object>().join(' · '),
+            at: _date(t['updated_at']),
+            workspaceId: t['workspace_id']?.toString(),
+          )).toList();
+}
+
+/// Advanced search in the Jira Query Language, over tickets, equipment or documents.
+class QueryRepository {
+  QueryRepository(this._api);
+  final ApiService _api;
+
+  Future<QueryResult> run(String entity, String jql, {int limit = 50}) async {
+    final r = _map(await _api.json((c) => _api.search(c).searchJqlWithHttpInfo(entity, jql: jql, limit: limit)));
+    final kind = switch (entity) { 'tickets' => RecordKind.ticket, 'documents' => RecordKind.document, _ => RecordKind.asset };
+    return QueryResult(
+      total: (r['total'] as num?)?.toInt() ?? 0,
+      capped: r['capped'] == true,
+      items: _list(r['items']).map(_map).map((m) => QueryHit(
+            kind: kind,
+            uid: m['uid'].toString(),
+            key: (m['key'] ?? m['code'] ?? m['source_key'])?.toString(),
+            title: (m['title'] ?? m['name'] ?? m['uid']).toString(),
+            sub: [m['state'] ?? m['type'], m['priority']].whereType<Object>().join(' · '),
+            workspaceId: m['workspace_id']?.toString(),
+            workspaceName: m['workspace_name']?.toString(),
+          )).toList(),
+    );
   }
 }

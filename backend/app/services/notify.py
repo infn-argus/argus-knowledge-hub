@@ -122,6 +122,21 @@ def on_transition(db: Session, issue: Issue, actor: Optional[str], before: str, 
            {"from": before, "to": after})
 
 
+EDIT_FIELDS = {"title": "title", "description": "description", "priority": "priority", "due_date": "due date",
+               "asset_uid": "equipment", "attributes": "fields"}
+
+
+def on_edited(db: Session, issue: Issue, actor: Optional[str], before: dict, previous_assignee: Optional[str]) -> None:
+    """A ticket's title, description, priority, due date, equipment or fields changed: told to its watchers.
+    A new assignee is told on their own ("Assigned to you"), and a new state on its own."""
+    changed = [label for field, label in EDIT_FIELDS.items() if before.get(field) != getattr(issue, field, None)]
+    if not changed:
+        return
+    newly_assigned = issue.assignee if issue.assignee != previous_assignee else None
+    notify(db, issue, "updated", f"{issue.title}: {', '.join(changed)} changed", actor,
+           [w for w in audience(db, issue) if w != newly_assigned], {"changed": changed})
+
+
 def on_comment(db: Session, issue: Issue, actor: Optional[str], body: str) -> None:
     mentioned = []
     for m in MENTION.findall(body or ""):
@@ -244,3 +259,84 @@ def announce(db: Session, workspace_id: str, what: str, kind: str, title: str, a
         out.append(n)
     db.flush()
     return out
+
+
+# --------------------------------------------------------------------------- following equipment and documents
+
+def follow(db: Session, subject: str, uid: str, user_id: Optional[str]) -> None:
+    from app.models.workflow import RecordWatcher
+    if not user_id or db.get(User, user_id) is None:
+        return
+    if db.scalar(select(RecordWatcher).where(RecordWatcher.subject == subject, RecordWatcher.subject_uid == uid,
+                                             RecordWatcher.user_id == user_id)) is None:
+        db.add(RecordWatcher(subject=subject, subject_uid=uid, user_id=user_id, created_at=now()))
+        db.flush()
+
+
+def unfollow(db: Session, subject: str, uid: str, user_id: str) -> None:
+    from app.models.workflow import RecordWatcher
+    row = db.scalar(select(RecordWatcher).where(RecordWatcher.subject == subject, RecordWatcher.subject_uid == uid,
+                                                RecordWatcher.user_id == user_id))
+    if row is not None:
+        db.delete(row)
+        db.flush()
+
+
+def followers(db: Session, subject: str, uid: str) -> list[str]:
+    from app.models.workflow import RecordWatcher
+    return list(db.scalars(select(RecordWatcher.user_id).where(RecordWatcher.subject == subject,
+                                                               RecordWatcher.subject_uid == uid)))
+
+
+def may_read_record(db: Session, user: User, subject: str, record) -> bool:
+    """Whether this person may read this piece of equipment or document: in its workspace, or anywhere when it
+    is shared (global) — and a restricted one only with its class (I-ACL-1)."""
+    from app.auth import OidcIdentity, grants_of
+    from app.services.permissions import resolve_permission
+    from app.services.visibility import can_see
+    resource = "objects" if subject == "asset" else "documents"
+    ws = record.workspace_id
+    if not resolve_permission(db, user, ws, "read", resource):
+        if not getattr(record, "is_global", False):
+            return False
+        if subject == "document" and getattr(record, "confidentiality", None) == "riservato":
+            return False
+    if subject == "asset":
+        return can_see(record, grants_of(db, OidcIdentity(user=user), ws))
+    return True
+
+
+def tell_followers(db: Session, subject: str, record, kind: str, title: str, actor: Optional[str],
+                   detail: Optional[dict] = None) -> list[Notification]:
+    """A change to a piece of equipment or a document, told to the people following it — never to the person
+    who made it, and only to those who may read it."""
+    actor_user = _user(db, actor) if actor else None
+    out = []
+    for user_id in followers(db, subject, record.uid):
+        user = db.get(User, user_id)
+        if user is None or (actor_user is not None and user.id == actor_user.id) or actor in (user.id, user.email):
+            continue
+        if not may_read_record(db, user, subject, record):
+            continue
+        n = Notification(workspace_id=record.workspace_id, recipient=user.id, issue_uid=None, kind=kind, title=title,
+                         detail={"subject": subject, "uid": record.uid, **(detail or {})}, actor=actor,
+                         created_at=now())
+        db.add(n)
+        out.append(n)
+    db.flush()
+    return out
+
+
+def asset_changed(db: Session, asset_uid: str, what: str, actor: Optional[str]) -> None:
+    """A history line on a piece of equipment (an edit, a label, a file, a comment), told to its followers."""
+    from app.models.asset import Asset
+    asset = db.get(Asset, asset_uid)
+    if asset is None:
+        return
+    tell_followers(db, "asset", asset, "asset_changed", f"{asset.name} ({asset.key}): {what}"[:300], actor)
+
+
+def document_changed(db: Session, doc, what: str, actor: Optional[str]) -> None:
+    """A step in a document's life (a new revision, a review, a publication, a retirement), told to its
+    followers."""
+    tell_followers(db, "document", doc, "document_changed", f"{doc.code} {doc.title}: {what}"[:300], actor)

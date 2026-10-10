@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../core/link_parser.dart';
 import '../../core/problem.dart';
+import '../../domain/models.dart' show inWorkspace;
 import '../../widgets/common.dart';
 
 /// Opens a link or a label through the server's resolver, then replaces itself with the record.
@@ -72,12 +73,14 @@ class _Candidates extends StatelessWidget {
           ListTile(
             key: Key('candidate-${c['uid']}'),
             leading: const Icon(Icons.memory),
-            title: Text('${c['key']} · ${c['name']}'),
+            title: Text(c['name']?.toString() ?? c['key'].toString()),
             subtitle: Text([
+              c['key'],
               c['type'],
+              if (c['workspace_id'] != null) 'in ${c['workspace_id']}',
               ...((c['attributes'] as Map?) ?? const {}).entries.map((e) => '${e.key} ${e.value}'),
             ].whereType<Object>().join(' · ')),
-            onTap: () => context.pushReplacement('/asset/${c['uid']}'),
+            onTap: () => context.pushReplacement(inWorkspace('/asset/${c['uid']}', c['workspace_id']?.toString())),
           ),
       ]);
 }

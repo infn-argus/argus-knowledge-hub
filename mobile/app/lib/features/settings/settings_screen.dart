@@ -33,6 +33,14 @@ class SettingsScreen extends ConsumerWidget {
             onSelectionChanged: (s) => ref.read(themeModeProvider.notifier).set(s.first),
           ),
         ),
+        SwitchListTile(
+          key: const Key('settings-show-keys'),
+          title: const Text('Show keys'),
+          subtitle: const Text('Equipment and documents with their key (SPARC-IP-01, PROC-0042); '
+              'off: by name and title only'),
+          value: ref.watch(showKeysProvider),
+          onChanged: (v) => ref.read(showKeysProvider.notifier).set(v),
+        ),
         const _Notifications(),
         const SectionHeader('On this device'),
         ListTile(

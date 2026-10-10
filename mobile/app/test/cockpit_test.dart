@@ -5,11 +5,11 @@ import 'fake_server.dart';
 import 'harness.dart';
 
 void main() {
-  testWidgets('home shows the cockpit: the counts, assigned to me, hotspots, knowledge health, states and activity',
+  testWidgets('home shows the cockpit: the counts, your tickets, hotspots, knowledge health, states and activity',
       (tester) async {
     final r = await start(tester, prepare: (s) => s.serveOverview = true);
 
-    expect(find.text('ASSIGNED TO ME'), findsOneWidget);
+    expect(find.text('YOUR TICKETS'), findsOneWidget);
     expect(find.text('Open tickets'), findsOneWidget);
     expect(find.text('2 in total'), findsOneWidget);
     expect(find.text('Awaiting approval'), findsOneWidget);

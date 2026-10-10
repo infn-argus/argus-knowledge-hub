@@ -254,6 +254,8 @@ def attach_to_asset(uid: str, asset_uid: str, identity=Depends(get_identity),
         db.add(AssetHistory(uid=str(uuid.uuid4()), asset_uid=asset.uid, type="attachment", author=actor_of(identity),
                             details=f"Attached {u.filename}", timestamp=now))
         asset.updated_at = now
+        from app.services import notify
+        notify.asset_changed(db, asset.uid, f"Attached {u.filename}", actor_of(identity))
     db.commit()
     return out
 

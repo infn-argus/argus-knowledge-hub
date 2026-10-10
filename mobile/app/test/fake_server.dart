@@ -75,6 +75,7 @@ class FakeArgus {
 
   /// What the person asked to hear about, per workspace.
   final Map<String, Map<String, dynamic>> subscriptions = {};
+  final Set<String> following = {};
 
   /// Labels on records, by record uid: put on and taken off by the app.
   final Map<String, List<Map<String, dynamic>>> labels = {};
@@ -148,6 +149,24 @@ class FakeArgus {
         for (final (id, name) in [(workspaceId, 'Slice'), ('other-ws', 'Ring')])
           {'workspace_id': id, 'workspace_name': name, ...?subscriptions[id]},
       ]);
+    }
+    final follow = RegExp(r'^/v1/notifications/following/(asset|document)/([^/]+)$').firstMatch(p);
+    if (follow != null) {
+      final key = '${follow.group(1)}/${follow.group(2)}';
+      if (m == 'PUT') following.add(key);
+      if (m == 'DELETE') following.remove(key);
+      return _json({'subject': follow.group(1), 'uid': follow.group(2), 'following': following.contains(key),
+        'followers': following.contains(key) ? 1 : 0});
+    }
+    if (p == '/v1/search/jql' && m == 'GET') {
+      final jql = q['jql'] ?? '';
+      if (jql.trim().endsWith('=')) {
+        return _json({'detail': {'error': 'Expected a value', 'position': jql.length, 'code': 'jql'}}, 422);
+      }
+      return _json({'entity': q['entity'], 'jql': jql, 'total': 1, 'capped': false, 'offset': 0, 'items': [
+        {'uid': ionPumpUid, 'key': 'S7C415E:AST:IP-07', 'name': 'Ion pump 7', 'type': 'Ion Pump',
+          'workspace_id': workspaceId, 'workspace_name': 'Slice'},
+      ]});
     }
     final subscribe = RegExp(r'^/v1/notifications/subscriptions/([^/]+)$').firstMatch(p);
     if (m == 'PUT' && subscribe != null) {
@@ -235,7 +254,7 @@ class FakeArgus {
           'created': b['created'], 'updated': b['updated']}, 201);
       }
       if (RegExp(r'^/v1/issues/[^/]+/transition$').hasMatch(p)) return _json(fixture('ticket'));
-      if (RegExp(r'^/v1/notifications/\d+/read$').hasMatch(p)) return _json({'ok': true});
+      if (RegExp(r'^/v1/notifications/(everywhere/)?\d+/read$').hasMatch(p)) return _json({'ok': true});
       final upload = RegExp(r'^/v1/uploads/([^/]+)/(complete|attach/(ticket|asset|document)/.+)$').firstMatch(p);
       if (upload != null) {
         final attach = upload.group(2)!.startsWith('attach');
@@ -274,7 +293,7 @@ class FakeArgus {
       '/v1/meta/api' => 'meta',
       '/v1/hub/search' => 'search',
       '/v1/schemas' => 'schemas',
-      '/v1/notifications' => 'notifications',
+      '/v1/notifications' || '/v1/notifications/everywhere' => 'notifications',
       '/v1/assets/$positionUid' => 'position',
       '/v1/hub/assets/$positionUid/context' => 'position_context',
       '/v1/assets/$ionPumpUid' => 'ion_pump',

@@ -26,6 +26,12 @@ abstract class PhoneNotifier {
   Future<void> disable();
 
   Future<bool> get enabled;
+
+  /// While the app is open: ask for news now, and show what is new on the phone when the person turned it on.
+  Future<void> checkNow(AppConfig config);
+
+  /// How often the open app asks (null: never — tests).
+  Duration? get whileOpenEvery;
 }
 
 const _task = 'argus-news';
@@ -85,6 +91,19 @@ class DevicePhoneNotifier implements PhoneNotifier {
     await Workmanager().cancelByUniqueName(_task);
     await const FlutterSecureStorage().delete(key: _on);
   }
+
+  @override
+  Future<void> checkNow(AppConfig config) async {
+    if (!await enabled) return;
+    try {
+      await checkForNews(config);
+    } catch (_) {
+      // offline, or signed out: the next check tries again
+    }
+  }
+
+  @override
+  Duration? get whileOpenEvery => const Duration(minutes: 2);
 }
 
 @pragma('vm:entry-point')
