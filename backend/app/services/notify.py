@@ -206,3 +206,41 @@ def deliver_pending(db: Session) -> int:
     db.flush()
     return sent
 
+
+
+# --------------------------------------------------------------------------- subscriptions
+
+SUBJECTS = {"tickets": "ticket", "documents": "document", "assets": "asset"}
+
+
+def announce(db: Session, workspace_id: str, what: str, kind: str, title: str, actor: Optional[str], uid: str,
+             issue: Optional[Issue] = None, record=None) -> list[Notification]:
+    """Something new in a workspace, told to everyone who asked to hear about that kind of thing there
+    (`what`: tickets, documents or assets) — never to the person who made it, and only to those who may
+    read it: the resource's read permission, and a restricted record's class (I-ACL-1)."""
+    from app.auth import OidcIdentity, grants_of
+    from app.models.workflow import NotificationSubscription
+    from app.services.permissions import resolve_permission
+    from app.services.visibility import can_see
+    column = getattr(NotificationSubscription, what)
+    actor_user = _user(db, actor) if actor else None
+    resource = {"tickets": "tickets", "documents": "documents", "assets": "objects"}[what]
+    out = []
+    for sub in db.scalars(select(NotificationSubscription).where(
+            NotificationSubscription.workspace_id == workspace_id, column.is_(True))):
+        user = db.get(User, sub.user_id)
+        if user is None or (actor_user is not None and user.id == actor_user.id) or actor in (user.id, user.email):
+            continue
+        if not resolve_permission(db, user, workspace_id, "read", resource):
+            continue
+        if issue is not None and not may_see(db, issue, user.id):
+            continue
+        if record is not None and not can_see(record, grants_of(db, OidcIdentity(user=user), workspace_id)):
+            continue
+        n = Notification(workspace_id=workspace_id, recipient=user.id, issue_uid=issue.uid if issue else None,
+                         kind=kind, title=title, detail={"subject": SUBJECTS[what], "uid": uid}, actor=actor,
+                         created_at=now())
+        db.add(n)
+        out.append(n)
+    db.flush()
+    return out

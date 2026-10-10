@@ -125,6 +125,8 @@ def create_issue(
     db.flush()
     record_issue_created(db, issue, current_user_id)
     notify.on_created(db, issue, current_user_id)
+    notify.announce(db, issue.workspace_id, "tickets", "new_ticket", f"New ticket: {issue.title}", current_user_id,
+                    issue.uid, issue=issue)
     # A ticket raised on an object has to appear on that object, or the
     # link only exists in one direction.
     if issue.asset_uid:

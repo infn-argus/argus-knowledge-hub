@@ -67,6 +67,9 @@ FIELD_OPERATIONS = [
     ("post", "/v1/intake/runs/{run_id}/outcome"),
     ("get", "/v1/notifications"),
     ("post", "/v1/notifications/{nid}/read"),
+    ("get", "/v1/notifications/subscriptions"),
+    ("put", "/v1/notifications/subscriptions/{workspace_id}"),
+    ("get", "/v1/notifications/everywhere"),
     # Next to the equipment: what else references it, its files, and what people have said and done to it
     ("get", "/v1/assets/{asset_uid}/comments"),
     ("post", "/v1/assets/{asset_uid}/comments"),

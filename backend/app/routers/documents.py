@@ -11,7 +11,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth import Identity, OidcIdentity, PatIdentity, get_identity, require_permission
 from app.db import get_db
-from app.services import knowledge_schedule
+from app.services import knowledge_schedule, notify
 from app.services.permissions import has_permission
 from app.models.attachment import Attachment
 from app.models.document import Document, DocumentRelation, DocumentRevision
@@ -189,6 +189,9 @@ def create_document(
         next_review_due=body.next_review_due, authored_by=_actor_user_id(identity),
     )
     db.add(revision)
+    if doc.confidentiality != "riservato":
+        notify.announce(db, workspace_id, "documents", "new_document", f"New document: {doc.code} {doc.title}",
+                        _actor_user_id(identity), doc.uid)
     db.commit()
     db.refresh(doc)
     return doc
@@ -542,6 +545,7 @@ def publish_revision(
     uid: str,
     rev_uid: str,
     workspace_id: str = Depends(require_permission("approve", resource="documents")),
+    identity: Identity = Depends(get_identity),
     db: Session = Depends(get_db),
 ):
     doc = _get_owned_document(uid, workspace_id, db)
@@ -558,6 +562,10 @@ def publish_revision(
     revision.state = "published"
     revision.published_at = datetime.now(timezone.utc)
     doc.current_revision_uid = revision.uid
+    if doc.confidentiality != "riservato":
+        notify.announce(db, workspace_id, "documents", "document_published",
+                        f"Published: {doc.code} {doc.title} (revision {revision.revision_number})",
+                        _actor_user_id(identity), doc.uid)
     db.commit()
     db.refresh(revision)
     knowledge_schedule.after_document_change(db, workspace_id)

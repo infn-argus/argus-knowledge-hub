@@ -159,3 +159,74 @@ def mark_all_read(recipient: Optional[str] = Query(None), identity=Depends(get_i
         n.read_at = notify.now()
     db.commit()
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- what a person wants to hear about
+
+class SubscriptionIn(BaseModel):
+    tickets: bool = False
+    documents: bool = False
+    assets: bool = False
+
+
+@notifications_router.get("/subscriptions")
+def my_subscriptions(identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """For each workspace this person can open, what they hear about there: every new ticket, every new or
+    newly published document, every new piece of equipment. Off until chosen."""
+    from app.models.workflow import NotificationSubscription
+    from app.routers.workspaces import list_my_workspaces
+    if not isinstance(identity, OidcIdentity):
+        raise HTTPException(status_code=422, detail="Subscriptions belong to a person, not an API token.")
+    mine = {s.workspace_id: s for s in db.scalars(select(NotificationSubscription).where(
+        NotificationSubscription.user_id == identity.user.id))}
+    return [{"workspace_id": w.id, "workspace_name": w.name,
+             "tickets": bool(mine.get(w.id) and mine[w.id].tickets),
+             "documents": bool(mine.get(w.id) and mine[w.id].documents),
+             "assets": bool(mine.get(w.id) and mine[w.id].assets)}
+            for w in list_my_workspaces(identity, db)]
+
+
+@notifications_router.put("/subscriptions/{workspace_id}")
+def set_subscription(workspace_id: str, body: SubscriptionIn, identity=Depends(get_identity),
+                     db: Session = Depends(get_db)):
+    from app.models.workflow import NotificationSubscription
+    from app.services.permissions import resolve_permission
+    if not isinstance(identity, OidcIdentity):
+        raise HTTPException(status_code=422, detail="Subscriptions belong to a person, not an API token.")
+    if not resolve_permission(db, identity.user, workspace_id, "read", "objects") and \
+            not resolve_permission(db, identity.user, workspace_id, "read", "tickets"):
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    sub = db.scalar(select(NotificationSubscription).where(NotificationSubscription.user_id == identity.user.id,
+                                                           NotificationSubscription.workspace_id == workspace_id))
+    if sub is None:
+        sub = NotificationSubscription(user_id=identity.user.id, workspace_id=workspace_id)
+        db.add(sub)
+    sub.tickets, sub.documents, sub.assets = body.tickets, body.documents, body.assets
+    sub.updated_at = notify.now()
+    db.commit()
+    return {"workspace_id": workspace_id, **body.model_dump()}
+
+
+@notifications_router.get("/everywhere")
+def my_notifications_everywhere(after: int = 0, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """This person's unread notifications in every workspace they can still open, newer than `after` (the
+    last id the phone has shown): what a background check turns into phone notifications."""
+    from app.models.workspace import Workspace
+    from app.services.permissions import resolve_permission
+    if not isinstance(identity, OidcIdentity):
+        return []
+    rows = list(db.scalars(select(Notification).where(
+        Notification.recipient.in_(_me(db, identity, None)), Notification.read_at.is_(None), Notification.id > after)
+        .order_by(Notification.id).limit(50)))
+    out, names, allowed = [], {}, {}
+    for n in rows:
+        if n.workspace_id not in allowed:
+            allowed[n.workspace_id] = resolve_permission(db, identity.user, n.workspace_id, "read", "tickets") or \
+                resolve_permission(db, identity.user, n.workspace_id, "read", "objects")
+            ws = db.get(Workspace, n.workspace_id)
+            names[n.workspace_id] = ws.name if ws else n.workspace_id
+        if allowed[n.workspace_id]:
+            out.append({"id": n.id, "workspace_id": n.workspace_id, "workspace_name": names[n.workspace_id],
+                        "kind": n.kind, "title": n.title, "issue_uid": n.issue_uid, "detail": n.detail,
+                        "created_at": n.created_at})
+    return out

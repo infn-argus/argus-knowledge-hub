@@ -230,6 +230,9 @@ def create_asset(
             is_global=data.get("is_global", False), avatar_icon_uid=data.get("avatar_icon_uid"))
     except LedgerError as exc:
         _ledger_failed(db, exc)
+    from app.services import notify
+    notify.announce(db, workspace_id, "assets", "new_asset", f"New equipment: {asset.name} ({asset.key})",
+                    current_user_id or _actor(identity), asset.uid, record=asset)
     db.commit()
     db.refresh(asset)
     return asset

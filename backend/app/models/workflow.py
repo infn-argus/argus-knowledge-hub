@@ -77,3 +77,18 @@ class TicketEscalation(Base):
     due_at: Mapped[object] = mapped_column(DateTime(timezone=True))
     escalated_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
     escalated_to: Mapped[list] = mapped_column(JSONB, default=list)
+
+
+class NotificationSubscription(Base):
+    """What a person wants to hear about in one workspace, beyond the tickets they watch: every new ticket,
+    every new or newly published document, every new piece of equipment."""
+    __tablename__ = "notification_subscriptions"
+    __table_args__ = (UniqueConstraint("user_id", "workspace_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    tickets: Mapped[bool] = mapped_column(Boolean, default=False)
+    documents: Mapped[bool] = mapped_column(Boolean, default=False)
+    assets: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)
