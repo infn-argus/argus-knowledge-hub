@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { assetsApi, documentsApi, graphApi, issuesApi } from "../../api/client";
 import type { FailureNode, FailureStep, ImpactResult, RootCauseCandidate } from "../../api/types";
 import { GraphCanvas, IN, OUT } from "../../components/graph/GraphCanvas";
-import { KIND_STYLE, LAYER_STYLE, LOSS_LABEL, nodeId, place, bundleEdges, openBundle, type GEdge, type GNode, type Neighbour } from "../../components/graph/model";
+import { KIND_STYLE, LAYER_STYLE, LOSS_LABEL, nodeId, place, bundleEdges, openBundle, STEP, type GEdge, type GNode, type Neighbour } from "../../components/graph/model";
 import { useBranches } from "../../components/graph/useBranches";
 import { DirectionLegend, RelationList } from "../../components/RelationGraph";
 
@@ -230,6 +230,7 @@ export function GraphExplorer() {
   const [healthy, setHealthy] = useState<{ uid: string; label: string }[]>([]);
   const [candidate, setCandidate] = useState(0);
   const [opened, setOpened] = useState<Set<string>>(new Set());   // groups opened in an analysis view
+  const [byMeaning, setByMeaning] = useState(false);              // the semantic graph beside the relations
 
   const summary = useQuery({ queryKey: ["graph-summary"], queryFn: graphApi.summary });
   const explore = useBranches(mode === "explore" && start ? { kind: startKind, uid: start.uid } : null,
@@ -253,8 +254,34 @@ export function GraphExplorer() {
       return causeGraph(rootCause.data.candidates[candidate], rootCause.data.symptoms);
     return null;
   }, [mode, impact.data, rootCause.data, candidate]);
+  const semantic = useQuery({
+    queryKey: ["semantic", startKind, start?.uid],
+    queryFn: () => graphApi.semantic(startKind, start!.uid),
+    enabled: mode === "explore" && !!start && byMeaning,
+    staleTime: 60_000,
+  });
+
   const drawn = useMemo(() => {
-    if (mode === "explore") return { nodes: explore.nodes, edges: explore.edges, rootId: explore.rootId };
+    if (mode === "explore") {
+      if (!byMeaning || !semantic.data || !explore.rootId) {
+        return { nodes: explore.nodes, edges: explore.edges, rootId: explore.rootId };
+      }
+      // Related by meaning: a column of their own, right of everything drawn, joined to the start by dashed lines.
+      const nodes = new Map(explore.nodes);
+      const col = Math.max(0, ...[...explore.nodes.values()].map((n) => n.col)) + 1;
+      const fresh = semantic.data.edges.filter((e) => !nodes.has(nodeId(e.to_kind, e.to_uid)));
+      fresh.forEach((e, i) => {
+        const n = semantic.data!.nodes.find((x) => x.kind === e.to_kind && x.uid === e.to_uid);
+        nodes.set(nodeId(e.to_kind, e.to_uid), {
+          id: nodeId(e.to_kind, e.to_uid), kind: e.to_kind as GNode["kind"], uid: e.to_uid, label: n?.label ?? e.to_uid,
+          sub: n?.sublabel ?? null, col, y: (i - (fresh.length - 1) / 2) * STEP, parent: explore.rootId, seq: 10_000 + i,
+        });
+      });
+      const edges = [...explore.edges, ...semantic.data.edges.map((e): GEdge => ({
+        from: explore.rootId!, to: nodeId(e.to_kind, e.to_uid), relation: e.score.toFixed(2), via: "semantic",
+      }))];
+      return { nodes, edges, rootId: explore.rootId };
+    }
     if (!analysis) return { nodes: new Map<string, GNode>(), edges: [] as GEdge[], rootId: null };
     // Groups the person opened in this view, replaced by their members.
     const nodes = new Map(analysis.nodes);
@@ -269,7 +296,7 @@ export function GraphExplorer() {
     }
     const root = [...nodes.values()].find((n) => n.mark === "origin" || n.mark === "cause");
     return { nodes, edges, rootId: root?.id ?? null };
-  }, [mode, explore.nodes, explore.edges, explore.rootId, analysis, opened]);
+  }, [mode, explore.nodes, explore.edges, explore.rootId, analysis, opened, byMeaning, semantic.data]);
 
   const current = selected && drawn.nodes.has(selected) ? selected : drawn.rootId;
   const sel = current ? drawn.nodes.get(current) : undefined;
@@ -360,6 +387,18 @@ export function GraphExplorer() {
                   </button>
                 );
               })}
+              <label className="ml-2 flex items-center gap-1 text-xs text-teal-700"
+                     title="From the knowledge index: records whose written knowledge is about the same thing as the start">
+                <input type="checkbox" checked={byMeaning} onChange={(e) => setByMeaning(e.target.checked)} />
+                related by meaning
+                {byMeaning && semantic.isFetching && " …"}
+                {byMeaning && semantic.data && !semantic.data.available && (
+                  <span className="text-slate-400"> — {semantic.data.reason}</span>
+                )}
+                {byMeaning && semantic.data?.available && semantic.data.edges.length === 0 && (
+                  <span className="text-slate-400"> — none found</span>
+                )}
+              </label>
             </div>
           ) : (
             <div className="flex flex-wrap gap-1" title="Which ways a failure may travel; none selected means all">

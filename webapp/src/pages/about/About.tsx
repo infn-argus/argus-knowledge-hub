@@ -51,6 +51,17 @@ export function AboutPage() {
             </>
           ) : api.isError ? <span className="text-red-600">not reachable</span> : "…"}
         </Row>
+        <Row label="Privacy">
+          <a className="text-blue-600 hover:underline" href="/privacy.html" target="_blank" rel="noreferrer">
+            How ARGUS and ARGUS Field use data
+          </a>
+        </Row>
+        <Row label="Mobile app">
+          ARGUS Field, for Android and iOS: the APK is attached to each{" "}
+          <a className="text-blue-600 hover:underline" href="https://github.com/infn-argus/argus-knowledge-hub/releases/latest"
+             target="_blank" rel="noreferrer">release</a>
+          ; see <a className="text-blue-600 hover:underline" href="/help/mobile-app">Help → The mobile app</a>.
+        </Row>
         <Row label="Licence">
           <a className="text-blue-600 hover:underline" href={EUPL_URL} target="_blank" rel="noreferrer">
             European Union Public Licence v. 1.2 (EUPL-1.2)

@@ -1,6 +1,6 @@
 ---
 title: My account, API tokens and the mobile app
-summary: Seeing who you are to ARGUS and what you may do; personal access tokens for your scripts; robot tokens for machines such as a facility's daily-logbook uploader; how the mobile app signs in.
+summary: Seeing who you are to ARGUS and what you may do; personal access tokens for your scripts; robot tokens for machines such as a facility's daily-logbook uploader; and where the mobile app is described.
 keywords: [olog, phoebus, epik8s, elog, electronic logbook, logbook entry, account, profile, me, who am i, permissions, roles, groups, token, api token, personal access token, pat, robot, robot token, service account, bot, logbook, daily logbook, upload, script, curl, api, automation, scope, expiry, revoke, mobile, app, android, ios, flutter, field, pkce, argus-mobile]
 order: 145
 ---
@@ -53,6 +53,12 @@ A workspace owner (or an administrator) makes them:
 Give each machine its own token, so one can be revoked without stopping the others. A robot token needs
 no `X-Workspace-Id` header.
 
+## If an API request is refused
+
+Check the token's expiry, whether it was revoked, its scopes and kinds of record, and the workspace it names (or the
+`X-Workspace-Id` header). A personal token also stops at what its owner's roles allow today. `<api>/docs` describes
+every request and its answer.
+
 ## Upload a facility's daily logbook
 
 With a **Daily logbook upload** token (read, create and modify documents), a nightly job:
@@ -63,8 +69,11 @@ With a **Daily logbook upload** token (read, create and modify documents), a nig
    field `file`).
 
 The **Robot tokens** page shows the exact commands, with this workspace's logbook type filled in.
-Re-running the same day answers 409 (already there), so the job can safely retry. Logbooks are then
-indexed like every other document, and Ask ARGUS can answer "what happened last Tuesday on the linac".
+Re-running the same day's creation answers 409 (already there). If a run stopped half way, check the two steps
+apart: the first run may have created the document without attaching the file. Attach it to the day's draft
+revision (`<uid>-r1`); attaching the same file twice adds a second copy, and a revision already published takes no
+new files. Logbooks are then indexed like every other document, and Ask ARGUS can answer "what happened last
+Tuesday on the linac".
 
 The same pattern serves any other data: a token with only the scopes and kinds of record the job
 needs, and the endpoints listed in the API reference at `<api>/docs`.
@@ -95,19 +104,6 @@ what it may do, when it expires, and when it was last used. An administrator can
 
 ## The mobile app (ARGUS Field)
 
-The Android and iOS app does **not** use tokens typed into it. It signs in like the web app, through
-the phone's browser, with the identity provider (OpenID Connect with PKCE), as the client
-`argus-mobile`. It then registers the phone as a device. What it may do is the person's own roles.
-Revoking the device, or the person's sessions at the identity provider, signs it out and wipes what it
-saved.
-
-For it to sign in, the identity provider needs the `argus-mobile` client, whose access token is
-addressed to the API (an audience mapper adding the web client's id). A new installation's Keycloak gets
-it with the realm. An installation set up before has to add it once (`docs/operations.md`, "The mobile
-app's sign-in client").
-
-On the Keycloak page the app opens, **Google** signs in with a Google account, when the installation offers
-it: the same person as with Google in the web app, recognised by email. Without a workspace yet, the app
-shows none until an administrator gives access.
-
-The app also has **Ask**, the assistant of *Ask ARGUS*, typed or spoken (see *Ask ARGUS*, "On the phone").
+The Android and iOS app does **not** use tokens typed into it: it signs in like the web app, through the phone's
+browser, with the identity provider, and works with the person's own roles. How to use it, how it signs in and how
+its access is withdrawn are in *The mobile app (ARGUS Field)*.

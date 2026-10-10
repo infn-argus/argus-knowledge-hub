@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/providers.dart';
 
@@ -23,6 +24,21 @@ class DiagnosticsScreen extends ConsumerWidget {
         row('Author', 'Andrea Michelotti'),
         row('Email', 'andrea.michelotti@infn.it'),
         row('Licence', 'European Union Public Licence v. 1.2 (EUPL-1.2)'),
+        ListTile(
+          dense: true,
+          title: const Text('Privacy policy'),
+          subtitle: Text(config.privacyPolicy.toString()),
+          trailing: const Icon(Icons.open_in_new),
+          onTap: () => launchUrl(config.privacyPolicy, mode: LaunchMode.externalApplication),
+        ),
+        ListTile(
+          dense: true,
+          title: const Text('Help'),
+          subtitle: const Text('The guide, with a topic on this app'),
+          trailing: const Icon(Icons.open_in_new),
+          onTap: () => launchUrl(Uri.https(config.privacyPolicy.host, '/help/mobile-app'),
+              mode: LaunchMode.externalApplication),
+        ),
         ListTile(
           dense: true,
           title: const Text('Licences'),

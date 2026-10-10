@@ -252,7 +252,8 @@ from the last export in the Git repository.
 - the signing key itself, where the deployment provides it (production: its Kubernetes Secret), so the
   rebuilt installation keeps signing with the same key;
 - exports whose data is **In the repository, with the archive**. An archive whose data went to an
-  artifact store on the lost installation cannot be imported again.
+  artifact store needs a surviving copy of that store: if its only copy was on the lost installation, the
+  checkpoint alone cannot restore the data.
 
 **Then, on the new installation:**
 1. Sign in as its first administrator (the deployment's `ARGUS_BOOTSTRAP_ADMINS`). A new installation
@@ -275,6 +276,16 @@ What an archive holds is what existed when it was made: data that came later, or
 archive did not yet carry (before 1.35: beam models, global values, groups, equipment classes), have to be
 brought back by hand.
 
+## Check the result after finalizing
+
+Compare the workspaces and record counts with the dry run and the reconciliation. Open a few assets, tickets,
+documents and attachments, and check their relations, revision history and beam-model bindings. Review the
+roles and the people imported, test users included.
+
+Then set up again what an archive does not carry: the AI endpoint and its index, new integration tokens, field
+devices. Check that a few people can sign in, see what they should and find what they search for, before handing
+the installation over.
+
 ## When something goes wrong
 
 | What you see | What it means, and what to do |
@@ -288,8 +299,8 @@ brought back by hand.
 | *push refused* mentioning a file size | a data file is above the provider's limit (100 MB on GitHub): use an artifact store for that export |
 | Verify fails on the signature | the exporter's public key is not in this installation's trusted keys, or the archive was changed |
 | *another administrator must approve* | the policy wants two people: ask a second administrator |
-| Dry run blocked: *same key, different content, not from this chain* | records with the same id already exist here, made here and different: ARGUS never overwrites them. Change or remove them here first, or discard the import |
-| Dry run blocked: unresolved references | the archive refers to records neither side has (for example deleted ones): choose *leave unresolved and list them in the reconciliation* and run the dry run again |
+| Dry run blocked: *same key, different content, not from this chain* | records with the same id already exist here, made here and different: ARGUS never overwrites them. Look at the conflicting records and the reconciliation with the administrator responsible, then resolve them deliberately or discard the import. Do not delete records here just to make the import pass |
+| Dry run blocked: unresolved references | the archive refers to records neither side has (for example deleted ones): look at what refers to them first; when that is acceptable, choose *leave unresolved and list them in the reconciliation* and run the dry run again |
 | Execute stopped half way | **Resume in staging**; nothing reached the real database |
 | Finalize reports a difference | nothing was committed; read the reconciliation, then retry or Discard |
 | Not enough space | an import needs room for the files in quarantine and the staging database; ask for disk space first |

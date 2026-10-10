@@ -19,6 +19,14 @@ sources that disagree. They wait in the **Review queue** (side bar) until someon
 
 A record made only from proposals shows as **Provisional** until it is accepted.
 
+## Check the evidence
+
+Confirm a proposal when its evidence supports it; **correct** it when you have evidence for another value;
+reject it when it is wrong or does not apply. When the evidence is not enough, ask before deciding.
+
+For an installation, check the physical unit and its position: a similar name alone does not show that the
+unit is installed there.
+
 ## Decide
 
 For each item: **Confirm** it as it is, **Correct** it (give the right value), or reject it. Each item

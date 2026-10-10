@@ -5,8 +5,9 @@ keywords: [import, imports, epik8s, values.yaml, jira, insight, confluence, git,
 order: 50
 ---
 
-Imports read another system into the workspace you are in. They never delete: a re-import updates what
-the source says and keeps what people edited since.
+Imports read another system into the workspace you are in. They do not delete records: a re-import
+updates what the source says, and what a person changed since the previous run is decided by the **merge
+strategy** (by default, the person's value is kept).
 
 ## Where
 
@@ -36,7 +37,8 @@ records what it read (for Git sources, the commit).
 4. Options:
    - **Infer equipment and lattice elements (rules)**: also make what the channels drive, which the file
      never lists: magnets and their supplies, ion pumps, cameras, BPMs, screens, mirrors… They are
-     marked *inferred*, and anything a person later edits is kept on the next run.
+     marked *inferred*; a person's later edits are kept on the next run under the default merge strategy
+     (check the strategy before re-running).
    - **Infer controllers**: the controller box each IOC talks to.
    - **Link to units already in the inventory**: link a channel to equipment the inventory already
      holds instead of inferring a twin (as proposals under *Channels ↔ hardware*).
@@ -63,3 +65,14 @@ Notes:
 
 When an import meets a value a person changed since the previous run, the strategy decides: keep the
 person's value (default), take the source's, or take whichever is newer.
+
+## Check an import before running it again
+
+1. Confirm the destination workspace and the saved configuration.
+2. Read the previous run's counts and warnings.
+3. Open a few representative records and their **Provenance**.
+4. Look at the inferred facts, conflicts and proposed hardware links waiting in the **Review queue**.
+5. Check the **merge strategy**, especially after people edited imported values.
+
+Re-run the saved configuration to update the same source. Something that disappeared from the source has not
+necessarily been removed or retired at the facility: find out before you change it by hand.

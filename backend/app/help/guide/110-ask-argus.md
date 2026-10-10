@@ -1,63 +1,96 @@
 ---
 title: Ask ARGUS
-summary: Asking questions in your own words, following up, and letting the assistant propose changes you confirm.
-keywords: [ask, ask argus, chat, voice, speak, microphone, hands-free, read aloud, phone, mobile, assistant, ai, question, answer, conversation, propose, proposal, apply, discard, create with ai, help, how to]
+summary: Asking questions in your own words, checking the answers, following up, letting the assistant propose changes you confirm, and using it on the phone.
+keywords: [ask, ask argus, chat, voice, speak, microphone, hands-free, read aloud, phone, mobile, assistant, ai, question, answer, conversation, propose, proposal, apply, discard, create with ai, help, how to, register from a photo, dictate, transcribe, document from a photo]
 order: 110
 ---
 
-**Ask ARGUS** (side bar) answers questions in your own words, in any language, from your workspace's
-own records: equipment, tickets, documents, the text of attached files, and this guide.
+**Ask ARGUS** answers questions in your own words, in any language, from the workspace's equipment, tickets,
+documents, the text of attached files and this guide.
 
 ## Ask
 
-1. Open **Ask ARGUS** and type a question: "which ion pumps are on the linac?", "what went wrong with
-   the gun vacuum before, and how was it fixed?", "how do I export a workspace?".
-2. You see each lookup as it runs (*Searching equipment*, *Reading what is written*, *Opening a
-   record*…) and then the answer. Every key in the answer opens its record.
-3. Ask a **follow-up** in the same conversation ("and which of those are in AC1?"): the earlier turns
-   are its context. **New chat** starts afresh; conversations are kept for you only.
+1. Open **Ask ARGUS** and ask: "Which ion pumps are on the linac?", "What went wrong with the gun vacuum
+   before, and how was it fixed?", "How do I export a workspace?".
+2. You see the **lookups** as it works (*Searching equipment*, *Reading what is written*, *Opening a record*).
+   Each record key in the answer opens its record.
+3. **Follow up** in the same conversation ("which of those are in AC1?"): earlier turns are its context.
+   **New chat** starts afresh. Conversations are kept, for you only.
 
-An answer built from **no lookups** is marked as such: treat it as unfounded. If it says the records do
-not contain something, it tells you what it looked at.
+An answer built from no lookups is marked as such: do not treat it as coming from the workspace's records.
+When something is not found, it says what it looked at.
+
+## Check an answer
+
+Open the linked records and check that they say what the answer says, about the right equipment, at the right
+revision or date. Lookups do not make every conclusion correct.
+
+*Not found* can mean the information is not there, that you may not read it, or that it has not been indexed
+yet. In a follow-up, give asset keys, dates and the part of the machine.
+
+To report a wrong answer, give the question, the part of the answer that is wrong, the records that show it and
+what it should have said. Leave out secrets and unrelated personal information.
 
 ## Let it make changes for you
 
-You can ask it to **create** records, **change** them, or **relate** them ("create a screen station
-SCN01 composed of camera … and motor …"). It never changes anything itself:
+Ask it to create, change or relate records: "Create screen station SCN01, composed of camera … and motor …". It
+**proposes**; it never changes anything by itself.
 
-1. It looks the records up, then **proposes** each change. Every proposal is checked at once: the type
-   exists, the record is there, the attributes belong to the type, the relation is allowed. A record it
-   proposes to create is called `new:1`, `new:2`… until it exists, so it can be related in the same
-   answer.
-2. The proposals appear under the answer as **Proposed changes**, with a box to tick each.
-3. Press **Apply** (all, or the ones ticked) or **Discard**. Applying goes through the same checks as
-   the forms, with **your** permissions, and is recorded in your name.
-4. Each line then shows *applied* (with a link to what was made), *failed* (and why), or *discarded*. A
-   relation to a record whose creation failed fails with it.
+1. It looks up the records and checks its proposals: the type exists, the records exist, the attributes belong
+   to the type, the relations are allowed. New records it proposes are called `new:1`, `new:2`… so they can be
+   related in the same answer.
+2. **Proposed changes** appears under the answer, with a box for each.
+3. **Apply** all of them or the ones ticked, or **Discard**. Applying goes through the same checks as the forms,
+   your rights, and your name in the history.
+4. Each then shows **applied** (with a link to the record), **failed** (with the reason) or **discarded**. A
+   relation that needs a record whose creation failed fails too.
 
-You are offered this only if you could make those changes by hand.
+You are only offered what your rights allow you to do by hand.
+
+## If only some changes succeed
+
+Read each result and open what was created or changed. Correct the ones that failed and retry only those: do
+not create again what already succeeded. When you apply a subset, include the creations the selected relations
+need.
 
 ## Ask it how to do something
 
-"How do I import an EPIK8s configuration?", "step by step, how do I move my local workspaces to
-production?": it answers from this guide, and can go through it with you one step at a time.
+"How do I import an EPIK8s configuration?", "step by step, how do I move local workspaces to production?": it
+answers from this guide, one step at a time if you like. The **Ask ARGUS to walk me through this** links in Help
+start the same.
 
 ## On the phone (ARGUS Field)
 
-The mobile app has the same assistant: the robot icon at the top of its home screen opens **Ask**.
+**Ask** is a tab of its own in the mobile app.
 
-1. Type a question, or press the **microphone** and say it. When you pause, what was heard is sent as the
+1. Type a question, or press the **microphone** and say it: when you pause, what was heard is sent as the
    question.
-2. The lookups appear as it works, then the answer. Follow-ups continue the conversation; **New
-   conversation** starts afresh, and **Earlier conversations** reopens one (also the ones from the web).
+2. You see the lookups while it works. Answers are formatted (lists, bold, tables), and the record keys they
+   cite open the record. Follow-ups continue the conversation; **New conversation** starts afresh; **Earlier
+   conversations** reopens past ones, the web's included.
 3. The **speaker** under an answer reads it aloud.
-4. **Hands-free** (the headset icon): each answer is read aloud, then the app listens for the next
-   question. It stops when you say nothing, or when you press the headset again.
+4. **Hands-free** (the headset icon): each answer is read aloud, then the app listens for the next question. It
+   stops when you say nothing, or when you press the headset again.
 
-Speech is recognised and spoken by the phone itself: only the words heard are sent, as a typed
-question would be. The first time, the phone asks to allow the microphone.
+Spoken questions are turned into words by the phone's speech-recognition service (on Android usually Google's,
+on iOS Apple's), which may process the audio under its own terms; only the recognised words go to ARGUS.
+Answers are read aloud by the phone. The first time, the phone asks to allow the microphone. Check equipment
+codes in what was heard before relying on the answer.
+
+## More than questions, on the phone
+
+The **+** beside the question box offers:
+
+- **Register equipment from a photo**: the camera opens on the nameplate, the form is filled from it, and you
+  check and register (see *The mobile app (ARGUS Field)*).
+- **Find or register by its label**: scan a QR code or barcode, read a printed serial, or type it; if nothing
+  carries it, register a new unit.
+- **Write a document by voice**: record it; the workspace's speech-to-text model transcribes it; you check the
+  text in the editor; the recording is kept with the draft.
+- **Write a document from a photo**: photograph a page; its text is read on the phone; the photo is kept with
+  the draft.
 
 ## When it is unavailable
 
-Ask ARGUS needs the workspace's AI endpoint (*AI endpoint*). Its search of what is written needs the
-written knowledge to be indexed there (*Written knowledge for Ask ARGUS*).
+Ask needs the workspace's AI endpoint to be set up and checked; searching what is written by meaning also needs
+the knowledge index. Writing a document by voice needs a speech model. See *AI settings*.
