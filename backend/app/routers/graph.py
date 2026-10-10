@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_permission
 from app.db import get_db
-from app.schemas.graph import GraphOut, GraphSummaryOut
+from app.models.document import Document
+from app.schemas.graph import GraphNodeOut, GraphOut, GraphSummaryOut, SemanticEdgeOut, SemanticGraphOut
 from app.services import causal_model
 from app.services.knowledge_graph import MAX_NODES, graph_summary, traverse
 from app.services.alarm_symptoms import root_cause_from_alarms
@@ -59,6 +60,46 @@ def _layers(value: Optional[str]) -> Optional[list]:
         raise HTTPException(status_code=422, detail=f"Unknown layer: {', '.join(unknown)}. "
                                                     f"Layers are {', '.join(causal_model.LAYERS)}.")
     return layers
+
+
+@router.get("/semantic", response_model=SemanticGraphOut)
+def get_semantic_graph(
+    kind: str = Query(pattern="^(asset|ticket|document)$"),
+    uid: str = Query(description="The record to start from"),
+    limit: int = Query(10, ge=1, le=30),
+    min_score: float = Query(0.3, ge=0, le=1, description="How close, 0 to 1, a record must be to be shown"),
+    workspace_id: str = Depends(require_permission("read")),
+    db: Session = Depends(get_db),
+):
+    """The semantic graph around one record: the records whose indexed text (procedures, tickets and their
+    comments, comments on equipment, attached files) is closest in meaning to its own, from the knowledge
+    index Ask ARGUS searches — what the relation graph cannot show, because nobody linked them."""
+    from app.routers.ai import endpoint_for
+    from app.services import knowledge_index
+    from app.services.ai_config import resolve as resolve_config
+    start = traverse(db, workspace_id, kind, uid, depth=1, max_nodes=1)
+    if not start.nodes:
+        raise HTTPException(status_code=404, detail="No such node in this workspace")
+    config, _from = resolve_config(db, workspace_id)
+    endpoint = endpoint_for(config) if config is not None and config.enabled and config.last_check_ok else None
+    found = knowledge_index.related(db, workspace_id, kind, uid, endpoint, limit=limit, min_score=min_score,
+                                    confidential_ok=bool(config and config.allow_confidential))
+    root = start.nodes[0]
+    nodes = [GraphNodeOut(kind=root.kind, uid=root.uid, label=root.label, sublabel=root.sublabel,
+                          type_name=root.type_name, state=root.state, depth=0)]
+    edges = []
+    for r in found.get("related", []):
+        rec = r["record"]
+        label = rec.get("name") or rec.get("title") or rec.get("code") or r["title"]
+        sublabel = rec.get("key") or rec.get("source_key") or (rec.get("code") if r["kind"] == "document" else None)
+        if r["kind"] == "document":
+            doc = db.get(Document, r["uid"])
+            label = f"{doc.code} {doc.title}" if doc else label
+        nodes.append(GraphNodeOut(kind=r["kind"], uid=r["uid"], label=label, sublabel=sublabel, depth=1))
+        edges.append(SemanticEdgeOut(from_kind=kind, from_uid=uid, to_kind=r["kind"], to_uid=r["uid"],
+                                     score=r["score"], excerpt=r["excerpt"], matched=r["matched"]))
+    return SemanticGraphOut(nodes=nodes, edges=edges, available=found.get("available", False),
+                            reason=found.get("reason"), basis=found.get("from"))
 
 
 @router.get("/relation-semantics")

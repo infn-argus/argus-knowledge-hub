@@ -194,3 +194,41 @@ def test_a_reranker_orders_the_passages_found(world, monkeypatch):
     finally:
         db.close()
     assert not plain["reranked"] and len(plain["results"]) == 2
+
+
+def test_the_semantic_graph_links_what_is_about_the_same_thing_and_only_what_may_be_read(world):
+    run(world)
+    db = SessionLocal()
+    try:
+        ws = world["ws"]
+        found = ki.related(db, ws, "document", f"{ws}-PROC-1", min_score=0.2)  # the fake model scores low
+        got = {(r["kind"], r["uid"]): r for r in found["related"]}
+        assert ("ticket", f"{ws}-t1") in got, "the ion pump that trips is about an ion pump replacement"
+        assert ("ticket", f"{ws}-t2") not in got, "a restricted ticket is not shown"
+        assert ("document", f"{world['other']}-PROC-3") not in got, "nor another workspace's private document"
+        assert ("document", f"{ws}-PROC-4") not in got, "nor a confidential one"
+        assert ("document", f"{ws}-PROC-1") not in got, "nor the record itself"
+        first = found["related"][0]
+        assert 0 < first["score"] <= 1 and first["excerpt"] and first["matched"]
+        assert [r["score"] for r in found["related"]] == sorted((r["score"] for r in found["related"]), reverse=True)
+    finally:
+        db.close()
+
+
+def test_the_semantic_graph_through_the_api(world):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from tests.test_ledger_transition import token
+    run(world)
+    db = SessionLocal()
+    headers = token(db, world["ws"])
+    db.commit()
+    db.close()
+    client = TestClient(app)
+    r = client.get("/v1/graph/semantic", headers=headers, params={"kind": "ticket", "uid": f"{world['ws']}-t1",
+                                                                  "min_score": 0.2})
+    assert r.status_code == 200, r.text
+    g = r.json()
+    assert g["nodes"][0]["uid"] == f"{world['ws']}-t1" and g["nodes"][0]["depth"] == 0
+    assert g["edges"] and all(e["relation"] == "similar" and e["from_uid"] == f"{world['ws']}-t1" for e in g["edges"])
+    assert client.get("/v1/graph/semantic", headers=headers, params={"kind": "ticket", "uid": "nope"}).status_code == 404

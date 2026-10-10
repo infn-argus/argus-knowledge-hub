@@ -2202,6 +2202,139 @@
         "title": "GlobalValueOut",
         "type": "object"
       },
+      "GraphEdgeOut": {
+        "properties": {
+          "from_kind": {
+            "title": "From Kind",
+            "type": "string"
+          },
+          "from_uid": {
+            "title": "From Uid",
+            "type": "string"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "to_kind": {
+            "title": "To Kind",
+            "type": "string"
+          },
+          "to_uid": {
+            "title": "To Uid",
+            "type": "string"
+          },
+          "via": {
+            "title": "Via",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_kind",
+          "from_uid",
+          "to_kind",
+          "to_uid",
+          "relation",
+          "via"
+        ],
+        "title": "GraphEdgeOut",
+        "type": "object"
+      },
+      "GraphNodeOut": {
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "restricted": {
+            "default": false,
+            "title": "Restricted",
+            "type": "boolean"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "sublabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sublabel"
+          },
+          "type_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type Name"
+          },
+          "uid": {
+            "title": "Uid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "uid",
+          "label",
+          "depth"
+        ],
+        "title": "GraphNodeOut",
+        "type": "object"
+      },
+      "GraphOut": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdgeOut"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeOut"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges",
+          "truncated"
+        ],
+        "title": "GraphOut",
+        "type": "object"
+      },
       "GuideIn": {
         "properties": {
           "draft": {
@@ -3107,6 +3240,106 @@
           "updated_at"
         ],
         "title": "SchemaOut",
+        "type": "object"
+      },
+      "SemanticEdgeOut": {
+        "description": "Two records whose written knowledge is about the same thing: how close (0 to 1), and the closest\npassages on each side, so the link explains itself.",
+        "properties": {
+          "excerpt": {
+            "title": "Excerpt",
+            "type": "string"
+          },
+          "from_kind": {
+            "title": "From Kind",
+            "type": "string"
+          },
+          "from_uid": {
+            "title": "From Uid",
+            "type": "string"
+          },
+          "matched": {
+            "title": "Matched",
+            "type": "string"
+          },
+          "relation": {
+            "default": "similar",
+            "title": "Relation",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "to_kind": {
+            "title": "To Kind",
+            "type": "string"
+          },
+          "to_uid": {
+            "title": "To Uid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_kind",
+          "from_uid",
+          "to_kind",
+          "to_uid",
+          "score",
+          "excerpt",
+          "matched"
+        ],
+        "title": "SemanticEdgeOut",
+        "type": "object"
+      },
+      "SemanticGraphOut": {
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/SemanticEdgeOut"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeOut"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "SemanticGraphOut",
         "type": "object"
       },
       "SubscriptionIn": {
@@ -6427,6 +6660,259 @@
         "summary": "List Global Values",
         "tags": [
           "global-values"
+        ]
+      }
+    },
+    "/v1/graph": {
+      "get": {
+        "description": "Everything within `depth` hops of one node, across objects, tickets,\ndocuments and people.\n\nDepth is capped at 4 deliberately: in a real inventory a hub object\nreaches most of the graph by the third hop, and an answer that large\nhelps nobody.",
+        "operationId": "get_graph",
+        "parameters": [
+          {
+            "description": "asset | ticket | document | group | person",
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "description": "asset | ticket | document | group | person",
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The node to start from",
+            "in": "query",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "description": "The node to start from",
+              "title": "Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 4,
+              "minimum": 1,
+              "title": "Depth",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Comma-separated node kinds to keep, e.g. 'asset,document'",
+            "in": "query",
+            "name": "kinds",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated node kinds to keep, e.g. 'asset,document'",
+              "title": "Kinds"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_nodes",
+            "required": false,
+            "schema": {
+              "default": 400,
+              "maximum": 400,
+              "minimum": 1,
+              "title": "Max Nodes",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Graph",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
+    "/v1/graph/semantic": {
+      "get": {
+        "description": "The semantic graph around one record: the records whose indexed text (procedures, tickets and their\ncomments, comments on equipment, attached files) is closest in meaning to its own, from the knowledge\nindex Ask ARGUS searches — what the relation graph cannot show, because nobody linked them.",
+        "operationId": "get_semantic_graph",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "pattern": "^(asset|ticket|document)$",
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The record to start from",
+            "in": "query",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "description": "The record to start from",
+              "title": "Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 30,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "How close, 0 to 1, a record must be to be shown",
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "default": 0.3,
+              "description": "How close, 0 to 1, a record must be to be shown",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Min Score",
+              "type": "number"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticGraphOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Semantic Graph",
+        "tags": [
+          "graph"
         ]
       }
     },

@@ -481,6 +481,105 @@ def search(db: Session, workspace_id: str, endpoint: Endpoint, query: str, kinds
     return {"available": True, "results": results[:wanted], "reranked": reranked}
 
 
+# --------------------------------------------------------------------------- the semantic graph
+
+def _record_of(db: Session, row) -> Optional[tuple[str, str]]:
+    """The record a passage speaks for: a document (its text or a revision's file), a ticket (its text, a
+    comment, a file), a piece of equipment (a comment on it, a file)."""
+    kind, parent = row["source_kind"], row["parent_kind"]
+    if kind == "document":
+        return "document", row["source_uid"]
+    if kind == "ticket":
+        return "ticket", row["source_uid"]
+    if parent == "ticket":
+        return "ticket", row["parent_uid"]
+    if parent == "asset":
+        return "asset", row["parent_uid"]
+    if parent == "document_revision":
+        revision = db.get(DocumentRevision, row["parent_uid"])
+        return ("document", revision.document_uid) if revision else None
+    return None
+
+
+def _own_passages(db: Session, kind: str, uid: str, model: str, limit: int = 6) -> list[dict]:
+    if kind == "document":
+        revisions = [r for (r,) in db.execute(select(DocumentRevision.uid).where(DocumentRevision.document_uid == uid))]
+        where = ("((source_kind = 'document' AND source_uid = :u) OR "
+                 "(parent_kind = 'document_revision' AND parent_uid = ANY(:revs)))")
+        params = {"u": uid, "revs": revisions}
+    elif kind == "ticket":
+        where, params = "((source_kind = 'ticket' AND source_uid = :u) OR (parent_kind = 'ticket' AND parent_uid = :u))", {"u": uid}
+    elif kind == "asset":
+        where, params = "(parent_kind = 'asset' AND parent_uid = :u)", {"u": uid}
+    else:
+        return []
+    return [dict(r) for r in db.execute(text(
+        f"SELECT body, embedding::text AS vec FROM knowledge_chunks WHERE {where} AND model = :m "
+        "AND embedding IS NOT NULL ORDER BY source_kind, seq LIMIT :n"), {**params, "m": model, "n": limit}).mappings()]
+
+
+def _describe(db: Session, kind: str, uid: str) -> Optional[str]:
+    """What a record without indexed text is, to search by: its key, name, type and description."""
+    if kind == "asset":
+        a = db.get(Asset, uid)
+        if a is None:
+            return None
+        attrs = a.attributes or {}
+        return " ".join(str(x) for x in (a.key, a.name, a.type, attrs.get("description"), attrs.get("manufacturer"),
+                                         attrs.get("model")) if x)
+    if kind == "ticket":
+        i = db.get(Issue, uid)
+        return f"{i.title}\n{i.description or ''}" if i else None
+    if kind == "document":
+        d = db.get(Document, uid)
+        return f"{d.code} {d.title}" if d else None
+    return None
+
+
+def related(db: Session, workspace_id: str, kind: str, uid: str, endpoint: Optional[Endpoint] = None,
+            limit: int = 10, min_score: float = 0.3, confidential_ok: bool = False) -> dict:
+    """The records whose written knowledge is about the same thing as this one's — the semantic graph beside
+    the relation graph. Each comes with how close it is (cosine similarity of the closest passages, 0 to 1)
+    and the two passages that are closest, so the link explains itself. Only what this workspace may read."""
+    if not store_ready(db):
+        return {"available": False, "reason": "The written knowledge has not been indexed (AI settings)."}
+    model = (endpoint.embedding_model if endpoint and endpoint.embedding_model else None) or db.execute(text(
+        "SELECT model FROM knowledge_chunks WHERE workspace_id = :w GROUP BY model ORDER BY count(*) DESC LIMIT 1"),
+        {"w": workspace_id}).scalar()
+    if not model:
+        return {"available": True, "related": [], "from": "nothing indexed"}
+    own = _own_passages(db, kind, uid, model)
+    basis = "passages"
+    if not own and endpoint and endpoint.embedding_model:
+        description = _describe(db, kind, uid)
+        if description:
+            try:
+                own = [{"body": description, "vec": _vector(embed(endpoint, [description])[0])}]
+                basis = "description"
+            except LLMError:
+                own = []
+    best: dict[tuple, dict] = {}
+    for mine in own:
+        for row in db.execute(text(
+                "SELECT source_kind, source_uid, parent_kind, parent_uid, title, body, "
+                "1 - (embedding <=> CAST(:v AS vector)) AS score FROM knowledge_chunks "
+                "WHERE (workspace_id = :w OR shared) AND model = :m AND embedding IS NOT NULL "
+                "ORDER BY embedding <=> CAST(:v AS vector) LIMIT 40"),
+                {"v": mine["vec"], "w": workspace_id, "m": model}).mappings():
+            target = _record_of(db, row)
+            if target is None or target == (kind, uid) or row["score"] < min_score:
+                continue
+            if target in best and best[target]["score"] >= row["score"]:
+                continue
+            record = _visible(db, workspace_id, row, confidential_ok)
+            if record is None:
+                continue
+            best[target] = {"kind": target[0], "uid": target[1], "record": record, "score": round(float(row["score"]), 3),
+                            "excerpt": row["body"][:400], "matched": mine["body"][:400], "title": row["title"]}
+    ranked = sorted(best.values(), key=lambda r: r["score"], reverse=True)[:max(1, min(limit, 30))]
+    return {"available": True, "related": ranked, "from": basis if own else "nothing indexed"}
+
+
 # --------------------------------------------------------------------------- the command line
 
 def main(argv: list[str]) -> None:

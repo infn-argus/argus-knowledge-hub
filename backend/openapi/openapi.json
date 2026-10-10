@@ -9248,6 +9248,106 @@
         "title": "SchemaUpdate",
         "type": "object"
       },
+      "SemanticEdgeOut": {
+        "description": "Two records whose written knowledge is about the same thing: how close (0 to 1), and the closest\npassages on each side, so the link explains itself.",
+        "properties": {
+          "excerpt": {
+            "title": "Excerpt",
+            "type": "string"
+          },
+          "from_kind": {
+            "title": "From Kind",
+            "type": "string"
+          },
+          "from_uid": {
+            "title": "From Uid",
+            "type": "string"
+          },
+          "matched": {
+            "title": "Matched",
+            "type": "string"
+          },
+          "relation": {
+            "default": "similar",
+            "title": "Relation",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "to_kind": {
+            "title": "To Kind",
+            "type": "string"
+          },
+          "to_uid": {
+            "title": "To Uid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_kind",
+          "from_uid",
+          "to_kind",
+          "to_uid",
+          "score",
+          "excerpt",
+          "matched"
+        ],
+        "title": "SemanticEdgeOut",
+        "type": "object"
+      },
+      "SemanticGraphOut": {
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/SemanticEdgeOut"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeOut"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "SemanticGraphOut",
+        "type": "object"
+      },
       "SerialLineConvertIn": {
         "properties": {
           "accept_golden_loss": {
@@ -27947,6 +28047,124 @@
           }
         ],
         "summary": "Post Root Cause From Alarms",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
+    "/v1/graph/semantic": {
+      "get": {
+        "description": "The semantic graph around one record: the records whose indexed text (procedures, tickets and their\ncomments, comments on equipment, attached files) is closest in meaning to its own, from the knowledge\nindex Ask ARGUS searches — what the relation graph cannot show, because nobody linked them.",
+        "operationId": "get_semantic_graph_v1_graph_semantic_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "pattern": "^(asset|ticket|document)$",
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The record to start from",
+            "in": "query",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "description": "The record to start from",
+              "title": "Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 30,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "How close, 0 to 1, a record must be to be shown",
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "default": 0.3,
+              "description": "How close, 0 to 1, a record must be to be shown",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Min Score",
+              "type": "number"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticGraphOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Semantic Graph",
         "tags": [
           "graph"
         ]

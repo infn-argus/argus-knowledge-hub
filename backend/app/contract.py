@@ -27,6 +27,8 @@ FIELD_OPERATIONS = [
     ("get", "/v1/links/resolve"),
     ("get", "/v1/lookup/{identifier}"),
     ("get", "/v1/hub/search"),
+    ("get", "/v1/graph"),
+    ("get", "/v1/graph/semantic"),
     ("get", "/v1/hub/overview"),
     ("get", "/v1/assets/{uid}"),
     ("get", "/v1/hub/assets/{uid}/context"),
