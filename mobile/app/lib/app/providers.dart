@@ -24,6 +24,7 @@ import '../features/ask/voice.dart';
 import '../features/auth/auth_service.dart';
 import '../features/capture/media_source.dart';
 import '../features/capture/photo_source.dart';
+import '../features/notifications/phone_notifications.dart';
 import '../features/scan/text_reader.dart';
 import 'queue.dart';
 
@@ -490,3 +491,11 @@ final askConversationsProvider = FutureProvider.autoDispose<List<AskConversation
   ref.watch(workspaceIdProvider);
   return ref.watch(askRepositoryProvider).conversations();
 });
+
+
+/// News on the phone while the app is closed (features/notifications/phone_notifications.dart). Tests replace it.
+final phoneNotifierProvider = Provider<PhoneNotifier>((_) => DevicePhoneNotifier());
+
+/// What the person hears about, per workspace.
+final subscriptionsProvider = FutureProvider.autoDispose<List<WorkspaceSubscription>>(
+    (ref) => ref.watch(notificationRepositoryProvider).subscriptions());

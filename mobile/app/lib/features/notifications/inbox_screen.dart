@@ -32,7 +32,7 @@ class InboxScreen extends ConsumerWidget {
                       title: Text(n.title,
                           style: n.read ? null : const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text([n.kind, if (n.at != null) formatWhenDate(n.at)].whereType<String>().join(' · ')),
-                      onTap: n.issueUid == null
+                      onTap: n.route == null
                           ? null
                           : () async {
                               if (!n.read) {
@@ -41,7 +41,7 @@ class InboxScreen extends ConsumerWidget {
                                 } catch (_) {}
                                 ref.invalidate(notificationsProvider);
                               }
-                              if (context.mounted) context.push('/ticket/${n.issueUid}');
+                              if (context.mounted) context.push(n.route!);
                             },
                     ),
                 ]),

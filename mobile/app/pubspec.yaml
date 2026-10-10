@@ -38,6 +38,8 @@ dependencies:
   geolocator: ^14.1.1
   open_filex: ^4.7.0
   cryptography_flutter: ^2.3.4
+  workmanager: ^0.10.10
+  flutter_local_notifications: ^22.3.1
 
 dev_dependencies:
   flutter_test:

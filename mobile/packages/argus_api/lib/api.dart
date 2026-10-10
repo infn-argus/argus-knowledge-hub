@@ -94,6 +94,7 @@ part 'model/outcome_in.dart';
 part 'model/replace_in.dart';
 part 'model/revoke_in.dart';
 part 'model/schema_out.dart';
+part 'model/subscription_in.dart';
 part 'model/swap_in.dart';
 part 'model/transition_in.dart';
 part 'model/upload_in.dart';

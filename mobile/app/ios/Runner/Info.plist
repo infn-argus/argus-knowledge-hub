@@ -6,6 +6,15 @@
 	<string>The camera reads the label on equipment, and takes the photos and videos you attach.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The microphone hears a question you ask the assistant, and records the notes you attach.</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>argus-news</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Where you are is attached to a ticket, equipment or a document when you choose "Where I am".</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

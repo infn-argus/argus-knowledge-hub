@@ -73,6 +73,9 @@ class FakeArgus {
   final Map<String, Map<String, Object?>> labelLookups = {};
   final List<String> lookedUp = [];
 
+  /// What the person asked to hear about, per workspace.
+  final Map<String, Map<String, dynamic>> subscriptions = {};
+
   /// Labels on records, by record uid: put on and taken off by the app.
   final Map<String, List<Map<String, dynamic>>> labels = {};
 
@@ -109,6 +112,17 @@ class FakeArgus {
     if (m == 'DELETE' && labelDelete != null) {
       labels[labelDelete.group(1)!]?.removeWhere((l) => l['uid'] == labelDelete.group(2));
       return http.Response('', 204);
+    }
+    if (p == '/v1/notifications/subscriptions' && m == 'GET') {
+      return _json([
+        for (final (id, name) in [(workspaceId, 'Slice'), ('other-ws', 'Ring')])
+          {'workspace_id': id, 'workspace_name': name, ...?subscriptions[id]},
+      ]);
+    }
+    final subscribe = RegExp(r'^/v1/notifications/subscriptions/([^/]+)$').firstMatch(p);
+    if (m == 'PUT' && subscribe != null) {
+      subscriptions[subscribe.group(1)!] = body();
+      return _json({'workspace_id': subscribe.group(1), ...body()});
     }
     final revFiles = RegExp(r'^/v1/documents/([^/]+)/revisions/([^/]+)/attachments$').firstMatch(p);
     if (m == 'GET' && revFiles != null) return _json([]);

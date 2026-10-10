@@ -6,6 +6,8 @@
     <!-- "Where I am", attached to a ticket, equipment or a document: asked for when the person chooses it. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- News from ARGUS on the phone (Android 13 and later ask the person first). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
         android:label="ARGUS Field"

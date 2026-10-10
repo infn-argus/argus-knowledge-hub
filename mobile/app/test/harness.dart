@@ -16,6 +16,7 @@ import 'package:argus_field/core/blob_store.dart';
 import 'package:argus_field/core/local_store.dart';
 
 import 'package:argus_field/features/capture/media_source.dart';
+import 'package:argus_field/features/notifications/phone_notifications.dart';
 import 'package:argus_field/features/scan/text_reader.dart';
 
 import 'fake_server.dart';
@@ -98,6 +99,7 @@ Future<Running> start(WidgetTester tester,
       photoSourceProvider.overrideWithValue(photos),
       textReaderProvider.overrideWithValue(texts),
       mediaSourceProvider.overrideWithValue(media),
+      phoneNotifierProvider.overrideWithValue(FakePhoneNotifier()),
       ...overrides,
     ],
     child: const ArgusFieldApp(),
@@ -143,4 +145,22 @@ class _FakeRecorder implements NoteRecorder {
 
   @override
   Future<void> cancel() async {}
+}
+
+
+/// Notifications on the phone, in tests: allowed, and remembered.
+class FakePhoneNotifier implements PhoneNotifier {
+  bool on = false;
+
+  @override
+  bool get supported => true;
+
+  @override
+  Future<bool> get enabled async => on;
+
+  @override
+  Future<bool> enable(AppConfig config) async => on = true;
+
+  @override
+  Future<void> disable() async => on = false;
 }

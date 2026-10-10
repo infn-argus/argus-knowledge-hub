@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/caching_client.dart';
+import '../../core/problem.dart';
+import '../../domain/capture.dart';
 import '../../widgets/common.dart';
 
 /// What the person can set about the app itself, as opposed to the records: how it looks, and what it
@@ -31,6 +33,7 @@ class SettingsScreen extends ConsumerWidget {
             onSelectionChanged: (s) => ref.read(themeModeProvider.notifier).set(s.first),
           ),
         ),
+        const _Notifications(),
         const SectionHeader('On this device'),
         ListTile(
           leading: const Icon(Icons.offline_pin_outlined),
@@ -55,4 +58,106 @@ class SettingsScreen extends ConsumerWidget {
       ]),
     );
   }
+}
+
+
+/// What the person hears about, per workspace, and whether the phone shows it while the app is closed.
+class _Notifications extends ConsumerStatefulWidget {
+  const _Notifications();
+
+  @override
+  ConsumerState<_Notifications> createState() => _NotificationsState();
+}
+
+class _NotificationsState extends ConsumerState<_Notifications> {
+  bool? _phone;
+  final _saving = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    ref.read(phoneNotifierProvider).enabled.then((on) {
+      if (mounted) setState(() => _phone = on);
+    });
+  }
+
+  Future<void> _setPhone(bool on) async {
+    final notifier = ref.read(phoneNotifierProvider);
+    if (on) {
+      final allowed = await notifier.enable(ref.read(configProvider));
+      if (!allowed && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Notifications are not allowed for ARGUS Field. Allow them in the system settings.')));
+      }
+      setState(() => _phone = allowed);
+    } else {
+      await notifier.disable();
+      setState(() => _phone = false);
+    }
+  }
+
+  Future<void> _set(WorkspaceSubscription s) async {
+    setState(() => _saving.add(s.workspaceId));
+    try {
+      await ref.read(notificationRepositoryProvider).subscribe(s);
+      ref.invalidate(subscriptionsProvider);
+    } on Problem catch (p) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(p.message)));
+    } finally {
+      if (mounted) setState(() => _saving.remove(s.workspaceId));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final notifier = ref.watch(phoneNotifierProvider);
+    final subs = ref.watch(subscriptionsProvider);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const SectionHeader('Notifications'),
+      if (notifier.supported)
+        SwitchListTile(
+          key: const Key('settings-phone-notifications'),
+          secondary: const Icon(Icons.notifications_active_outlined),
+          title: const Text('Show news on this phone'),
+          subtitle: const Text('Checked about every 15 minutes while the app is closed.'),
+          value: _phone ?? false,
+          onChanged: _phone == null ? null : _setPhone,
+        ),
+      const Padding(
+        padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
+        child: Text('Besides the tickets you report, are assigned or watch, tell me about:'),
+      ),
+      subs.when(
+        loading: () => const Padding(padding: EdgeInsets.all(16), child: LinearProgressIndicator()),
+        error: (e, _) => ListTile(title: Text('$e')),
+        data: (all) => Column(children: [
+          for (final s in all)
+            ExpansionTile(
+              key: Key('settings-subscription-${s.workspaceId}'),
+              leading: const Icon(Icons.workspaces_outline),
+              title: Text(s.workspaceName),
+              subtitle: Text(_summary(s)),
+              children: [
+                for (final (key, label, value, change) in [
+                  ('tickets', 'New tickets', s.tickets, (bool v) => s.copyWith(tickets: v)),
+                  ('documents', 'New and published documents', s.documents, (bool v) => s.copyWith(documents: v)),
+                  ('assets', 'New equipment', s.assets, (bool v) => s.copyWith(assets: v)),
+                ])
+                  SwitchListTile(
+                    key: Key('subscribe-${s.workspaceId}-$key'),
+                    title: Text(label),
+                    value: value,
+                    onChanged: _saving.contains(s.workspaceId) ? null : (v) => _set(change(v)),
+                  ),
+              ],
+            ),
+        ]),
+      ),
+    ]);
+  }
+}
+
+String _summary(WorkspaceSubscription s) {
+  final what = [if (s.tickets) 'tickets', if (s.documents) 'documents', if (s.assets) 'equipment'];
+  return what.isEmpty ? 'Nothing new' : 'New ${what.join(', ')}';
 }

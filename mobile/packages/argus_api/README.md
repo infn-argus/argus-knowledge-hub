@@ -129,6 +129,9 @@ Class | Method | HTTP request | Description
 *MetaApi* | [**apiMeta**](doc//MetaApi.md#apimeta) | **GET** /v1/meta/api | Api Meta
 *NotificationsApi* | [**markRead**](doc//NotificationsApi.md#markread) | **POST** /v1/notifications/{nid}/read | Mark Read
 *NotificationsApi* | [**myNotifications**](doc//NotificationsApi.md#mynotifications) | **GET** /v1/notifications | My Notifications
+*NotificationsApi* | [**myNotificationsEverywhere**](doc//NotificationsApi.md#mynotificationseverywhere) | **GET** /v1/notifications/everywhere | My Notifications Everywhere
+*NotificationsApi* | [**mySubscriptions**](doc//NotificationsApi.md#mysubscriptions) | **GET** /v1/notifications/subscriptions | My Subscriptions
+*NotificationsApi* | [**setSubscription**](doc//NotificationsApi.md#setsubscription) | **PUT** /v1/notifications/subscriptions/{workspace_id} | Set Subscription
 *SchemasApi* | [**getSchema**](doc//SchemasApi.md#getschema) | **GET** /v1/schemas/{uid} | Get Schema
 *SchemasApi* | [**listSchemas**](doc//SchemasApi.md#listschemas) | **GET** /v1/schemas | List Schemas
 *UploadsApi* | [**attachToAsset**](doc//UploadsApi.md#attachtoasset) | **POST** /v1/uploads/{uid}/attach/asset/{asset_uid} | Attach To Asset
@@ -190,6 +193,7 @@ Class | Method | HTTP request | Description
  - [ReplaceIn](doc//ReplaceIn.md)
  - [RevokeIn](doc//RevokeIn.md)
  - [SchemaOut](doc//SchemaOut.md)
+ - [SubscriptionIn](doc//SubscriptionIn.md)
  - [SwapIn](doc//SwapIn.md)
  - [TransitionIn](doc//TransitionIn.md)
  - [UploadIn](doc//UploadIn.md)

@@ -78,6 +78,7 @@ lib/model/outcome_in.dart
 lib/model/replace_in.dart
 lib/model/revoke_in.dart
 lib/model/schema_out.dart
+lib/model/subscription_in.dart
 lib/model/swap_in.dart
 lib/model/transition_in.dart
 lib/model/upload_in.dart

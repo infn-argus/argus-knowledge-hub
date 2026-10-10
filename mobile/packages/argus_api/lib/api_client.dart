@@ -274,6 +274,8 @@ class ApiClient {
           return RevokeIn.fromJson(value);
         case 'SchemaOut':
           return SchemaOut.fromJson(value);
+        case 'SubscriptionIn':
+          return SubscriptionIn.fromJson(value);
         case 'SwapIn':
           return SwapIn.fromJson(value);
         case 'TransitionIn':

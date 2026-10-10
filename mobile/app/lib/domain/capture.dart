@@ -166,7 +166,8 @@ class TransitionResult {
 }
 
 class NotificationItem {
-  const NotificationItem({required this.id, required this.title, this.issueUid, this.kind, this.read = false, this.at});
+  const NotificationItem({required this.id, required this.title, this.issueUid, this.kind, this.read = false, this.at,
+      this.subject, this.subjectUid, this.workspaceId, this.workspaceName});
 
   final int id;
   final String title;
@@ -174,6 +175,38 @@ class NotificationItem {
   final String? kind;
   final bool read;
   final DateTime? at;
+  /// What it is about, when it is not a ticket's own news: 'ticket', 'document' or 'asset' (a subscription).
+  final String? subject;
+  final String? subjectUid;
+  final String? workspaceId;
+  final String? workspaceName;
+
+  /// Where tapping it leads.
+  String? get route => switch (subject) {
+        'document' => '/document/$subjectUid',
+        'asset' => '/asset/$subjectUid',
+        _ => issueUid != null ? '/ticket/$issueUid' : (subject == 'ticket' ? '/ticket/$subjectUid' : null),
+      };
+}
+
+/// What a person hears about in one workspace (subscriptions).
+class WorkspaceSubscription {
+  const WorkspaceSubscription(
+      {required this.workspaceId, required this.workspaceName, this.tickets = false, this.documents = false,
+       this.assets = false});
+
+  final String workspaceId;
+  final String workspaceName;
+  final bool tickets;
+  final bool documents;
+  final bool assets;
+
+  WorkspaceSubscription copyWith({bool? tickets, bool? documents, bool? assets}) => WorkspaceSubscription(
+      workspaceId: workspaceId,
+      workspaceName: workspaceName,
+      tickets: tickets ?? this.tickets,
+      documents: documents ?? this.documents,
+      assets: assets ?? this.assets);
 }
 
 // --------------------------------------------------------------------------- replacement and review (M3)

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/sync/sync_driver.dart';
+import 'package:go_router/go_router.dart';
+
+import '../features/notifications/phone_notifications.dart';
 import 'providers.dart';
 import 'router.dart';
 
@@ -23,13 +26,25 @@ class ArgusFieldApp extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => MaterialApp.router(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(routerProvider);
+    // A notification tapped opens what it is about: now, or once the app has started from it.
+    onNotificationTapped = router.push;
+    final launched = launchedFromNotification;
+    if (launched != null) {
+      launchedFromNotification = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) => router.push(launched));
+    }
+    return _app(ref, router);
+  }
+
+  Widget _app(WidgetRef ref, GoRouter router) => MaterialApp.router(
         title: 'ARGUS Field',
         debugShowCheckedModeBanner: false,
         theme: _theme(Brightness.light),
         darkTheme: _theme(Brightness.dark),
         themeMode: ref.watch(themeModeProvider),
-        routerConfig: ref.watch(routerProvider),
+        routerConfig: router,
         builder: (context, child) => SyncDriver(child: OfflineBanner(child: child ?? const SizedBox.shrink())),
       );
 }

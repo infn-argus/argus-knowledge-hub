@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
 import 'fake_server.dart';
+import 'harness.dart' show FakePhoneNotifier;
 
 const _config = AppConfig(
   environment: 'development',
@@ -33,6 +34,7 @@ Future<FakeArgus> _start(WidgetTester tester, {Map<String, String> stored = cons
       httpClientProvider.overrideWithValue(server.client),
       cacheStoreProvider.overrideWithValue(MemoryLocalStore()),
       blobStoreProvider.overrideWithValue(MemoryBlobStore()),
+      phoneNotifierProvider.overrideWithValue(FakePhoneNotifier()),
     ],
     child: const ArgusFieldApp(),
   ));

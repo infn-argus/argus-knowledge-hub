@@ -336,8 +336,42 @@ class NotificationRepository {
               issueUid: n['issue_uid']?.toString(),
               kind: n['kind']?.toString(),
               read: n['read'] == true,
-              at: _date(n['created_at'])))
+              at: _date(n['created_at']),
+              subject: _map(n['detail'])['subject']?.toString(),
+              subjectUid: _map(n['detail'])['uid']?.toString()))
           .toList();
+
+  /// Unread news in every workspace, newer than [after]: what the background check shows on the phone.
+  Future<List<NotificationItem>> everywhere({int after = 0}) async =>
+      _list(await _api.json((c) => _api.notifications(c).myNotificationsEverywhereWithHttpInfo(after: after)))
+          .map(_map)
+          .map((n) => NotificationItem(
+              id: (n['id'] as num).toInt(),
+              title: (n['title'] ?? '').toString(),
+              issueUid: n['issue_uid']?.toString(),
+              kind: n['kind']?.toString(),
+              at: _date(n['created_at']),
+              subject: _map(n['detail'])['subject']?.toString(),
+              subjectUid: _map(n['detail'])['uid']?.toString(),
+              workspaceId: n['workspace_id']?.toString(),
+              workspaceName: n['workspace_name']?.toString()))
+          .toList();
+
+  Future<List<WorkspaceSubscription>> subscriptions() async =>
+      _list(await _api.json((c) => _api.notifications(c).mySubscriptionsWithHttpInfo()))
+          .map(_map)
+          .map((m) => WorkspaceSubscription(
+              workspaceId: m['workspace_id'].toString(),
+              workspaceName: (m['workspace_name'] ?? m['workspace_id']).toString(),
+              tickets: m['tickets'] == true,
+              documents: m['documents'] == true,
+              assets: m['assets'] == true))
+          .toList();
+
+  Future<void> subscribe(WorkspaceSubscription s) async {
+    await _api.json((c) => _api.notifications(c).setSubscriptionWithHttpInfo(
+        s.workspaceId, api.SubscriptionIn(tickets: s.tickets, documents: s.documents, assets: s.assets)));
+  }
 
   Future<void> markRead(int id) async {
     await _api.json((c) => _api.notifications(c).markReadWithHttpInfo(id));
