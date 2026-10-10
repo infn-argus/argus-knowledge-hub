@@ -246,6 +246,12 @@ class ApiClient {
           return DraftDocumentOut.fromJson(value);
         case 'GlobalValueOut':
           return GlobalValueOut.fromJson(value);
+        case 'GraphEdgeOut':
+          return GraphEdgeOut.fromJson(value);
+        case 'GraphNodeOut':
+          return GraphNodeOut.fromJson(value);
+        case 'GraphOut':
+          return GraphOut.fromJson(value);
         case 'GuideIn':
           return GuideIn.fromJson(value);
         case 'HTTPValidationError':
@@ -274,6 +280,10 @@ class ApiClient {
           return RevokeIn.fromJson(value);
         case 'SchemaOut':
           return SchemaOut.fromJson(value);
+        case 'SemanticEdgeOut':
+          return SemanticEdgeOut.fromJson(value);
+        case 'SemanticGraphOut':
+          return SemanticGraphOut.fromJson(value);
         case 'SubscriptionIn':
           return SubscriptionIn.fromJson(value);
         case 'SwapIn':

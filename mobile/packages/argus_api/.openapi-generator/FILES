@@ -12,6 +12,7 @@ lib/api/attachments_api.dart
 lib/api/documents_api.dart
 lib/api/field_client_api.dart
 lib/api/global_values_api.dart
+lib/api/graph_api.dart
 lib/api/hub_api.dart
 lib/api/installations_api.dart
 lib/api/intake_api.dart
@@ -64,6 +65,9 @@ lib/model/document_update.dart
 lib/model/draft_document_in.dart
 lib/model/draft_document_out.dart
 lib/model/global_value_out.dart
+lib/model/graph_edge_out.dart
+lib/model/graph_node_out.dart
+lib/model/graph_out.dart
 lib/model/guide_in.dart
 lib/model/http_validation_error.dart
 lib/model/issue_comment_create.dart
@@ -78,6 +82,8 @@ lib/model/outcome_in.dart
 lib/model/replace_in.dart
 lib/model/revoke_in.dart
 lib/model/schema_out.dart
+lib/model/semantic_edge_out.dart
+lib/model/semantic_graph_out.dart
 lib/model/subscription_in.dart
 lib/model/swap_in.dart
 lib/model/transition_in.dart

@@ -6,8 +6,10 @@ import 'package:go_router/go_router.dart';
 
 import '../core/problem.dart';
 import '../domain/capture.dart' show DocumentSeed;
+import '../domain/models.dart' show RecordKind;
 import '../features/ask/ask_screen.dart';
 import '../features/assets/asset_list_screen.dart';
+import '../features/graph/graph_record_screen.dart';
 import '../features/graph/graph_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/shell/app_shell.dart';
@@ -101,6 +103,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
       GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
+      GoRoute(
+          path: '/graph/:kind/:uid',
+          builder: (_, st) => GraphRecordScreen(
+              kind: RecordKind.values.firstWhere((k) => k.name == st.pathParameters['kind'],
+                  orElse: () => RecordKind.asset),
+              uid: st.pathParameters['uid']!,
+              title: st.uri.queryParameters['title'] ?? st.pathParameters['uid']!)),
       GoRoute(path: '/scan', builder: (_, st) => ScanScreen(pick: st.uri.queryParameters['pick'] == '1')),
       GoRoute(path: '/diagnostics', builder: (_, _) => const DiagnosticsScreen()),
       GoRoute(path: '/inbox', builder: (_, _) => const InboxScreen()),

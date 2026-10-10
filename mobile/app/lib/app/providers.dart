@@ -15,6 +15,7 @@ import '../data/api_service.dart';
 import '../data/ask_repository.dart';
 import '../data/browse_repository.dart';
 import '../data/capture_repositories.dart';
+import '../data/graph_repository.dart';
 import '../data/replacement_repositories.dart';
 import '../data/repositories.dart';
 import '../data/update_check.dart';
@@ -499,3 +500,15 @@ final phoneNotifierProvider = Provider<PhoneNotifier>((_) => DevicePhoneNotifier
 /// What the person hears about, per workspace.
 final subscriptionsProvider = FutureProvider.autoDispose<List<WorkspaceSubscription>>(
     (ref) => ref.watch(notificationRepositoryProvider).subscriptions());
+
+final graphRepositoryProvider = Provider((ref) => GraphRepository(ref.watch(apiServiceProvider)));
+
+final connectedProvider = FutureProvider.autoDispose.family<List<GraphLink>, (RecordKind, String)>((ref, key) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(graphRepositoryProvider).connected(key.$1, key.$2);
+});
+
+final byMeaningProvider = FutureProvider.autoDispose.family<SemanticNeighbours, (RecordKind, String)>((ref, key) {
+  ref.watch(workspaceIdProvider);
+  return ref.watch(graphRepositoryProvider).byMeaning(key.$1, key.$2);
+});

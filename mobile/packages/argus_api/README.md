@@ -97,6 +97,8 @@ Class | Method | HTTP request | Description
 *FieldClientApi* | [**resolveLink**](doc//FieldClientApi.md#resolvelink) | **GET** /v1/links/resolve | Resolve Link
 *FieldClientApi* | [**revokeDevice**](doc//FieldClientApi.md#revokedevice) | **POST** /v1/devices/{device_id}/revoke | Revoke Device
 *GlobalValuesApi* | [**listGlobalValues**](doc//GlobalValuesApi.md#listglobalvalues) | **GET** /v1/global-values | List Global Values
+*GraphApi* | [**getGraph**](doc//GraphApi.md#getgraph) | **GET** /v1/graph | Get Graph
+*GraphApi* | [**getSemanticGraph**](doc//GraphApi.md#getsemanticgraph) | **GET** /v1/graph/semantic | Get Semantic Graph
 *HubApi* | [**assetContext**](doc//HubApi.md#assetcontext) | **GET** /v1/hub/assets/{uid}/context | Asset Context
 *HubApi* | [**documentContext**](doc//HubApi.md#documentcontext) | **GET** /v1/hub/documents/{uid}/context | Document Context
 *HubApi* | [**overview**](doc//HubApi.md#overview) | **GET** /v1/hub/overview | Overview
@@ -179,6 +181,9 @@ Class | Method | HTTP request | Description
  - [DraftDocumentIn](doc//DraftDocumentIn.md)
  - [DraftDocumentOut](doc//DraftDocumentOut.md)
  - [GlobalValueOut](doc//GlobalValueOut.md)
+ - [GraphEdgeOut](doc//GraphEdgeOut.md)
+ - [GraphNodeOut](doc//GraphNodeOut.md)
+ - [GraphOut](doc//GraphOut.md)
  - [GuideIn](doc//GuideIn.md)
  - [HTTPValidationError](doc//HTTPValidationError.md)
  - [IssueCommentCreate](doc//IssueCommentCreate.md)
@@ -193,6 +198,8 @@ Class | Method | HTTP request | Description
  - [ReplaceIn](doc//ReplaceIn.md)
  - [RevokeIn](doc//RevokeIn.md)
  - [SchemaOut](doc//SchemaOut.md)
+ - [SemanticEdgeOut](doc//SemanticEdgeOut.md)
+ - [SemanticGraphOut](doc//SemanticGraphOut.md)
  - [SubscriptionIn](doc//SubscriptionIn.md)
  - [SwapIn](doc//SwapIn.md)
  - [TransitionIn](doc//TransitionIn.md)

@@ -12,6 +12,7 @@ import '../../domain/models.dart';
 import '../../widgets/attach_menu.dart';
 import '../../widgets/attachment_open.dart';
 import '../../widgets/common.dart';
+import '../../widgets/related_by_meaning.dart';
 import '../../widgets/type_tree.dart';
 import '../../widgets/rich_content.dart';
 import 'report_screen.dart' show impactOptions;
@@ -200,6 +201,7 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
             _Transitions(uid: widget.uid, onMove: (o) => _move(t, o), busy: _busy),
             _Attachments(uid: widget.uid, onAdd: _busy ? null : _attach),
             _Comments(uid: widget.uid),
+            RelatedByMeaning(kind: RecordKind.ticket, uid: widget.uid),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Row(children: [

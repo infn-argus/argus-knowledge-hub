@@ -7,9 +7,11 @@ import '../../core/problem.dart';
 import '../../app/queue.dart';
 import '../../data/command_queue.dart';
 import '../../domain/capture.dart';
+import '../../domain/models.dart' show RecordKind;
 import '../../widgets/attach_menu.dart';
 import '../../widgets/attachment_open.dart';
 import '../../widgets/common.dart';
+import '../../widgets/related_by_meaning.dart';
 import '../../widgets/rich_content.dart';
 import '../../widgets/type_tree.dart';
 
@@ -75,6 +77,7 @@ class DocumentScreen extends ConsumerWidget {
           ),
           _Workflow(uid: uid),
           _Files(uid: uid),
+          RelatedByMeaning(kind: RecordKind.document, uid: uid),
           if (d.steps.isNotEmpty) ...[
             const SectionHeader('Steps'),
             for (final (i, s) in d.steps.indexed)

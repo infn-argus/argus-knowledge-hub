@@ -13,6 +13,7 @@ import '../../widgets/auth_image.dart';
 import '../../widgets/attach_menu.dart';
 import '../../widgets/attachment_open.dart';
 import '../../widgets/common.dart';
+import '../../widgets/related_by_meaning.dart';
 import '../../widgets/rich_content.dart';
 import 'relation_graph_screen.dart';
 
@@ -229,6 +230,7 @@ class _AssetBodyState extends ConsumerState<_AssetBody> {
           ),
         ),
       ),
+      RelatedByMeaning(kind: RecordKind.asset, uid: a.uid),
       SectionHeader('Files', trailing: '${attachments.length}'),
       if (attachments.isEmpty) const ListTile(title: Text('No files yet.')),
       if (attachments.isNotEmpty)

@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
-import '../records/relation_graph_screen.dart';
+import '../../widgets/related_by_meaning.dart';
 import '../shell/app_shell.dart';
 
-/// The knowledge graph: start from a piece of equipment and walk what it is connected to — what it is part
-/// of, what powers it, what it is installed in — as the web's graph does.
+/// The knowledge graph: start from a piece of equipment, a ticket or a document and walk what it is connected
+/// to — by the relations people made, and by what the written knowledge says is about the same thing.
 class GraphScreen extends ConsumerStatefulWidget {
   const GraphScreen({super.key});
 
@@ -37,7 +38,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
             controller: _query,
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search),
-              hintText: 'Equipment to start from',
+              hintText: 'Equipment, ticket or document to start from',
               border: OutlineInputBorder(),
             ),
             onChanged: (v) => setState(() => _q = v.trim()),
@@ -49,17 +50,17 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
               : r.when(
                   loading: () => const Center(child: CircularProgressIndicator()),
                   error: (e, _) => Center(child: Text('$e')),
-                  data: (res) => res.assets.isEmpty
-                      ? const Center(child: Text('No equipment matches.'))
+                  data: (res) => res.isEmpty
+                      ? const Center(child: Text('Nothing matches.'))
                       : ListView(children: [
-                          for (final a in res.assets)
+                          for (final a in [...res.assets, ...res.tickets, ...res.documents])
                             ListTile(
                               key: Key('graph-start-${a.uid}'),
-                              leading: const Icon(Icons.hub_outlined),
+                              leading: Icon(kindIcon(a.kind)),
                               title: Text(a.title ?? a.uid),
                               subtitle: a.subtitle == null ? null : Text(a.subtitle!),
-                              onTap: () => Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
-                                  builder: (_) => RelationGraphScreen(rootUid: a.uid, rootName: a.title ?? a.uid))),
+                              onTap: () => context.push('/graph/${a.kind.name}/${Uri.encodeComponent(a.uid)}'
+                                  '?title=${Uri.encodeComponent(a.title ?? a.uid)}'),
                             ),
                         ]),
                 ),
@@ -79,8 +80,8 @@ class _Hint extends StatelessWidget {
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.hub_outlined, size: 56, color: Theme.of(context).colorScheme.outline),
             const SizedBox(height: 12),
-            const Text('Find a piece of equipment to see what it is connected to: what it is part of, what '
-                'powers it, where it is installed. Tap a neighbour to walk on from there.',
+            const Text('Find equipment, a ticket or a document to see what it is connected to, and what is '
+                'about the same thing by meaning. Tap a neighbour to walk on from there.',
                 textAlign: TextAlign.center),
           ]),
         ),

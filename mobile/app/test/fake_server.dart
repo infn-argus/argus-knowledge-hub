@@ -113,6 +113,36 @@ class FakeArgus {
       labels[labelDelete.group(1)!]?.removeWhere((l) => l['uid'] == labelDelete.group(2));
       return http.Response('', 204);
     }
+    if (p == '/v1/graph' && m == 'GET') {
+      final kind = q['kind']!, uid = q['uid']!;
+      return _json({
+        'truncated': false,
+        'nodes': [
+          {'kind': kind, 'uid': uid, 'label': 'Start', 'depth': 0},
+          {'kind': 'ticket', 'uid': ticketUid, 'label': 'Pressure spike on gun ion pump', 'state': 'new', 'depth': 1},
+          {'kind': 'person', 'uid': 'p1', 'label': 'Rossi', 'depth': 1},
+        ],
+        'edges': [
+          {'from_kind': 'ticket', 'from_uid': ticketUid, 'to_kind': kind, 'to_uid': uid, 'relation': 'about', 'via': 'work'},
+          {'from_kind': kind, 'from_uid': uid, 'to_kind': 'person', 'to_uid': 'p1', 'relation': 'owner', 'via': 'people'},
+        ],
+      });
+    }
+    if (p == '/v1/graph/semantic' && m == 'GET') {
+      final kind = q['kind']!, uid = q['uid']!;
+      return _json({
+        'available': true,
+        'basis': 'passages',
+        'nodes': [
+          {'kind': kind, 'uid': uid, 'label': 'Start', 'depth': 0},
+          {'kind': 'document', 'uid': documentUid, 'label': 'DOC-0001 Ion pump replacement', 'depth': 1},
+        ],
+        'edges': [
+          {'from_kind': kind, 'from_uid': uid, 'to_kind': 'document', 'to_uid': documentUid, 'relation': 'similar',
+            'score': 0.82, 'excerpt': 'Replace the ion pump and bake the sector.', 'matched': 'The ion pump trips on start.'},
+        ],
+      });
+    }
     if (p == '/v1/notifications/subscriptions' && m == 'GET') {
       return _json([
         for (final (id, name) in [(workspaceId, 'Slice'), ('other-ws', 'Ring')])
