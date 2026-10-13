@@ -31,6 +31,9 @@ git tag v1.34.0 && git push origin v1.34.0
    and builds the web app; a failure stops the release before anything is pushed;
 2. builds both images and pushes them to ghcr.io as `1.34.0` and `latest`. The web app is built
    with the production Keycloak and API addresses (`WEB_KEYCLOAK`, `WEB_API` in the workflow);
+   the workflow pushes with `GITHUB_TOKEN`, so each ghcr.io package must grant this repository *Write*
+   access (package settings > Manage Actions access); a package first pushed by hand with a PAT
+   (`deploy.sh`) does not, and the push fails with `permission_denied: write_package`;
 3. commits `Deploy 1.34.0` to `main`, setting the image tags in
    `charts/argus-knowledge-hub/values-production.yaml`.
 
