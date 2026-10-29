@@ -110,9 +110,10 @@ export function GuidedEntry({
   const ai = status.data;
   const canAssist = !!ai?.validated;
   const canSee = canAssist && kind === "asset" && !!ai?.has_vision;
+  const isDocument = kind === "document";
   const profiles = useQuery({ queryKey: ["intake-status"], queryFn: intakeApi.status, enabled: canAssist, staleTime: 60_000 });
   const profile = profiles.data?.[kind];
-  const accept = (canSee ? "image/*," : "") + ".pdf,.docx,.xlsx,.xlsm,.eml,.txt,.md,.csv";
+  const accept = (isDocument || canSee ? "image/jpeg,image/png,image/webp," : "") + ".pdf,.docx,.xlsx,.xlsm,.eml,.txt,.md,.csv";
 
   const [text, setText] = useState("");
   const navigate = useNavigate();
@@ -120,15 +121,13 @@ export function GuidedEntry({
   const [used, setUsed] = useState<Set<string>>(new Set());
   const photo = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  // A document's file (PDF, Word, Excel, e-mail, text), read whole: its text is the body as it is, or what the
-  // template rework starts from — never replaced by the summary the assistant writes of it.
+  // A document's file is read whole. Images are transcribed by the workspace's vision model before rework.
   const [fileText, setFileText] = useState<{ name: string; text: string; truncated: boolean } | null>(null);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   // "Keep it as it is": the suggestions the assistant then makes go into the fields still empty.
   const autoFill = useRef(false);
-  const isDocument = kind === "document";
 
   const debounced = useDebounced(draft, 400);
   const guide = useQuery({
@@ -175,7 +174,9 @@ export function GuidedEntry({
     setFileProblem(null);
     setExtracting(true);
     try {
-      const out = await intakeApi.extract(file);
+      const level = draft.confidentiality;
+      const out = await intakeApi.extract(file,
+        level === "pubblico" || level === "riservato" ? level : "interno");
       setFileText({ name: file.name, text: out.text, truncated: out.truncated });
     } catch (e) {
       setFileProblem(e instanceof ApiError ? String((e.body as { detail?: string })?.detail ?? e.message) : String(e));
@@ -199,7 +200,8 @@ export function GuidedEntry({
   const rework = () => navigate(
     `/documents/reshape${draft.document_type_uid ? `?document_type_uid=${encodeURIComponent(String(draft.document_type_uid))}` : ""}`,
     { state: { reshape: { text: sourceText(), kind: fileText ? "import" : "intake", filename: fileText?.name,
-                          file: sourceFile ?? undefined } } });
+                          file: sourceFile ?? undefined, confidentiality: draft.confidentiality,
+                          isGlobal: draft.is_global } } });
 
   const use = (fields: string[]) => {
     if (!result) return;
@@ -245,7 +247,7 @@ export function GuidedEntry({
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={4}
-              placeholder="Paste the document's text, or add its file (PDF, Word, Excel, e-mail, web page, text)."
+              placeholder="Paste the document's text, or add a file or image (PDF, Word, Excel, e-mail, JPEG, PNG…)."
               className="mt-2 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
             />
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -279,7 +281,7 @@ export function GuidedEntry({
               <input
                 ref={photo}
                 type="file"
-                accept=".pdf,.docx,.xlsx,.xlsm,.eml,.html,.htm,.txt,.md,.markdown,.csv"
+                accept="image/jpeg,image/png,image/webp,.pdf,.docx,.xlsx,.xlsm,.eml,.html,.htm,.txt,.md,.markdown,.csv"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];

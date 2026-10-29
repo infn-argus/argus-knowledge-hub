@@ -2367,6 +2367,22 @@
       },
       "Body_extract_text_v1_intake_extract_post": {
         "properties": {
+          "confidentiality": {
+            "default": "interno",
+            "title": "Confidentiality",
+            "type": "string"
+          },
+          "document_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Uid"
+          },
           "file": {
             "format": "binary",
             "title": "File",
@@ -3686,6 +3702,11 @@
               }
             ],
             "title": "Document Type Uid"
+          },
+          "is_global": {
+            "default": false,
+            "title": "Is Global",
+            "type": "boolean"
           },
           "next_review_due": {
             "anyOf": [
@@ -10320,6 +10341,11 @@
           "extraction": {
             "title": "Extraction",
             "type": "object"
+          },
+          "is_global": {
+            "default": false,
+            "title": "Is Global",
+            "type": "boolean"
           },
           "issues": {
             "items": {},
@@ -34123,6 +34149,95 @@
         ]
       }
     },
+    "/v1/documents/{uid}/revisions/{rev_uid}/withdraw": {
+      "post": {
+        "description": "The author can take back a pending review before a reviewer decides.",
+        "operationId": "withdraw_revision_v1_documents__uid__revisions__rev_uid__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "title": "Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rev_uid",
+            "required": true,
+            "schema": {
+              "title": "Rev Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentRevisionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Withdraw Revision",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
     "/v1/documents/{uid}/supersede": {
       "post": {
         "description": "`by_document_uid` replaces this document, which retires and points to it.",
@@ -40770,7 +40885,7 @@
     },
     "/v1/intake/extract": {
       "post": {
-        "description": "A file's text, whole — a PDF, a Word or Excel file, an e-mail, a text file — to keep as a document's body\nor to rework with a template. Nothing is stored and no model reads it; a picture has no text here (the phone\nreads photos on the device).",
+        "description": "Read a source for document rework. Images use the configured vision model; other files are read locally.",
         "operationId": "extract_text_v1_intake_extract_post",
         "parameters": [
           {

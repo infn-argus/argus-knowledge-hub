@@ -390,6 +390,7 @@ class ReshapeSave(BaseModel):
     code: Optional[str] = None
     markdown: str = Field(min_length=1, max_length=500_000)
     confidentiality: Literal["pubblico", "interno", "riservato"] = "interno"
+    is_global: bool = False
     authority_level: Literal["ufficiale", "informativo", "bozza_interna"] = "bozza_interna"
     # From the preview, as the person settled them: kept in the record of how it was made.
     dates: dict = Field(default_factory=dict)
@@ -430,7 +431,8 @@ def _save(db: Session, workspace_id: str, identity: Identity, body: ReshapeSave,
     if document_uid is None:
         doc_body = DocumentCreate(uid=str(uuid.uuid4()), code=body.code, title=body.title.strip(),
                                   document_type_uid=body.document_type_uid, owner_user_id=_user_id(identity),
-                                  confidentiality=body.confidentiality, authority_level=body.authority_level,
+                                  confidentiality=body.confidentiality, is_global=body.is_global,
+                                  authority_level=body.authority_level,
                                   source="manual", body_markdown=body.markdown, attributes=attributes)
         doc, revision = new_document(db, doc_body, workspace_id, identity)
     else:

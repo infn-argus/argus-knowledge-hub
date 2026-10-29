@@ -733,6 +733,7 @@ export interface DocumentInput {
   responsible_service_asset_uid?: string | null;
   authority_level?: AuthorityLevel;
   confidentiality?: Confidentiality;
+  is_global?: boolean;
   source?: string;
   body_markdown?: string | null;
   steps?: DocumentStep[];
