@@ -51,8 +51,12 @@ COMMON = (
 ASSET_SYSTEM = COMMON + (
     "Shape: {\"type\": <one of the types listed, or null>, \"name\": <string or null>, "
     "\"key\": <string or null>, \"attributes\": {<attribute key>: <value>}, "
+    "\"network\": {\"mac\": <MAC address or null>, \"ip\": <IP address or null>, \"hostname\": <or null>}, "
     "\"evidence\": {<field>: <quote>}, \"confidence\": {<field>: <number>}}\n"
-    "Field names in evidence and confidence: type, name, key, and attributes.<key>.\n"
+    "Field names in evidence and confidence: type, name, key, attributes.<key>, network.mac, network.ip, "
+    "network.hostname.\n"
+    "A MAC address (often printed as MAC: 00:30:53:…) identifies the unit's network port, not the unit: put it "
+    "only in network.mac, never in an attribute.\n"
     "Use only the types and attribute keys listed. A control-channel or PV name (like GUNSIP01 or "
     "SPARC:VAC:GUNSIP01) names a place in the machine, not a physical unit: never use it as the name "
     "or key of a physical unit.\n"
@@ -350,17 +354,58 @@ def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint,
         fields[f"attributes.{k}"] = _field(value, _label(attr, value), data, f"attributes.{k}", clean,
                                            from_image, "ai_classified" if attr.get("type") == "enumeration"
                                            else "ai_extracted")
+    companions = _network(db, workspace_id, data, clean, from_image, dropped,
+                          db.get(Schema, (fields.get("schema_uid") or {}).get("value") or "") or chosen)
     validations += [{"step": "vocabulary", "result": "pass", "dropped": len(dropped)},
                     {"step": "evidence", "result": "pass",
                      "ungrounded": [f for f, v in fields.items() if not v["grounded"]]}]
     _screen(fields, dropped, redactions)
-    output = {"fields": fields, "dropped": dropped}
+    output = {"fields": fields, "dropped": dropped, "companions": companions}
     run = _record(db, workspace_id, actor, "asset", endpoint, profile_id=profile_id, input_refs=refs, hashes=hashes, redactions=redactions,
-                  output=output, validations=validations, outcome="proposed" if fields else "draft_only",
+                  output=output, validations=validations, outcome="proposed" if fields or companions else "draft_only",
                   error=None, started=started, model=endpoint.vision_model if image else None)
     return {"run_id": run.id, "profile_id": profile_id, "fields": fields, "dropped": dropped, "hypotheses": [],
+            "companions": companions,
             "redacted": sum(redactions.values()),
             "guide": guide.guide_asset(db, workspace_id, apply(draft, fields), grants)}
+
+
+def _network(db: Session, workspace_id: str, data: dict, text: str, from_image: bool, dropped: list,
+             schema: Optional[Schema]) -> list[dict]:
+    """The network identity the input shows — a MAC, an IP, a hostname — as records to make with the new one: its
+    Ethernet port (with the MAC) and, with an address, its Address Record. Each value is checked (format,
+    evidence) like a field; a MAC already on a recorded port is not proposed again."""
+    from app.services import network_companions as nc
+    net = data.get("network") if isinstance(data.get("network"), dict) else {}
+    # A MAC the model put among the attributes still belongs to the port.
+    attrs = data.get("attributes") if isinstance(data.get("attributes"), dict) else {}
+    raw_mac = net.get("mac") or attrs.get("mac") or attrs.get("mac_address")
+    t = nc.types(db, workspace_id)
+    out: list[dict] = []
+    mac = nc.normalise_mac(raw_mac) if raw_mac else None
+    if raw_mac and mac is None:
+        dropped.append({"field": "network.mac", "reason": f"“{raw_mac}” is not a MAC address"})
+    if mac and t["port"]:
+        other = nc.port_with_mac(db, mac)
+        if other is not None:
+            dropped.append({"field": "network.mac", "reason": f"the MAC {mac} is already on {other.key} ({other.name})",
+                            "link": {"uid": other.uid, "key": other.key, "name": other.name,
+                                     "path": f"/assets/{other.uid}"}})
+        else:
+            f = _field(mac, None, data, "network.mac", text, from_image, "ai_extracted")
+            out.append({"kind": "port", "type_uid": t["port"], "relation": nc.PORT_VERB, "selected": True,
+                        "attributes": {"port_label": "eth0", "port_kind": "RJ45", "mac": mac},
+                        "confidence": f["confidence"], "evidence": f["evidence"], "grounded": f["grounded"],
+                        "reason": "a MAC address was read: it identifies the unit's network port"})
+    ip = nc.normalise_ip(net.get("ip")) if net.get("ip") else None
+    host = nc.normalise_hostname(net.get("hostname")) if net.get("hostname") else None
+    if (ip or host) and t["address"]:
+        f = _field(ip or host, None, data, "network.ip" if ip else "network.hostname", text, from_image, "ai_extracted")
+        out.append({"kind": "address", "type_uid": t["address"], "relation": nc.ADDRESS_VERB, "selected": True,
+                    "attributes": {**({"ip": ip} if ip else {}), **({"hostname": host} if host else {})},
+                    "confidence": f["confidence"], "evidence": f["evidence"], "grounded": f["grounded"],
+                    "reason": "an address was read: the unit is described by it"})
+    return out
 
 
 # --------------------------------------------------------------------------- tickets

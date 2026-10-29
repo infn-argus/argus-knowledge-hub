@@ -41,6 +41,7 @@ lib/auth/oauth.dart
 lib/model/activity_action.dart
 lib/model/activity_change.dart
 lib/model/activity_in.dart
+lib/model/address_in.dart
 lib/model/ai_status.dart
 lib/model/approve_action.dart
 lib/model/ask_conversation_detail.dart
@@ -95,6 +96,7 @@ lib/model/mentioned_object.dart
 lib/model/my_workspace_out.dart
 lib/model/observation_in.dart
 lib/model/outcome_in.dart
+lib/model/port_in.dart
 lib/model/replace_in.dart
 lib/model/reshape_in.dart
 lib/model/reshape_save.dart

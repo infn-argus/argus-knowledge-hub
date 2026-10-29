@@ -211,7 +211,7 @@ def create_asset(
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
     validate_attributes(db, schema, body.attributes, workspace_id, Asset)
     _assert_unique(db, workspace_id, body.attributes, type_name=type_name)
-    data = body.model_dump()
+    data = body.model_dump(exclude={"ports", "addresses"})
     data["key"] = (data.get("key") or "").strip()
     if not data["key"]:
         try:
@@ -234,6 +234,16 @@ def create_asset(
             is_global=data.get("is_global", False), avatar_icon_uid=data.get("avatar_icon_uid"))
     except LedgerError as exc:
         _ledger_failed(db, exc)
+    if body.ports or body.addresses:
+        from app.services import network_companions
+        try:
+            network_companions.create(db, workspace_id, _actor(identity), asset,
+                                      [p.model_dump() for p in body.ports], [a.model_dump() for a in body.addresses])
+        except network_companions.CompanionError as exc:
+            db.rollback()
+            raise HTTPException(status_code=422, detail=str(exc))
+        except LedgerError as exc:
+            _ledger_failed(db, exc)
     from app.services import notify
     notify.announce(db, workspace_id, "assets", "new_asset", f"New equipment: {asset.name} ({asset.key})",
                     current_user_id or _actor(identity), asset.uid, record=asset)

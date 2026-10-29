@@ -5,6 +5,7 @@ import { assetsApi, intakeApi, schemasApi, type AssistResult } from "../../api/c
 import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 import { AttributeInput } from "../../components/AttributeInput";
 import { finalFor, GuidedEntry } from "../../components/GuidedEntry";
+import { emptyAddress, emptyPort, fromProposals, macLooksRight, NetworkPortSection } from "../../components/NetworkPortSection";
 import { SchemaBrowser } from "../../components/SchemaBrowser";
 import { SchemaPicker } from "../../components/SchemaPicker";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
@@ -28,7 +29,18 @@ export function AssetForm() {
   const [key, setKey] = useState("");
   const [attributes, setAttributes] = useState<Record<string, unknown>>({});
   const [isGlobal, setIsGlobal] = useState(false);
-  const [assisted, setAssisted] = useState<AssistResult | null>(null);
+  const [assisted, setAssistedState] = useState<AssistResult | null>(null);
+  const [port, setPort] = useState(emptyPort);
+  const [address, setAddress] = useState(emptyAddress);
+  // What the assistant read for the network goes to the network section, ticked: the person may untick it.
+  const setAssisted = (r: AssistResult | null) => {
+    setAssistedState(r);
+    if (r?.companions?.length) {
+      const next = fromProposals(r.companions, port, address);
+      setPort(next.port);
+      setAddress(next.address);
+    }
+  };
   const [browsing, setBrowsing] = useState(false);
   const currentWorkspaceId = useCurrentWorkspaceId();
   const draft = { uid: uid ?? null, schema_uid: schemaUid, name, key, attributes };
@@ -66,6 +78,16 @@ export function AssetForm() {
     enabled: !isEditing,
   });
 
+  // Whether the chosen type is equipment on a network (the guide decides; nothing to ask for a pump).
+  const offer = useQuery({
+    queryKey: ["network-port-offer", schemaUid],
+    queryFn: () => intakeApi.guide("asset", { schema_uid: schemaUid }),
+    enabled: !isEditing && !!schemaUid,
+    staleTime: 5 * 60_000,
+    select: (g) => g.network_port,
+  });
+  const showNetwork = !isEditing && (!!offer.data?.offered || port.fromAssistant || address.fromAssistant);
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (isEditing) {
@@ -79,6 +101,12 @@ export function AssetForm() {
         name,
         attributes,
         is_global: isGlobal,
+        ...(showNetwork && port.on && offer.data?.port_type_uid !== null
+          ? { ports: [{ port_label: port.port_label.trim() || "eth0", port_kind: port.port_kind, mac: port.mac.trim() || null }] }
+          : {}),
+        ...(showNetwork && address.on && (address.ip.trim() || address.hostname.trim())
+          ? { addresses: [{ ip: address.ip.trim() || null, hostname: address.hostname.trim() || null }] }
+          : {}),
       });
     },
     onSuccess: async (asset) => {
@@ -217,9 +245,14 @@ export function AssetForm() {
           </div>
         )}
 
+        {showNetwork && (
+          <NetworkPortSection port={port} setPort={setPort} address={address} setAddress={setAddress}
+                              addressAvailable={!!offer.data?.address_type_uid || address.fromAssistant} />
+        )}
+
         <button
           type="submit"
-          disabled={saveMutation.isPending || !schemaUid}
+          disabled={saveMutation.isPending || !schemaUid || (port.on && !macLooksRight(port.mac))}
           className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
         >
           {saveMutation.isPending ? "Saving…" : "Save asset"}

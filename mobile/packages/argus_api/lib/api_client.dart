@@ -190,6 +190,8 @@ class ApiClient {
           return ActivityChange.fromJson(value);
         case 'ActivityIn':
           return ActivityIn.fromJson(value);
+        case 'AddressIn':
+          return AddressIn.fromJson(value);
         case 'ApproveAction':
           return ApproveAction.fromJson(value);
         case 'AskConversationDetail':
@@ -296,6 +298,8 @@ class ApiClient {
           return ObservationIn.fromJson(value);
         case 'OutcomeIn':
           return OutcomeIn.fromJson(value);
+        case 'PortIn':
+          return PortIn.fromJson(value);
         case 'ReplaceIn':
           return ReplaceIn.fromJson(value);
         case 'ReshapeIn':

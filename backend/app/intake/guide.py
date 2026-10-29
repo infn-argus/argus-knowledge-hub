@@ -272,7 +272,13 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
     order = [("type", "What it is"), ("identity", "Name and key"), ("identifiers", "Serial or inventory number"),
              ("details", "Required details"), ("duplicates", "Not already recorded")]
     step_list = [{"id": i, "label": label, "done": steps[i]} for i, label in order if steps[i] is not None]
-    return _result("asset", checks, step_list, questions)
+    out = _result("asset", checks, step_list, questions)
+    # A network port is offered for equipment that is on a network (services/network_companions).
+    from app.models.schema import Schema as _Schema
+    from app.services import network_companions
+    out["network_port"] = network_companions.offer(
+        db, workspace_id, db.get(_Schema, draft.get("schema_uid")) if draft.get("schema_uid") else None)
+    return out
 
 
 # --------------------------------------------------------------------------- tickets

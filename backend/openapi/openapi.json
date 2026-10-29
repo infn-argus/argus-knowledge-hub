@@ -584,6 +584,35 @@
         "title": "ActivityIn",
         "type": "object"
       },
+      "AddressIn": {
+        "description": "A registered address made with the record: the record is `described by` it.",
+        "properties": {
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          }
+        },
+        "title": "AddressIn",
+        "type": "object"
+      },
       "AdmitIn": {
         "properties": {
           "reason": {
@@ -1237,6 +1266,14 @@
       },
       "AssetCreate": {
         "properties": {
+          "addresses": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AddressIn"
+            },
+            "title": "Addresses",
+            "type": "array"
+          },
           "attributes": {
             "default": {},
             "title": "Attributes",
@@ -1287,6 +1324,14 @@
               "type": "string"
             },
             "title": "Outbound Relations",
+            "type": "array"
+          },
+          "ports": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PortIn"
+            },
+            "title": "Ports",
             "type": "array"
           },
           "schema_uid": {
@@ -9671,6 +9716,52 @@
           "longitude"
         ],
         "title": "PointIn",
+        "type": "object"
+      },
+      "PortIn": {
+        "description": "A network port made with the record: `port of` it (services/network_companions).",
+        "properties": {
+          "link_speed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Speed"
+          },
+          "mac": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mac"
+          },
+          "port_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "RJ45",
+            "title": "Port Kind"
+          },
+          "port_label": {
+            "default": "eth0",
+            "title": "Port Label",
+            "type": "string"
+          }
+        },
+        "title": "PortIn",
         "type": "object"
       },
       "PortMapIn": {

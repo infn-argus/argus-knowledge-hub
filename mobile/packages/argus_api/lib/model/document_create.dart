@@ -19,6 +19,7 @@ class DocumentCreate {
     this.code,
     this.confidentiality,
     this.documentTypeUid,
+    this.isGlobal = false,
     this.nextReviewDue,
     this.ownerUserId,
     this.responsibleServiceAssetUid,
@@ -49,6 +50,8 @@ class DocumentCreate {
 
   String? documentTypeUid;
 
+  bool isGlobal;
+
   DateTime? nextReviewDue;
 
   String? ownerUserId;
@@ -77,6 +80,7 @@ class DocumentCreate {
     other.code == code &&
     other.confidentiality == confidentiality &&
     other.documentTypeUid == documentTypeUid &&
+    other.isGlobal == isGlobal &&
     other.nextReviewDue == nextReviewDue &&
     other.ownerUserId == ownerUserId &&
     other.responsibleServiceAssetUid == responsibleServiceAssetUid &&
@@ -97,6 +101,7 @@ class DocumentCreate {
     (code == null ? 0 : code!.hashCode) +
     (confidentiality == null ? 0 : confidentiality!.hashCode) +
     (documentTypeUid == null ? 0 : documentTypeUid!.hashCode) +
+    (isGlobal.hashCode) +
     (nextReviewDue == null ? 0 : nextReviewDue!.hashCode) +
     (ownerUserId == null ? 0 : ownerUserId!.hashCode) +
     (responsibleServiceAssetUid == null ? 0 : responsibleServiceAssetUid!.hashCode) +
@@ -109,7 +114,7 @@ class DocumentCreate {
     (validUntil == null ? 0 : validUntil!.hashCode);
 
   @override
-  String toString() => 'DocumentCreate[attributes=$attributes, authorityLevel=$authorityLevel, bodyMarkdown=$bodyMarkdown, code=$code, confidentiality=$confidentiality, documentTypeUid=$documentTypeUid, nextReviewDue=$nextReviewDue, ownerUserId=$ownerUserId, responsibleServiceAssetUid=$responsibleServiceAssetUid, retentionClass=$retentionClass, source_=$source_, steps=$steps, title=$title, uid=$uid, validFrom=$validFrom, validUntil=$validUntil]';
+  String toString() => 'DocumentCreate[attributes=$attributes, authorityLevel=$authorityLevel, bodyMarkdown=$bodyMarkdown, code=$code, confidentiality=$confidentiality, documentTypeUid=$documentTypeUid, isGlobal=$isGlobal, nextReviewDue=$nextReviewDue, ownerUserId=$ownerUserId, responsibleServiceAssetUid=$responsibleServiceAssetUid, retentionClass=$retentionClass, source_=$source_, steps=$steps, title=$title, uid=$uid, validFrom=$validFrom, validUntil=$validUntil]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -143,6 +148,7 @@ class DocumentCreate {
     } else {
       json[r'document_type_uid'] = null;
     }
+      json[r'is_global'] = this.isGlobal;
     if (this.nextReviewDue != null) {
       json[r'next_review_due'] = _dateFormatter.format(this.nextReviewDue!.toUtc());
     } else {
@@ -205,6 +211,7 @@ class DocumentCreate {
         code: mapValueOfType<String>(json, r'code'),
         confidentiality: DocumentCreateConfidentialityEnum.fromJson(json[r'confidentiality']),
         documentTypeUid: mapValueOfType<String>(json, r'document_type_uid'),
+        isGlobal: mapValueOfType<bool>(json, r'is_global') ?? false,
         nextReviewDue: mapDateTime(json, r'next_review_due', r''),
         ownerUserId: mapValueOfType<String>(json, r'owner_user_id'),
         responsibleServiceAssetUid: mapValueOfType<String>(json, r'responsible_service_asset_uid'),

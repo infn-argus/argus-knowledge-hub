@@ -33,6 +33,16 @@ configured, **Describe it** fills the form from a sentence, a nameplate photo or
 AI-assisted entry*). On the phone, **Register equipment** does the same from a nameplate photo, and can start
 from a similar unit you scan.
 
+### Its network port and address
+
+A unit's **MAC address** is not one of its own fields: it identifies one network interface, so it is kept on the
+unit's **network port** — an *Equipment Port* record, `port of` the unit, that cables and switch ports connect to.
+When the photo or the description shows a MAC (or an IP address or hostname), the form proposes, ticked, **Add its
+network port** with the MAC (and **Add its network address**, an *Address Record* the unit is `described by`). For
+equipment that is usually on a network (IT equipment, cameras, PLCs, digitizers, controllers…) the same section is
+offered unticked. Untick what you do not want; the port and the address are saved together with the unit. A MAC
+already recorded on another port is pointed out instead of proposed again.
+
 ## Check possible duplicates
 
 Open a record the checklist suggests and compare its identifiers, type and location. Several units may share
@@ -96,7 +106,16 @@ open, ignoring capital letters:
 - the **serial**, **inventory** number and **MAC** written in its fields.
 
 When nothing carries the value as written, ARGUS tries it again **without what a nameplate prints around
-it**: *S/N:*, *Serial No.*, *Matricola*, *Inv.*, *P/N*, or a GS1 barcode's *(21)*.
+it**: *S/N:*, *Serial No.*, *Matricola*, *Inv.*, *P/N*, *MAC:*, or a GS1 barcode's *(21)*. A MAC is found
+in any of its spellings (`00:30:53:…`, `00-30-53-…`, `0030.5337.…`), and opens the **unit its network port
+belongs to** (the app says it was found through the port).
+
+A manufacturer's code often carries several fields at once — a DataMatrix with *P/N:… S/N:…*, a GS1 string,
+a web address with the serial in it. When no record carries the whole code, ARGUS tries **each piece**. A unit
+found by a piece (its serial) is not opened straight away: the phone asks whether to **remember the whole
+code** on it, as a label, so the next scan opens it at once. A code no record carries can be remembered too:
+**Remember this code on a unit**, then find the unit. There is no need to copy the serial into a label — the
+serial field is already scanned.
 
 - One record carries it: it opens, in its own workspace (the app moves there and says so).
 - A QR code carried by one record opens that record, even if another unit has the same value as a serial.

@@ -4,6 +4,20 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
 
+class PortIn(BaseModel):
+    """A network port made with the record: `port of` it (services/network_companions)."""
+    port_label: str = "eth0"
+    port_kind: Optional[str] = "RJ45"
+    mac: Optional[str] = None
+    link_speed: Optional[str] = None
+
+
+class AddressIn(BaseModel):
+    """A registered address made with the record: the record is `described by` it."""
+    ip: Optional[str] = None
+    hostname: Optional[str] = None
+
+
 class AssetCreate(BaseModel):
     uid: str
     schema_uid: str
@@ -17,6 +31,9 @@ class AssetCreate(BaseModel):
     inbound_relations: list[str] = []
     outbound_relations: list[str] = []
     is_global: bool = False
+    # Made with it, in the same transaction: its network ports and addresses.
+    ports: list[PortIn] = []
+    addresses: list[AddressIn] = []
 
 
 class AssetUpdate(BaseModel):

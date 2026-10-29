@@ -225,9 +225,22 @@ def resolve_link(path: str = Query(..., description="e.g. /asset/<uid> or https:
     if hit.get("status") == "migrated" and hit.get("kind") == "asset":
         found = db.get(Asset, hit["uid"])
         holders = _merge([found] if found is not None else [], holders)
+    # Nothing carries the whole code: a piece of it (the serial inside a manufacturer's code). The answer says
+    # so, for the app to offer remembering the whole code on the record, so the next scan finds it at once.
+    parts: dict[str, str] = {}
+    if not holders:
+        holders, parts = _part_holders(db, ident, readable, grants)
+    holders, via = _port_owners(db, holders, ident, readable, grants)
     if len(holders) == 1:
         a = holders[0]
-        return _asset_link(db, a.uid, a.workspace_id if a.workspace_id in readable else (ws or ""), grants, "asset")
+        out = _asset_link(db, a.uid, a.workspace_id if a.workspace_id in readable else (ws or ""), grants, "asset")
+        if a.uid in parts:
+            out["matched"] = {"by": "part", "part": parts[a.uid], "code": ident}
+        if a.uid in via:
+            port = via[a.uid]
+            out["via_port"] = {"uid": port.uid, "key": port.key, "name": port.name,
+                               "mac": (port.attributes or {}).get("mac")}
+        return out
     if len(holders) > 1:
         # A value held by two units (a serial, a key one has and the other had) opens neither: the person
         # chooses (A67).
@@ -293,16 +306,76 @@ def _label_holders(db: Session, value: str, readable: list[str], grants) -> list
     v = value.strip()
     if not v:
         return []
+    from app.services.network_companions import normalise_mac
     found = _visible_holders(db, select(Asset).where(exact_clause(db, grants, v)), readable, grants)
     bare = _bare_label(v)
     if not found and bare != v:
         found = _visible_holders(db, select(Asset).where(exact_clause(db, grants, bare)), readable, grants)
+    # A MAC in another spelling (0030.5337.8628, 003053378628) than the one recorded.
+    mac = normalise_mac(bare)
+    if not found and mac is not None and mac.lower() not in (v.lower(), bare.lower()):
+        found = _visible_holders(db, select(Asset).where(exact_clause(db, grants, mac)), readable, grants)
     return found
+
+
+def _parts(value: str) -> list[str]:
+    """The pieces of a code that carries several fields — a manufacturer's DataMatrix ("P/N:… S/N:…"), a GS1
+    string ("(01)…(21)…"), a web address with the serial in it (…?sn=4711) — each without what is printed
+    around it: tried one by one when the whole code is no record's label."""
+    from urllib.parse import parse_qsl, urlparse
+    v = value.strip()
+    if "://" in v:
+        u = urlparse(v)
+        pieces = [x for _, x in parse_qsl(u.query)] + [p for p in u.path.split("/") if p]
+    else:
+        pieces = re.split(r"[\s;,|\x1d\x1e]+", re.sub(r"\((\d{2,4})\)", r" (\1)", v))
+    out: list[str] = []
+    for p in pieces:
+        b = _bare_label(re.sub(r"^\(\d{2,4}\)", "", p))
+        if len(b) >= 4 and b.lower() != v.lower() and b not in out:
+            out.append(b)
+    return out[:16]
+
+
+def _part_holders(db: Session, value: str, readable: list[str], grants) -> tuple[list[Asset], dict[str, str]]:
+    """Records found by a piece of the code (_parts), and the piece each was found by."""
+    found: list[Asset] = []
+    by: dict[str, str] = {}
+    for part in _parts(value):
+        for a in _label_holders(db, part, readable, grants):
+            if a.uid not in by:
+                by[a.uid] = part
+                found.append(a)
+    return found, by
+
+
+def _port_owners(db: Session, holders: list[Asset], value: str, readable: list[str],
+                 grants) -> tuple[list[Asset], dict[str, Asset]]:
+    """A network port found by its MAC stands for the unit it is the port of: a scanned MAC opens the unit (the
+    MAC is recorded on its port, services/network_companions). Returns the records, and the port each unit was
+    found through."""
+    from app.models.asset import Relation
+    from app.services import network_companions as nc
+    mac = nc.normalise_mac(_bare_label(value))
+    if mac is None:
+        return holders, {}
+    out: list[Asset] = []
+    via: dict[str, Asset] = {}
+    for a in holders:
+        if a.type == nc.PORT_TYPE and nc.normalise_mac((a.attributes or {}).get("mac")) == mac:
+            owner_uid = db.scalar(select(Relation.to_asset_uid).where(Relation.from_asset_uid == a.uid,
+                                                                      Relation.relation_type == nc.PORT_VERB).limit(1))
+            owner = _visible_holders(db, select(Asset).where(Asset.uid == owner_uid), readable, grants) if owner_uid else []
+            if owner:
+                via.setdefault(owner[0].uid, a)
+                a = owner[0]
+        out.append(a)
+    return _merge(out), via
 
 
 _LABEL_PREFIX = re.compile(
     r"^(?:\(21\)|\]C1|\]d2|\]Q3|(?:S\s*/\s*N|SN|SER(?:IAL)?(?:\s*(?:NO|NR|N°|NUMBER|#))?|MATR(?:ICOLA)?|P\s*/\s*N|"
-    r"INV(?:ENTAR(?:Y|IO))?(?:\s*(?:NO|NR|N°|#))?|ASSET\s*TAG)\s*[.:#]?)\s*", re.I)
+    r"INV(?:ENTAR(?:Y|IO))?(?:\s*(?:NO|NR|N°|#))?|ASSET\s*TAG|MAC(?:\s*ADDR(?:ESS)?)?)\s*[.:#]?)\s*", re.I)
 
 
 def _bare_label(value: str) -> str:
