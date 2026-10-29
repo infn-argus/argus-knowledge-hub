@@ -106,7 +106,16 @@ open, ignoring capital letters:
 - the **serial**, **inventory** number and **MAC** written in its fields.
 
 When nothing carries the value as written, ARGUS tries it again **without what a nameplate prints around
-it**: *S/N:*, *Serial No.*, *Matricola*, *Inv.*, *P/N*, or a GS1 barcode's *(21)*.
+it**: *S/N:*, *Serial No.*, *Matricola*, *Inv.*, *P/N*, *MAC:*, or a GS1 barcode's *(21)*. A MAC is found
+in any of its spellings (`00:30:53:…`, `00-30-53-…`, `0030.5337.…`), and opens the **unit its network port
+belongs to** (the app says it was found through the port).
+
+A manufacturer's code often carries several fields at once — a DataMatrix with *P/N:… S/N:…*, a GS1 string,
+a web address with the serial in it. When no record carries the whole code, ARGUS tries **each piece**. A unit
+found by a piece (its serial) is not opened straight away: the phone asks whether to **remember the whole
+code** on it, as a label, so the next scan opens it at once. A code no record carries can be remembered too:
+**Remember this code on a unit**, then find the unit. There is no need to copy the serial into a label — the
+serial field is already scanned.
 
 - One record carries it: it opens, in its own workspace (the app moves there and says so).
 - A QR code carried by one record opens that record, even if another unit has the same value as a serial.

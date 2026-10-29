@@ -145,3 +145,49 @@ def test_a_bad_mac_or_address_is_refused_and_nothing_is_saved(world):
         db = SessionLocal()
         assert db.get(Asset, uid) is None
         db.close()
+
+
+def _resolve(world, value):
+    from urllib.parse import quote
+    return client.get("/v1/links/resolve", headers=world["headers"],
+                      params={"path": f"/lookup/{quote(value, safe='')}", "workspace_id": world["ws"]})
+
+
+def test_a_scanned_mac_opens_the_unit_its_port_belongs_to(world):
+    uid = str(uuid.uuid4())
+    hexes = f"0030c5{world['tag']}"
+    mac = ":".join(hexes[i:i + 2] for i in range(0, 12, 2)).upper()
+    assert client.post("/v1/assets", headers=world["headers"], json={
+        "uid": uid, "schema_uid": world["camera"], "name": "Camera by MAC", "attributes": {},
+        "ports": [{"mac": mac}]}).status_code in (200, 201)
+    for spelling in (mac, mac.lower().replace(":", "-"), f"{hexes[:4]}.{hexes[4:8]}.{hexes[8:]}", f"MAC: {mac}"):
+        r = _resolve(world, spelling)
+        assert r.status_code == 200, (spelling, r.text)
+        out = r.json()
+        assert out["uid"] == uid, spelling
+        assert out["via_port"]["mac"] == mac and out["via_port"]["name"] == "Camera by MAC · eth0"
+
+
+def test_the_serial_inside_a_manufacturers_code_finds_the_unit_and_says_so(world):
+    serial = f"407{world['tag']}"
+    uid = str(uuid.uuid4())
+    assert client.post("/v1/assets", headers=world["headers"], json={
+        "uid": uid, "schema_uid": world["camera"], "name": "Camera by serial",
+        "attributes": {"serial": serial}}).status_code in (200, 201)
+    for code in (f"P/N:2000036233 S/N:{serial}", f"(01)04049394012345(21){serial}",
+                 f"https://www.example-maker.com/p?pn=107960&sn={serial}"):
+        r = _resolve(world, code)
+        assert r.status_code == 200, (code, r.text)
+        out = r.json()
+        assert out["uid"] == uid and out["matched"] == {"by": "part", "part": serial, "code": code}
+    # The serial itself is a whole match: nothing to remember.
+    assert "matched" not in _resolve(world, serial).json()
+    # Once the whole code is remembered as a label, it is found whole.
+    code = f"P/N:2000036233 S/N:{serial}"
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    assert client.post(f"/v1/assets/{uid}/labels", headers=world["headers"], json={
+        "uid": str(uuid.uuid4()), "type": "datamatrix", "value": code, "issuer": "scan",
+        "created_at": now, "updated_at": now}).status_code == 201
+    out = _resolve(world, code).json()
+    assert out["uid"] == uid and "matched" not in out

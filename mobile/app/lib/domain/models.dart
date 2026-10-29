@@ -18,7 +18,16 @@ enum RecordKind { asset, position, installation, document, ticket, review }
 /// Where a link, a scanned label or a search hit leads.
 class LinkTarget {
   const LinkTarget(
-      {required this.kind, required this.uid, this.title, this.subtitle, this.recordUid, this.workspaceId, this.key});
+      {required this.kind,
+      required this.uid,
+      this.title,
+      this.subtitle,
+      this.recordUid,
+      this.workspaceId,
+      this.key,
+      this.matchedPart,
+      this.matchedCode,
+      this.viaPort});
 
   final RecordKind kind;
   final String uid;
@@ -27,6 +36,12 @@ class LinkTarget {
   final String? recordUid; // for a review item: the record it is about
   final String? workspaceId; // the workspace it is opened in, when the server said
   final String? key; // its key or code, shown beside the title when keys are shown
+  /// Found by a piece of a scanned code (the serial inside a manufacturer's code), not by the whole code:
+  /// the piece, and the whole code — which can be remembered on the record as its label.
+  final String? matchedPart;
+  final String? matchedCode;
+  /// Found by a MAC: the network port (name, MAC) the record was found through.
+  final String? viaPort;
 
   String get route => inWorkspace(switch (kind) {
         RecordKind.asset || RecordKind.position => '/asset/$uid',

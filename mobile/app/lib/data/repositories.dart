@@ -68,6 +68,8 @@ class LookupRepository {
 
   Future<LinkTarget> resolveLink(String path) async {
     final r = _map(await _api.json((c) => _api.field(c).resolveLinkWithHttpInfo(path)));
+    final matched = _map(r['matched']);
+    final port = r['via_port'] is Map ? _map(r['via_port']) : null;
     return LinkTarget(
       kind: _kind(r['kind']?.toString()),
       uid: r['uid'].toString(),
@@ -76,6 +78,9 @@ class LookupRepository {
       subtitle: r['type']?.toString(),
       recordUid: (r['record_uid'] ?? r['position_uid'])?.toString(),
       workspaceId: r['workspace_id']?.toString(),
+      matchedPart: matched['part']?.toString(),
+      matchedCode: matched['code']?.toString(),
+      viaPort: port == null ? null : [port['name'], port['mac']].whereType<Object>().join(' · '),
     );
   }
 
