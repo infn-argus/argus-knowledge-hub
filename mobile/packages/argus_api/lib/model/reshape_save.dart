@@ -20,6 +20,7 @@ class ReshapeSave {
     this.dates,
     required this.documentTypeUid,
     this.extraction,
+    this.isGlobal = false,
     this.issues,
     this.linkAssets = const [],
     required this.markdown,
@@ -55,6 +56,8 @@ class ReshapeSave {
   ///
   Object? extraction;
 
+  bool isGlobal;
+
   Object? issues;
 
   List<String> linkAssets;
@@ -79,6 +82,7 @@ class ReshapeSave {
     other.dates == dates &&
     other.documentTypeUid == documentTypeUid &&
     other.extraction == extraction &&
+    other.isGlobal == isGlobal &&
     other.issues == issues &&
     _deepEquality.equals(other.linkAssets, linkAssets) &&
     other.markdown == markdown &&
@@ -97,6 +101,7 @@ class ReshapeSave {
     (dates == null ? 0 : dates!.hashCode) +
     (documentTypeUid.hashCode) +
     (extraction == null ? 0 : extraction!.hashCode) +
+    (isGlobal.hashCode) +
     (issues == null ? 0 : issues!.hashCode) +
     (linkAssets.hashCode) +
     (markdown.hashCode) +
@@ -106,7 +111,7 @@ class ReshapeSave {
     (title.hashCode);
 
   @override
-  String toString() => 'ReshapeSave[authorityLevel=$authorityLevel, code=$code, confidentiality=$confidentiality, confirmDocumentDate=$confirmDocumentDate, dates=$dates, documentTypeUid=$documentTypeUid, extraction=$extraction, issues=$issues, linkAssets=$linkAssets, markdown=$markdown, model=$model, source_=$source_, template=$template, title=$title]';
+  String toString() => 'ReshapeSave[authorityLevel=$authorityLevel, code=$code, confidentiality=$confidentiality, confirmDocumentDate=$confirmDocumentDate, dates=$dates, documentTypeUid=$documentTypeUid, extraction=$extraction, isGlobal=$isGlobal, issues=$issues, linkAssets=$linkAssets, markdown=$markdown, model=$model, source_=$source_, template=$template, title=$title]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -137,6 +142,7 @@ class ReshapeSave {
     } else {
       json[r'extraction'] = null;
     }
+      json[r'is_global'] = this.isGlobal;
     if (this.issues != null) {
       json[r'issues'] = this.issues;
     } else {
@@ -181,6 +187,7 @@ class ReshapeSave {
         dates: mapValueOfType<Object>(json, r'dates'),
         documentTypeUid: mapValueOfType<String>(json, r'document_type_uid')!,
         extraction: mapValueOfType<Object>(json, r'extraction'),
+        isGlobal: mapValueOfType<bool>(json, r'is_global') ?? false,
         issues: mapValueOfType<Object>(json, r'issues'),
         linkAssets: json[r'link_assets'] is Iterable
             ? (json[r'link_assets'] as Iterable).cast<String>().toList(growable: false)
