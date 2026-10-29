@@ -175,6 +175,8 @@ def new_document(db: Session, body: DocumentCreate, workspace_id: str, identity:
 
     if body.retention_class not in document_control.RETENTION_YEARS:
         raise HTTPException(status_code=422, detail="Unknown retention class")
+    if body.is_global and body.confidentiality == "riservato":
+        raise HTTPException(status_code=422, detail="A confidential document cannot be shared with other workspaces")
     doc = Document(
         uid=body.uid, workspace_id=workspace_id, code=code, title=body.title,
         document_type_uid=body.document_type_uid, owner_user_id=body.owner_user_id,
@@ -184,7 +186,8 @@ def new_document(db: Session, body: DocumentCreate, workspace_id: str, identity:
         # A globally-shared workspace shares what is written in it, including
         # documents created after the flag was set — the same rule types
         # already follow, so the workspace-level flag doesn't decay.
-        is_global=bool(workspace is not None and workspace.is_global),
+        is_global=bool((body.is_global or (workspace is not None and workspace.is_global))
+                       and body.confidentiality != "riservato"),
     )
     doc_schema = db.get(Schema, doc.document_type_uid) if doc.document_type_uid else None
     stamp_current_user_attributes(db, doc_schema, body.attributes, _actor_user_id(identity))
@@ -563,6 +566,33 @@ def submit_revision(
     return revision
 
 
+@router.post("/{uid}/revisions/{rev_uid}/withdraw", response_model=DocumentRevisionOut)
+def withdraw_revision(
+    uid: str,
+    rev_uid: str,
+    workspace_id: str = Depends(require_permission("modify", resource="documents")),
+    db: Session = Depends(get_db),
+    identity: Identity = Depends(get_identity),
+):
+    """The author can take back a pending review before a reviewer decides."""
+    doc = _get_owned_document(uid, workspace_id, db)
+    revision = _get_revision(uid, rev_uid, db)
+    if revision.state != "in_review":
+        raise HTTPException(status_code=409, detail="Only an in-review revision can be withdrawn")
+    # An API token has no person behind it to be the author: a revision made through one is withdrawn by
+    # rejecting it, never by another token (None would equal None).
+    actor = _actor_user_id(identity)
+    if actor is None or revision.authored_by != actor:
+        raise HTTPException(status_code=403, detail="Only the revision's author can withdraw it")
+    revision.state = "draft"
+    revision.submitted_at = None
+    # review_comment is the reviewers' (a rejection's reason stays shown); the withdrawal is told to followers.
+    notify.document_changed(db, doc, f"revision {revision.revision_number} withdrawn from review", actor)
+    db.commit()
+    db.refresh(revision)
+    return revision
+
+
 @router.post("/{uid}/revisions/{rev_uid}/approve", response_model=DocumentRevisionOut)
 def approve_revision(
     uid: str,
@@ -721,12 +751,13 @@ async def upload_revision_attachment(
     is immutable: the figure a procedure was approved with has to stay the
     figure that revision shows, whatever a later one replaces it with.
     """
-    doc = _get_visible_document(uid, workspace_id, identity, db)
+    doc = _get_owned_document(uid, workspace_id, db)
+    _check_confidentiality(doc, workspace_id, identity, db)
     revision = _get_revision(doc.uid, rev_uid, db)
-    if revision.state in ("published", "superseded", "retired"):
+    if revision.state != "draft":
         raise HTTPException(
             status_code=409,
-            detail="That revision is closed — start a new revision to add files.",
+            detail="Only a draft revision can receive files. Withdraw or reject the review first, or start a new revision.",
         )
 
     attachment_uid = str(uuid.uuid4())

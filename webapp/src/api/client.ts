@@ -806,6 +806,8 @@ export const documentsApi = {
     }),
   submitRevision: (uid: string, revUid: string) =>
     request<DocumentRevision>(`/v1/documents/${uid}/revisions/${revUid}/submit`, { method: "POST" }),
+  withdrawRevision: (uid: string, revUid: string) =>
+    request<DocumentRevision>(`/v1/documents/${uid}/revisions/${revUid}/withdraw`, { method: "POST" }),
   approveRevision: (uid: string, revUid: string, comment?: string) =>
     request<DocumentRevision>(`/v1/documents/${uid}/revisions/${revUid}/approve`, {
       method: "POST",
@@ -1093,10 +1095,10 @@ export const intakeApi = {
     request<GuideResult>(`/v1/intake/guide/${kind}`, { method: "POST", body: json({ draft }) }),
   assist: (kind: IntakeKind, text: string, draft: Record<string, unknown>) =>
     request<AssistResult>(`/v1/intake/assist/${kind}`, { method: "POST", body: json({ text, draft }) }),
-  /** A file's whole text (PDF, Word, Excel, e-mail, text), to keep as a document's body or to rework: nothing is
-   * stored and no model reads it. */
-  extract: (file: File) =>
-    upload<{ text: string; format: string; truncated: boolean; filename: string | null }>("/v1/intake/extract", { file }),
+  /** Read a document source. Images use the workspace's vision model; other files are read locally. */
+  extract: (file: File, confidentiality: "pubblico" | "interno" | "riservato" = "interno", documentUid?: string | null) =>
+    upload<{ text: string; format: string; truncated: boolean; filename: string | null }>("/v1/intake/extract",
+      { file, confidentiality, ...(documentUid ? { document_uid: documentUid } : {}) }),
   /** A file: a nameplate photo (assets), a datasheet, a Word or Excel file, an email. */
   assistFile: async (kind: IntakeKind, file: File, text: string, draft: Record<string, unknown>): Promise<AssistResult> =>
     upload<AssistResult>(`/v1/intake/assist/${kind}/file`, { file, text, draft: JSON.stringify(draft) }),

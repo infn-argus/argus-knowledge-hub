@@ -42,7 +42,8 @@ export function DocumentForm() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [attachSource, setAttachSource] = useState(true);
   const allAttributes = { ...attributes, ...(summary.trim() ? { argus_summary: summary.trim() } : {}) };
-  const draft = { title, document_type_uid: documentTypeUid, code, body_markdown: bodyMarkdown, attributes: allAttributes };
+  const draft = { title, document_type_uid: documentTypeUid, code, body_markdown: bodyMarkdown,
+                  confidentiality, is_global: isGlobal, attributes: allAttributes };
 
   /** Values from the checklist or the assistant, by field name. */
   const apply = (values: Record<string, unknown>) => {
@@ -84,6 +85,7 @@ export function DocumentForm() {
       document_type_uid: documentTypeUid || null,
       authority_level: authorityLevel,
       confidentiality: confidentiality,
+      is_global: isGlobal && confidentiality !== "riservato",
       body_markdown: bodyMarkdown || null,
       steps,
       attributes: allAttributes,
@@ -131,6 +133,7 @@ export function DocumentForm() {
         document_type_uid: documentTypeUid || null,
         authority_level: authorityLevel,
         confidentiality: confidentiality,
+        is_global: isGlobal && confidentiality !== "riservato",
         body_markdown: bodyMarkdown || null,
         steps,
         attributes: allAttributes,
@@ -138,9 +141,12 @@ export function DocumentForm() {
     },
     onSuccess: async (doc) => {
       if (doc && sourceFile && attachSource) {
-        // The original, kept with the first revision. A failure here leaves the document saved: the file can be
-        // added from its page.
-        await documentsApi.uploadRevisionAttachment(doc.uid, `${doc.uid}-r1`, sourceFile).catch(() => undefined);
+        // The document is already saved; tell the author if the original needs to be attached from its page.
+        try {
+          await documentsApi.uploadRevisionAttachment(doc.uid, `${doc.uid}-r1`, sourceFile);
+        } catch (e) {
+          alert(`The draft was saved, but its original file was not attached: ${e instanceof Error ? e.message : String(e)}. Add it on the document page.`);
+        }
       }
       if (assisted && doc) {
         await intakeApi.outcome(assisted.run_id, doc.uid, finalFor(assisted, draft)).catch(() => undefined);

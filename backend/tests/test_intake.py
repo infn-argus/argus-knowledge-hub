@@ -400,9 +400,20 @@ def test_a_file_is_read_whole_to_be_a_documents_body_and_nothing_is_kept(world):
     db = SessionLocal()
     assert db.query(IntakeRun).count() == runs_before
     db.close()
-    for name, data, mime in (("x.bin", b"\x00\x01", "application/octet-stream"), ("plate.jpg", b"\xff\xd8", "image/jpeg")):
-        assert client.post("/v1/intake/extract", headers=world["headers"],
-                           files={"file": (name, data, mime)}).status_code == 422
+    assert client.post("/v1/intake/extract", headers=world["headers"],
+                       files={"file": ("x.bin", b"\x00\x01", "application/octet-stream")}).status_code == 422
+    # A picture is transcribed by the vision model: with AI switched off it is refused before any model call.
+    db = SessionLocal()
+    cfg = db.get(LLMConfig, world["ws"])
+    if cfg is not None:
+        cfg.enabled = False
+        db.commit()
+    db.close()
+    assert client.post("/v1/intake/extract", headers=world["headers"],
+                       files={"file": ("plate.jpg", b"\xff\xd8", "image/jpeg")}).status_code == 409
+    db = SessionLocal()
+    assert db.query(IntakeRun).count() == runs_before
+    db.close()
 
 
 # --- existing records -------------------------------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { reshapeApi } from "../../api/client";
 import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 import {
@@ -10,6 +10,7 @@ import {
   documentsApi,
   issuesApi,
   schemasApi,
+  tokensApi,
 } from "../../api/client";
 import { effectiveAttributes, inheritedKeys } from "../../lib/schemaAttributes";
 import { AttributeInput } from "../../components/AttributeInput";
@@ -43,10 +44,13 @@ const STATE_STYLES: Record<string, string> = {
 export function DocumentDetail() {
   const showKeys = useShowKeys();
   const { uid } = useParams<{ uid: string }>();
+  const [searchParams] = useSearchParams();
+  const revisionFromUrl = searchParams.get("revision");
   const workspaceId = useCurrentWorkspaceId();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [viewedRevisionUid, setViewedRevisionUid] = useState<string | null>(null);
+  const [viewedRevisionUid, setViewedRevisionUid] = useState<string | null>(revisionFromUrl);
+  useEffect(() => setViewedRevisionUid(revisionFromUrl), [revisionFromUrl, uid]);
   const [rejectComment, setRejectComment] = useState("");
   const [viewingDrawing, setViewingDrawing] = useState<string | null>(null);
   const [showReject, setShowReject] = useState(false);
@@ -56,6 +60,7 @@ export function DocumentDetail() {
     queryFn: () => documentsApi.get(uid!),
     enabled: !!uid,
   });
+  const profile = useQuery({ queryKey: ["my-profile"], queryFn: tokensApi.profile });
   const revisions = useQuery({
     queryKey: ["document-revisions", uid],
     queryFn: () => documentsApi.listRevisions(uid!),
@@ -172,6 +177,20 @@ export function DocumentDetail() {
     mutationFn: () => documentsApi.submitRevision(uid!, viewed!.uid),
     onSuccess: invalidate,
     onError: () => alert("Submit failed."),
+  });
+  const withdrawMutation = useMutation({
+    mutationFn: () => documentsApi.withdrawRevision(uid!, viewed!.uid),
+    onSuccess: invalidate,
+    onError: (e) => alert(`Could not withdraw review — ${errorText(e)}`),
+  });
+  const shareMutation = useMutation({
+    mutationFn: (shared: boolean) => documentsApi.update(uid!, { is_global: shared }),
+    onSuccess: invalidate,
+    onError: (e) => alert(`Could not change sharing — ${errorText(e)}`),
+  });
+  const attachMutation = useMutation({
+    mutationFn: (file: File) => documentsApi.uploadRevisionAttachment(uid!, viewed!.uid, file),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["document-attachments", uid] }),
   });
   const approveMutation = useMutation({
     mutationFn: () => documentsApi.approveRevision(uid!, viewed!.uid),
@@ -361,6 +380,14 @@ export function DocumentDetail() {
               </a>
             )}
           </p>
+          {doc.workspace_id === workspaceId && (
+            <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+              <input type="checkbox" checked={doc.is_global} disabled={doc.confidentiality === "riservato" || shareMutation.isPending}
+                     onChange={(e) => shareMutation.mutate(e.target.checked)} />
+              Share with every workspace
+              {doc.confidentiality === "riservato" && <span>(unavailable for confidential documents)</span>}
+            </label>
+          )}
         </div>
         <div className="flex gap-2">
           <FollowButton subject="document" uid={doc.uid} />
@@ -464,6 +491,12 @@ export function DocumentDetail() {
               )}
               {viewed.state === "in_review" && (
                 <>
+                  {profile.data?.user?.id === viewed.authored_by && (
+                    <button onClick={() => withdrawMutation.mutate()} disabled={withdrawMutation.isPending}
+                            className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
+                      Withdraw review to edit
+                    </button>
+                  )}
                   <button
                     onClick={() => setShowReject((v) => !v)}
                     className="rounded border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
@@ -685,6 +718,14 @@ export function DocumentDetail() {
               <label className="block text-xs font-medium uppercase tracking-wide text-slate-400">
                 Files
               </label>
+              {viewed.state === "draft" && (
+                <label className="cursor-pointer rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50">
+                  {attachMutation.isPending ? "Attaching…" : "+ Attach file to draft"}
+                  <input type="file" className="hidden" disabled={attachMutation.isPending}
+                         onChange={(e) => { const file = e.target.files?.[0]; e.target.value = "";
+                                            if (file) attachMutation.mutate(file); }} />
+                </label>
+              )}
               {galleryImages.length > 0 && (
                 <label className="flex items-center gap-1.5 text-xs text-slate-500">
                   <input type="checkbox" checked={showImages} onChange={(e) => setShowImages(e.target.checked)} />
@@ -692,6 +733,7 @@ export function DocumentDetail() {
                 </label>
               )}
             </div>
+            {attachMutation.isError && <p className="mt-1 text-xs text-red-600">{errorText(attachMutation.error)}</p>}
             {showImages && galleryImages.length > 0 && (
               <div className="mt-2">
                 <ImageGallery images={galleryImages} />
