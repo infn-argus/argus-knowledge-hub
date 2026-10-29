@@ -758,6 +758,20 @@
       },
       "AskMessageOut": {
         "properties": {
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChatAttachmentOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachments"
+          },
           "content": {
             "default": "",
             "title": "Content",
@@ -1681,6 +1695,26 @@
         "title": "Body_assist_from_file_v1_intake_assist__kind__file_post",
         "type": "object"
       },
+      "Body_read_chat_attachment_v1_ai_chat_attachments_post": {
+        "properties": {
+          "confidentiality": {
+            "default": "interno",
+            "title": "Confidentiality",
+            "type": "string"
+          },
+          "file": {
+            "description": "A photo, a screenshot, a PDF, a spreadsheet or a text file",
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_read_chat_attachment_v1_ai_chat_attachments_post",
+        "type": "object"
+      },
       "Body_transcribe_recording_v1_ai_transcribe_post": {
         "properties": {
           "file": {
@@ -1810,8 +1844,77 @@
         "title": "CaptureIn",
         "type": "object"
       },
+      "ChatAttachment": {
+        "description": "A file the question comes with, as read by POST /v1/ai/chat/attachments.",
+        "properties": {
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "name": {
+            "maxLength": 200,
+            "title": "Name",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 40000,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "text"
+        ],
+        "title": "ChatAttachment",
+        "type": "object"
+      },
+      "ChatAttachmentOut": {
+        "properties": {
+          "chars": {
+            "default": 0,
+            "title": "Chars",
+            "type": "integer"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ChatAttachmentOut",
+        "type": "object"
+      },
       "ChatIn": {
         "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/ChatAttachment"
+            },
+            "maxItems": 3,
+            "title": "Attachments",
+            "type": "array"
+          },
           "conversation_id": {
             "anyOf": [
               {
@@ -3920,8 +4023,41 @@
         "type": "object"
       },
       "PortIn": {
-        "description": "A network port made with the record: `port of` it (services/network_companions).",
+        "description": "A port made with the record — a network port, or a serial port with its settings: `port of` it\n(services/network_companions).",
         "properties": {
+          "baud": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baud"
+          },
+          "flow_control": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flow Control"
+          },
+          "framing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Framing"
+          },
           "link_speed": {
             "anyOf": [
               {
@@ -3944,6 +4080,17 @@
             ],
             "title": "Mac"
           },
+          "operating_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operating Mode"
+          },
           "port_kind": {
             "anyOf": [
               {
@@ -3960,6 +4107,39 @@
             "default": "eth0",
             "title": "Port Label",
             "type": "string"
+          },
+          "port_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port Role"
+          },
+          "port_settings": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port Settings"
+          },
+          "tcp_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tcp Port"
           }
         },
         "title": "PortIn",
@@ -5475,6 +5655,85 @@
           }
         ],
         "summary": "Chat",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/ai/chat/attachments": {
+      "post": {
+        "description": "A file for a chat question, as text: what the chat sends with the question (`attachments`). An image\nis read by the workspace's vision model and recorded like every model call; other files are read here.",
+        "operationId": "read_chat_attachment",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_read_chat_attachment_v1_ai_chat_attachments_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Chat Attachment",
         "tags": [
           "ai"
         ]

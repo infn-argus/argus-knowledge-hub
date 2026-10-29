@@ -5,6 +5,7 @@ import { documentsApi, intakeApi, problemText, reshapeApi, schemasApi, templates
 import type { ReshapeResult, ReshapeSource } from "../../api/types";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { WorkspaceScopeBanner } from "../../components/WorkspaceScopeBanner";
+import { daySections, type DaySection } from "../../lib/daySections";
 
 const KINDS: { id: ReshapeSource["kind"]; label: string }[] = [
   { id: "paste", label: "Notes or a transcript" },
@@ -57,6 +58,22 @@ export function DocumentReshape() {
   const [confidentiality, setConfidentiality] = useState<"pubblico" | "interno" | "riservato">(seed?.confidentiality ?? "interno");
   const [isGlobal, setIsGlobal] = useState(seed?.isGlobal ?? false);
   const [templateRef, setTemplateRef] = useState<string>("");     // "": the one that applies
+  // A running log of several days is reworked a day at a time: the whole text is kept while one day is in the box.
+  const [whole, setWhole] = useState<string | null>(null);
+  const [day, setDay] = useState<number | null>(null);
+  const [savedDays, setSavedDays] = useState<Record<number, { uid: string; revision: string; title: string }>>({});
+  const days = useMemo(() => (intoDocument ? [] : daySections(whole ?? text)), [whole, text, intoDocument]);
+  const pickDay = (i: number) => {
+    if (whole === null) setWhole(text);
+    setText(days[i].text);
+    setOriginalDate(days[i].date);
+    setDay(i);
+  };
+  const wholeText = () => {
+    if (whole !== null) setText(whole);
+    setWhole(null);
+    setDay(null);
+  };
   const typeName = types.find((t) => t.uid === typeUid)?.name;
 
   const choices = useQuery({ queryKey: ["templates", typeName], queryFn: () => templatesApi.list(typeName),
@@ -83,6 +100,9 @@ export function DocumentReshape() {
   const loadFile = async (file: File) => {
     setFileProblem(null);
     setResult(null);
+    setWhole(null);
+    setDay(null);
+    setSavedDays({});
     try {
       // Text files as they are; a PDF, Word or Excel file or an e-mail read by the server (nothing kept there).
       const plain = /\.(txt|md|markdown|csv|log)$/i.test(file.name);
@@ -124,6 +144,9 @@ export function DocumentReshape() {
         <Link to="/documents/templates" className="text-sm text-indigo-600 hover:underline">Templates…</Link>
       </div>
       <WorkspaceScopeBanner action={intoDocument ? "The draft becomes a new revision of a document in" : "The draft will be saved in"} />
+      {days.length > 1 && (
+        <DaysPanel days={days} current={day} saved={savedDays} typeName={typeName} onPick={pickDay} onWhole={wholeText} />
+      )}
 
       <section className="grid gap-4 rounded-lg border border-slate-200 bg-white p-4 lg:grid-cols-[2fr_1fr]">
         <div>
@@ -240,7 +263,21 @@ export function DocumentReshape() {
                          title, markdown: draft, confidentiality, is_global: isGlobal && confidentiality !== "riservato",
                          dates: result.dates, extraction: result.extraction,
                          issues: result.issues, model: result.model, ...extra })}
-                       onSaved={(uid, revisionUid) => navigate(`/documents/${uid}?revision=${encodeURIComponent(revisionUid)}`)}
+                       onSaved={(uid, revisionUid) => {
+                         if (day === null) {
+                           navigate(`/documents/${uid}?revision=${encodeURIComponent(revisionUid)}`);
+                           return;
+                         }
+                         // A day of a log: kept, and on to the next day not yet saved. The original file goes
+                         // with the first day saved only.
+                         const next = { ...savedDays, [day]: { uid, revision: revisionUid, title } };
+                         setSavedDays(next);
+                         setAttachOriginal(false);
+                         setResult(null);
+                         const after = days.findIndex((_, i) => i > day && !next[i]);
+                         const first = after >= 0 ? after : days.findIndex((_, i) => !next[i]);
+                         if (first >= 0) pickDay(first);
+                       }}
                        intoDocument={!!intoDocument} />
       )}
     </div>
@@ -403,6 +440,47 @@ function ReshapeReview({ result, source, draft, onDraft, title, onTitle, save, o
         </section>
       </div>
     </div>
+  );
+}
+
+/** The days of a running log, to rework one at a time: each becomes its own draft, dated that day. */
+function DaysPanel({ days, current, saved, typeName, onPick, onWhole }: {
+  days: DaySection[]; current: number | null; saved: Record<number, { uid: string; revision: string; title: string }>;
+  typeName?: string; onPick: (i: number) => void; onWhole: () => void;
+}) {
+  const done = Object.keys(saved).length;
+  return (
+    <section className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950" aria-label="Days in the text">
+      <p>
+        <b>This text holds {days.length} days.</b> {typeName ? `A ${typeName}` : "A document"} is usually one day&apos;s
+        record, and one draft for all of them is too long to rework well: rework them one at a time — each draft gets
+        its day&apos;s date.{done > 0 && ` ${done} of ${days.length} saved.`}
+      </p>
+      <ul className="mt-2 flex flex-wrap gap-1.5">
+        {days.map((d, i) => (
+          <li key={`${d.date}-${i}`}>
+            {saved[i] ? (
+              <Link to={`/documents/${saved[i].uid}?revision=${encodeURIComponent(saved[i].revision)}`}
+                    className="inline-block rounded border border-green-300 bg-green-50 px-2 py-1 text-xs text-green-900 hover:underline"
+                    title={saved[i].title}>
+                <span aria-hidden>✓ </span>{d.label}
+              </Link>
+            ) : (
+              <button type="button" onClick={() => onPick(i)} aria-pressed={current === i}
+                      className={`rounded border px-2 py-1 text-xs ${current === i
+                        ? "border-slate-900 bg-slate-900 text-white" : "border-amber-300 bg-white hover:bg-amber-100"}`}>
+                {d.label} <span className={current === i ? "text-slate-300" : "text-slate-400"}>· {d.text.length.toLocaleString()}</span>
+              </button>
+            )}
+          </li>
+        ))}
+        {current !== null && (
+          <li>
+            <button type="button" onClick={onWhole} className="px-2 py-1 text-xs text-amber-900 underline">Back to the whole text</button>
+          </li>
+        )}
+      </ul>
+    </section>
   );
 }
 

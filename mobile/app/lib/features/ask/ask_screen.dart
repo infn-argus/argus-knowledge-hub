@@ -37,6 +37,7 @@ class _AskScreenState extends ConsumerState<AskScreen> with WidgetsBindingObserv
   bool _listening = false;
   int? _speaking; // the turn being read aloud
   String? _preparing; // a recording being transcribed, a photo being read
+  final _files = <AskFile>[]; // photos and screenshots read for the next question
 
   late final Voice _voice;
   /// Hands-free: the turns of a spoken conversation (voice_turns.dart), shown by the orb.
@@ -137,15 +138,23 @@ class _AskScreenState extends ConsumerState<AskScreen> with WidgetsBindingObserv
 
   void _send([String? text, Completer<String>? done]) {
     final question = (text ?? _input.text).trim();
-    if (question.isEmpty || _busy) {
+    // Spoken turns never carry the files waiting in the composer.
+    final files = done == null ? List<AskFile>.of(_files) : const <AskFile>[];
+    if ((question.isEmpty && files.isEmpty) || _busy) {
       done?.completeError(const AskFailure(TurnError.answer, 'Another question is being answered.'));
       return;
     }
     _input.clear();
-    final turn = AskTurn(question: question);
-    setState(() => _turns.add(turn));
+    final turn = AskTurn(question: question, files: files);
+    setState(() {
+      _turns.add(turn);
+      if (files.isNotEmpty) _files.clear();
+    });
     _toBottom();
-    _answering = ref.read(askRepositoryProvider).ask(question, conversationId: _conversationId, voice: done != null).listen(
+    _answering = ref
+        .read(askRepositoryProvider)
+        .ask(question, conversationId: _conversationId, voice: done != null, files: files)
+        .listen(
       (e) => setState(() {
         switch (e) {
           case AskConversationStarted(:final id):
@@ -359,13 +368,15 @@ class _AskScreenState extends ConsumerState<AskScreen> with WidgetsBindingObserv
     );
   }
 
-  /// Besides asking: registering equipment, and writing a document by voice or from a photo.
+  /// Besides asking: registering equipment, writing a document by voice or from a photo, and asking about a
+  /// photo or a screenshot.
   Future<void> _actions() async {
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (sheet) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
+        child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
           for (final (k, icon, title, sub) in const [
             ('register-photo', Icons.add_a_photo_outlined, 'Register equipment from a photo',
                 'Its nameplate is read and the form filled in'),
@@ -374,6 +385,10 @@ class _AskScreenState extends ConsumerState<AskScreen> with WidgetsBindingObserv
                 "Dictate it: transcribed, then written up with the type's template for you to review"),
             ('doc-photo', Icons.document_scanner_outlined, 'Write a document from a photo',
                 'A page, a sign, a whiteboard: its text is read'),
+            ('ask-photo', Icons.photo_camera_outlined, 'Ask about a photo',
+                'A configuration page, a label, a screen: what it shows goes with your question'),
+            ('ask-image', Icons.image_search, 'Ask about a screenshot or a picture',
+                'Chosen from the phone: what it shows goes with your question'),
           ])
             ListTile(
               key: Key('ask-action-$k'),
@@ -382,7 +397,7 @@ class _AskScreenState extends ConsumerState<AskScreen> with WidgetsBindingObserv
               subtitle: Text(sub),
               onTap: () => Navigator.pop(sheet, k),
             ),
-        ]),
+        ])),
       ),
     );
     if (action == null || !mounted) return;
@@ -403,6 +418,22 @@ class _AskScreenState extends ConsumerState<AskScreen> with WidgetsBindingObserv
         final photo = await ref.read(photoSourceProvider).take();
         if (photo == null || !mounted) return;
         await _startDocument('Reading the text…', 'photo', photo, () => reader.read(photo));
+      case 'ask-photo' || 'ask-image':
+        if (_files.length >= 3) {
+          _say('A question takes up to three files.');
+          return;
+        }
+        final photo = await ref.read(photoSourceProvider).take(fromGallery: action == 'ask-image');
+        if (photo == null || !mounted) return;
+        setState(() => _preparing = 'Reading what it shows…');
+        try {
+          final file = await ref.read(askRepositoryProvider).readFile(photo);
+          if (mounted) setState(() => _files.add(file));
+        } on Problem catch (p) {
+          _say(p.message);
+        } finally {
+          if (mounted) setState(() => _preparing = null);
+        }
     }
   }
 
@@ -463,6 +494,19 @@ class _AskScreenState extends ConsumerState<AskScreen> with WidgetsBindingObserv
                 const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
                 const SizedBox(width: 8),
                 Text(_preparing!, key: const Key('ask-preparing')),
+              ]),
+            ),
+          if (_files.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final (i, f) in _files.indexed)
+                  InputChip(
+                    key: Key('ask-file-$i'),
+                    avatar: const Icon(Icons.attach_file, size: 16),
+                    label: Text(f.name, overflow: TextOverflow.ellipsis),
+                    onDeleted: () => setState(() => _files.removeAt(i)),
+                  ),
               ]),
             ),
           Row(children: [
@@ -593,7 +637,14 @@ class _TurnView extends StatelessWidget {
           margin: const EdgeInsets.only(left: 48, bottom: 8),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(16)),
-          child: Text(turn.question, style: TextStyle(color: scheme.onPrimaryContainer)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            if (turn.question.isNotEmpty) Text(turn.question, style: TextStyle(color: scheme.onPrimaryContainer)),
+            for (final f in turn.files)
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.attach_file, size: 14, color: scheme.onPrimaryContainer),
+                Flexible(child: Text(f.name, style: TextStyle(color: scheme.onPrimaryContainer, fontSize: 12))),
+              ]),
+          ]),
         ),
       ),
       if (turn.lookups.isNotEmpty)

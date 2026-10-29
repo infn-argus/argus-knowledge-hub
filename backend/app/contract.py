@@ -125,6 +125,7 @@ FIELD_OPERATIONS = [
     ("post", "/v1/ai/transcribe"),
     ("post", "/v1/ai/draft-document"),
     ("post", "/v1/ai/chat"),
+    ("post", "/v1/ai/chat/attachments"),
     ("get", "/v1/ai/conversations"),
     ("get", "/v1/ai/conversations/{conversation_id}"),
     ("post", "/v1/ai/conversations/{conversation_id}/feedback"),

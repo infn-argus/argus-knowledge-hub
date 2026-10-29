@@ -249,7 +249,19 @@ def complete_structured(endpoint: Endpoint, system: str, user: str) -> str:
         raise LLMError(f"{endpoint.model} used all {endpoint.max_output_tokens} tokens before answering (a "
                        "reasoning model that kept thinking): nothing to read. Raise or clear the output-token "
                        "limit in the AI settings.")
+    if choice.get("finish_reason") == "length":
+        return Reply(content or "", cut_off=True)
     return content or ""
+
+
+class Reply(str):
+    """A model's answer that also says whether it was cut off at the output-token limit (`cut_off`): a JSON
+    answer cut short does not parse, and the reason is then that, not a model that ignored the format."""
+
+    def __new__(cls, text: str, cut_off: bool = False):
+        out = super().__new__(cls, text)
+        out.cut_off = cut_off
+        return out
 
 
 def rerank(endpoint: Endpoint, query: str, documents: list[str]) -> list[tuple[int, float]]:

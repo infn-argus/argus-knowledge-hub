@@ -19,6 +19,7 @@ press "Use".
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 import uuid
 from typing import Optional
@@ -33,7 +34,7 @@ from app.models.intake import IntakeRun
 from app.models.schema import Schema
 from app.services.llm import Endpoint, LLMError
 
-PROMPT_VERSION = "2026.09.1"
+PROMPT_VERSION = "2026.10.1"
 RULES = {"asset": "ai.asset.describe/1", "ticket": "ai.ticket.describe/1", "document": "ai.document.describe/1"}
 MAX_TEXT = 8000
 LOW = 0.5            # confidence cap when the evidence cannot be found in the input
@@ -52,11 +53,19 @@ ASSET_SYSTEM = COMMON + (
     "Shape: {\"type\": <one of the types listed, or null>, \"name\": <string or null>, "
     "\"key\": <string or null>, \"attributes\": {<attribute key>: <value>}, "
     "\"network\": {\"mac\": <MAC address or null>, \"ip\": <IP address or null>, \"hostname\": <or null>}, "
+    "\"ports\": [{\"label\": <as shown, e.g. Port 1>, \"kind\": <RS-232, RS-422, RS-485, RJ45… or null>, "
+    "\"alias\": <the name given to the port, or null>, \"baud\": <number or null>, \"data_bits\": <or null>, "
+    "\"parity\": <None, Even, Odd, Mark, Space or null>, \"stop_bits\": <or null>, "
+    "\"flow_control\": <None, RTS/CTS, XON/XOFF, DTR/DSR or null>, \"tcp_port\": <or null>, "
+    "\"other\": <any other setting shown for the port, as short text, or null>}], "
     "\"evidence\": {<field>: <quote>}, \"confidence\": {<field>: <number>}}\n"
     "Field names in evidence and confidence: type, name, key, attributes.<key>, network.mac, network.ip, "
-    "network.hostname.\n"
+    "network.hostname, ports.\n"
     "A MAC address (often printed as MAC: 00:30:53:…) identifies the unit's network port, not the unit: put it "
     "only in network.mac, never in an attribute.\n"
+    "Fill ports only when the input shows the unit's own ports one by one (a port table, a configuration "
+    "page): one entry per port, with the settings shown for it. A port's settings are never the unit's "
+    "attributes.\n"
     "Use only the types and attribute keys listed. A control-channel or PV name (like GUNSIP01 or "
     "SPARC:VAC:GUNSIP01) names a place in the machine, not a physical unit: never use it as the name "
     "or key of a physical unit.\n"
@@ -172,11 +181,13 @@ def _field(value, label, data, field, text, from_image, method) -> dict:
 def _record(db: Session, workspace_id: str, actor: str, kind: str, endpoint: Optional[Endpoint], *,
             input_refs: list, hashes: list, redactions: dict, output: Optional[dict], validations: list,
             outcome: str, error: Optional[str], started: float, model: Optional[str] = None,
-            profile_id: Optional[str] = None) -> IntakeRun:
+            profile_id: Optional[str] = None, operation: Optional[str] = None,
+            rule_id: Optional[str] = None) -> IntakeRun:
     # A model profile is part of the rule id (§23.8): another model is another rule, never the same claims.
-    rule = RULES[kind] + (f"#{profile_id[:8]}" if profile_id else "")
+    # A run is written once (the table is append-only): what it was is given here, never set afterwards.
+    rule = (rule_id or RULES[kind]) + (f"#{profile_id[:8]}" if profile_id else "")
     run = IntakeRun(id=str(uuid.uuid4()), workspace_id=workspace_id, requested_by=actor, kind=kind,
-                    operation=f"{kind}.describe", rule_id=rule, prompt_version=PROMPT_VERSION, profile_id=profile_id,
+                    operation=operation or f"{kind}.describe", rule_id=rule, prompt_version=PROMPT_VERSION, profile_id=profile_id,
                     provider=_host(endpoint) if endpoint else None,
                     model=model or (endpoint.model if endpoint else None), input_refs=input_refs,
                     input_hashes=hashes, redactions=redactions, output=output, validations=validations,
@@ -356,6 +367,8 @@ def assist_asset(db: Session, workspace_id: str, actor: str, endpoint: Endpoint,
                                            else "ai_extracted")
     companions = _network(db, workspace_id, data, clean, from_image, dropped,
                           db.get(Schema, (fields.get("schema_uid") or {}).get("value") or "") or chosen)
+    base = (fields.get("attributes.tcp_port_base") or {}).get("value") or (draft.get("attributes") or {}).get("tcp_port_base")
+    companions += _ports(db, workspace_id, data, clean, from_image, dropped, companions, base)
     validations += [{"step": "vocabulary", "result": "pass", "dropped": len(dropped)},
                     {"step": "evidence", "result": "pass",
                      "ungrounded": [f for f, v in fields.items() if not v["grounded"]]}]
@@ -405,6 +418,74 @@ def _network(db: Session, workspace_id: str, data: dict, text: str, from_image: 
                     "attributes": {**({"ip": ip} if ip else {}), **({"hostname": host} if host else {})},
                     "confidence": f["confidence"], "evidence": f["evidence"], "grounded": f["grounded"],
                     "reason": "an address was read: the unit is described by it"})
+    return out
+
+
+PARITY = {"none": "N", "n": "N", "even": "E", "e": "E", "odd": "O", "o": "O", "mark": "M", "m": "M",
+          "space": "S", "s": "S"}
+FLOW = {"none": "None", "no": "None", "off": "None", "rts/cts": "RTS/CTS", "rtscts": "RTS/CTS", "hardware": "RTS/CTS",
+        "xon/xoff": "XON/XOFF", "xonxoff": "XON/XOFF", "software": "XON/XOFF", "dtr/dsr": "DTR/DSR", "dtrdsr": "DTR/DSR"}
+MAX_PORTS = 64
+
+
+def _int(v) -> Optional[int]:
+    try:
+        n = float(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+    return int(n) if n == int(n) and n > 0 else None
+
+
+def _ports(db: Session, workspace_id: str, data: dict, text: str, from_image: bool, dropped: list,
+           already: list[dict], tcp_port_base=None) -> list[dict]:
+    """The unit's ports the input lists one by one (a converter's port table, a switch's configuration page),
+    as Equipment Ports to make: label, kind, alias (its role), and a serial port's settings — baud rate,
+    framing (8N1), flow control. A port's socket on the network is the converter's first TCP port plus its
+    number, when the input does not say it."""
+    from app.services import network_companions as nc
+    rows = data.get("ports") if isinstance(data.get("ports"), list) else []
+    t = nc.types(db, workspace_id)
+    if not rows or not t["port"]:
+        return []
+    f = _field("ports", None, data, "ports", text, from_image, "ai_extracted")
+    taken = {str((c.get("attributes") or {}).get("port_label") or "").lower() for c in already if c["kind"] == "port"}
+    out: list[dict] = []
+    for row in rows[:MAX_PORTS]:
+        if not isinstance(row, dict) or not str(row.get("label") or "").strip():
+            continue
+        label = str(row["label"]).strip()[:60]
+        if label.lower() in taken:
+            continue
+        taken.add(label.lower())
+        attrs: dict = {"port_label": label}
+        kind = str(row.get("kind") or "").strip().lower().replace(" ", "")
+        attrs["port_kind"] = nc.SERIAL_KINDS.get(kind) or {"rj45": "RJ45", "ethernet": "RJ45", "sfp": "SFP",
+                                                           "usb": "USB"}.get(kind) or "Other"
+        if str(row.get("alias") or "").strip():
+            attrs["port_role"] = str(row["alias"]).strip()[:120]
+        baud = _int(row.get("baud"))
+        if baud:
+            attrs["baud"] = baud
+        bits, parity, stop = _int(row.get("data_bits")), PARITY.get(str(row.get("parity") or "").strip().lower()), \
+            str(row.get("stop_bits") or "").strip()
+        if bits and parity and stop in ("1", "1.5", "2", "1.0", "2.0"):
+            attrs["framing"] = f"{bits}{parity}{stop.replace('.0', '')}"
+        flow = FLOW.get(str(row.get("flow_control") or "").strip().lower().replace(" ", ""))
+        if flow:
+            attrs["flow_control"] = flow
+        tcp = _int(row.get("tcp_port"))
+        number = re.search(r"(\d+)\s*$", label)
+        if tcp is None and _int(tcp_port_base) and number:
+            tcp = _int(tcp_port_base) + int(number.group(1)) - 1
+        if tcp:
+            attrs["tcp_port"] = tcp
+        if str(row.get("other") or "").strip():
+            attrs["port_settings"] = str(row["other"]).strip()[:500]
+        out.append({"kind": "port", "type_uid": t["port"], "relation": nc.PORT_VERB, "selected": True,
+                    "attributes": attrs, "confidence": f["confidence"], "evidence": f["evidence"],
+                    "grounded": f["grounded"], "reason": "the input lists the unit's ports"})
+    if len(rows) > MAX_PORTS:
+        dropped.append({"field": "ports", "reason": f"only the first {MAX_PORTS} ports are proposed"})
     return out
 
 

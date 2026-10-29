@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { aiApi, ApiError, streamChat } from "../../api/client";
+import { aiApi, ApiError, streamChat, type ChatAttachment } from "../../api/client";
 import type { AskAction, AskMessage, AskStep, ChatEvent } from "../../api/types";
 import { MarkdownView } from "../../components/MarkdownView";
 import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
@@ -59,12 +59,17 @@ interface Turn {
   actions?: AskAction[];
   /** Its rating, once given. */
   rating?: "up" | "down" | null;
+  /** The files a question came with. */
+  attachments?: { name: string; format: string | null }[];
 }
+
+const MAX_FILES = 3;
 
 function fromMessage(m: AskMessage): Turn {
   return {
     id: m.id, role: m.role, content: m.content, steps: m.steps ?? [], thinking: "",
     stopped: m.stopped, error: m.error, seconds: m.seconds, seq: m.seq, rating: m.rating ?? null,
+    attachments: m.attachments ?? undefined,
   };
 }
 
@@ -404,6 +409,10 @@ export function Ask() {
   const [draft, setDraft] = useState(() => params.get("draft") ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Files read for the next question (a screenshot, a datasheet): their text goes with it.
+  const [files, setFiles] = useState<ChatAttachment[]>([]);
+  const [reading, setReading] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
   const abort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   // Set while a turn is streaming into a conversation it created, so loading that conversation from the
@@ -490,10 +499,27 @@ export function Ask() {
     }
   };
 
+  const attach = async (picked: File[]) => {
+    setError(null);
+    setReading(true);
+    try {
+      for (const f of picked.slice(0, MAX_FILES - files.length)) {
+        const read = await aiApi.readAttachment(f);
+        setFiles((all) => [...all, read].slice(0, MAX_FILES));
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? String(e.detail ?? e.message) : e instanceof Error ? e.message : String(e));
+    } finally {
+      setReading(false);
+    }
+  };
+
   const send = async (text: string) => {
     const question = text.trim();
-    if (!question || busy) return;
+    const sending = files;
+    if ((!question && !sending.length) || busy || reading) return;
     setDraft("");
+    setFiles([]);
     setError(null);
     setBusy(true);
     const controller = new AbortController();
@@ -501,11 +527,12 @@ export function Ask() {
     own.current = current;
     setTurns((all) => [
       ...all,
-      { id: `u-${Date.now()}`, role: "user", content: question, steps: [], thinking: "", stopped: null, error: null, seconds: null },
+      { id: `u-${Date.now()}`, role: "user", content: question, steps: [], thinking: "", stopped: null, error: null, seconds: null,
+        attachments: sending.map((f) => ({ name: f.name, format: f.format })) },
       { id: `a-${Date.now()}`, role: "assistant", content: "", steps: [], thinking: "", stopped: null, error: null, seconds: null, live: true },
     ]);
     try {
-      await streamChat({ question, conversation_id: current }, onEvent, controller.signal);
+      await streamChat({ question, conversation_id: current, attachments: sending }, onEvent, controller.signal);
     } catch (e) {
       if (controller.signal.aborted) {
         update((t) => ({ ...t, live: false, stopped: "cancelled", steps: t.steps.map((s) => ({ ...s, running: false })) }));
@@ -513,6 +540,7 @@ export function Ask() {
         setError(e instanceof ApiError ? String(e.detail ?? e.message) : e instanceof Error ? e.message : String(e));
         setTurns((all) => all.slice(0, -2));
         setDraft(question);
+        setFiles(sending);
       }
     } finally {
       setBusy(false);
@@ -609,6 +637,15 @@ export function Ask() {
               t.role === "user" ? (
                 <div key={t.id} className="self-end whitespace-pre-wrap rounded-lg bg-slate-900 px-3 py-2 text-sm text-white">
                   {t.content}
+                  {!!t.attachments?.length && (
+                    <ul className="mt-1 flex flex-wrap gap-1">
+                      {t.attachments.map((f, j) => (
+                        <li key={`${f.name}-${j}`} className="rounded bg-slate-700 px-1.5 py-0.5 text-xs text-slate-100">
+                          <span aria-hidden>📎 </span>{f.name}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               ) : (
                 <AssistantTurn key={t.id} turn={t} actions={actionsOf(t)} conversationId={current}
@@ -626,7 +663,34 @@ export function Ask() {
           }}
           className="border-t border-slate-200 bg-white p-3"
         >
+          {(files.length > 0 || reading) && (
+            <ul className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2" aria-label="Attached files">
+              {files.map((f, i) => (
+                <li key={`${f.name}-${i}`} className="flex items-center gap-1 rounded border border-slate-300 bg-slate-50 px-2 py-1 text-xs text-slate-700"
+                    title={f.truncated ? "Long: only its beginning goes with the question" : undefined}>
+                  <span aria-hidden>📎</span> {f.name}
+                  <span className="text-slate-400">({f.format === "image" ? "read by the vision model" : `${f.text.length} characters`}{f.truncated ? ", shortened" : ""})</span>
+                  <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((all) => all.filter((_, j) => j !== i))}
+                          className="ml-1 text-slate-400 hover:text-rose-600">✕</button>
+                </li>
+              ))}
+              {reading && <li className="px-2 py-1 text-xs text-slate-500">Reading the file…</li>}
+            </ul>
+          )}
           <div className="mx-auto flex max-w-3xl items-end gap-2">
+            <button type="button" aria-label="Attach a file" title="Attach a photo, a screenshot, a PDF or a text file"
+                    disabled={!usable || busy || reading || files.length >= MAX_FILES}
+                    onClick={() => picker.current?.click()}
+                    className="rounded border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+              <span aria-hidden>📎</span>
+            </button>
+            <input ref={picker} type="file" multiple className="hidden" data-testid="ask-file"
+                   accept={(status.data?.has_vision ? "image/jpeg,image/png,image/webp," : "") + ".pdf,.docx,.xlsx,.xlsm,.eml,.txt,.md,.csv,.html"}
+                   onChange={(e) => {
+                     const picked = Array.from(e.target.files ?? []);
+                     e.target.value = "";
+                     if (picked.length) void attach(picked);
+                   }} />
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -652,7 +716,7 @@ export function Ask() {
             ) : (
               <button
                 type="submit"
-                disabled={!usable || !draft.trim()}
+                disabled={!usable || reading || (!draft.trim() && !files.length)}
                 className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:bg-slate-300"
               >
                 Send
@@ -661,7 +725,7 @@ export function Ask() {
           </div>
           {error && <p className="mx-auto mt-2 max-w-3xl text-sm text-rose-700">{error}</p>}
           <p className="mx-auto mt-1 max-w-3xl text-[11px] text-slate-400">
-            Enter to send · Shift+Enter for a new line · keys in answers open their records
+            Enter to send · Shift+Enter for a new line · 📎 adds a photo, a screenshot or a file · keys in answers open their records
           </p>
         </form>
       </section>

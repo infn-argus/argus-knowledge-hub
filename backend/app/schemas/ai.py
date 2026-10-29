@@ -221,8 +221,22 @@ class AskStep(BaseModel):
     seconds: float = 0
 
 
+class ChatAttachment(BaseModel):
+    """A file the question comes with, as read by POST /v1/ai/chat/attachments."""
+    name: str = Field(max_length=200)
+    format: Optional[str] = None
+    text: str = Field(max_length=40000)
+
+
+class ChatAttachmentOut(BaseModel):
+    name: str
+    format: Optional[str] = None
+    chars: int = 0
+
+
 class ChatIn(BaseModel):
     question: str
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=3)
     # Omitted to start a conversation; given to continue one.
     conversation_id: Optional[str] = None
     # Spoken (the app's hands-free mode): a short answer first, one clarifying question when ambiguous.
@@ -237,6 +251,8 @@ class AskMessageOut(BaseModel):
     role: str
     content: str = ""
     steps: Optional[list[AskStep]] = None
+    # The files a question came with (their names and size; the text stays with the conversation).
+    attachments: Optional[list[ChatAttachmentOut]] = None
     stopped: Optional[str] = None
     error: Optional[str] = None
     seconds: Optional[float] = None

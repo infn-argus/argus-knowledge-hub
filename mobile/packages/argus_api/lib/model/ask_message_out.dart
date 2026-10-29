@@ -13,6 +13,7 @@ part of openapi.api;
 class AskMessageOut {
   /// Returns a new [AskMessageOut] instance.
   AskMessageOut({
+    this.attachments = const [],
     this.content = '',
     this.createdAt,
     this.error,
@@ -24,6 +25,8 @@ class AskMessageOut {
     this.steps = const [],
     this.stopped,
   });
+
+  List<ChatAttachmentOut>? attachments;
 
   String content;
 
@@ -47,6 +50,7 @@ class AskMessageOut {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is AskMessageOut &&
+    _deepEquality.equals(other.attachments, attachments) &&
     other.content == content &&
     other.createdAt == createdAt &&
     other.error == error &&
@@ -61,6 +65,7 @@ class AskMessageOut {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (attachments == null ? 0 : attachments!.hashCode) +
     (content.hashCode) +
     (createdAt == null ? 0 : createdAt!.hashCode) +
     (error == null ? 0 : error!.hashCode) +
@@ -73,10 +78,15 @@ class AskMessageOut {
     (stopped == null ? 0 : stopped!.hashCode);
 
   @override
-  String toString() => 'AskMessageOut[content=$content, createdAt=$createdAt, error=$error, id=$id, rating=$rating, role=$role, seconds=$seconds, seq=$seq, steps=$steps, stopped=$stopped]';
+  String toString() => 'AskMessageOut[attachments=$attachments, content=$content, createdAt=$createdAt, error=$error, id=$id, rating=$rating, role=$role, seconds=$seconds, seq=$seq, steps=$steps, stopped=$stopped]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+    if (this.attachments != null) {
+      json[r'attachments'] = this.attachments;
+    } else {
+      json[r'attachments'] = null;
+    }
       json[r'content'] = this.content;
     if (this.createdAt != null) {
       json[r'created_at'] = this.createdAt!.toUtc().toIso8601String();
@@ -133,6 +143,7 @@ class AskMessageOut {
       }());
 
       return AskMessageOut(
+        attachments: ChatAttachmentOut.listFromJson(json[r'attachments']),
         content: mapValueOfType<String>(json, r'content') ?? '',
         createdAt: mapDateTime(json, r'created_at', r''),
         error: mapValueOfType<String>(json, r'error'),

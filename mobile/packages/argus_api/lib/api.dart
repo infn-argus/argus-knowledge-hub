@@ -78,6 +78,8 @@ part 'model/assist_in.dart';
 part 'model/attachment_out.dart';
 part 'model/capabilities_out.dart';
 part 'model/capture_in.dart';
+part 'model/chat_attachment.dart';
+part 'model/chat_attachment_out.dart';
 part 'model/chat_in.dart';
 part 'model/close_review_in.dart';
 part 'model/decide_in.dart';

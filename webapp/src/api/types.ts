@@ -1370,6 +1370,8 @@ export interface AskMessage {
   role: "user" | "assistant";
   content: string;
   steps: AskStep[] | null;
+  /** The files a question came with. */
+  attachments?: { name: string; format: string | null; chars: number }[] | null;
   stopped: string | null;
   error: string | null;
   seconds: number | null;

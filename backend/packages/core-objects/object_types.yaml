@@ -249,3 +249,7 @@ object_types:
         - {key: tcp_port, name: TCP port, type: integer, indexed: true}
         - {key: signal_level, name: Signal level}
         - {key: termination, name: Termination}
+        - {key: baud, name: Baud rate, type: integer}
+        - {key: framing, name: "Framing (data bits, parity, stop bits)"}
+        - {key: flow_control, name: Flow control, type: enumeration, options: [{id: none, value: None}, {id: rts_cts, value: RTS/CTS}, {id: xon_xoff, value: XON/XOFF}, {id: dtr_dsr, value: DTR/DSR}]}
+        - {key: port_settings, name: Other settings, type: text}

@@ -12,7 +12,8 @@ export const macLooksRight = (v: string) => !v.trim() || MAC.test(v.trim());
 
 /** What the assistant proposed, as the form's drafts (ticked when it read them). */
 export function fromProposals(list: CompanionProposal[] | undefined, port: PortDraft, address: AddressDraft) {
-  const p = list?.find((c) => c.kind === "port");
+  // The network port is the one with the MAC; a port table's other ports are listed apart (ProposedPorts).
+  const p = list?.find((c) => c.kind === "port" && !!c.attributes.mac);
   const a = list?.find((c) => c.kind === "address");
   return {
     port: p ? { on: p.selected, port_label: p.attributes.port_label ?? "eth0", port_kind: p.attributes.port_kind ?? "RJ45",

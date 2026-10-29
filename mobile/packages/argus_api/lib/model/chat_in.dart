@@ -13,10 +13,13 @@ part of openapi.api;
 class ChatIn {
   /// Returns a new [ChatIn] instance.
   ChatIn({
+    this.attachments = const [],
     this.conversationId,
     required this.question,
     this.voice = false,
   });
+
+  List<ChatAttachment> attachments;
 
   String? conversationId;
 
@@ -26,6 +29,7 @@ class ChatIn {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is ChatIn &&
+    _deepEquality.equals(other.attachments, attachments) &&
     other.conversationId == conversationId &&
     other.question == question &&
     other.voice == voice;
@@ -33,15 +37,17 @@ class ChatIn {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (attachments.hashCode) +
     (conversationId == null ? 0 : conversationId!.hashCode) +
     (question.hashCode) +
     (voice.hashCode);
 
   @override
-  String toString() => 'ChatIn[conversationId=$conversationId, question=$question, voice=$voice]';
+  String toString() => 'ChatIn[attachments=$attachments, conversationId=$conversationId, question=$question, voice=$voice]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+      json[r'attachments'] = this.attachments;
     if (this.conversationId != null) {
       json[r'conversation_id'] = this.conversationId;
     } else {
@@ -71,6 +77,7 @@ class ChatIn {
       }());
 
       return ChatIn(
+        attachments: ChatAttachment.listFromJson(json[r'attachments']),
         conversationId: mapValueOfType<String>(json, r'conversation_id'),
         question: mapValueOfType<String>(json, r'question')!,
         voice: mapValueOfType<bool>(json, r'voice') ?? false,

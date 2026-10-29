@@ -93,6 +93,37 @@ void main() {
     expect(app.server.sent('POST', '/v1/ai/chat').last, {'question': 'And after that?', 'conversation_id': 'conv-1'});
   });
 
+  testWidgets('a screenshot is read and goes with the question, and a photo alone is a question too', (tester) async {
+    final app = await start(tester);
+    app.server.routes['GET /v1/ai/status'] = _json(_usable);
+    app.server.routes['POST /v1/ai/chat'] = _answer;
+    app.server.routes['POST /v1/ai/chat/attachments'] =
+        _json({'name': 'IMG_1.jpg', 'format': 'image', 'text': '| Port 4 | VITARA+flame | 57600 |', 'truncated': false});
+    await app.tap('nav-ask');
+
+    await app.tap('ask-actions');
+    await app.tap('ask-action-ask-image');
+    expect(app.photos.lastFromGallery, isTrue, reason: 'a screenshot is chosen from the phone');
+    expect(find.byKey(const Key('ask-file-0')), findsOneWidget);
+
+    await app.type('ask-input', 'What is on port 4?');
+    await app.tap('ask-send');
+    expect(app.server.sent('POST', '/v1/ai/chat').single, {
+      'question': 'What is on port 4?',
+      'attachments': [{'name': 'IMG_1.jpg', 'format': 'image', 'text': '| Port 4 | VITARA+flame | 57600 |'}],
+    });
+    expect(find.byKey(const Key('ask-file-0')), findsNothing, reason: 'the file went with the question');
+    expect(find.text('IMG_1.jpg'), findsOneWidget, reason: 'the question shows the file it came with');
+
+    await app.tap('ask-actions');
+    await app.tap('ask-action-ask-photo');
+    expect(app.photos.lastFromGallery, isFalse);
+    await app.tap('ask-send');
+    expect(app.server.sent('POST', '/v1/ai/chat').last,
+        {'question': '', 'conversation_id': 'conv-1', 'attachments': [
+          {'name': 'IMG_1.jpg', 'format': 'image', 'text': '| Port 4 | VITARA+flame | 57600 |'}]});
+  });
+
   testWidgets('hands-free: the question is heard and sent as spoken, the answer said, and it keeps listening '
       'through silence until it is ended', (tester) async {
     // Reduced motion: the orb is drawn still, so the screen settles (its moving form: handsfree_test.dart).

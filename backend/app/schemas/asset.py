@@ -5,11 +5,19 @@ from pydantic import BaseModel, ConfigDict
 
 
 class PortIn(BaseModel):
-    """A network port made with the record: `port of` it (services/network_companions)."""
+    """A port made with the record — a network port, or a serial port with its settings: `port of` it
+    (services/network_companions)."""
     port_label: str = "eth0"
     port_kind: Optional[str] = "RJ45"
     mac: Optional[str] = None
     link_speed: Optional[str] = None
+    port_role: Optional[str] = None
+    tcp_port: Optional[int] = None
+    operating_mode: Optional[str] = None
+    baud: Optional[int] = None
+    framing: Optional[str] = None
+    flow_control: Optional[str] = None
+    port_settings: Optional[str] = None
 
 
 class AddressIn(BaseModel):
