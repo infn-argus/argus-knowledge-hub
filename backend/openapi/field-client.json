@@ -1970,6 +1970,11 @@
             ],
             "title": "Document Type Uid"
           },
+          "is_global": {
+            "default": false,
+            "title": "Is Global",
+            "type": "boolean"
+          },
           "next_review_due": {
             "anyOf": [
               {
@@ -4085,6 +4090,11 @@
           "extraction": {
             "title": "Extraction",
             "type": "object"
+          },
+          "is_global": {
+            "default": false,
+            "title": "Is Global",
+            "type": "boolean"
           },
           "issues": {
             "title": "Issues"

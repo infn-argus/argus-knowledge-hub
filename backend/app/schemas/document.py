@@ -20,6 +20,7 @@ class DocumentCreate(BaseModel):
     responsible_service_asset_uid: Optional[str] = None
     authority_level: AuthorityLevel = "informativo"
     confidentiality: Confidentiality = "interno"
+    is_global: bool = False
     source: str = "manual"
     retention_class: str = "5y"
     # Seeds the first Draft revision.

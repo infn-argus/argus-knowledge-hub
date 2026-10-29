@@ -26,6 +26,8 @@ export interface ReshapeSeed {
   subject?: string;
   /** The file the text was read from: attached to the saved draft, so the original is never lost. */
   file?: File;
+  confidentiality?: "pubblico" | "interno" | "riservato";
+  isGlobal?: boolean;
 }
 
 /** Rework raw text — notes, an e-mail, a transcript, an imported page — into a draft that follows the document
@@ -52,7 +54,8 @@ export function DocumentReshape() {
   const [sender, setSender] = useState("");
   const [current, setCurrent] = useState(false);
   const [typeUid, setTypeUid] = useState(params.get("document_type_uid") ?? "");
-  const [confidentiality, setConfidentiality] = useState<"pubblico" | "interno" | "riservato">("interno");
+  const [confidentiality, setConfidentiality] = useState<"pubblico" | "interno" | "riservato">(seed?.confidentiality ?? "interno");
+  const [isGlobal, setIsGlobal] = useState(seed?.isGlobal ?? false);
   const [templateRef, setTemplateRef] = useState<string>("");     // "": the one that applies
   const typeName = types.find((t) => t.uid === typeUid)?.name;
 
@@ -69,6 +72,8 @@ export function DocumentReshape() {
   const [result, setResult] = useState<ReshapeResult | null>(null);
   const [draft, setDraft] = useState("");
   const [title, setTitle] = useState("");
+  useEffect(() => setResult(null), [text, kind, filename, originalDate, sender, subject, current,
+                                   typeUid, templateRef, confidentiality]);
   const preview = useMutation({
     mutationFn: () => reshapeApi.preview({ source: sourceOf(), document_type_uid: typeUid,
                                            template: templateRef || null, confidentiality, document_uid: intoDocument }),
@@ -77,10 +82,11 @@ export function DocumentReshape() {
 
   const loadFile = async (file: File) => {
     setFileProblem(null);
+    setResult(null);
     try {
       // Text files as they are; a PDF, Word or Excel file or an e-mail read by the server (nothing kept there).
       const plain = /\.(txt|md|markdown|csv|log)$/i.test(file.name);
-      setText(plain ? await file.text() : (await intakeApi.extract(file)).text);
+      setText(plain ? await file.text() : (await intakeApi.extract(file, confidentiality, intoDocument)).text);
     } catch (e) {
       setFileProblem(problemText(e));
       return;
@@ -96,7 +102,11 @@ export function DocumentReshape() {
   const saveWithOriginal = async (body: Parameters<typeof reshapeApi.save>[0]) => {
     const saved = await reshapeApi.save(body, intoDocument);
     if (original && attachOriginal) {
-      await documentsApi.uploadRevisionAttachment(saved.document_uid, saved.revision_uid, original).catch(() => undefined);
+      try {
+        await documentsApi.uploadRevisionAttachment(saved.document_uid, saved.revision_uid, original);
+      } catch (e) {
+        alert(`The draft was saved, but its original file was not attached: ${problemText(e)}. Add it on the document page.`);
+      }
     }
     return saved;
   };
@@ -120,8 +130,8 @@ export function DocumentReshape() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label className="text-sm font-medium text-slate-700">The raw text</label>
             <label className="cursor-pointer text-xs text-indigo-600 hover:underline">
-              Open a file (PDF, Word, Excel, e-mail, web page, text)
-              <input type="file" accept=".pdf,.docx,.xlsx,.xlsm,.html,.htm,.txt,.md,.markdown,.csv,.eml,text/*" className="hidden"
+              Open a file or image (PDF, Word, Excel, e-mail, web page, text, JPEG, PNG, WebP)
+              <input type="file" accept="image/jpeg,image/png,image/webp,.pdf,.docx,.xlsx,.xlsm,.html,.htm,.txt,.md,.markdown,.csv,.eml,text/*" className="hidden"
                      onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadFile(f); e.target.value = ""; }} />
             </label>
           </div>
@@ -131,6 +141,7 @@ export function DocumentReshape() {
           <p className="text-[11px] text-slate-400">{text.length.toLocaleString()} of 60,000 characters
             {filename ? ` · from ${filename}` : ""}. Instructions written in the text are treated as text.</p>
           {fileProblem && <p className="text-xs text-rose-700">{fileProblem}</p>}
+          <p className="text-[11px] text-slate-500">Images are read by this workspace&apos;s vision model. Check its transcription before previewing.</p>
           {original && (
             <label className="mt-1 flex items-center gap-2 text-xs text-slate-700">
               <input type="checkbox" checked={attachOriginal} onChange={(e) => setAttachOriginal(e.target.checked)} />
@@ -206,6 +217,13 @@ export function DocumentReshape() {
               <option value="riservato">Confidential (riservato)</option>
             </select>
           </label>
+          {!intoDocument && (
+            <label className="flex items-start gap-2 text-xs text-slate-700">
+              <input type="checkbox" checked={isGlobal && confidentiality !== "riservato"}
+                     disabled={confidentiality === "riservato"} onChange={(e) => setIsGlobal(e.target.checked)} />
+              <span>Share with every workspace <span className="block text-slate-500">Other workspaces can read it; editing stays here.</span></span>
+            </label>
+          )}
           <button type="button" disabled={!text.trim() || !typeUid || preview.isPending} onClick={() => preview.mutate()}
                   className="w-full rounded bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-40">
             {preview.isPending ? "Reading the text…" : result ? "Preview again" : "Preview"}
@@ -219,9 +237,11 @@ export function DocumentReshape() {
                        save={(extra) => saveWithOriginal({
                          source: sourceOf(), document_type_uid: typeUid, template: `${result.template.ref}${
                            result.template.scope === "official" ? "" : `@${result.template.version}`}`,
-                         title, markdown: draft, confidentiality, dates: result.dates, extraction: result.extraction,
+                         title, markdown: draft, confidentiality, is_global: isGlobal && confidentiality !== "riservato",
+                         dates: result.dates, extraction: result.extraction,
                          issues: result.issues, model: result.model, ...extra })}
-                       onSaved={(uid) => navigate(`/documents/${uid}`)} intoDocument={!!intoDocument} />
+                       onSaved={(uid, revisionUid) => navigate(`/documents/${uid}?revision=${encodeURIComponent(revisionUid)}`)}
+                       intoDocument={!!intoDocument} />
       )}
     </div>
   );
@@ -229,8 +249,8 @@ export function DocumentReshape() {
 
 function ReshapeReview({ result, source, draft, onDraft, title, onTitle, save, onSaved, intoDocument }: {
   result: ReshapeResult; source: string; draft: string; onDraft: (v: string) => void; title: string;
-  onTitle: (v: string) => void; save: (extra: Record<string, unknown>) => Promise<{ document_uid: string }>;
-  onSaved: (uid: string) => void; intoDocument: boolean;
+  onTitle: (v: string) => void; save: (extra: Record<string, unknown>) => Promise<{ document_uid: string; revision_uid: string }>;
+  onSaved: (uid: string, revisionUid: string) => void; intoDocument: boolean;
 }) {
   const lines = useMemo(() => source.replace(/\r\n/g, "\n").split("\n"), [source]);
   const cited = useMemo(() => {
@@ -251,7 +271,7 @@ function ReshapeReview({ result, source, draft, onDraft, title, onTitle, save, o
   const [links, setLinks] = useState<Set<string>>(new Set());
   const saving = useMutation({
     mutationFn: () => save({ code: code || null, confirm_document_date: confirmDate, link_assets: [...links] }),
-    onSuccess: (r) => onSaved(r.document_uid),
+    onSuccess: (r) => onSaved(r.document_uid, r.revision_uid),
   });
   const lineRef = (ls?: number[]) => ls && ls.length > 0 && (
     <button type="button" onClick={() => setFocus(ls[0])} className="ml-1 font-mono text-[11px] text-indigo-600 hover:underline">

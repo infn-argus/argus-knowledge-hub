@@ -66,17 +66,19 @@ be reworked with its type's template (**+ Revision from raw text** on its page).
 follows the template of a document type. It is also offered from **New document** ("Rework with the template",
 for the text you described or the file you added) and on a document's page (**+ Revision from raw text**).
 
-1. Paste the text, or open a file — a PDF, a Word or Excel file, an e-mail, a text file; the file itself is
+1. Paste the text, or open a file — a PDF, a Word or Excel file, an e-mail, a text file, or a JPEG, PNG or WebP image. Images are transcribed by the workspace's configured vision model; check the transcription before previewing. The file itself is
    attached to the saved draft (*Attach the original file*, ticked by default). Say what it is and, if you know it, when it was
    written. An e-mail's own Date / Inviato line is read first. Tick **The text was written now** only if it was.
 2. Choose the document type. The page says which template applies and why: your choice, else your own copy set
-   as yours, else the workspace's variant, else the official template.
+   as yours, else the workspace's variant, else the official template. For a new document, **Share with every
+   workspace** can be selected here unless the document is *riservato*.
 3. **Preview**: nothing is saved. You see the original (lines used in the draft in green, lines not carried over
    in amber), the draft to edit, and what to check: what is missing (`[da confermare]` in the draft), what was
    deduced (`[da verificare]`), the dates and where each came from, weekdays that do not match their dates,
    lines that read like instructions to an assistant (always treated as text), and records the text names, to
    link if you want.
-4. **Save as draft**: a new document, or the document's next revision, in draft. The original text is kept among
+4. **Save as draft**: a new document, or the document's next revision, in draft. ARGUS opens the new draft revision
+   so its text and files can be completed. The original text is kept among
    the revision's files, and the page shows the template and the exact version that made it. Submit, approve and
    publish as usual. A procedure, work instruction, safety document or runbook says it is not usable as an
    instruction until it is validated and published. A drawing or manual card points to the original.
@@ -108,7 +110,7 @@ Every revision, the first one included, goes the same way:
 
 1. **Draft**: open the document and the draft revision; its text is edited in place. **Save** keeps your
    changes; edit and save as often as needed.
-2. **Submit for review**: the revision is locked while it is reviewed.
+2. **Submit for review**: the revision is locked while it is reviewed. Its author can **Withdraw review to edit** before a reviewer decides.
 3. **In review**: someone **other than its author** decides. **Approve**, or **Reject** with a reason: a rejected
    revision goes back to **draft**, with the reason shown, for the author to correct and submit again.
 4. **Approved**: **Publish** makes it the revision to work from. Approving does not publish: the two are
@@ -137,8 +139,7 @@ that the document covers the configuration installed before following it.
 
 ## Files of a revision
 
-A file belongs to one revision: the figures a procedure was approved with stay with that revision. Add files to
-the **draft**; a published revision's files are not changed. On the phone, the document's **Files** section
+A file belongs to one revision: the figures a procedure was approved with stay with that revision. Use **+ Attach file to draft** to add a file without inserting it into the body, or the editor's paperclip to place an image or link in the text. An in-review or approved revision cannot receive files; withdraw or reject it first. A published revision's files are not changed. On the phone, the document's **Files** section
 lists the published revision's files and the draft's, and **Attach to the draft** adds a photo, a video, a
 recorded note or a location.
 
