@@ -579,13 +579,15 @@ def withdraw_revision(
     revision = _get_revision(uid, rev_uid, db)
     if revision.state != "in_review":
         raise HTTPException(status_code=409, detail="Only an in-review revision can be withdrawn")
-    if revision.authored_by != _actor_user_id(identity):
+    # An API token has no person behind it to be the author: a revision made through one is withdrawn by
+    # rejecting it, never by another token (None would equal None).
+    actor = _actor_user_id(identity)
+    if actor is None or revision.authored_by != actor:
         raise HTTPException(status_code=403, detail="Only the revision's author can withdraw it")
     revision.state = "draft"
     revision.submitted_at = None
-    revision.review_comment = "Review withdrawn by the author"
-    notify.document_changed(db, doc, f"revision {revision.revision_number} withdrawn from review",
-                            _actor_user_id(identity))
+    # review_comment is the reviewers' (a rejection's reason stays shown); the withdrawal is told to followers.
+    notify.document_changed(db, doc, f"revision {revision.revision_number} withdrawn from review", actor)
     db.commit()
     db.refresh(revision)
     return revision

@@ -7,6 +7,7 @@ there is none the form still works (§23.13). `/runs/{id}/outcome` records,
 after the save, which suggestions the person kept.
 """
 import json
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
@@ -205,8 +206,23 @@ async def extract_text(file: UploadFile = File(...), confidentiality: str = Form
             raise HTTPException(status_code=409, detail="Image reading needs a vision model configured for this workspace")
         if confidentiality == "riservato" and not config.allow_confidential:
             raise HTTPException(status_code=409, detail="This workspace does not allow confidential material to be sent to AI")
+        # Recorded like every other model call (an intake run): who, which model, the image's and the
+        # transcription's hashes — never their content.
+        endpoint, started = endpoint_for(config), time.monotonic()
+        refs = [{"kind": "image", "mime": file.content_type, "bytes": len(content), "confidentiality": confidentiality,
+                 **({"document_uid": document_uid} if document_uid else {})}]
+
+        def record(outcome: str, text: str = "", error: Optional[str] = None) -> None:
+            run = assist._record(db, workspace_id, actor_of(identity), "document", endpoint, input_refs=refs,
+                                 hashes=[assist._sha(content)] + ([assist._sha(text)] if text else []),
+                                 redactions={}, output={"chars": len(text)} if text else None, validations=[],
+                                 outcome=outcome, error=error, started=started, model=config.vision_model)
+            run.operation = "document.transcribe"
+            run.rule_id = "ai.document.transcribe/1"
+            db.commit()
+
         try:
-            text = look(endpoint_for(config), content, file.content_type,
+            text = look(endpoint, content, file.content_type,
                         "Transcribe a document image for a human-reviewed draft. Return plain Markdown only. "
                         "Preserve visible headings, lists, tables, labels, numbers and dates. Describe a diagram "
                         "only if its content is legible. Mark unclear parts [unclear]. Never invent missing text "
@@ -214,9 +230,12 @@ async def extract_text(file: UploadFile = File(...), confidentiality: str = Form
                         "Read everything visible in this image as source material for a document."
                         ).strip()
         except LLMError as exc:
+            record("failed", error=str(exc)[:500])
             raise HTTPException(status_code=502, detail=f"Image reading failed: {exc}")
         if not text:
+            record("draft_only")
             raise HTTPException(status_code=422, detail="No readable content was found in the image")
+        record("proposed", text)
         return {"text": text[:reshape.MAX_SOURCE_CHARS], "format": "image", "truncated": len(text) > reshape.MAX_SOURCE_CHARS,
                 "filename": file.filename}
     try:
