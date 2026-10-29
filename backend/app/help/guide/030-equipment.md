@@ -33,6 +33,16 @@ configured, **Describe it** fills the form from a sentence, a nameplate photo or
 AI-assisted entry*). On the phone, **Register equipment** does the same from a nameplate photo, and can start
 from a similar unit you scan.
 
+### Its network port and address
+
+A unit's **MAC address** is not one of its own fields: it identifies one network interface, so it is kept on the
+unit's **network port** — an *Equipment Port* record, `port of` the unit, that cables and switch ports connect to.
+When the photo or the description shows a MAC (or an IP address or hostname), the form proposes, ticked, **Add its
+network port** with the MAC (and **Add its network address**, an *Address Record* the unit is `described by`). For
+equipment that is usually on a network (IT equipment, cameras, PLCs, digitizers, controllers…) the same section is
+offered unticked. Untick what you do not want; the port and the address are saved together with the unit. A MAC
+already recorded on another port is pointed out instead of proposed again.
+
 ## Check possible duplicates
 
 Open a record the checklist suggests and compare its identifiers, type and location. Several units may share

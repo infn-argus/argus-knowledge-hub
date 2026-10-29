@@ -13,6 +13,7 @@ part of openapi.api;
 class AssetCreate {
   /// Returns a new [AssetCreate] instance.
   AssetCreate({
+    this.addresses = const [],
     this.attributes,
     this.avatarIconUid,
     this.inboundRelations = const [],
@@ -20,10 +21,13 @@ class AssetCreate {
     this.key,
     required this.name,
     this.outboundRelations = const [],
+    this.ports = const [],
     required this.schemaUid,
     this.type,
     required this.uid,
   });
+
+  List<AddressIn> addresses;
 
   ///
   /// Please note: This property should have been non-nullable! Since the specification file
@@ -45,6 +49,8 @@ class AssetCreate {
 
   List<String> outboundRelations;
 
+  List<PortIn> ports;
+
   String schemaUid;
 
   String? type;
@@ -53,6 +59,7 @@ class AssetCreate {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is AssetCreate &&
+    _deepEquality.equals(other.addresses, addresses) &&
     other.attributes == attributes &&
     other.avatarIconUid == avatarIconUid &&
     _deepEquality.equals(other.inboundRelations, inboundRelations) &&
@@ -60,6 +67,7 @@ class AssetCreate {
     other.key == key &&
     other.name == name &&
     _deepEquality.equals(other.outboundRelations, outboundRelations) &&
+    _deepEquality.equals(other.ports, ports) &&
     other.schemaUid == schemaUid &&
     other.type == type &&
     other.uid == uid;
@@ -67,6 +75,7 @@ class AssetCreate {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
+    (addresses.hashCode) +
     (attributes == null ? 0 : attributes!.hashCode) +
     (avatarIconUid == null ? 0 : avatarIconUid!.hashCode) +
     (inboundRelations.hashCode) +
@@ -74,15 +83,17 @@ class AssetCreate {
     (key == null ? 0 : key!.hashCode) +
     (name.hashCode) +
     (outboundRelations.hashCode) +
+    (ports.hashCode) +
     (schemaUid.hashCode) +
     (type == null ? 0 : type!.hashCode) +
     (uid.hashCode);
 
   @override
-  String toString() => 'AssetCreate[attributes=$attributes, avatarIconUid=$avatarIconUid, inboundRelations=$inboundRelations, isGlobal=$isGlobal, key=$key, name=$name, outboundRelations=$outboundRelations, schemaUid=$schemaUid, type=$type, uid=$uid]';
+  String toString() => 'AssetCreate[addresses=$addresses, attributes=$attributes, avatarIconUid=$avatarIconUid, inboundRelations=$inboundRelations, isGlobal=$isGlobal, key=$key, name=$name, outboundRelations=$outboundRelations, ports=$ports, schemaUid=$schemaUid, type=$type, uid=$uid]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
+      json[r'addresses'] = this.addresses;
     if (this.attributes != null) {
       json[r'attributes'] = this.attributes;
     } else {
@@ -102,6 +113,7 @@ class AssetCreate {
     }
       json[r'name'] = this.name;
       json[r'outbound_relations'] = this.outboundRelations;
+      json[r'ports'] = this.ports;
       json[r'schema_uid'] = this.schemaUid;
     if (this.type != null) {
       json[r'type'] = this.type;
@@ -131,6 +143,7 @@ class AssetCreate {
       }());
 
       return AssetCreate(
+        addresses: AddressIn.listFromJson(json[r'addresses']),
         attributes: mapValueOfType<Object>(json, r'attributes'),
         avatarIconUid: mapValueOfType<String>(json, r'avatar_icon_uid'),
         inboundRelations: json[r'inbound_relations'] is Iterable
@@ -142,6 +155,7 @@ class AssetCreate {
         outboundRelations: json[r'outbound_relations'] is Iterable
             ? (json[r'outbound_relations'] as Iterable).cast<String>().toList(growable: false)
             : const [],
+        ports: PortIn.listFromJson(json[r'ports']),
         schemaUid: mapValueOfType<String>(json, r'schema_uid')!,
         type: mapValueOfType<String>(json, r'type'),
         uid: mapValueOfType<String>(json, r'uid')!,

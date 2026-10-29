@@ -970,6 +970,20 @@ export type GuideResult = {
   checks: GuideCheck[];
   steps: { id: string; label: string; done: boolean }[];
   next: { field: string; question: string } | null;
+  /** Assets: whether the form offers a network port for the chosen type. */
+  network_port?: { offered: boolean; port_type_uid: string | null; address_type_uid: string | null };
+};
+/** A record to make with the new one: its network port (with the MAC read), or its registered address. */
+export type CompanionProposal = {
+  kind: "port" | "address";
+  type_uid: string;
+  relation: string;
+  selected: boolean;
+  attributes: { port_label?: string; port_kind?: string; mac?: string; ip?: string; hostname?: string };
+  confidence: number | null;
+  evidence: string | null;
+  grounded: boolean;
+  reason: string;
 };
 export type AssistResult = {
   run_id: string;
@@ -980,6 +994,7 @@ export type AssistResult = {
   message?: string | null;
   redacted?: number;
   guide: GuideResult;
+  companions?: CompanionProposal[];
 };
 
 export type ProposeResult = {
