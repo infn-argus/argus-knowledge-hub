@@ -1,7 +1,7 @@
 ---
 title: Documents and the knowledge base
 summary: Writing procedures, manuals and reports; the first revision and later ones, review, approval and publication; confidentiality, sharing, retention and where a document applies.
-keywords: [document, documents, rework, raw text, notes, email, e-mail, transcript, minutes, template, templates, variant, rielabora, testo grezzo, procedure, manual, report, knowledge base, revision, draft, submit, review, reject, approval, approve, publish, new revision, edit, retire, confidentiality, riservato, shared, global, retention, markdown, controlled document, attachment, related by meaning, export, pdf, print, download, markdown file, .md, save as pdf]
+keywords: [document, documents, logbook, log, running log, shift log, days, rework, raw text, notes, email, e-mail, transcript, minutes, template, templates, variant, rielabora, testo grezzo, procedure, manual, report, knowledge base, revision, draft, submit, review, reject, approval, approve, publish, new revision, edit, retire, confidentiality, riservato, shared, global, retention, markdown, controlled document, attachment, related by meaning, export, pdf, print, download, markdown file, .md, save as pdf]
 order: 80
 ---
 
@@ -82,6 +82,17 @@ for the text you described or the file you added) and on a document's page (**+ 
    the revision's files, and the page shows the template and the exact version that made it. Submit, approve and
    publish as usual. A procedure, work instruction, safety document or runbook says it is not usable as an
    instruction until it is validated and published. A drawing or manual card points to the original.
+
+### A log of several days
+
+A running log (a shift log, a machine log) holds many days, each starting with its date on a line of its own
+(`26.10.2026`, `2026-10-26`, *Lunedì 26 ottobre 2026*). One draft for all of them is too long to rework well —
+the assistant's answer is cut off, or comes back unreadable — and a *Logbook Entry* is one day's record anyway.
+When the text holds several days, the page lists them above the text: choose a day and only its text goes in the
+box, with its date as **Written or sent on**. Preview and save it as usual: the page stays, marks the day saved
+(a link to its draft) and moves to the next day. **Back to the whole text** returns to all of it. The original
+file is attached to the first day saved only. What comes before the first day (a title, instructions) is left
+out of each day.
 
 The workspace's AI settings apply: confidential (*riservato*) material is sent to the model only where the
 workspace allows it. **Draft with AI** and **Review** on the editor are unchanged and work on these drafts too.

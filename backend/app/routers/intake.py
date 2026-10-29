@@ -21,6 +21,7 @@ from app.intake import assist, files, guide, outcome, profiles, proposals
 from app.ledger.engine import LedgerError
 from app.routers.ai import _usable_config, endpoint_for
 from app.routers.ledger import actor_of
+from app.schemas.asset import AddressIn, PortIn
 from app.services.asset_vision import MAX_IMAGE_BYTES
 from app.services import reshape
 from app.services.llm import LLMError, look
@@ -188,17 +189,25 @@ async def extract_text(file: UploadFile = File(...), confidentiality: str = Form
     """Read a source for document rework. Images use the configured vision model; other files are read locally."""
     workspace_id = _allowed(db, identity, x_workspace_id, "create", "documents")
     content = await _read(file)
+    if files.kind_of(file.filename or "", file.content_type) == "image" and document_uid:
+        from app.routers.documents import _check_confidentiality, _get_owned_document
+        doc = _get_owned_document(document_uid, workspace_id, db)
+        _check_confidentiality(doc, workspace_id, identity, db)
+        if doc.confidentiality == "riservato":
+            confidentiality = "riservato"
+    return read_source(db, identity, workspace_id, content, file, confidentiality,
+                       refs={"document_uid": document_uid} if document_uid else {}, use="document rework")
+
+
+def read_source(db: Session, identity, workspace_id: str, content: bytes, file: UploadFile, confidentiality: str,
+                refs: Optional[dict] = None, use: str = "document rework") -> dict:
+    """A file as text: an image read by the workspace's vision model (recorded as an intake run, with the
+    image's and the transcription's hashes — never their content), any other file read locally."""
     if files.kind_of(file.filename or "", file.content_type) == "image":
-        if document_uid:
-            from app.routers.documents import _check_confidentiality, _get_owned_document
-            doc = _get_owned_document(document_uid, workspace_id, db)
-            _check_confidentiality(doc, workspace_id, identity, db)
-            if doc.confidentiality == "riservato":
-                confidentiality = "riservato"
         if confidentiality not in ("pubblico", "interno", "riservato"):
             raise HTTPException(status_code=422, detail="Unknown confidentiality level")
         if file.content_type not in ("image/jpeg", "image/png", "image/webp"):
-            raise HTTPException(status_code=422, detail="Use a JPEG, PNG or WebP image for document rework")
+            raise HTTPException(status_code=422, detail=f"Use a JPEG, PNG or WebP image for {use}")
         if len(content) > MAX_IMAGE_BYTES:
             raise HTTPException(status_code=413, detail="The image is larger than 8 MB")
         config = _usable_config(db, workspace_id)
@@ -206,19 +215,16 @@ async def extract_text(file: UploadFile = File(...), confidentiality: str = Form
             raise HTTPException(status_code=409, detail="Image reading needs a vision model configured for this workspace")
         if confidentiality == "riservato" and not config.allow_confidential:
             raise HTTPException(status_code=409, detail="This workspace does not allow confidential material to be sent to AI")
-        # Recorded like every other model call (an intake run): who, which model, the image's and the
-        # transcription's hashes — never their content.
         endpoint, started = endpoint_for(config), time.monotonic()
-        refs = [{"kind": "image", "mime": file.content_type, "bytes": len(content), "confidentiality": confidentiality,
-                 **({"document_uid": document_uid} if document_uid else {})}]
+        input_refs = [{"kind": "image", "mime": file.content_type, "bytes": len(content),
+                       "confidentiality": confidentiality, **(refs or {})}]
 
         def record(outcome: str, text: str = "", error: Optional[str] = None) -> None:
-            run = assist._record(db, workspace_id, actor_of(identity), "document", endpoint, input_refs=refs,
+            assist._record(db, workspace_id, actor_of(identity), "document", endpoint, input_refs=input_refs,
                                  hashes=[assist._sha(content)] + ([assist._sha(text)] if text else []),
                                  redactions={}, output={"chars": len(text)} if text else None, validations=[],
-                                 outcome=outcome, error=error, started=started, model=config.vision_model)
-            run.operation = "document.transcribe"
-            run.rule_id = "ai.document.transcribe/1"
+                                 outcome=outcome, error=error, started=started, model=config.vision_model,
+                                 operation="document.transcribe", rule_id="ai.document.transcribe/1")
             db.commit()
 
         try:
@@ -287,6 +293,47 @@ async def propose_for_asset(uid: str, file: Optional[UploadFile] = File(None), t
     return _run(db, lambda: proposals.propose_asset(db, workspace_id, actor_of(identity), ep, uid, text=body,
                                                     image=image, mime_type=(file.content_type if file else None) or "image/jpeg",
                                                     file_refs=refs, profile_id=profile_id, grants=grants))
+
+
+class CompanionsIn(BaseModel):
+    ports: list[PortIn] = []
+    addresses: list[AddressIn] = []
+    run_id: Optional[str] = None
+
+
+@router.post("/propose/asset/{uid}/companions", status_code=201)
+def add_companions(uid: str, body: CompanionsIn, identity=Depends(get_identity), grants=Depends(get_grants),
+                   workspace_id: str = Depends(require_permission("create")), db: Session = Depends(get_db)):
+    """The ports and addresses a file showed that the unit does not have yet, made now that its person chose
+    them: each port `port of` the unit, the unit `described by` each address."""
+    from app.models.asset import Asset
+    from app.services import network_companions
+    from app.services.visibility import asset_visible_in
+    asset = db.get(Asset, uid)
+    if asset is None or asset.workspace_id != workspace_id or asset.deleted_at is not None \
+            or not asset_visible_in(asset, workspace_id, grants):
+        raise HTTPException(status_code=404, detail="No such record in this workspace")
+    if not body.ports and not body.addresses:
+        raise HTTPException(status_code=422, detail="Choose a port or an address to add.")
+    labels = [p.port_label.strip().lower() for p in body.ports]
+    have = {str((p.attributes or {}).get("port_label") or "").strip().lower()
+            for p in network_companions.ports_of(db, uid)}
+    clash = sorted({x for x in labels if x in have} | {x for x in labels if labels.count(x) > 1})
+    if clash:
+        raise HTTPException(status_code=409, detail=f"{asset.name} already has a port labelled {clash[0]!r}")
+    why = f"read from a file (intake run {body.run_id})" if body.run_id else "read from a file"
+    try:
+        made = network_companions.create(db, workspace_id, actor_of(identity), asset,
+                                         [p.model_dump() for p in body.ports],
+                                         [a.model_dump() for a in body.addresses], reason=f"of {asset.key}, {why}")
+    except network_companions.CompanionError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    except LedgerError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return made
 
 
 class DecideIn(BaseModel):

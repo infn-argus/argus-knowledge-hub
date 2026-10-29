@@ -297,9 +297,14 @@ def extract(endpoint: Endpoint, t: dt.Template, source: str, meta: SourceMeta, d
     except LLMError as e:
         raise ReshapeError(f"The assistant could not be reached: {e}", 502) from e
     data = json_object(reply)
+    if not isinstance(data, dict) and getattr(reply, "cut_off", False):
+        raise ReshapeError("The assistant's answer was cut off at the output-token limit: the text is too long to "
+                           "rework as one document. Rework it a part at a time (one day of a log, one e-mail), or "
+                           "raise the output-token limit in the AI settings.", 422)
     if not isinstance(data, dict):
         raise ReshapeError("The assistant did not answer with the structured extraction this needs; nothing was "
-                           "made. Try again, or with a shorter text.", 502)
+                           "made. Try again, or with a shorter text"
+                           + (" (one day of a log, one e-mail at a time)" if len(source) > 8000 else "") + ".", 502)
     return data
 
 

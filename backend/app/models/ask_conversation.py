@@ -37,6 +37,8 @@ class AskMessage(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     # An answer's lookups (tool, arguments, result, error, seconds), how it ended and how long it took.
     steps: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    # The files a question came with: name, format and the text read from each (images by the vision model).
+    attachments: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     stopped: Mapped[Optional[str]] = mapped_column(String, nullable=True)   # answered | exhausted | failed | cancelled
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

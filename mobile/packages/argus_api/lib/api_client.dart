@@ -230,6 +230,10 @@ class ApiClient {
           return CapabilitiesOut.fromJson(value);
         case 'CaptureIn':
           return CaptureIn.fromJson(value);
+        case 'ChatAttachment':
+          return ChatAttachment.fromJson(value);
+        case 'ChatAttachmentOut':
+          return ChatAttachmentOut.fromJson(value);
         case 'ChatIn':
           return ChatIn.fromJson(value);
         case 'CloseReviewIn':

@@ -61,6 +61,26 @@ def extract(content: bytes, filename: str, mime: Optional[str], limit: int = MAX
     raise UnreadableFile("This kind of file cannot be read yet: use a PDF, Word, Excel, email or text file.")
 
 
+def _page_text(page) -> str:
+    """A PDF page's text, line by line as it is laid out. The plain reading follows the file's own text runs,
+    and a page written in a word processor with justified lines (Google Docs) comes out a word per line, each
+    word its own paragraph; the layout reading keeps the lines, and the spaces it pads columns with are
+    folded back to one. The plain reading is the fallback."""
+    try:
+        laid = page.extract_text(extraction_mode="layout") or ""
+    except Exception:
+        laid = ""
+    if laid.strip():
+        lines = [re.sub(r"(?<=\S) {2,}(?=\S)", " ", line.rstrip()) for line in laid.splitlines()]
+        margin = min((len(x) - len(x.lstrip()) for x in lines if x.strip()), default=0)
+        text = "\n".join(x[margin:] for x in lines)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
+    try:
+        return (page.extract_text() or "").strip()
+    except Exception:
+        return ""
+
+
 def _pdf(content: bytes, limit: int = MAX_CHARS) -> tuple[str, list[dict]]:
     try:
         from pypdf import PdfReader
@@ -69,10 +89,7 @@ def _pdf(content: bytes, limit: int = MAX_CHARS) -> tuple[str, list[dict]]:
         raise UnreadableFile(f"The PDF could not be opened: {exc}")
     parts, refs, total = [], [], 0
     for n, page in enumerate(reader.pages[:MAX_PAGES if limit <= MAX_CHARS else DOCUMENT_PAGES], start=1):
-        try:
-            text = (page.extract_text() or "").strip()
-        except Exception:
-            text = ""
+        text = _page_text(page)
         if not text:
             continue
         chunk = f"[page {n}]\n{text}\n"

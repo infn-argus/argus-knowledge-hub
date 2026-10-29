@@ -121,6 +121,8 @@ NEW_IN_IT = {"Firewall", "Wireless Access Point", "Storage System", "Patch Panel
 # What 1.35.26 added on the way to the domain packages: the core vocabulary made neutral (the beam options
 # kept, now added by the accelerator package), the GLPI provenance fields, two IT types made concrete.
 NEUTRAL_OPTIONS = {"service_down", "service_degraded", "no_impact", "mission_critical", "degrades_service", "glpi"}
+# core-objects 2.1.0: a serial port's settings on Equipment Port.
+SERIAL_SETTINGS = {"baud", "framing", "flow_control", "port_settings"}
 GLPI_FIELDS = {"glpi_url", "glpi_unmapped"}
 # The beam's own options: a workspace without the accelerator package no longer has them.
 BEAM_OPTIONS = {"beam_down", "beam_degraded", "no_beam_impact", "beam_critical", "degrades"}
@@ -144,13 +146,13 @@ def _new_names() -> set:
 
 
 def _as_before(schema: dict) -> dict:
-    """A schema with what 1.35.26 added taken out again."""
+    """A schema with what 1.35.26 and later added taken out again."""
     s = json.loads(json.dumps(schema))
     if s.get("metadata"):
         s["metadata"] = {k: v for k, v in s["metadata"].items() if k not in ("locatable", "map_layer")}
     attrs = []
     for a in s.get("attributes") or []:
-        if a.get("key") in GLPI_FIELDS:
+        if a.get("key") in GLPI_FIELDS or (s["name"] == "Equipment Port" and a.get("key") in SERIAL_SETTINGS):
             continue
         if a.get("key") in ("argus_impact", "argus_criticality", "argus_source") and a.get("options"):
             a["options"] = sorted((o for o in a["options"] if o.get("id") not in NEUTRAL_OPTIONS),
@@ -179,7 +181,8 @@ def test_installing_the_packages_writes_exactly_what_seeding_wrote_before_them()
     gained four IT types; core-objects 1.1.0 map placement; and 1.35.26 made the core vocabulary neutral (the
     beam options kept, with their ids and labels, by the accelerator package), added the GLPI provenance
     fields, made two IT types concrete, and brought the types of the packages the accelerator now stands on
-    (safety, vacuum-cryo, optics-alignment, core-records). Nothing else changed: no type, field or option a
+    (safety, vacuum-cryo, optics-alignment, core-records); core-objects 2.1.0 gave Equipment Port a serial
+    port's settings. Nothing else changed: no type, field or option a
     workspace had is gone or different."""
     before = json.loads((FIXTURES / "seeding.json").read_text())
     now = seed_every_way(_by_installer)

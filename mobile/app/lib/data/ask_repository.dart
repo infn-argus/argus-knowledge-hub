@@ -58,11 +58,26 @@ class AskDone extends AskEvent {
   final String? error;
 }
 
+/// A file read for a question (a photo, a screenshot): its text goes with the question.
+class AskFile {
+  const AskFile({required this.name, this.format, this.text = ''});
+
+  final String name;
+  final String? format;
+  final String text;
+
+  Map<String, Object?> toJson() => {'name': name, 'format': format, 'text': text};
+}
+
 class AskTurn {
-  AskTurn({required this.question, this.answer = '', List<AskLookup>? lookups, this.stopped, this.error})
-      : lookups = lookups ?? [];
+  AskTurn({required this.question, this.answer = '', List<AskLookup>? lookups, this.stopped, this.error,
+      List<AskFile>? files})
+      : lookups = lookups ?? [],
+        files = files ?? const [];
 
   final String question;
+  /// The files the question came with (their names; the text went with the question).
+  final List<AskFile> files;
   String answer;
   final List<AskLookup> lookups;
   String? stopped;
@@ -132,6 +147,16 @@ class AskRepository {
     return ((r is Map ? r['body_markdown'] : null) ?? '').toString().trim();
   }
 
+  /// A photo or a screenshot for a question, as text: read by the workspace's vision model.
+  Future<AskFile> readFile(PickedPhoto photo) async {
+    final file = http.MultipartFile.fromBytes('file', photo.bytes,
+        filename: photo.name, contentType: MediaType.parse(photo.mimeType));
+    final r = await _api.json((c) => _api.ai(c).readChatAttachmentWithHttpInfo(file));
+    final m = r is Map ? r : const {};
+    return AskFile(name: (m['name'] ?? photo.name).toString(), format: m['format']?.toString(),
+        text: (m['text'] ?? '').toString());
+  }
+
   Future<AskAvailability> availability() async {
     final s = await _api.call((c) => _api.ai(c).status());
     final usable = s.configured && s.enabled && s.validated;
@@ -142,11 +167,13 @@ class AskRepository {
 
   /// [voice]: the answer will be read aloud (hands-free) — the server asks for the essential first, briefly, and
   /// one clarifying question when the question is ambiguous.
-  Stream<AskEvent> ask(String question, {String? conversationId, bool voice = false}) async* {
+  Stream<AskEvent> ask(String question,
+      {String? conversationId, bool voice = false, List<AskFile> files = const []}) async* {
     await for (final e in _api.events('/v1/ai/chat', {
       'question': question,
       'conversation_id': ?conversationId,
       if (voice) 'voice': true,
+      if (files.isNotEmpty) 'attachments': [for (final f in files) f.toJson()],
     })) {
       switch (e['type']) {
         case 'conversation':
@@ -200,7 +227,9 @@ class AskRepository {
     final turns = <AskTurn>[];
     for (final m in d.messages) {
       if (m.role == 'user') {
-        turns.add(AskTurn(question: m.content));
+        turns.add(AskTurn(question: m.content, files: [
+          for (final f in m.attachments ?? const <api.ChatAttachmentOut>[]) AskFile(name: f.name, format: f.format),
+        ]));
       } else if (turns.isNotEmpty) {
         turns.last
           ..answer = m.content

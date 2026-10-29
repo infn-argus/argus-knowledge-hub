@@ -8,7 +8,7 @@ values file or a chat window to get there.
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -527,7 +527,8 @@ def _sse(event: dict) -> str:
 
 
 def _chat_events(workspace_id: str, owner: str, question: str, conversation_id: Optional[str],
-                 endpoint: Endpoint, grants, can_propose: bool = False, voice: bool = False):
+                 endpoint: Endpoint, grants, can_propose: bool = False, voice: bool = False,
+                 attachments: Optional[list] = None):
     """The chat turn as server-sent events, saved as it ends. Runs after the request's own session is
     gone, so it has its own, and the viewer's restricted-class grants are set again here: the lookups
     must see what the person may see, no more."""
@@ -549,16 +550,19 @@ def _chat_events(workspace_id: str, owner: str, question: str, conversation_id: 
             db.flush()
         earlier = list(db.scalars(select(AskMessage).where(AskMessage.conversation_id == conversation.id)
                                   .order_by(AskMessage.seq)))
-        history = [{"role": m.role, "content": m.content} for m in earlier]
+        history = [{"role": m.role, "content": m.content, "attachments": m.attachments} for m in earlier]
         seq = (earlier[-1].seq + 1) if earlier else 0
+        files = [{**a, "chars": len(a.get("text") or "")} for a in attachments or []]
         db.add(AskMessage(id=str(uuid.uuid4()), conversation_id=conversation.id, seq=seq, role="user",
-                          content=question))
+                          content=question, attachments=files or None))
         db.commit()
         yield _sse({"type": "conversation", "id": conversation.id, "title": conversation.title})
         from app.services import ask_actions
         proposer = ask_actions.Proposer(db, workspace_id, conversation.id, seq) if can_propose else None
         try:
-            for event in ask_events(db, workspace_id, endpoint, question, history=history, proposer=proposer,
+            from app.services.ask import with_attachments
+            for event in ask_events(db, workspace_id, endpoint, with_attachments(question, files),
+                                    history=history, proposer=proposer,
                                     context=ask_actions.context(db, conversation.id), voice=voice):
                 if event["type"] == "step":
                     steps.append({k: event[k] for k in ("tool", "arguments", "result", "error", "seconds")})
@@ -607,6 +611,8 @@ def chat(
     from app.models.ask_conversation import AskConversation
     from app.services.visibility import current_grants
     question = (body.question or "").strip()
+    if not question and body.attachments:
+        question = "What does the attached file show, and how does it compare with the records?"
     if not question:
         raise HTTPException(status_code=400, detail="Ask something.")
     owner = _owner(identity)
@@ -617,11 +623,33 @@ def chat(
     config = _usable_config(db, workspace_id)
     return StreamingResponse(
         _chat_events(workspace_id, owner, question, body.conversation_id, endpoint_for(config), current_grants(),
-                     can_propose=_may_change(db, identity, workspace_id), voice=body.voice),
+                     can_propose=_may_change(db, identity, workspace_id), voice=body.voice,
+                     attachments=[a.model_dump() for a in body.attachments]),
         media_type="text/event-stream",
         # Proxies (the cluster's ingress, nginx) would otherwise hold the events back until the end.
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/chat/attachments")
+async def read_chat_attachment(
+    file: UploadFile = File(description="A photo, a screenshot, a PDF, a spreadsheet or a text file"),
+    confidentiality: str = Form("interno"),
+    workspace_id: str = Depends(require_permission("read")),
+    identity=Depends(get_identity),
+    db: Session = Depends(get_db),
+):
+    """A file for a chat question, as text: what the chat sends with the question (`attachments`). An image
+    is read by the workspace's vision model and recorded like every model call; other files are read here."""
+    from app.routers.intake import _read, read_source
+    from app.services.ask import ATTACHMENT_CHARS
+    content = await _read(file)
+    out = read_source(db, identity, workspace_id, content, file, confidentiality, refs={"use": "ask"}, use="a question")
+    text = out.get("text") or ""
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="Nothing readable was found in the file")
+    return {"name": file.filename or "file", "format": out.get("format"), "text": text[:ATTACHMENT_CHARS],
+            "truncated": bool(out.get("truncated")) or len(text) > ATTACHMENT_CHARS}
 
 
 def _may_change(db: Session, identity, workspace_id: str) -> bool:

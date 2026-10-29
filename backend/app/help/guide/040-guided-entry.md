@@ -1,7 +1,7 @@
 ---
 title: Guided and AI-assisted entry
 summary: The checklist beside every form, and Describe it, which fills a form from a sentence, a photo or a file; writing a document by voice or from a photo, and Tidy with AI.
-keywords: [checklist, describe it, ai, nameplate, photo, datasheet, pdf, suggestion, form, fill, complete from a file, guided entry, secret, password, redacted, dictate, transcribe, tidy with ai, ocr]
+keywords: [checklist, describe it, ai, nameplate, serial ports, port table, baud rate, moxa, converter, photo, datasheet, pdf, suggestion, form, fill, complete from a file, guided entry, secret, password, redacted, dictate, transcribe, tidy with ai, ocr]
 order: 40
 ---
 
@@ -57,6 +57,20 @@ proposal in the **Review queue** is what changes the record.
 On an asset's page, **Complete from a file** takes a datasheet, a photo or a note and proposes every value
 that differs from the record. The proposals wait in the **Review queue**: nothing on the record changes until
 someone accepts them.
+
+A file that lists the unit's **ports** one by one — a serial converter's *Serial Settings* page, a switch's port
+table — is read port by port. Each port's settings are not the unit's own fields: they belong to its *Equipment
+Port* records (`port of` the unit), with **Baud rate**, **Framing** (data bits, parity, stop bits, written
+`8N1`, `7N1`…), **Flow control**, its alias as **Role**, and its **TCP port** (the converter's *TCP port of
+serial port 1* plus the port's number, when the page does not show it).
+
+- A port the unit already has (the same label, or the same MAC) gets the values that differ as proposals on
+  that port, in the **Review queue** with the unit's own.
+- The ports it does not have yet are listed under **Ports it does not have yet**, ticked. **Add … to this
+  unit** makes the ticked ones; untick those you do not want. An address the file shows is offered the same way.
+
+When you register a new unit from such a page, the same ports are listed on the form under **Its ports** and are
+saved with the unit. The port settings need *core-objects* 2.1 in the workspace (**Packages → Upgrade**).
 
 ## Write a document by voice, or from a photo
 

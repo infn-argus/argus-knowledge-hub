@@ -379,6 +379,97 @@ class AiApi {
     return null;
   }
 
+  /// Read Chat Attachment
+  ///
+  /// A file for a chat question, as text: what the chat sends with the question (`attachments`). An image is read by the workspace's vision model and recorded like every model call; other files are read here.
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [MultipartFile] file (required):
+  ///   A photo, a screenshot, a PDF, a spreadsheet or a text file
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  ///
+  /// * [String] confidentiality:
+  Future<Response> readChatAttachmentWithHttpInfo(MultipartFile file, { String? authorization, String? xWorkspaceId, String? confidentiality, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/v1/ai/chat/attachments';
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (authorization != null) {
+      headerParams[r'authorization'] = parameterToString(authorization);
+    }
+    if (xWorkspaceId != null) {
+      headerParams[r'X-Workspace-Id'] = parameterToString(xWorkspaceId);
+    }
+
+    const contentTypes = <String>['multipart/form-data'];
+
+    bool hasFields = false;
+    final mp = MultipartRequest('POST', Uri.parse(path));
+    if (confidentiality != null) {
+      hasFields = true;
+      mp.fields[r'confidentiality'] = parameterToString(confidentiality);
+    }
+    if (file != null) {
+      hasFields = true;
+      mp.fields[r'file'] = file.field;
+      mp.files.add(file);
+    }
+    if (hasFields) {
+      postBody = mp;
+    }
+
+    return apiClient.invokeAPI(
+      path,
+      'POST',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// Read Chat Attachment
+  ///
+  /// A file for a chat question, as text: what the chat sends with the question (`attachments`). An image is read by the workspace's vision model and recorded like every model call; other files are read here.
+  ///
+  /// Parameters:
+  ///
+  /// * [MultipartFile] file (required):
+  ///   A photo, a screenshot, a PDF, a spreadsheet or a text file
+  ///
+  /// * [String] authorization:
+  ///
+  /// * [String] xWorkspaceId:
+  ///
+  /// * [String] confidentiality:
+  Future<Object?> readChatAttachment(MultipartFile file, { String? authorization, String? xWorkspaceId, String? confidentiality, }) async {
+    final response = await readChatAttachmentWithHttpInfo(file,  authorization: authorization, xWorkspaceId: xWorkspaceId, confidentiality: confidentiality, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+    
+    }
+    return null;
+  }
+
   /// Reshape Preview
   ///
   /// The draft a template makes of the raw text, with what is missing or uncertain, the dates and the suggested links. Nothing is saved: no document, no revision, no file.

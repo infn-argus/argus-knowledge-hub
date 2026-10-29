@@ -100,6 +100,7 @@ def test_image_source_uses_vision_and_respects_confidentiality(monkeypatch):
     # The model call is recorded (hashes of the image and the transcription, not their content).
     [run] = runs
     assert run["outcome"] == "proposed" and len(run["hashes"]) == 2 and run["model"] == "vision"
+    assert run["operation"] == "document.transcribe" and run["rule_id"] == "ai.document.transcribe/1"
     assert "Visible title" not in str(run)
     with pytest.raises(HTTPException) as denied:
         asyncio.run(intake.extract_text(file(), "riservato", None, object(), db, "ws"))

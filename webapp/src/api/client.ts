@@ -976,12 +976,17 @@ export type GuideResult = {
   network_port?: { offered: boolean; port_type_uid: string | null; address_type_uid: string | null };
 };
 /** A record to make with the new one: its network port (with the MAC read), or its registered address. */
+/** A port's own fields (core-objects Equipment Port): a network port's MAC, a serial port's settings. */
+export type PortAttributes = {
+  port_label?: string; port_kind?: string; mac?: string; link_speed?: string; port_role?: string; tcp_port?: number;
+  operating_mode?: string; baud?: number; framing?: string; flow_control?: string; port_settings?: string;
+};
 export type CompanionProposal = {
   kind: "port" | "address";
   type_uid: string;
   relation: string;
   selected: boolean;
-  attributes: { port_label?: string; port_kind?: string; mac?: string; ip?: string; hostname?: string };
+  attributes: PortAttributes & { ip?: string; hostname?: string };
   confidence: number | null;
   evidence: string | null;
   grounded: boolean;
@@ -1006,7 +1011,12 @@ export type ProposeResult = {
   unchanged: string[];
   dropped: { field: string; reason: string; link?: IntakeLink }[];
   message?: string | null;
+  /** Ports and addresses the file shows that the unit has not: made only when chosen. */
+  companions?: CompanionProposal[];
+  /** Values that differ on ports the unit has: proposed on those ports, for review. */
+  port_changes?: { port: { uid: string; key: string; name: string; label: string | null }; field: string; value: unknown; current: unknown }[];
 };
+export type CompanionsMade = { ports: { uid: string; key: string; name: string }[]; addresses: { uid: string; key: string; name: string }[] };
 export type ProfileEvaluation = {
   dataset_version: string;
   passed: boolean;
@@ -1105,6 +1115,8 @@ export const intakeApi = {
   /** What a file or a note says about an existing asset, as proposals for its owner. */
   propose: (assetUid: string, input: { file?: File; text?: string }) =>
     upload<ProposeResult>(`/v1/intake/propose/asset/${assetUid}`, { file: input.file, text: input.text ?? "" }),
+  addCompanions: (assetUid: string, body: { ports: PortAttributes[]; addresses: { ip?: string; hostname?: string }[]; run_id?: string }) =>
+    request<CompanionsMade>(`/v1/intake/propose/asset/${assetUid}/companions`, { method: "POST", body: json(body) }),
   decide: (claimId: string, action: "confirm" | "edit" | "reject", value?: unknown, reason?: string) =>
     request<{ action: string }>(`/v1/intake/proposals/${claimId}`, {
       method: "POST",
@@ -1134,7 +1146,11 @@ export const linksApi = {
       `/v1/links/resolve?path=${encodeURIComponent(path)}`),
 };
 
+/** A file read for a chat question: its text goes with the question. */
+export type ChatAttachment = { name: string; format: string | null; text: string; truncated?: boolean };
+
 export const aiApi = {
+  readAttachment: (file: File) => upload<ChatAttachment>("/v1/ai/chat/attachments", { file }),
   getConfig: () => request<LLMConfig | null>("/v1/ai/config"),
   saveConfig: (input: LLMConfigInput) =>
     request<LLMConfig>("/v1/ai/config", { method: "PUT", body: json(input) }),
@@ -1592,7 +1608,7 @@ export const domainsApi = {
 /** A chat turn as it is worked out: each server-sent event is handed to `onEvent` as it arrives. Resolves
  * when the turn ends; rejects with an ApiError when the request is refused before it starts. */
 export async function streamChat(
-  body: { question: string; conversation_id?: string | null },
+  body: { question: string; conversation_id?: string | null; attachments?: ChatAttachment[] },
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {

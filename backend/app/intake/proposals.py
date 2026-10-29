@@ -75,12 +75,56 @@ def propose_asset(db: Session, workspace_id: str, actor: str, endpoint, uid: str
         proposed.append({"field": field, "value": suggestion["value"], "label": suggestion.get("label"),
                          "current": _current(asset, field) if field != "schema_uid" else asset.type,
                          "confidence": suggestion.get("confidence"), "evidence": suggestion.get("evidence")})
+    offered, port_changes, touched = _companions(db, asset, out.get("companions") or [], rule_id, out["run_id"], claims)
     if claims:
         # Proposed, not accepted: AI methods are advisory and never auto-accepted (§23.9).
         engine.add_manual_claims(db, stream, claims, cause=f"intake run {out['run_id']}")
-        engine.project_subject(db, uid, f"intake run {out['run_id']}")     # so the queue shows them now
+        for subject in [uid, *touched]:
+            engine.project_subject(db, subject, f"intake run {out['run_id']}")     # so the queue shows them now
     return {"run_id": out["run_id"], "profile_id": out.get("profile_id"), "proposed": proposed,
-            "unchanged": same, "dropped": out["dropped"], "message": out.get("message")}
+            "unchanged": same, "dropped": out["dropped"], "message": out.get("message"),
+            "companions": offered, "port_changes": port_changes}
+
+
+def _companions(db: Session, asset: Asset, companions: list[dict], rule_id: str, run_id: str,
+                claims: list) -> tuple[list[dict], list[dict], list[str]]:
+    """The ports and addresses the input shows, against what the unit already has. A port it has (the same
+    label, or the same MAC) gets the values that differ as proposals on that port, for review like the
+    unit's own; one it has not is offered, to be made only when the person says so — as is an address
+    it is not yet described by."""
+    from app.services import network_companions as nc
+    ports = nc.ports_of(db, asset.uid)
+    by_label = {str((p.attributes or {}).get("port_label") or "").strip().lower(): p for p in ports}
+    by_mac = {nc.normalise_mac((p.attributes or {}).get("mac")): p for p in ports if (p.attributes or {}).get("mac")}
+    known = set()
+    for a in nc.addresses_of(db, asset.uid):
+        known |= {str(v).lower() for v in ((a.attributes or {}).get("ip"), (a.attributes or {}).get("hostname")) if v}
+    offered, changes, touched = [], [], []
+    for c in companions:
+        attrs = c.get("attributes") or {}
+        if c["kind"] == "address":
+            if not ({str(v).lower() for v in (attrs.get("ip"), attrs.get("hostname")) if v} & known):
+                offered.append(c)
+            continue
+        port = by_mac.get(attrs.get("mac")) if attrs.get("mac") else None
+        port = port or by_label.get(str(attrs.get("port_label") or "").strip().lower())
+        if port is None:
+            offered.append(c)
+            continue
+        for k, v in attrs.items():
+            now = (port.attributes or {}).get(k)
+            if k == "port_label" or str(now if now is not None else "").strip().lower() == str(v).strip().lower():
+                continue
+            claims.append(ParsedClaim(f"uid:{port.uid}", f"attr:{k}", v, method="ai_extracted", rule_id=rule_id,
+                                      confidence=c.get("confidence"),
+                                      evidence={"intake_run": run_id, "quote": c.get("evidence"),
+                                                "grounded": c.get("grounded"), "current": now}))
+            changes.append({"port": {"uid": port.uid, "key": port.key, "name": port.name,
+                                     "label": (port.attributes or {}).get("port_label")},
+                            "field": k, "value": v, "current": now})
+            if port.uid not in touched:
+                touched.append(port.uid)
+    return offered, changes, touched
 
 
 def evidence_of(db: Session, claim_id: str) -> dict:

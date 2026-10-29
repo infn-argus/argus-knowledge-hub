@@ -6,6 +6,7 @@ import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
 import { AttributeInput } from "../../components/AttributeInput";
 import { finalFor, GuidedEntry } from "../../components/GuidedEntry";
 import { emptyAddress, emptyPort, fromProposals, macLooksRight, NetworkPortSection } from "../../components/NetworkPortSection";
+import { portBody, ProposedPorts, type PortChoice } from "../../components/ProposedPorts";
 import { SchemaBrowser } from "../../components/SchemaBrowser";
 import { SchemaPicker } from "../../components/SchemaPicker";
 import { effectiveAttributes } from "../../lib/schemaAttributes";
@@ -32,13 +33,17 @@ export function AssetForm() {
   const [assisted, setAssistedState] = useState<AssistResult | null>(null);
   const [port, setPort] = useState(emptyPort);
   const [address, setAddress] = useState(emptyAddress);
+  const [ports, setPorts] = useState<PortChoice[]>([]);
   // What the assistant read for the network goes to the network section, ticked: the person may untick it.
+  // The ports of a port table (a converter's serial ports) are listed apart, ticked too.
   const setAssisted = (r: AssistResult | null) => {
     setAssistedState(r);
     if (r?.companions?.length) {
       const next = fromProposals(r.companions, port, address);
       setPort(next.port);
       setAddress(next.address);
+      const listed = r.companions.filter((c) => c.kind === "port" && !c.attributes.mac);
+      if (listed.length) setPorts(listed.map((c) => ({ ...c.attributes, on: c.selected })));
     }
   };
   const [browsing, setBrowsing] = useState(false);
@@ -101,8 +106,13 @@ export function AssetForm() {
         name,
         attributes,
         is_global: isGlobal,
-        ...(showNetwork && port.on && offer.data?.port_type_uid !== null
-          ? { ports: [{ port_label: port.port_label.trim() || "eth0", port_kind: port.port_kind, mac: port.mac.trim() || null }] }
+        ...((showNetwork && port.on && offer.data?.port_type_uid !== null) || ports.some((p) => p.on)
+          ? { ports: [
+              ...(showNetwork && port.on && offer.data?.port_type_uid !== null
+                ? [{ port_label: port.port_label.trim() || "eth0", port_kind: port.port_kind, mac: port.mac.trim() || null }]
+                : []),
+              ...ports.filter((p) => p.on).map(portBody),
+            ] }
           : {}),
         ...(showNetwork && address.on && (address.ip.trim() || address.hostname.trim())
           ? { addresses: [{ ip: address.ip.trim() || null, hostname: address.hostname.trim() || null }] }
@@ -248,6 +258,10 @@ export function AssetForm() {
         {showNetwork && (
           <NetworkPortSection port={port} setPort={setPort} address={address} setAddress={setAddress}
                               addressAvailable={!!offer.data?.address_type_uid || address.fromAssistant} />
+        )}
+        {!isEditing && (
+          <ProposedPorts ports={ports}
+                         onToggle={(i, on) => setPorts((all) => all.map((p, j) => (j === i ? { ...p, on } : p)))} />
         )}
 
         <button

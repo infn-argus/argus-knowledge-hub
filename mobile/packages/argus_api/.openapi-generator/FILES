@@ -62,6 +62,8 @@ lib/model/assist_in.dart
 lib/model/attachment_out.dart
 lib/model/capabilities_out.dart
 lib/model/capture_in.dart
+lib/model/chat_attachment.dart
+lib/model/chat_attachment_out.dart
 lib/model/chat_in.dart
 lib/model/close_review_in.dart
 lib/model/decide_in.dart

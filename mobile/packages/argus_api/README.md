@@ -74,6 +74,7 @@ Class | Method | HTTP request | Description
 *AiApi* | [**getConversation**](doc//AiApi.md#getconversation) | **GET** /v1/ai/conversations/{conversation_id} | Get Conversation
 *AiApi* | [**listConversations**](doc//AiApi.md#listconversations) | **GET** /v1/ai/conversations | List Conversations
 *AiApi* | [**rateAnAnswer**](doc//AiApi.md#rateananswer) | **POST** /v1/ai/conversations/{conversation_id}/feedback | Rate An Answer
+*AiApi* | [**readChatAttachment**](doc//AiApi.md#readchatattachment) | **POST** /v1/ai/chat/attachments | Read Chat Attachment
 *AiApi* | [**reshapePreview**](doc//AiApi.md#reshapepreview) | **POST** /v1/ai/reshape | Reshape Preview
 *AiApi* | [**status**](doc//AiApi.md#status) | **GET** /v1/ai/status | Status
 *AiApi* | [**transcribeRecording**](doc//AiApi.md#transcriberecording) | **POST** /v1/ai/transcribe | Transcribe Recording
@@ -202,6 +203,8 @@ Class | Method | HTTP request | Description
  - [AttachmentOut](doc//AttachmentOut.md)
  - [CapabilitiesOut](doc//CapabilitiesOut.md)
  - [CaptureIn](doc//CaptureIn.md)
+ - [ChatAttachment](doc//ChatAttachment.md)
+ - [ChatAttachmentOut](doc//ChatAttachmentOut.md)
  - [ChatIn](doc//ChatIn.md)
  - [CloseReviewIn](doc//CloseReviewIn.md)
  - [DecideIn](doc//DecideIn.md)

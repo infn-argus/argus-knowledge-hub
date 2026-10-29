@@ -1,7 +1,7 @@
 ---
 title: Ask ARGUS
 summary: Asking questions in your own words, checking the answers, following up, letting the assistant propose changes you confirm, and using it on the phone.
-keywords: [ask, ask argus, rate, rating, feedback, thumbs up, thumbs down, not useful, wrong answer, chat, voice, speak, microphone, hands-free, orb, repeat, slower, show the source, interrupt, read aloud, phone, mobile, assistant, ai, question, answer, conversation, propose, proposal, apply, discard, create with ai, help, how to, register from a photo, dictate, transcribe, document from a photo]
+keywords: [ask, ask argus, attach, attachment, file, screenshot, upload, paperclip, rate, rating, feedback, thumbs up, thumbs down, not useful, wrong answer, chat, voice, speak, microphone, hands-free, orb, repeat, slower, show the source, interrupt, read aloud, phone, mobile, assistant, ai, question, answer, conversation, propose, proposal, apply, discard, create with ai, help, how to, register from a photo, dictate, transcribe, document from a photo]
 order: 110
 ---
 
@@ -16,6 +16,18 @@ documents, the text of attached files and this guide.
    Each record key in the answer opens its record.
 3. **Follow up** in the same conversation ("which of those are in AC1?"): earlier turns are its context.
    **New chat** starts afresh. Conversations are kept, for you only.
+
+## Ask about a file
+
+**📎** next to the question adds a photo, a screenshot, a PDF, a Word or Excel file, an e-mail or a text file —
+up to three per question. Each is read before you send: a photo or a screenshot by the workspace's vision model
+(recorded like every model call, *AI settings*), the others on the server. The question goes with what was read,
+and follow-ups in the conversation still see it. A file alone is a question too: *what does it show, and how does
+it compare with the records?*
+
+What a file says is your material, not a record: the answer says which values come from the file and which from
+the records. To put what it says on a unit, ask it to propose the changes, or use **Complete from a file** on the
+unit's page. A confidential file is read only where the workspace allows confidential material to be sent to AI.
 
 An answer built from no lookups is marked as such: do not treat it as coming from the workspace's records.
 When something is not found, it says what it looked at.

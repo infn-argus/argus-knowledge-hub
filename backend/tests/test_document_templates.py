@@ -458,3 +458,13 @@ def test_confidential_material_follows_the_ai_settings(world, model):
         "source": {"text": EMAIL, "kind": "email"}, "document_type_uid": w["types"]["Meeting Minutes"],
         "confidentiality": "riservato"})
     assert r.status_code == 409 and "riservato" in r.text and model["calls"] == 0
+
+
+def test_an_answer_cut_off_at_the_token_limit_says_the_text_is_too_long(world, monkeypatch):
+    from app.services.llm import Reply
+    as_(world["writer"])
+    monkeypatch.setattr(reshape, "complete_structured",
+                        lambda endpoint, system, user: Reply('{"title": "SPARC Running LOG", "sections": [{"he', cut_off=True))
+    r = _preview(world)
+    assert r.status_code == 422 and "cut off at the output-token limit" in r.json()["detail"]
+    assert "one day of a log" in r.json()["detail"]
