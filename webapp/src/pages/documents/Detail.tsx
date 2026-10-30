@@ -59,6 +59,8 @@ export function DocumentDetail() {
     queryKey: ["documents", uid],
     queryFn: () => documentsApi.get(uid!),
     enabled: !!uid,
+    // Not found is an answer (often: it lives in another workspace), not a hiccup to retry.
+    retry: (count, e) => !(e instanceof ApiError && e.status === 404) && count < 1,
   });
   const profile = useQuery({ queryKey: ["my-profile"], queryFn: tokensApi.profile });
   const revisions = useQuery({
@@ -327,7 +329,7 @@ export function DocumentDetail() {
     };
   };
   if (document.isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
-  if (!document.data) return <p className="text-sm text-red-600">Document not found.</p>;
+  if (!document.data) return <DocumentElsewhere uid={uid!} current={workspaceId} />;
   const doc = document.data;
 
   return (
@@ -897,6 +899,31 @@ function MadeFromRawText({ documentUid, revisionUid, state }: { documentUid: str
       {unpublished && OPERATIONAL.some((t) => g.template.id.startsWith(t.toLowerCase().replace(/ /g, "-"))) && (
         <span className="mt-1 block font-medium text-amber-800">Not usable as an operational instruction until validated and published.</span>
       )}
+    </div>
+  );
+}
+
+/** This page's address, opened in another workspace (`?ws=`, adopted when the app loads). */
+function withWorkspace(workspaceId: string): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set("ws", workspaceId);
+  return url.pathname + url.search + url.hash;
+}
+
+/** A link opened in a workspace that does not hold the document: the reader's workspace that does, to open it there. */
+function DocumentElsewhere({ uid, current }: { uid: string; current?: string | null }) {
+  const where = useQuery({ queryKey: ["document-workspace", uid], queryFn: () => documentsApi.workspace(uid), retry: false });
+  if (where.isLoading) return <p className="text-sm text-slate-500">Looking for the document in your workspaces…</p>;
+  if (!where.data || where.data.workspace_id === current) {
+    return <p className="text-sm text-red-600">Document not found, or you may not read it.</p>;
+  }
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950" data-testid="document-elsewhere">
+      <p>This document is in <b>{where.data.name}</b>, not in the workspace you are in now.</p>
+      <a href={withWorkspace(where.data.workspace_id)}
+         className="mt-2 inline-block rounded bg-slate-900 px-3 py-1.5 font-medium text-white">
+        Open it in {where.data.name}
+      </a>
     </div>
   );
 }

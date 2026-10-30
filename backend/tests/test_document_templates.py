@@ -468,3 +468,20 @@ def test_an_answer_cut_off_at_the_token_limit_says_the_text_is_too_long(world, m
     r = _preview(world)
     assert r.status_code == 422 and "cut off at the output-token limit" in r.json()["detail"]
     assert "one day of a log" in r.json()["detail"]
+
+
+def test_an_answer_that_times_out_says_why(world, monkeypatch):
+    import requests
+    from app.services.llm import LLMError
+
+    def too_slow(endpoint, system, user):
+        try:
+            raise requests.ReadTimeout("Read timed out. (read timeout=120)")
+        except requests.ReadTimeout as e:
+            raise LLMError(f"Could not reach https://gateway/v1: {e}") from e
+
+    as_(world["writer"])
+    monkeypatch.setattr(reshape, "complete_structured", too_slow)
+    r = _preview(world)
+    assert r.status_code == 504 and "did not finish within 2 minutes" in r.json()["detail"]
+    assert "AI service is slow or stuck" in r.json()["detail"]          # a short text is not the cause

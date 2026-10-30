@@ -274,6 +274,30 @@ async def import_markdown_documents(
     return import_markdown(db, workspace_id, payload, document_type_uid)
 
 
+class DocumentWorkspaceOut(BaseModel):
+    workspace_id: str
+    name: str
+
+
+@router.get("/{uid}/workspace", response_model=DocumentWorkspaceOut)
+def document_workspace(uid: str, identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """The workspace a document lives in, for a link opened in another one: only one where the caller may read
+    documents — anyone else learns nothing, not even that it exists. What it holds is then read there, under
+    that workspace's rules (confidentiality included)."""
+    from app.services.permissions import resolve_permission
+    doc = db.get(Document, uid)
+    allowed = doc is not None and (
+        identity.workspace_id == doc.workspace_id and identity.may("read", "documents")
+        if isinstance(identity, PatIdentity) else
+        (identity.token is None or (identity.token.may("read", "documents")
+                                    and identity.token.workspace_id in (None, doc.workspace_id)))
+        and resolve_permission(db, identity.user, doc.workspace_id, "read", "documents"))
+    if not allowed:
+        raise HTTPException(status_code=404, detail="Document not found")
+    ws = db.get(Workspace, doc.workspace_id)
+    return DocumentWorkspaceOut(workspace_id=doc.workspace_id, name=ws.name if ws else doc.workspace_id)
+
+
 @router.get("/{uid}", response_model=DocumentOut)
 def get_document(
     uid: str,

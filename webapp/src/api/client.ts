@@ -777,6 +777,8 @@ export const documentsApi = {
   list: (documentTypeUid?: string) =>
     request<AppDocument[]>(`/v1/documents${documentTypeUid ? `?document_type_uid=${documentTypeUid}` : ""}`),
   get: (uid: string) => request<AppDocument>(`/v1/documents/${uid}`),
+  /** Which of the caller's workspaces holds a document, for a link opened in another one. */
+  workspace: (uid: string) => request<{ workspace_id: string; name: string }>(`/v1/documents/${uid}/workspace`),
   create: (input: DocumentInput) =>
     request<AppDocument>("/v1/documents", { method: "POST", body: json(input) }),
   update: (uid: string, input: DocumentUpdateInput) =>

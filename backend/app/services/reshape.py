@@ -30,9 +30,11 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+import requests
+
 from app.services import doc_templates as dt
 from app.services.ai_suggestions import CODE_FENCE, THINK_BLOCK
-from app.services.llm import Endpoint, LLMError, complete_structured
+from app.services.llm import COMPLETION_TIMEOUT_SECONDS, Endpoint, LLMError, complete_structured
 
 MAX_SOURCE_CHARS = 60_000
 MAX_ITEM_CHARS = 4000
@@ -295,6 +297,13 @@ def extract(endpoint: Endpoint, t: dt.Template, source: str, meta: SourceMeta, d
     try:
         reply = complete_structured(endpoint, system, user)
     except LLMError as e:
+        if isinstance(e.__cause__, requests.Timeout):
+            raise ReshapeError(f"The assistant did not finish within {COMPLETION_TIMEOUT_SECONDS // 60} minutes; "
+                               "nothing was made. "
+                               + ("The text is long: rework it a part at a time (one day of a log, one e-mail)."
+                                  if len(source) > 8000 else
+                                  "The text is short, so the AI service is slow or stuck: try again later, and if it "
+                                  "keeps happening ask an administrator to check the AI endpoint."), 504) from e
         raise ReshapeError(f"The assistant could not be reached: {e}", 502) from e
     data = json_object(reply)
     if not isinstance(data, dict) and getattr(reply, "cut_off", False):
