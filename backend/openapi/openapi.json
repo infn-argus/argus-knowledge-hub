@@ -4605,6 +4605,24 @@
         "title": "DocumentUpdate",
         "type": "object"
       },
+      "DocumentWorkspaceOut": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "name"
+        ],
+        "title": "DocumentWorkspaceOut",
+        "type": "object"
+      },
       "DokuwikiImportConfigParams": {
         "properties": {
           "include_children": {
@@ -34706,6 +34724,86 @@
           }
         ],
         "summary": "Supersede Document",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/v1/documents/{uid}/workspace": {
+      "get": {
+        "description": "The workspace a document lives in, for a link opened in another one: only one where the caller may read\ndocuments — anyone else learns nothing, not even that it exists. What it holds is then read there, under\nthat workspace's rules (confidentiality included).",
+        "operationId": "document_workspace_v1_documents__uid__workspace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "title": "Uid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentWorkspaceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Document Workspace",
         "tags": [
           "documents"
         ]

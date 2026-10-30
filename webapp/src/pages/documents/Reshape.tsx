@@ -92,7 +92,9 @@ export function DocumentReshape() {
   useEffect(() => setResult(null), [text, kind, filename, originalDate, sender, subject, current,
                                    typeUid, templateRef, confidentiality]);
   const preview = useMutation({
-    mutationFn: () => reshapeApi.preview({ source: sourceOf(), document_type_uid: typeUid,
+    // A day picked together with the preview is sent as it is: the state holding it is not set yet.
+    mutationFn: (only?: DaySection) => reshapeApi.preview({
+      source: only ? { ...sourceOf(), text: only.text, original_date: only.date } : sourceOf(), document_type_uid: typeUid,
                                            template: templateRef || null, confidentiality, document_uid: intoDocument }),
     onSuccess: (r) => { setResult(r); setDraft(r.markdown); setTitle(r.title); },
   });
@@ -247,10 +249,25 @@ export function DocumentReshape() {
               <span>Share with every workspace <span className="block text-slate-500">Other workspaces can read it; editing stays here.</span></span>
             </label>
           )}
-          <button type="button" disabled={!text.trim() || !typeUid || preview.isPending} onClick={() => preview.mutate()}
-                  className="w-full rounded bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-40">
-            {preview.isPending ? "Reading the text…" : result ? "Preview again" : "Preview"}
-          </button>
+          {days.length > 0 && day === null ? (
+            // Several days in the box: the first is reworked, the whole log only when asked (it is slow and may time out).
+            <>
+              <button type="button" disabled={!typeUid || preview.isPending} data-testid="preview-first-day"
+                      onClick={() => { pickDay(0); preview.mutate(days[0]); }}
+                      className="w-full rounded bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-40">
+                {preview.isPending ? "Reading the text…" : `Preview the first day, ${days[0].label}`}
+              </button>
+              <button type="button" disabled={!typeUid || preview.isPending} onClick={() => preview.mutate(undefined)}
+                      className="w-full text-xs text-slate-600 underline disabled:opacity-40">
+                Preview all {days.length} days as one draft (slow, may time out)
+              </button>
+            </>
+          ) : (
+            <button type="button" disabled={!text.trim() || !typeUid || preview.isPending} onClick={() => preview.mutate(undefined)}
+                    className="w-full rounded bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-40">
+              {preview.isPending ? "Reading the text…" : result ? "Preview again" : "Preview"}
+            </button>
+          )}
           {preview.isError && <p className="text-xs text-rose-700">{problemText(preview.error)}</p>}
         </div>
       </section>
