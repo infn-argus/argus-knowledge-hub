@@ -1,12 +1,12 @@
 ---
 title: The product catalogue
 summary: The shared Vendors and Product Models every workspace points at — where they come from (two Git repositories, pinned), how a release is previewed and installed, how existing records are adopted without losing their links, which values Git manages and how a correction goes back, matching GLPI's devices to models, and what to check when something is refused.
-keywords: [catalogue, product model, vendor, manufacturer, collection, release, install, upgrade, preview, adopt, adoption, migration, manifest, export, netbox, device type, glpi, match, correction, git, pull request, lock, pin, datasheet, verification, duplicate, retire, transfer]
+keywords: [catalogue, catalogue workspace, system catalogue, status, protected, product model, vendor, manufacturer, collection, release, install, upgrade, preview, adopt, adoption, migration, manifest, export, netbox, device type, glpi, match, correction, git, pull request, lock, pin, datasheet, verification, duplicate, retire, transfer]
 order: 168
 ---
 
 Every workspace's units point at **one shared catalogue** of Product Models and Vendors, kept in the
-catalogue workspace. A model used by both the IT and the accelerator workspaces is one record: a Moxa NPort
+installation's catalogue workspace. A model used by both the IT and the accelerator workspaces is one record: a Moxa NPort
 5450 is `moxa/nport-5450` wherever it is installed. The units themselves — serial numbers, positions, owners —
 stay in their own workspaces.
 
@@ -21,12 +21,49 @@ Neither ever holds site data: no serial numbers, installed units, locations, sel
 
 ## Where to find it
 
-- **Settings › Product catalogue** — browse and search the models: from a collection (with their catalogue id),
-  local (made here), or retired; how many units are of each; and the GLPI matching.
-- **Settings › Catalogue collections** — the pinned sources, the collections and the version installed, preview
-  and install, the entries waiting for review, the corrections for Git, and the history.
+- **Settings › Product catalogue** — everyone: browse and search the models, from a collection (with their
+  catalogue id), local (made here), or retired, and how many units are of each.
+- **Administration › Catalogue** — administrators: which workspace is the catalogue and what depends on it, the
+  pinned sources, the collections and the version installed, preview and install, the entries waiting for
+  review, the corrections for Git, the history, and matching GLPI's devices (for the workspace you choose).
+  The old *Catalogue collections* address leads there.
 
-Reading needs read access to the catalogue workspace; previewing and installing, its owner or an administrator.
+The catalogue workspace itself is in the workspace switcher only for those who can change it; everyone else
+reads its models from their own workspace.
+
+## Which models a workspace is offered
+
+Each collection names its **domain**: the packages whose workspaces its models are for (the IT devices for
+workspaces with the IT package; vacuum, motion, diagnostics, power and timing for those with the accelerator,
+vacuum or optics packages). When a unit's *Product model* is chosen, the picker shows the models of the
+workspace's domains and the local ones; **Show every model** shows the rest. Nothing is hidden from search, and
+a unit keeps the model it points at. Collections installed before domains were kept are offered everywhere.
+
+## Who maintains it
+
+Everyone can read the catalogue. It is **maintained** by the administrators and by the people and groups given
+*Curator* or *Owner* on the catalogue workspace — added and removed under **Maintainers** on *Administration ›
+Catalogue*. A maintainer edits Vendors and Product Models, installs and upgrades collections, decides the
+catalogue's review queue and downloads the corrections for Git; an Owner also grants access to the catalogue.
+Maintainers who are not administrators find *Catalogue* in Administration, and nothing else there.
+
+## The catalogue workspace
+
+One workspace is the installation's catalogue: an administrator sees which in
+`python -m app.catalogue status` (or `GET /v1/admin/catalogue`), with what it holds, the workspaces that take
+their shared types from it, and how many units in each point at its models. In an installation that had a
+catalogue before, it is the workspace that already held the shared types and models; in a new one, the first
+workspace given the object catalogue as the one others hang from, or the one an administrator designates.
+
+It is protected, because every workspace depends on it:
+
+- it holds **Vendors and Product Models only** — a unit put there would belong to no workspace, so it is
+  refused, whatever tries to write it;
+- it cannot be **deleted**, **exported as a workspace bundle** (its collections are its portable form), be a
+  transfer's **target**, have anything **moved out** of it (copying is allowed), or be made to **hang from**
+  another workspace.
+
+Its shared types are managed by its packages, as in any workspace.
 
 ## Which release ARGUS reads
 

@@ -525,6 +525,8 @@ export interface Me {
   email: string | null;
   name: string | null;
   is_admin: boolean;
+  /** May maintain the installation's catalogue: an administrator, or its workspace's Curator or Owner. */
+  catalogue_maintainer?: boolean;
 }
 
 export interface Workspace {
@@ -544,6 +546,8 @@ export interface MyWorkspace {
   name: string;
   is_global: boolean;
   created_at: string;
+  /** "catalogue" for the installation's catalogue workspace. */
+  role?: string | null;
   can_read: boolean;
   can_create: boolean;
   can_modify: boolean;

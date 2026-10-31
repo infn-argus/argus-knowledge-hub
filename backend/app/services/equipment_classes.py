@@ -337,7 +337,9 @@ def monthly(db: Session) -> dict:
     from app.models.workflow import Notification
     opened = open_reviews(db)
     rep = report(db)
-    home = db.scalar(select(Schema.workspace_id).where(Schema.name == "Asset", Schema.is_global.is_(True)).limit(1))
+    from app.catalogue.system import designated
+    home = designated(db) or db.scalar(select(Schema.workspace_id).where(
+        Schema.name == "Asset", Schema.is_global.is_(True)).order_by(Schema.workspace_id).limit(1))
     messages = [f"Promotion review opened for '{r.class_name}': " + "; ".join(t["text"] for t in r.triggers)
                 for r in opened]
     if rep["unclassified"]["alert"]:

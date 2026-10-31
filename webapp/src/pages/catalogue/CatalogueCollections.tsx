@@ -172,7 +172,9 @@ function PlanView({ plan, decisions, setDecision, manifest }: {
 
 /** The collections this installation ships, what the catalogue has installed, previewing and installing a
  *  release, and the entries waiting for review. */
-export function CatalogueCollectionsPage() {
+/** The catalogue's collections: sources, versions, preview and install, review, corrections, history. On its own
+ *  page, or `embedded` in Administration › Catalogue. */
+export function CatalogueCollectionsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const queryClient = useQueryClient();
   const list = useQuery({ queryKey: ["catalogue-collections"], queryFn: catalogueCollectionsApi.list });
   const review = useQuery({ queryKey: ["catalogue-review"], queryFn: catalogueCollectionsApi.review });
@@ -207,7 +209,7 @@ export function CatalogueCollectionsPage() {
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-2">
+      {!embedded && <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Catalogue collections</h1>
           <p className="mt-1 text-sm text-slate-500">
@@ -216,7 +218,7 @@ export function CatalogueCollectionsPage() {
           </p>
         </div>
         <Link to="/catalogue/models" className="text-sm font-medium text-sky-800 underline">Product catalogue</Link>
-      </div>
+      </div>}
       {list.isError && <p className="whitespace-pre-line text-sm text-red-600">{problem(list.error)}</p>}
 
       {(list.data?.sources ?? []).length > 0 && (

@@ -116,8 +116,9 @@ class Plan:
 # --------------------------------------------------------------------------- where, and what is there
 
 def catalogue_workspace(db: Session) -> Optional[str]:
-    """The catalogue workspace: the one holding the global `Asset` type."""
-    return db.scalar(select(Schema.workspace_id).where(Schema.name == "Asset", Schema.is_global.is_(True)).limit(1))
+    """The installation's catalogue workspace: the one designated (app/catalogue/system.py), or None."""
+    from app.catalogue.system import designated
+    return designated(db)
 
 
 def installed(db: Session, workspace_id: str) -> dict[str, CatalogueInstallation]:
@@ -646,6 +647,7 @@ def plan(db: Session, workspace_id: str, collection_ids: list[str], *, actor: st
         if apply:
             db.add(CatalogueInstallation(workspace_id=workspace_id, collection_id=c.id, from_version=release.from_version,
                                          version=c.version, checksum=c.checksum, installed_by=actor,
+                                         domains=list(c.domains) or None,
                                          result={"counts": release.counts(),
                                                  "attention": [i.as_dict() for i in release.items
                                                                if i.category in ("conflict", "retire", "transfer")]}))

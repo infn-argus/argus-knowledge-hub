@@ -3737,6 +3737,19 @@
         "title": "DefaultAccess",
         "type": "object"
       },
+      "DesignateIn": {
+        "properties": {
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id"
+        ],
+        "title": "DesignateIn",
+        "type": "object"
+      },
       "DeviceIn": {
         "properties": {
           "app_version": {
@@ -9013,6 +9026,11 @@
             "title": "Auth Type",
             "type": "string"
           },
+          "catalogue_maintainer": {
+            "default": false,
+            "title": "Catalogue Maintainer",
+            "type": "boolean"
+          },
           "email": {
             "anyOf": [
               {
@@ -9449,6 +9467,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
           }
         },
         "required": [
@@ -13502,6 +13531,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
           }
         },
         "required": [
@@ -13588,6 +13628,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
           }
         },
         "required": [
@@ -17188,6 +17239,154 @@
         "summary": "Delete Bundle",
         "tags": [
           "workspace bundles"
+        ]
+      }
+    },
+    "/v1/admin/catalogue": {
+      "get": {
+        "description": "Which workspace is the installation's catalogue, what it holds, which workspaces hang from it, the units\npointing at its models, and its collections (docs/system-catalogue.md). Administrators and the catalogue's\nmaintainers.",
+        "operationId": "catalogue_status_v1_admin_catalogue_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Catalogue Status",
+        "tags": [
+          "catalogue"
+        ]
+      }
+    },
+    "/v1/admin/catalogue/designate": {
+      "post": {
+        "description": "Make a workspace the installation's catalogue, when there is none. Refused while another is, or while\nit holds records other than Vendors and Product Models.",
+        "operationId": "designate_catalogue_v1_admin_catalogue_designate_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Designate Catalogue",
+        "tags": [
+          "catalogue"
         ]
       }
     },
@@ -30276,6 +30475,75 @@
           }
         ],
         "summary": "Browse Models",
+        "tags": [
+          "catalogue"
+        ]
+      }
+    },
+    "/v1/catalogue/collections/offered": {
+      "get": {
+        "description": "The catalogue's models this workspace is not offered by default (`hidden`): those of collections for\ndomains it has no package of. A model picker hides them behind \"show every model\".",
+        "operationId": "offered_models_v1_catalogue_collections_offered_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Offered Models",
         "tags": [
           "catalogue"
         ]

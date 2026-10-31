@@ -30,6 +30,8 @@ class WorkspaceOut(BaseModel):
     name: str
     is_global: bool
     created_at: datetime
+    # `catalogue` for the installation's catalogue workspace (docs/system-catalogue.md)
+    role: Optional[str] = None
 
 
 class MyWorkspaceOut(WorkspaceOut):
@@ -105,6 +107,8 @@ class MeOut(BaseModel):
     email: Optional[str] = None
     name: Optional[str] = None
     is_admin: bool = False
+    # May maintain the installation's catalogue (an administrator, or its workspace's Curator or Owner)
+    catalogue_maintainer: bool = False
 
 
 class UserOut(BaseModel):

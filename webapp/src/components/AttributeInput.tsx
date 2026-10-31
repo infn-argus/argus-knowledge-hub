@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { assetsApi, attributeValuesApi, directoryApi, membersApi, schemasApi } from "../api/client";
+import { useState } from "react";
+import { assetsApi, attributeValuesApi, catalogueCollectionsApi, directoryApi, membersApi, schemasApi } from "../api/client";
 import { SchemaAttribute } from "../api/types";
 import { AssetPicker } from "./AssetPicker";
 import { IndexedStringInput } from "./IndexedStringInput";
@@ -138,6 +139,10 @@ function ReferenceInput({
     queryFn: () => assetsApi.list(),
     enabled: !!attribute.referenceSchemaUid && !!attribute.includeChildren,
   });
+  const isModel = attribute.referenceType === "Product Model" || attribute.key === "product_model";
+  const offered = useQuery({ queryKey: ["catalogue-offered"], queryFn: catalogueCollectionsApi.offered,
+                             enabled: isModel, retry: false, staleTime: 5 * 60_000 });
+  const [everyModel, setEveryModel] = useState(false);
 
   if (!attribute.referenceSchemaUid) {
     // Legacy attribute with only a display label, no linked schema — fall
@@ -159,12 +164,17 @@ function ReferenceInput({
     allowed.add(attribute.referenceSchemaUid);
     options = allAssets.data.filter((a) => allowed.has(a.schema_uid));
   }
+  // A product model: the catalogue's models for this workspace's domains first; the rest on request. The model
+  // a unit already points at is always there.
+  const hidden = new Set(isModel && !everyModel ? offered.data?.hidden ?? [] : []);
+  const more = isModel ? (options ?? []).filter((a) => (offered.data?.hidden ?? []).includes(a.uid) && a.uid !== value).length : 0;
+  if (hidden.size) options = (options ?? []).filter((a) => !hidden.has(a.uid) || a.uid === value);
 
   const isLoading = attribute.includeChildren
     ? allSchemas.isLoading || allAssets.isLoading
     : targets.isLoading;
 
-  return (
+  const picker = (
     <AssetPicker
       options={options ?? []}
       value={typeof value === "string" ? value : null}
@@ -172,6 +182,16 @@ function ReferenceInput({
       disabled={disabled || isLoading}
       placeholder={isLoading ? "Loading…" : "Search assets…"}
     />
+  );
+  if (!isModel || (!more && !everyModel)) return picker;
+  return (
+    <div>
+      {picker}
+      <button type="button" onClick={() => setEveryModel(!everyModel)}
+              className="mt-1 text-xs text-sky-800 hover:underline">
+        {everyModel ? "Only the models for this workspace's domains" : `Show every model (${more} more)`}
+      </button>
+    </div>
   );
 }
 

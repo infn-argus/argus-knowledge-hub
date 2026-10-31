@@ -2983,7 +2983,30 @@ export interface GlpiMatchReport {
 /** GLPI's devices in the current workspace matched to catalogue models, through the review queue. */
 export const glpiMatchesApi = {
   unmatched: () => request<{ workspace_id: string; unmatched: GlpiMatchReport["unmatched"] }>("/v1/catalogue/glpi-matches"),
-  run: () => request<GlpiMatchReport>("/v1/catalogue/glpi-matches", { method: "POST" }),
+  /** In the current workspace, or in `workspaceId` (Administration › Catalogue). */
+  run: (workspaceId?: string) => request<GlpiMatchReport>("/v1/catalogue/glpi-matches",
+    { method: "POST", ...(workspaceId ? { headers: { "X-Workspace-Id": workspaceId } } : {}) }),
+};
+
+/** GET /v1/admin/catalogue: the installation's catalogue workspace and what depends on it. */
+export interface SystemCatalogueStatus {
+  designated: string | null;
+  candidates: string[];
+  name?: string;
+  records?: Record<string, number>;
+  other_records?: Record<string, number>;
+  not_shared?: number;
+  shared_types?: number;
+  own_types?: number;
+  hanging?: Record<string, string[]>;
+  units?: Record<string, number>;
+  collections?: Record<string, string>;
+}
+
+export const systemCatalogueApi = {
+  status: () => request<SystemCatalogueStatus>("/v1/admin/catalogue"),
+  designate: (workspaceId: string) =>
+    request<SystemCatalogueStatus>("/v1/admin/catalogue/designate", { method: "POST", body: json({ workspace_id: workspaceId }) }),
 };
 
 export const catalogueCollectionsApi = {
@@ -2994,6 +3017,9 @@ export const catalogueCollectionsApi = {
     return request<CatalogueBrowse>(`${CC}/models${qs ? `?${qs}` : ""}`);
   },
   record: (uid: string) => request<CatalogueRecord>(`${CC}/records/${encodeURIComponent(uid)}`),
+  /** The catalogue's models this workspace is not offered by default: collections for domains it has no package of. */
+  offered: () => request<{ workspace_id: string; packages: string[]; hidden: string[];
+                           collections: Record<string, { domains: string[] | null; offered: boolean }> }>(`${CC}/offered`),
   review: () => request<CatalogueReviewItem[]>(`${CC}/review`),
   corrections: () => request<CataloguePatches>(`${CC}/corrections`),
   /** `manifest`: a migration manifest's YAML text (`python -m app.catalogue export`), read by the server. */

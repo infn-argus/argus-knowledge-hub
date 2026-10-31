@@ -184,8 +184,11 @@ def validate_collection(c: Collection, tree: dict[str, Collection]) -> list[Prob
     for key in ("name", "owner", "license", "domain"):
         if not getattr(c, key):
             r.add(MANIFEST, key, "is required")
-    if c.domain and c.domain != "catalogue" and c.domain not in available():
-        r.add(MANIFEST, "domain", f"{c.domain!r} is not a package id (or `catalogue` for vendors)")
+    for d in c.domains:
+        if d != "catalogue" and d not in available():
+            r.add(MANIFEST, "domain", f"{d!r} is not a package id (or `catalogue`, for every workspace)")
+    if "catalogue" in c.domains and len(c.domains) > 1:
+        r.add(MANIFEST, "domain", "`catalogue` is for every workspace: it is not listed with packages")
     _check_ranges(r, c.requires_packages, {pid: p.version for pid, p in available().items()}, "packages")
     _check_ranges(r, c.requires_collections, {cid: o.version for cid, o in tree.items()}, "collections")
     if c.id in c.requires_collections:

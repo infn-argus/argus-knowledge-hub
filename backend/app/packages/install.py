@@ -334,6 +334,11 @@ def _object_options(db: Session, workspace_id: str, catalogue_workspace_id: Opti
     if catalogue_workspace_id:
         if catalogue_workspace_id == workspace_id:
             raise PackageProblem("a workspace cannot be its own catalogue")
+        from app.catalogue.system import CatalogueProtected, refuse
+        try:
+            refuse(db, workspace_id, "made to hang from another workspace")
+        except CatalogueProtected as e:
+            raise PackageProblem(str(e)) from None
         return {"scope": asset_types.SCOPE_BEAMLINE, "catalogue_workspace_id": catalogue_workspace_id}
     if scope == asset_types.SCOPE_GLOBAL:
         return {"scope": asset_types.SCOPE_GLOBAL}
@@ -437,6 +442,9 @@ def _run(db: Session, workspace_id: str, package_ids: list[str], *, catalogue_wo
         catalogue_icons.PREVIEW.reset(token)
     if keep:
         savepoint.commit()
+        if options.get("scope") == "global" and any(s.action != "unchanged" for _, s in steps):
+            from app.catalogue.system import designate_if_none
+            designate_if_none(db, workspace_id)
     else:
         savepoint.rollback()
     return Plan(workspace_id, [s for _, s in steps], options)

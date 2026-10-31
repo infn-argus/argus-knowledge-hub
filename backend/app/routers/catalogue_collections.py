@@ -44,19 +44,22 @@ def _workspace(db: Session) -> str:
 
 
 def _may_read(db: Session, identity: Identity, ws: str) -> None:
-    from app.services.permissions import resolve_permission
-    if isinstance(identity, PatIdentity):
-        if identity.workspace_id != ws:
-            raise HTTPException(status_code=403, detail="This token belongs to another workspace")
-        return
-    if identity.user.is_admin or resolve_permission(db, identity.user, ws, "read", "objects"):
-        return
-    raise HTTPException(status_code=403, detail="You may not read the catalogue")
+    """Everyone reads the installation's catalogue: its models are shared with every workspace."""
+    return None
 
 
 def _may_install(db: Session, identity: Identity, ws: str) -> None:
-    from app.routers.workspaces import _require_owner_or_admin
-    _require_owner_or_admin(ws, identity, db)
+    """Installing, deciding and correcting: the catalogue's maintainers (app/catalogue/system.py)."""
+    from app.catalogue.system import may_maintain
+    if isinstance(identity, PatIdentity):
+        if identity.workspace_id != ws or not identity.may("admin"):
+            raise HTTPException(status_code=403, detail="Only the catalogue's maintainers may do this")
+        return
+    if identity.token is not None and (not identity.token.may("admin") or
+                                       identity.token.workspace_id not in (None, ws)):
+        raise HTTPException(status_code=403, detail="This token may not maintain the catalogue")
+    if not may_maintain(db, identity.user):
+        raise HTTPException(status_code=403, detail="Only the catalogue's maintainers may do this")
 
 
 def _actor(identity: Identity) -> str:
@@ -113,7 +116,7 @@ def list_collections(identity: Identity = Depends(get_identity), db: Session = D
     for c in tree.values():
         got = have.get(c.id)
         rows.append({"id": c.id, "name": c.name, "description": c.description, "version": c.version,
-                     "domain": c.domain, "owner": c.owner, "license": c.license, "checksum": c.checksum,
+                     "domain": c.domain, "domains": c.domains, "owner": c.owner, "license": c.license, "checksum": c.checksum,
                      "summary": c.summary(), "vendors": len(c.vendors), "models": len(c.models),
                      "requires": {"packages": c.requires_packages, "collections": c.requires_collections},
                      "problems": [str(p) for p in problems.get(c.id, [])],
@@ -275,3 +278,52 @@ def glpi_match(workspace_id: str = Depends(require_permission("update")), db: Se
         raise HTTPException(status_code=422, detail={"error": str(exc)})
     db.commit()
     return out
+
+
+@router.get("/offered")
+def offered_models(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """The catalogue's models this workspace is not offered by default (`hidden`): those of collections for
+    domains it has no package of. A model picker hides them behind "show every model"."""
+    from app.catalogue.system import offered
+    return offered(db, workspace_id)
+
+
+# --------------------------------------------------------------------------- the system catalogue (administrators)
+
+system_router = APIRouter(prefix="/v1/admin/catalogue", tags=["catalogue"])
+
+
+def _admin(identity: Identity) -> None:
+    if isinstance(identity, PatIdentity) or not identity.user.is_admin:
+        raise HTTPException(status_code=403, detail="Admins only")
+
+
+class DesignateIn(BaseModel):
+    workspace_id: str
+
+
+@system_router.get("")
+def catalogue_status(identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """Which workspace is the installation's catalogue, what it holds, which workspaces hang from it, the units
+    pointing at its models, and its collections (docs/system-catalogue.md). Administrators and the catalogue's
+    maintainers."""
+    from app.catalogue.system import may_maintain
+    if isinstance(identity, PatIdentity) or not may_maintain(db, identity.user):
+        raise HTTPException(status_code=403, detail="Administrators and the catalogue's maintainers only")
+    from app.catalogue.system import status
+    return status(db)
+
+
+@system_router.post("/designate")
+def designate_catalogue(body: DesignateIn, identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """Make a workspace the installation's catalogue, when there is none. Refused while another is, or while
+    it holds records other than Vendors and Product Models."""
+    _admin(identity)
+    from app.catalogue.system import CatalogueProtected, designate, status
+    try:
+        designate(db, body.workspace_id)
+    except CatalogueProtected as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail={"error": str(e), "code": "catalogue_workspace"})
+    db.commit()
+    return status(db)

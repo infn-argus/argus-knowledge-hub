@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { catalogueCollectionsApi, glpiMatchesApi, type GlpiMatchReport } from "../../api/client";
+import { catalogueCollectionsApi, glpiMatchesApi, workspacesApi, type GlpiMatchReport } from "../../api/client";
 import { problem } from "./catalogueText";
 
 const STATUS: Record<string, string> = { catalogue: "From a collection", local: "Local", retired: "Retired" };
@@ -25,15 +25,15 @@ function Facet({ label, value, counts, onChange, names }: {
 
 /** GLPI's devices in the current workspace: propose their catalogue models for review, and list the GLPI
  *  models nothing matches (candidates for new entries). */
-export function GlpiMatches() {
+export function GlpiMatches({ workspaceId }: { workspaceId?: string } = {}) {
   const [report, setReport] = useState<GlpiMatchReport | null>(null);
-  const run = useMutation({ mutationFn: glpiMatchesApi.run, onSuccess: setReport });
+  const run = useMutation({ mutationFn: () => glpiMatchesApi.run(workspaceId), onSuccess: setReport });
   const unmatched = report?.unmatched;
   return (
     <section aria-label="GLPI devices" className="rounded border border-slate-200 bg-white p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-slate-900">GLPI devices in this workspace</h2>
+          <h2 className="text-sm font-semibold text-slate-900">GLPI devices in {workspaceId ?? "this workspace"}</h2>
           <p className="text-xs text-slate-500">
             Proposes the catalogue model GLPI's manufacturer and model name, for each device that has none. Each
             proposal waits in the <Link to="/review" className="text-sky-800 underline">review queue</Link> until someone
@@ -81,6 +81,7 @@ export function ProductCataloguePage() {
   const [collection, setCollection] = useState("");
   const params = { q, device_class: deviceClass, vendor, status, collection };
   const found = useQuery({ queryKey: ["catalogue-models", params], queryFn: () => catalogueCollectionsApi.models(params) });
+  const me = useQuery({ queryKey: ["me"], queryFn: workspacesApi.me });
 
   return (
     <div className="max-w-6xl space-y-4">
@@ -92,7 +93,9 @@ export function ProductCataloguePage() {
             a local one was made here, and can be proposed for a collection.
           </p>
         </div>
-        <Link to="/catalogue/collections" className="text-sm font-medium text-sky-800 underline">Collections and updates</Link>
+        {(me.data?.is_admin || me.data?.catalogue_maintainer) && (
+          <Link to="/admin/catalogue" className="text-sm font-medium text-sky-800 underline">Collections and updates</Link>
+        )}
       </div>
 
       <div className="flex flex-wrap items-end gap-3 rounded border border-slate-200 bg-white p-3">
@@ -106,8 +109,6 @@ export function ProductCataloguePage() {
         <Facet label="Source" value={status} onChange={setStatus} counts={found.data?.facets.status} names={STATUS} />
         <Facet label="Collection" value={collection} onChange={setCollection} counts={found.data?.facets.collection} />
       </div>
-
-      <GlpiMatches />
 
       {found.isError && <p className="whitespace-pre-line text-sm text-red-600">{problem(found.error)}</p>}
       {found.isLoading && <p className="text-sm text-slate-500">Loading…</p>}

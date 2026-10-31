@@ -3742,6 +3742,11 @@
             "title": "Auth Type",
             "type": "string"
           },
+          "catalogue_maintainer": {
+            "default": false,
+            "title": "Catalogue Maintainer",
+            "type": "boolean"
+          },
           "email": {
             "anyOf": [
               {
@@ -3908,6 +3913,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
           }
         },
         "required": [

@@ -26,6 +26,9 @@ class Workspace(Base):
     # How keys are made for records created without one; null is the default
     # pattern. See app/services/asset_keys.py.
     asset_key_pattern: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # `catalogue` for the one workspace that is the installation's catalogue of Vendors and Product Models
+    # (docs/system-catalogue.md); null for every other.
+    role: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Fallback rights for any authenticated user with no explicit Membership
     # row in this workspace. All unchecked by default — a workspace stays

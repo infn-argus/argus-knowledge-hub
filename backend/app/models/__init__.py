@@ -79,3 +79,5 @@ from app.models import activity  # noqa: F401,E402
 from app.models import indoor  # noqa: F401,E402
 from app.models import type_migration  # noqa: F401,E402
 from app.models import catalogue_entry  # noqa: F401,E402
+
+import app.catalogue.system  # noqa: E402,F401  (the catalogue workspace's guard)

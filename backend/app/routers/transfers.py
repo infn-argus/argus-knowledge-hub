@@ -78,6 +78,14 @@ def create_transfer(
     if target is None:
         raise HTTPException(status_code=404, detail="Target workspace not found")
 
+    from app.catalogue.system import CatalogueProtected, refuse
+    try:
+        refuse(db, body.target_workspace_id, "a transfer's target: its models are made through its collections")
+        if body.mode != "copy":
+            refuse(db, workspace_id, "moved out of: copy from it instead, or point units at its models")
+    except CatalogueProtected as exc:
+        raise HTTPException(status_code=422, detail={"error": str(exc), "code": "catalogue_workspace"})
+
     resources = _resources_touched(db, body)
     if not resources:
         raise HTTPException(status_code=422, detail="Nothing selected to transfer")

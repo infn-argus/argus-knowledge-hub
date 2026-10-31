@@ -207,6 +207,11 @@ def create_asset(
     # A record's type follows its schema, as on update: the ledger and the
     # graph select records by it, so a free-typed one would hide them.
     type_name = schema.name
+    from app.catalogue.system import CatalogueProtected, check_record
+    try:
+        check_record(db, workspace_id, type_name)
+    except CatalogueProtected as exc:
+        raise HTTPException(status_code=422, detail={"error": str(exc), "code": "catalogue_workspace"})
     _check_class(db, type_name, body.attributes, None)
     stamp_current_user_attributes(db, schema, body.attributes, current_user_id)
     validate_attributes(db, schema, body.attributes, workspace_id, Asset)

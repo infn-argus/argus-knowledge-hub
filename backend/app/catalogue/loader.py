@@ -58,6 +58,9 @@ class Collection:
     # Tombstones: an entry that moved to another collection ({id, moved_to}).
     moved: list[Entry] = field(default_factory=list)
     classifications: list[Entry] = field(default_factory=list)
+    # The packages whose workspaces its models are for (`domain`: one package id, a list of them, or
+    # `catalogue` for every workspace — vendors). `domain` is them joined, for display.
+    domains: list[str] = field(default_factory=list)
     read_problems: list[Problem] = field(default_factory=list)
     # Where it came from when not written as collection files: e.g. "netbox" for device types read from a
     # NetBox library at a pinned revision (app/catalogue/sources.py).
@@ -154,9 +157,11 @@ def load(path: Path | str) -> Collection:
         p = root / rel
         if p.is_file():
             digest.update(rel.encode() + b"\0" + p.read_bytes() + b"\0")
+    raw_domain = manifest.get("domain")
+    domains = [str(d) for d in raw_domain] if isinstance(raw_domain, list) else ([str(raw_domain)] if raw_domain else [])
     return Collection(
         id=cid, version=str(manifest.get("version") or ""), name=str(manifest.get("name") or cid),
-        domain=str(manifest.get("domain") or ""), owner=str(manifest.get("owner") or ""),
+        domain=", ".join(domains), domains=domains, owner=str(manifest.get("owner") or ""),
         license=str(manifest.get("license") or ""), description=str(manifest.get("description") or ""),
         requires_packages=_ranges(requires.get("packages"), cid, "requires › packages", problems),
         requires_collections=_ranges(requires.get("collections"), cid, "requires › collections", problems),

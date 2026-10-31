@@ -100,12 +100,14 @@ def _require_owner_or_admin(workspace_id: str, identity: Identity, db: Session) 
 
 
 @router.get("/me", response_model=MeOut)
-def get_me(identity: Identity = Depends(get_identity)):
+def get_me(identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
     if isinstance(identity, PatIdentity):
         return MeOut(auth_type="pat", workspace_id=identity.workspace_id)
     user = identity.user
+    from app.catalogue.system import may_maintain
     return MeOut(
-        auth_type="oidc", user_id=user.id, email=user.email, name=user.name, is_admin=user.is_admin
+        auth_type="oidc", user_id=user.id, email=user.email, name=user.name, is_admin=user.is_admin,
+        catalogue_maintainer=may_maintain(db, user),
     )
 
 
@@ -116,7 +118,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
         if ws is None:
             return []
         return [MyWorkspaceOut(
-            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
+            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at, role=ws.role,
             can_read=True, can_create=True, can_modify=True, can_delete=True,
             can_read_tickets=True, can_create_tickets=True,
             can_modify_tickets=True, can_delete_tickets=True,
@@ -128,7 +130,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     if user.is_admin:
         return [
             MyWorkspaceOut(
-                id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
+                id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at, role=ws.role,
                 can_read=True, can_create=True, can_modify=True, can_delete=True,
                 can_read_tickets=True, can_create_tickets=True,
                 can_modify_tickets=True, can_delete_tickets=True,
@@ -157,7 +159,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     for ws in db.scalars(select(Workspace).where(Workspace.id.in_(granted_ws_ids), NOT_STAGED)) if granted_ws_ids else []:
         granted = effective_permissions(db, user, ws.id)
         result.append(MyWorkspaceOut(
-            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
+            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at, role=ws.role,
             can_read="read" in granted["objects"], can_create="create" in granted["objects"],
             can_modify="modify" in granted["objects"], can_delete="delete" in granted["objects"],
             can_read_tickets="read" in granted["tickets"],
@@ -193,7 +195,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     ).all()
     result.extend(
         MyWorkspaceOut(
-            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
+            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at, role=ws.role,
             can_read=ws.default_can_read, can_create=ws.default_can_create,
             can_modify=ws.default_can_modify, can_delete=ws.default_can_delete,
             can_read_tickets=ws.default_can_read_tickets,
@@ -430,6 +432,11 @@ def delete_workspace(
     workspace = db.get(Workspace, workspace_id)
     if workspace is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    from app.catalogue.system import CatalogueProtected, refuse
+    try:
+        refuse(db, workspace_id, "deleted")
+    except CatalogueProtected as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "code": "catalogue_workspace"})
     # The one sanctioned purge of append-only audit rows: the workspace's own.
     from app.ledger.audit import allow_purge
     allow_purge(db)
