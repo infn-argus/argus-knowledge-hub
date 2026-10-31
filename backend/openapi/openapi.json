@@ -5271,6 +5271,26 @@
         "title": "Epik8sImportRequest",
         "type": "object"
       },
+      "EverywhereIn": {
+        "properties": {
+          "workspaces": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspaces"
+          }
+        },
+        "title": "EverywhereIn",
+        "type": "object"
+      },
       "ExitIn": {
         "properties": {
           "attestations": {
@@ -13773,6 +13793,32 @@
         "title": "RevertIn",
         "type": "object"
       },
+      "app__routers__packages__RevertIn": {
+        "properties": {
+          "checksum": {
+            "title": "Checksum",
+            "type": "string"
+          },
+          "decisions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Decisions",
+            "type": "object"
+          },
+          "package_id": {
+            "title": "Package Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "package_id",
+          "checksum"
+        ],
+        "title": "RevertIn",
+        "type": "object"
+      },
       "app__routers__portability__ConfirmIn": {
         "properties": {
           "confirm": {
@@ -17142,6 +17188,251 @@
         "summary": "Delete Bundle",
         "tags": [
           "workspace bundles"
+        ]
+      }
+    },
+    "/v1/admin/packages": {
+      "get": {
+        "description": "Every workspace's packages, at their versions, with the upgrades this installation ships and the earlier\nversions each can go back to; and, per package, the workspaces behind.",
+        "operationId": "every_workspace_v1_admin_packages_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Every Workspace",
+        "tags": [
+          "packages"
+        ]
+      }
+    },
+    "/v1/admin/packages/{package_id}/upgrade-everywhere": {
+      "post": {
+        "description": "Upgrade this package in every workspace behind on it that has no decision to make, shared catalogues\nfirst, each workspace on its own (one refused leaves the others upgraded). Those that need a migration\nplan are listed, unchanged.",
+        "operationId": "upgrade_everywhere_v1_admin_packages__package_id__upgrade_everywhere_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "package_id",
+            "required": true,
+            "schema": {
+              "title": "Package Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EverywhereIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upgrade Everywhere",
+        "tags": [
+          "packages"
+        ]
+      }
+    },
+    "/v1/admin/packages/{package_id}/upgrade-everywhere/preview": {
+      "post": {
+        "description": "For each workspace behind on this package: ready (no decision to make), needs decisions (upgrade it on\nits own page), or refused (why). Nothing is changed.",
+        "operationId": "preview_everywhere_v1_admin_packages__package_id__upgrade_everywhere_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "package_id",
+            "required": true,
+            "schema": {
+              "title": "Package Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EverywhereIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Everywhere",
+        "tags": [
+          "packages"
         ]
       }
     },
@@ -64267,7 +64558,7 @@
     },
     "/v1/workspaces/{workspace_id}/packages": {
       "get": {
-        "description": "Exactly which package versions this workspace uses (with the checksum of what was applied, and how it\nwas put in), what newer versions this installation ships, and the history.",
+        "description": "Exactly which package versions this workspace uses (with the checksum of what was applied, and how it\nwas put in), what newer versions this installation ships, the earlier ones it can go back to, and the\nhistory.",
         "operationId": "workspace_packages_v1_workspaces__workspace_id__packages_get",
         "parameters": [
           {
@@ -64514,6 +64805,182 @@
           }
         ],
         "summary": "Preview Install",
+        "tags": [
+          "packages"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/packages/revert": {
+      "post": {
+        "description": "Go back to an earlier version of a package this workspace had, with its migration plan; recorded in the\nhistory. Refused while another package here, or a workspace hanging from this catalogue, needs the newer one.",
+        "operationId": "revert_package_v1_workspaces__workspace_id__packages_revert_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__routers__packages__RevertIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revert Package",
+        "tags": [
+          "packages"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/packages/revert/preview": {
+      "post": {
+        "description": "What going back to an earlier version of a package would do here — what it would remove (each a\ndecision: apply or keep), restore and rename back — worked out and rolled back. Nothing is kept.",
+        "operationId": "preview_revert_v1_workspaces__workspace_id__packages_revert_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__routers__packages__RevertIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Revert",
         "tags": [
           "packages"
         ]

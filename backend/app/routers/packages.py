@@ -11,6 +11,7 @@ from app.db import get_db
 from app.models.workspace import Workspace
 from app.packages import install as installer
 from app.packages.behaviors import describe as behaviors
+from app.packages import revert as reverter
 from app.packages.loader import available
 from app.packages.validate import validate
 
@@ -53,6 +54,18 @@ class PackagesIn(BaseModel):
     scope: Optional[str] = None
     # an upgrade's migration plan: for each breaking change (by id), "apply" or "keep"
     decisions: dict[str, str] = {}
+
+
+class RevertIn(BaseModel):
+    package_id: str
+    # the earlier version to go back to, by the checksum of what the workspace was given then
+    checksum: str
+    decisions: dict[str, str] = {}
+
+
+class EverywhereIn(BaseModel):
+    # the workspaces to upgrade (default: every one behind); each without a decision to make is upgraded
+    workspaces: Optional[list[str]] = None
 
 
 def _may_read(db: Session, identity: Identity, workspace_id: str) -> None:
@@ -165,12 +178,17 @@ def _history(db: Session, workspace_id: str) -> list[dict]:
              "result": h.result} for h in installer.history(db, workspace_id)]
 
 
-@router.get("/workspaces/{workspace_id}/packages")
-def workspace_packages(workspace_id: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
-    """Exactly which package versions this workspace uses (with the checksum of what was applied, and how it
-    was put in), what newer versions this installation ships, and the history."""
-    _may_read(db, identity, workspace_id)
-    catalog = available()
+def _upgradable(shipped, version: str) -> bool:
+    from packaging.version import InvalidVersion, Version
+    if shipped is None:
+        return False
+    try:
+        return Version(shipped.version) > Version(version)
+    except InvalidVersion:
+        return shipped.version != version
+
+
+def _rows(db: Session, workspace_id: str, catalog: dict) -> list[dict]:
     rows = []
     for r in installer.installed(db, workspace_id).values():
         shipped = catalog.get(r.package_id)
@@ -178,8 +196,18 @@ def workspace_packages(workspace_id: str, identity=Depends(get_identity), db: Se
                      "version": r.version, "checksum": r.checksum, "options": r.options,
                      "installed_at": r.installed_at, "installed_by": r.installed_by,
                      "shipped_version": shipped.version if shipped else None,
-                     "upgrade_available": bool(shipped and shipped.version != r.version)})
-    return {"workspace_id": workspace_id, "packages": sorted(rows, key=lambda x: x["package_id"]),
+                     "upgrade_available": _upgradable(shipped, r.version),
+                     "revert_to": reverter.targets(db, workspace_id, r.package_id)})
+    return sorted(rows, key=lambda x: x["package_id"])
+
+
+@router.get("/workspaces/{workspace_id}/packages")
+def workspace_packages(workspace_id: str, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Exactly which package versions this workspace uses (with the checksum of what was applied, and how it
+    was put in), what newer versions this installation ships, the earlier ones it can go back to, and the
+    history."""
+    _may_read(db, identity, workspace_id)
+    return {"workspace_id": workspace_id, "packages": _rows(db, workspace_id, available()),
             "history": _history(db, workspace_id)}
 
 
@@ -215,3 +243,128 @@ def install_packages(workspace_id: str, body: PackagesIn, identity=Depends(get_i
         raise HTTPException(status_code=422, detail=_problem(e))
     db.commit()
     return {**plan.as_dict(), "history": _history(db, workspace_id)}
+
+
+def _revert(db: Session, workspace_id: str, body: RevertIn, identity, keep: bool) -> dict:
+    _may_install(db, identity, workspace_id)
+    actor = identity.user.id if isinstance(identity, OidcIdentity) else "api-token"
+    try:
+        plan = reverter.run(db, workspace_id, body.package_id, body.checksum, decisions=body.decisions,
+                            actor=actor if keep else None, keep=keep)
+    except installer.PackageProblem as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=_problem(e))
+    if not keep:
+        db.rollback()
+        return plan.as_dict()
+    db.commit()
+    return {**plan.as_dict(), "history": _history(db, workspace_id)}
+
+
+@router.post("/workspaces/{workspace_id}/packages/revert/preview")
+def preview_revert(workspace_id: str, body: RevertIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """What going back to an earlier version of a package would do here — what it would remove (each a
+    decision: apply or keep), restore and rename back — worked out and rolled back. Nothing is kept."""
+    return _revert(db, workspace_id, body, identity, keep=False)
+
+
+@router.post("/workspaces/{workspace_id}/packages/revert")
+def revert_package(workspace_id: str, body: RevertIn, identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Go back to an earlier version of a package this workspace had, with its migration plan; recorded in the
+    history. Refused while another package here, or a workspace hanging from this catalogue, needs the newer one."""
+    return _revert(db, workspace_id, body, identity, keep=True)
+
+
+# --------------------------------------------------------------------------- every workspace (administrators)
+
+def _admin(identity) -> None:
+    if isinstance(identity, PatIdentity) or not identity.user.is_admin:
+        raise HTTPException(status_code=403, detail="Admins only")
+
+
+def _catalogue_first(db: Session, workspace_ids: list[str], package_id: str) -> list[str]:
+    """Shared catalogues before the workspaces that hang from them."""
+    rows = {r.workspace_id: r for r in installer.installed_everywhere(db, package_id)}
+    return sorted(workspace_ids, key=lambda w: (0 if ((rows.get(w) and rows[w].options) or {}).get("scope") == "global"
+                                                else 1, w))
+
+
+@router.get("/admin/packages")
+def every_workspace(identity=Depends(get_identity), db: Session = Depends(get_db)):
+    """Every workspace's packages, at their versions, with the upgrades this installation ships and the earlier
+    versions each can go back to; and, per package, the workspaces behind."""
+    _admin(identity)
+    catalog = available()
+    workspaces = []
+    behind: dict[str, list[str]] = {}
+    for ws in db.query(Workspace).order_by(Workspace.id):
+        rows = _rows(db, ws.id, catalog)
+        for r in rows:
+            if r["upgrade_available"]:
+                behind.setdefault(r["package_id"], []).append(ws.id)
+        workspaces.append({"id": ws.id, "name": ws.name, "packages": rows})
+    return {"packages": [{"id": p.id, "name": p.name, "version": p.version,
+                          "behind": _catalogue_first(db, behind.get(p.id, []), p.id)}
+                         for p in sorted(catalog.values(), key=lambda p: p.id)],
+            "workspaces": workspaces}
+
+
+def _everywhere(db: Session, package_id: str, body: EverywhereIn, identity, keep: bool) -> dict:
+    _admin(identity)
+    shipped = available().get(package_id)
+    if shipped is None:
+        raise HTTPException(status_code=404, detail="No such package")
+    rows = {r.workspace_id: r for r in installer.installed_everywhere(db, package_id)}
+    wanted = [w for w, r in rows.items() if _upgradable(shipped, r.version)]
+    if body.workspaces is not None:
+        wanted = [w for w in wanted if w in set(body.workspaces)]
+    actor = identity.user.id
+    out = []
+    going = set()                            # catalogues upgraded (or ready to be) before what hangs from them
+    for ws in _catalogue_first(db, wanted, package_id):
+        entry = {"workspace_id": ws, "from_version": rows[ws].version, "to_version": shipped.version}
+        try:
+            plan = installer.plan(db, ws, [package_id])
+            db.rollback()
+            undecided = sorted({c for s in plan.steps if s.action == "upgrade"
+                                for c in (s.result or {}).get("needs_decision") or []})
+            entry["steps"] = [{"package_id": s.package_id, "action": s.action, "from_version": s.from_version,
+                               "version": s.version} for s in plan.steps if s.action != "unchanged"]
+            if undecided:
+                entry.update(status="needs_decisions", decisions=len(undecided))
+            elif not keep:
+                entry["status"] = "ready"
+                going.add(ws)
+            else:
+                installer.install(db, ws, [package_id], actor=actor)
+                db.commit()
+                entry["status"] = "upgraded"
+                going.add(ws)
+        except installer.CatalogueBehind as e:
+            db.rollback()
+            if not keep and e.catalogue in going:
+                entry["status"] = "after_catalogue"  # worked out once its catalogue is upgraded, just before it
+            else:
+                entry.update(status="refused", error=str(e))
+        except installer.PackageProblem as e:
+            db.rollback()
+            entry.update(status="refused", error=str(e))
+        out.append(entry)
+    return {"package_id": package_id, "version": shipped.version, "workspaces": out}
+
+
+@router.post("/admin/packages/{package_id}/upgrade-everywhere/preview")
+def preview_everywhere(package_id: str, body: EverywhereIn, identity=Depends(get_identity),
+                       db: Session = Depends(get_db)):
+    """For each workspace behind on this package: ready (no decision to make), needs decisions (upgrade it on
+    its own page), or refused (why). Nothing is changed."""
+    return _everywhere(db, package_id, body, identity, keep=False)
+
+
+@router.post("/admin/packages/{package_id}/upgrade-everywhere")
+def upgrade_everywhere(package_id: str, body: EverywhereIn, identity=Depends(get_identity),
+                       db: Session = Depends(get_db)):
+    """Upgrade this package in every workspace behind on it that has no decision to make, shared catalogues
+    first, each workspace on its own (one refused leaves the others upgraded). Those that need a migration
+    plan are listed, unchanged."""
+    return _everywhere(db, package_id, body, identity, keep=True)
