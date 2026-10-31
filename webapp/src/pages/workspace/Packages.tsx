@@ -61,39 +61,25 @@ function how(options: Record<string, string> | null): string {
 }
 
 const ACTIONS: Record<string, string> = {
-  install: "installed", upgrade: "upgraded", seeded: "seeded by an import", detected: "found in place",
-  unchanged: "unchanged",
+  install: "installed", upgrade: "upgraded", revert: "reverted", seeded: "seeded by an import",
+  detected: "found in place", unchanged: "unchanged",
 };
 
+/** What is being worked out: adding a package, upgrading one, or going back to an earlier version. */
+type Pending =
+  | { kind: "install"; packageId: string; name: string; version: string }
+  | { kind: "upgrade"; packageId: string; name: string; from: string; version: string }
+  | { kind: "revert"; packageId: string; name: string; from: string; version: string; checksum: string };
+
+const VERB: Record<Pending["kind"], string> = { install: "Install", upgrade: "Upgrade", revert: "Go back" };
+
 /** Which template packages this workspace uses — exact versions and checksums, how each was put in, the
- *  history — and adding one, previewed before anything changes. */
+ *  history — with upgrading, going back to an earlier version, and adding one, each previewed before
+ *  anything changes. */
 export function WorkspacePackages() {
   const { workspaceId = "" } = useParams();
-  const queryClient = useQueryClient();
-  const mine = useQuery({ queryKey: ["workspace-packages", workspaceId],
-                          queryFn: () => packagesApi.ofWorkspace(workspaceId) });
-  const all = useQuery({ queryKey: ["packages"], queryFn: packagesApi.list });
-  const [chosen, setChosen] = useState("");
-  const [plan, setPlan] = useState<PackagePlan | null>(null);
-  const [decisions, setDecisions] = useState<Record<string, "apply" | "keep">>({});
-  const preview = useMutation({ mutationFn: () => packagesApi.preview(workspaceId, { packages: [chosen], decisions }),
-                                onSuccess: setPlan });
-  const install = useMutation({
-    mutationFn: () => packagesApi.install(workspaceId, { packages: [chosen], decisions }),
-    onSuccess: () => {
-      setPlan(null);
-      setDecisions({});
-      setChosen("");
-      queryClient.invalidateQueries({ queryKey: ["workspace-packages", workspaceId] });
-      queryClient.invalidateQueries({ queryKey: ["schemas"] });
-    },
-  });
-  const have = new Set((mine.data?.packages ?? []).map((p) => p.package_id));
-  const offer = (all.data ?? []).filter((p) => p.installable && (!have.has(p.id) ||
-    mine.data?.packages.find((x) => x.package_id === p.id)?.upgrade_available));
-
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Packages</h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -101,50 +87,139 @@ export function WorkspacePackages() {
           definitions only — types, fields, enumerations, workflows — never records.
         </p>
       </div>
+      <PackageManager workspaceId={workspaceId} />
+    </div>
+  );
+}
 
-      <table className="w-full rounded border border-slate-200 bg-white text-sm">
-        <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-          <tr><th className="px-4 py-2">Package</th><th className="px-4 py-2">Version</th>
-            <th className="px-4 py-2">Checksum</th><th className="px-4 py-2">How</th><th className="px-4 py-2">Since</th></tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {(mine.data?.packages ?? []).length === 0 && (
-            <tr><td colSpan={5} className="px-4 py-3 text-slate-500">None recorded.</td></tr>
-          )}
-          {(mine.data?.packages ?? []).map((p) => (
-            <tr key={p.package_id}>
-              <td className="px-4 py-2"><span className="font-medium text-slate-900">{p.name}</span>
-                <span className="block font-mono text-xs text-slate-400">{p.package_id}</span></td>
-              <td className="px-4 py-2 font-mono">
-                {p.version}
-                {p.upgrade_available && <span className="ml-1 text-xs text-amber-700">({p.shipped_version} available)</span>}
-              </td>
-              <td className="px-4 py-2 font-mono text-xs text-slate-500" title={p.checksum}>{p.checksum.slice(0, 12)}</td>
-              <td className="px-4 py-2 text-slate-600">{how(p.options)}</td>
-              <td className="px-4 py-2 text-slate-500">{p.installed_at ? new Date(p.installed_at).toLocaleDateString() : ""}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+/** One workspace's packages, with their upgrades, reverts and additions: on the workspace's own page, and for
+ *  each workspace in Administration → Packages. */
+export function PackageManager({ workspaceId, compact = false }: { workspaceId: string; compact?: boolean }) {
+  const queryClient = useQueryClient();
+  const mine = useQuery({ queryKey: ["workspace-packages", workspaceId],
+                          queryFn: () => packagesApi.ofWorkspace(workspaceId) });
+  const all = useQuery({ queryKey: ["packages"], queryFn: packagesApi.list });
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [plan, setPlan] = useState<PackagePlan | null>(null);
+  const [decisions, setDecisions] = useState<Record<string, "apply" | "keep">>({});
 
-      {offer.length > 0 && (
-        <div className="rounded border border-slate-200 bg-white p-4">
-          <h2 className="text-sm font-semibold text-slate-900">Add a package</h2>
-          <div className="mt-2 flex items-center gap-2">
-            <select value={chosen} onChange={(e) => { setChosen(e.target.value); setPlan(null); setDecisions({}); }}
-                    className="rounded border border-slate-300 px-2 py-1.5 text-sm">
-              <option value="">Choose…</option>
-              {offer.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {have.has(p.id) ? "Upgrade: " : ""}{p.name} {p.version} — {contentsLine(p)}
-                </option>
-              ))}
-            </select>
-            <button type="button" disabled={!chosen || preview.isPending} onClick={() => preview.mutate()}
-                    className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">
-              {preview.isPending ? "Working it out…" : "Preview"}
-            </button>
+  const work = (p: Pending, d: Record<string, "apply" | "keep">) => p.kind === "revert"
+    ? { revert: { package_id: p.packageId, checksum: p.checksum, decisions: d } }
+    : { install: { packages: [p.packageId], decisions: d } };
+  const preview = useMutation({
+    mutationFn: ({ p, d }: { p: Pending; d: Record<string, "apply" | "keep"> }) => {
+      const w = work(p, d);
+      return w.revert ? packagesApi.previewRevert(workspaceId, w.revert) : packagesApi.preview(workspaceId, w.install!);
+    },
+    onSuccess: setPlan,
+  });
+  const apply = useMutation({
+    mutationFn: (p: Pending) => {
+      const w = work(p, decisions);
+      return w.revert ? packagesApi.revert(workspaceId, w.revert) : packagesApi.install(workspaceId, w.install!);
+    },
+    onSuccess: () => {
+      close();
+      queryClient.invalidateQueries({ queryKey: ["workspace-packages", workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ["admin-packages"] });
+      queryClient.invalidateQueries({ queryKey: ["schemas"] });
+    },
+  });
+  function start(p: Pending) {
+    setPending(p);
+    setPlan(null);
+    setDecisions({});
+    preview.reset();
+    apply.reset();
+    preview.mutate({ p, d: {} });
+  }
+  function close() {
+    setPending(null);
+    setPlan(null);
+    setDecisions({});
+  }
+
+  const rows = mine.data?.packages ?? [];
+  const have = new Set(rows.map((p) => p.package_id));
+  const addable = (all.data ?? []).filter((p) => p.installable && !have.has(p.id));
+  const undecided = (plan?.steps ?? []).some((s) => (s.action === "upgrade" || s.action === "revert") &&
+    ((s.result.needs_decision as string[]) ?? []).some((id) => !decisions[id]));
+
+  return (
+    <div className="space-y-6">
+      <div className="overflow-x-auto rounded border border-slate-200 bg-white">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <tr><th className="px-4 py-2">Package</th><th className="px-4 py-2">Version</th>
+              {!compact && <><th className="px-4 py-2">Checksum</th><th className="px-4 py-2">How</th>
+                <th className="px-4 py-2">Since</th></>}
+              <th className="px-4 py-2 text-right"><span className="sr-only">Actions</span></th></tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.length === 0 && (
+              <tr><td colSpan={compact ? 3 : 6} className="px-4 py-3 text-slate-500">None recorded.</td></tr>
+            )}
+            {rows.map((p) => (
+              <tr key={p.package_id} className={pending?.packageId === p.package_id ? "bg-sky-50" : undefined}>
+                <td className="px-4 py-2"><span className="font-medium text-slate-900">{p.name}</span>
+                  <span className="block font-mono text-xs text-slate-400">{p.package_id}</span></td>
+                <td className="px-4 py-2 font-mono whitespace-nowrap">
+                  {p.version}
+                  {p.upgrade_available && <span className="block text-xs text-amber-700">{p.shipped_version} available</span>}
+                </td>
+                {!compact && <>
+                  <td className="px-4 py-2 font-mono text-xs text-slate-500" title={p.checksum}>{p.checksum.slice(0, 12)}</td>
+                  <td className="px-4 py-2 text-slate-600">{how(p.options)}</td>
+                  <td className="px-4 py-2 text-slate-500">{p.installed_at ? new Date(p.installed_at).toLocaleDateString() : ""}</td>
+                </>}
+                <td className="px-4 py-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {p.upgrade_available && p.shipped_version && (
+                      <button type="button" disabled={preview.isPending || apply.isPending}
+                              onClick={() => start({ kind: "upgrade", packageId: p.package_id, name: p.name,
+                                                     from: p.version, version: p.shipped_version! })}
+                              className="whitespace-nowrap rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+                        Upgrade to {p.shipped_version}
+                      </button>
+                    )}
+                    {(p.revert_to ?? []).length > 0 && (
+                      <select aria-label={`Go back: ${p.name}`} value=""
+                              disabled={preview.isPending || apply.isPending}
+                              onChange={(e) => {
+                                const t = p.revert_to!.find((x) => x.checksum === e.target.value);
+                                if (t) start({ kind: "revert", packageId: p.package_id, name: p.name, from: p.version,
+                                               version: t.version, checksum: t.checksum });
+                              }}
+                              className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700">
+                        <option value="">Go back to…</option>
+                        {p.revert_to!.map((t) => <option key={t.checksum} value={t.checksum}>{t.version}</option>)}
+                      </select>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {pending && (
+        <section aria-label="Preview" className="rounded border border-sky-200 bg-white p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-900">
+              {pending.kind === "install" && <>Install {pending.name} {pending.version}</>}
+              {pending.kind === "upgrade" && <>Upgrade {pending.name} from {pending.from} to {pending.version}</>}
+              {pending.kind === "revert" && <>Go back: {pending.name} from {pending.from} to {pending.version}</>}
+            </h2>
+            <button type="button" onClick={close} className="text-xs text-slate-500 hover:underline">Cancel</button>
           </div>
+          {pending.kind === "revert" && (
+            <p className="mt-1 text-xs text-slate-500">
+              What {pending.version} did not have is removed only where you choose apply; the values records hold
+              under a removed field are kept. A field {pending.from} renamed is renamed back, its values with it.
+            </p>
+          )}
+          {preview.isPending && <p className="mt-2 text-sm text-slate-500">Working it out…</p>}
           {preview.isError && (catalogueBehind(preview.error)
             ? <CatalogueFirst d={catalogueBehind(preview.error)!} />
             : <p className="mt-2 text-sm text-red-600">{problem(preview.error)}</p>)}
@@ -153,49 +228,88 @@ export function WorkspacePackages() {
               {plan.steps.map((s) => {
                 const created = (s.result?.created as string[] | undefined) ?? [];
                 const extended = (s.result?.extended as string[] | undefined) ?? [];
+                const changes = (s.result?.changes as PackageChange[] | undefined) ?? [];
                 return (
                   <p key={s.package_id}>
                     <span className="font-mono">{s.package_id} {s.version}</span>: {ACTIONS[s.action] ?? s.action}
                     {s.action === "install" ? "" : s.from_version ? ` from ${s.from_version}` : ""}
                     {created.length > 0 && ` — creates ${created.length} types`}
                     {extended.length > 0 && `, extends ${extended.length}`}
-                    {s.action !== "unchanged" && created.length === 0 && extended.length === 0 && " — nothing new"}
+                    {(s.action === "upgrade" || s.action === "revert") && ` — ${changes.length} change${changes.length === 1 ? "" : "s"}`}
+                    {s.action === "install" && created.length === 0 && extended.length === 0 && " — nothing new"}
                   </p>
                 );
               })}
-              {plan.steps.filter((s) => s.action === "upgrade").map((s) => (
+              {plan.steps.filter((s) => s.action === "upgrade" || s.action === "revert").map((s) => (
                 <Upgrade key={s.package_id} changes={(s.result.changes as PackageChange[]) ?? []}
                          decisions={decisions} onDecide={(id, v) => setDecisions({ ...decisions, [id]: v })} />
               ))}
               {plan.options?.scope && <p className="text-xs text-slate-500">The object catalogue goes in {how(plan.options)}.</p>}
-              <button type="button"
-                      disabled={!plan.changes || install.isPending || plan.steps.some((s) =>
-                        s.action === "upgrade" && ((s.result.needs_decision as string[]) ?? []).some((id) => !decisions[id]))}
-                      onClick={() => install.mutate()}
-                      className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
-                {install.isPending ? "Installing…" : plan.changes ? "Install" : "Nothing to install"}
-              </button>
-              {install.isError && (catalogueBehind(install.error)
-                ? <CatalogueFirst d={catalogueBehind(install.error)!} />
-                : <p className="text-sm text-red-600">{problem(install.error)}</p>)}
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" disabled={!plan.changes || apply.isPending || undecided}
+                        onClick={() => apply.mutate(pending)}
+                        className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+                  {apply.isPending ? "Working…" : plan.changes ? VERB[pending.kind] : "Nothing to do"}
+                </button>
+                {undecided && <span className="text-xs text-amber-800">Decide each change that needs a decision first.</span>}
+                {Object.keys(decisions).length > 0 && (
+                  <button type="button" onClick={() => preview.mutate({ p: pending, d: decisions })} disabled={preview.isPending}
+                          className="text-xs text-sky-800 underline">Check again with these decisions</button>
+                )}
+              </div>
+              {apply.isError && (catalogueBehind(apply.error)
+                ? <CatalogueFirst d={catalogueBehind(apply.error)!} />
+                : <p className="text-sm text-red-600">{problem(apply.error)}</p>)}
             </div>
           )}
-        </div>
+        </section>
       )}
 
-      <div>
-        <h2 className="mb-2 text-sm font-semibold text-slate-900">History</h2>
-        <ul className="space-y-1 text-sm text-slate-600">
-          {(mine.data?.history ?? []).slice().reverse().map((h, i) => (
-            <li key={i}>
-              <span className="text-slate-400">{h.at ? new Date(h.at).toLocaleString() : ""}</span>{" "}
-              <span className="font-mono">{h.package_id}</span> {h.from_version ? `${h.from_version} → ` : ""}
-              <span className="font-mono">{h.to_version}</span> — {ACTIONS[h.action] ?? h.action}
-              {h.actor ? ` by ${h.actor}` : ""}
-            </li>
-          ))}
-        </ul>
-      </div>
+      {addable.length > 0 && (
+        <section aria-label="Add a package" className="rounded border border-slate-200 bg-white p-4">
+          <h2 className="text-sm font-semibold text-slate-900">Add a package</h2>
+          <p className="mt-0.5 text-xs text-slate-500">What it depends on comes with it. Nothing changes until you install after the preview.</p>
+          <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+            {addable.map((p) => (
+              <li key={p.id} className="flex min-w-0 flex-col rounded border border-slate-200 p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-medium text-slate-900">{p.name}</span>
+                  <span className="shrink-0 font-mono text-xs text-slate-500">{p.version}</span>
+                </div>
+                <span className="font-mono text-xs text-slate-400">{p.id}</span>
+                {p.description && <p className="mt-1 line-clamp-3 text-xs text-slate-600" title={p.description}>{p.description}</p>}
+                <p className="mt-1 text-xs text-slate-500">{contentsLine(p)}</p>
+                {Object.keys(p.depends ?? {}).length > 0 && (
+                  <p className="mt-0.5 text-xs text-slate-400">Needs {Object.keys(p.depends).join(", ")}</p>
+                )}
+                <div className="mt-auto pt-2">
+                  <button type="button" disabled={preview.isPending || apply.isPending}
+                          onClick={() => start({ kind: "install", packageId: p.id, name: p.name, version: p.version })}
+                          className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-50 disabled:opacity-50">
+                    Preview
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {!compact && (
+        <div>
+          <h2 className="mb-2 text-sm font-semibold text-slate-900">History</h2>
+          <ul className="space-y-1 text-sm text-slate-600">
+            {(mine.data?.history ?? []).slice().reverse().map((h, i) => (
+              <li key={i}>
+                <span className="text-slate-400">{h.at ? new Date(h.at).toLocaleString() : ""}</span>{" "}
+                <span className="font-mono">{h.package_id}</span> {h.from_version ? `${h.from_version} → ` : ""}
+                <span className="font-mono">{h.to_version}</span> — {ACTIONS[h.action] ?? h.action}
+                {h.actor ? ` by ${h.actor}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

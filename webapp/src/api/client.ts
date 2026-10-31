@@ -1991,6 +1991,34 @@ export interface WorkspacePackageRow {
   installed_by: string | null;
   shipped_version: string | null;
   upgrade_available: boolean;
+  /** Earlier versions this workspace had and can go back to, newest first. */
+  revert_to?: { version: string; checksum: string }[];
+}
+
+export interface RevertInput {
+  package_id: string;
+  checksum: string;
+  decisions?: Record<string, "apply" | "keep">;
+}
+
+/** GET /v1/admin/packages: every workspace's packages, and per package the workspaces behind. */
+export interface EveryWorkspacePackages {
+  packages: { id: string; name: string; version: string; behind: string[] }[];
+  workspaces: { id: string; name: string; packages: WorkspacePackageRow[] }[];
+}
+
+export interface UpgradeEverywhereResult {
+  package_id: string;
+  version: string;
+  workspaces: {
+    workspace_id: string;
+    from_version: string;
+    to_version: string;
+    status: "ready" | "upgraded" | "needs_decisions" | "after_catalogue" | "refused";
+    decisions?: number;
+    error?: string;
+    steps?: { package_id: string; action: string; from_version: string | null; version: string }[];
+  }[];
 }
 
 export interface PackageHistoryRow {
@@ -2050,6 +2078,19 @@ export const packagesApi = {
     request<PackagePlan>("/v1/packages/preview", { method: "POST", body: json(input) }),
   capabilities: (workspaceId: string) =>
     request<WorkspaceCapabilities>(`/v1/workspaces/${workspaceId}/capabilities`),
+  /** Going back to an earlier version this workspace had: previewed (rolled back), then applied. */
+  previewRevert: (workspaceId: string, input: RevertInput) =>
+    request<PackagePlan>(`/v1/workspaces/${workspaceId}/packages/revert/preview`, { method: "POST", body: json(input) }),
+  revert: (workspaceId: string, input: RevertInput) =>
+    request<PackagePlan>(`/v1/workspaces/${workspaceId}/packages/revert`, { method: "POST", body: json(input) }),
+  /** Administrators: every workspace's packages. */
+  everywhere: () => request<EveryWorkspacePackages>("/v1/admin/packages"),
+  previewEverywhere: (packageId: string, workspaces?: string[]) =>
+    request<UpgradeEverywhereResult>(`/v1/admin/packages/${encodeURIComponent(packageId)}/upgrade-everywhere/preview`,
+                                     { method: "POST", body: json({ workspaces: workspaces ?? null }) }),
+  upgradeEverywhere: (packageId: string, workspaces?: string[]) =>
+    request<UpgradeEverywhereResult>(`/v1/admin/packages/${encodeURIComponent(packageId)}/upgrade-everywhere`,
+                                     { method: "POST", body: json({ workspaces: workspaces ?? null }) }),
 };
 
 /** What a workspace's packages let it do: which pages to show. */

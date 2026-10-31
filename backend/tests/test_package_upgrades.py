@@ -183,3 +183,144 @@ def test_an_upgrade_with_its_plan_applies_it_keeps_local_edits_and_records_every
     again = installer.install(db, ws, ["accelerator"])
     assert {s.action for s in again.steps} == {"unchanged"}
     db.close()
+
+
+# --------------------------------------------------------------------------- going back
+
+PLAN = {"object_types/Storage Mount/attributes/capacity_gb/renamed": "apply",
+        "object_types/Storage Mount/attributes/server/removed": "keep",
+        "object_types/Storage Mount/attributes/mount_path/tightened": "keep",
+        "object_types/Wire Scanner/removed": "apply"}
+
+
+def test_a_workspace_goes_back_to_the_version_it_had_with_a_plan_and_a_record(world):
+    from app.packages import revert
+    ws = world["ws"]
+    db = SessionLocal()
+    old_checksum = installer.installed(db, ws)["accelerator"].checksum
+    assert revert.targets(db, ws, "accelerator") == []                  # nothing earlier yet
+    installer.install(db, ws, ["accelerator"], decisions=PLAN, actor="tester")
+    db.commit()
+    [target] = revert.targets(db, ws, "accelerator")
+    assert target == {"version": FROM, "checksum": old_checksum}
+
+    preview = revert.run(db, ws, "accelerator", old_checksum, keep=False)
+    db.rollback()
+    r = preview.steps[0].result
+    assert preview.steps[0].action == "revert" and preview.steps[0].from_version == TO
+    assert "object_types/Turbo Pump Controller/removed" in r["needs_decision"]
+    assert "object_types/Storage Mount/attributes/size_gb/renamed" in r["needs_decision"]   # renamed back
+    with pytest.raises(installer.PackageProblem, match="needs a migration plan"):
+        revert.run(db, ws, "accelerator", old_checksum, keep=True)
+    db.rollback()
+
+    decide = {c: "apply" for c in r["needs_decision"]}
+    revert.run(db, ws, "accelerator", old_checksum, decisions=decide, actor="tester", keep=True)
+    db.commit()
+    db.expire_all()
+    row = installer.installed(db, ws)["accelerator"]
+    assert (row.version, row.checksum) == (FROM, old_checksum)
+    keys = {a["key"] for a in db.get(Schema, asset_types.type_uid(ws, "Storage Mount")).attributes}
+    assert "size_gb" in keys and "capacity_gb" not in keys
+    assert db.get(Asset, world["rack"]).attributes["size_gb"] == 42      # the value moved back with it
+    scanner = db.get(Schema, asset_types.type_uid(ws, "Wire Scanner"))
+    assert scanner.is_concrete and "withdrawn" not in (scanner.metadata_json or {})   # offered again
+    turbo = db.get(Schema, asset_types.type_uid(ws, "Turbo Pump Controller"))
+    assert turbo is None or turbo.is_concrete is False
+    [step] = [h for h in installer.history(db, ws) if h.action == "revert"]
+    assert (step.from_version, step.to_version, step.actor) == (TO, FROM, "tester")
+
+    # The newer version is an upgrade again.
+    assert {s.action for s in installer.plan(db, ws, ["accelerator"]).steps if s.package_id == "accelerator"} == {"upgrade"}
+    db.rollback()
+    db.close()
+
+
+def test_a_revert_to_a_version_the_workspace_never_had_is_refused(world):
+    from app.packages import revert
+    db = SessionLocal()
+    with pytest.raises(installer.PackageProblem, match="not an earlier version"):
+        revert.run(db, world["ws"], "accelerator", "0" * 64, keep=False)
+    db.close()
+
+
+def test_a_revert_another_package_needs_the_newer_version_of_is_refused(world):
+    from app.models.package import PackageSnapshot
+    from app.packages import revert
+    ws = world["ws"]
+    db = SessionLocal()
+    installer.install(db, ws, ["accelerator"], decisions=PLAN)
+    db.commit()
+    [target] = revert.targets(db, ws, "accelerator")
+    # A package here that needs the newer accelerator.
+    snap = db.scalar(select(PackageSnapshot).where(PackageSnapshot.package_id == "core-objects",
+                                                   PackageSnapshot.checksum == installer.installed(db, ws)["core-objects"].checksum))
+    dependent = installer.installed(db, ws)["core-objects"]
+    original = dict(snap.manifest)
+    snap.manifest = {**original, "depends": {"accelerator": f">={TO}"}}
+    db.flush()
+    try:
+        assert revert.blockers(db, ws, "accelerator", FROM) == [f"core-objects {dependent.version} needs accelerator >={TO}"]
+        with pytest.raises(installer.PackageProblem, match="cannot go back"):
+            revert.run(db, ws, "accelerator", target["checksum"], keep=False)
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_administrators_see_every_workspace_and_upgrade_where_no_decision_is_needed(world):
+    from fastapi.testclient import TestClient
+    from app.auth import OidcIdentity, get_identity
+    from app.main import app
+    from app.models.user import User
+    db = SessionLocal()
+    admin = User(id=str(uuid.uuid4()), email=f"admin-{secrets.token_hex(3)}@argus.test", is_admin=True)
+    plain = User(id=str(uuid.uuid4()), email=f"user-{secrets.token_hex(3)}@argus.test", is_admin=False)
+    db.add_all([admin, plain])
+    db.commit()
+    db.refresh(admin)
+    db.refresh(plain)
+    db.expunge_all()
+    db.close()
+    client = TestClient(app)
+    try:
+        app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=plain)
+        assert client.get("/v1/admin/packages").status_code == 403
+        app.dependency_overrides[get_identity] = lambda: OidcIdentity(user=admin)
+        every = client.get("/v1/admin/packages").json()
+        mine = next(w for w in every["workspaces"] if w["id"] == world["ws"])
+        acc = next(p for p in mine["packages"] if p["package_id"] == "accelerator")
+        assert acc["upgrade_available"] and acc["shipped_version"] == TO and acc["revert_to"] == []
+        assert world["ws"] in next(p for p in every["packages"] if p["id"] == "accelerator")["behind"]
+
+        body = {"workspaces": [world["ws"]]}
+        preview = client.post("/v1/admin/packages/accelerator/upgrade-everywhere/preview", json=body).json()
+        [entry] = preview["workspaces"]
+        assert entry["status"] == "needs_decisions" and entry["decisions"] >= 4
+        done = client.post("/v1/admin/packages/accelerator/upgrade-everywhere", json=body).json()
+        assert done["workspaces"][0]["status"] == "needs_decisions"       # left for its own page
+        db = SessionLocal()
+        assert installer.installed(db, world["ws"])["accelerator"].version == FROM
+        db.close()
+
+        # Upgraded with its plan on its own page, it can be taken back from the same API.
+        r = client.post(f"/v1/workspaces/{world['ws']}/packages/install",
+                        json={"packages": ["accelerator"], "decisions": PLAN})
+        assert r.status_code == 200, r.text
+        rows = client.get(f"/v1/workspaces/{world['ws']}/packages").json()["packages"]
+        [target] = next(p for p in rows if p["package_id"] == "accelerator")["revert_to"]
+        r = client.post(f"/v1/workspaces/{world['ws']}/packages/revert/preview",
+                        json={"package_id": "accelerator", "checksum": target["checksum"]})
+        assert r.status_code == 200 and r.json()["steps"][0]["action"] == "revert"
+        decide = {c: "keep" for c in r.json()["steps"][0]["result"]["needs_decision"]}
+        r = client.post(f"/v1/workspaces/{world['ws']}/packages/revert",
+                        json={"package_id": "accelerator", "checksum": target["checksum"], "decisions": decide})
+        assert r.status_code == 200, r.text
+        assert r.json()["history"][-1]["action"] == "revert"
+    finally:
+        app.dependency_overrides.pop(get_identity, None)
+        db = SessionLocal()
+        for u in (admin, plain):
+            db.delete(db.get(User, u.id))
+        db.commit()
+        db.close()

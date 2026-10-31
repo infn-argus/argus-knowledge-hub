@@ -52,7 +52,7 @@ class Step:
     package_id: str
     version: str
     checksum: str
-    action: str                       # install | upgrade | unchanged
+    action: str                       # install | upgrade | unchanged | revert
     from_version: Optional[str] = None
     requested: bool = True            # asked for, or there as a dependency
     result: dict = field(default_factory=dict)
@@ -318,6 +318,12 @@ def resolve(package_ids: list[str], catalog: Optional[dict[str, Package]] = None
 def installed(db: Session, workspace_id: str) -> dict[str, WorkspacePackage]:
     return {r.package_id: r for r in db.scalars(select(WorkspacePackage).where(
         WorkspacePackage.workspace_id == workspace_id))}
+
+
+def installed_everywhere(db: Session, package_id: str) -> list[WorkspacePackage]:
+    """Every workspace's record of one package."""
+    return list(db.scalars(select(WorkspacePackage).where(WorkspacePackage.package_id == package_id)
+                           .order_by(WorkspacePackage.workspace_id)))
 
 
 def _object_options(db: Session, workspace_id: str, catalogue_workspace_id: Optional[str],

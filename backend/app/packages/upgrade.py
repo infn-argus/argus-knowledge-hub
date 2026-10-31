@@ -281,7 +281,12 @@ def _add_types(db: Session, workspace_id: str, row: WorkspacePackage, new: Packa
     made = {}
     for t in specs:                                  # the package lists parents before children
         uid = asset_types.type_uid(workspace_id, t.name)
-        if db.get(Schema, uid) is not None:
+        existing = db.get(Schema, uid)
+        if existing is not None:
+            meta = existing.metadata_json or {}
+            if meta.get("withdrawn"):            # withdrawn by an earlier version, offered again
+                existing.is_concrete = not t.abstract
+                existing.metadata_json = {k: v for k, v in meta.items() if k != "withdrawn"}
             continue
         attrs = []
         for a in t.attributes:

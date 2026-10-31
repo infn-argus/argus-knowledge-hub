@@ -28,6 +28,7 @@ export function AdminShell() {
   const globalItems: { to: string; label: string }[] = [];
   if (me.data?.is_admin) {
     globalItems.push({ to: "/admin/workspaces", label: "Workspaces" });
+    globalItems.push({ to: "/admin/packages", label: "Packages" });
     globalItems.push({ to: "/admin/users", label: "Users" });
     globalItems.push({ to: "/admin/settings", label: "Settings" });
     globalItems.push({ to: "/admin/ai", label: "AI" });

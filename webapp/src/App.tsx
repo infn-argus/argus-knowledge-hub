@@ -64,6 +64,7 @@ import { WorkspaceMembers } from "./pages/workspace/Members";
 import { WorkspaceIntegrity } from "./pages/workspace/Integrity";
 import { WorkspaceKeys } from "./pages/workspace/Keys";
 import { WorkspacePackages } from "./pages/workspace/Packages";
+import { AdminPackagesPage } from "./pages/admin/Packages";
 import { GlpiPage } from "./pages/workspace/Glpi";
 import { AccessReviews } from "./pages/workspace/AccessReviews";
 import { EquipmentClassesPage } from "./pages/catalogue/EquipmentClasses";
@@ -198,6 +199,7 @@ export function App() {
           <Route path="/admin/new-workspace" element={<NewWorkspace />} />
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/statistics" element={<StatisticsPage />} />
+          <Route path="/admin/packages" element={<AdminPackagesPage />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/admin/ai" element={<InstallationAI />} />
           <Route path="/admin/tokens" element={<AdminTokensPage />} />

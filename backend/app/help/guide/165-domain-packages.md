@@ -36,8 +36,35 @@ starts from. **Preview the installation** shows each package that would go in, w
 version and checksum, and the types, kinds and workflows it creates. A new workspace is **private** — nobody
 but its creator sees it until roles are given — and holds **no records**, only their types.
 
-Packages can be added later on the workspace's **Packages** page, previewed the same way; a newer version is an
-**upgrade**, whose changes are listed, and any that would remove or tighten something wait for a decision.
+Packages can be added later on the workspace's **Packages** page (*Administration › Packages*, under the
+workspace): each package the workspace does not have is a card with what it holds and needs, and **Preview**
+shows what installing it would do before anything changes.
+
+## Upgrading and going back
+
+A package this installation ships in a newer version has **Upgrade to …** on its row. The preview lists every
+change: what is added goes in by itself, a changed label or description where the workspace did not change it
+itself, and anything that would remove, rename or tighten something waits for a decision — **apply** it, or
+**keep** the workspace's own. A change that records would fail is refused until those records are corrected or
+the change is kept.
+
+**Go back to…** on a row takes the workspace back to a version of that package it had before (ARGUS keeps every
+version a workspace was given). It is an upgrade the other way, previewed and decided the same way: what the
+newer version added is removed only where you choose apply — the values records hold under a removed field are
+kept — a type the newer version withdrew is offered again, and a field it renamed is renamed back with its
+values. It is refused while another package in the workspace needs the newer version, or while a workspace
+hanging from this one (when it is a shared catalogue) has it. Afterwards the newer version is an upgrade again.
+
+Every install, upgrade and revert is in the page's **History**, with who did it and each decision.
+
+### Every workspace at once
+
+*Administration › Packages* (administrators) lists each package that is behind somewhere and the workspaces
+behind on it. **Preview upgrade everywhere** says, for each, whether it is ready (no decision to make), needs
+decisions, or is refused and why; **Upgrade** then upgrades the ready ones — shared catalogues first, then the
+workspaces that hang from them, each on its own, so one refusal leaves the others upgraded. A workspace that
+needs decisions is left as it is: open it on the same page (every workspace is listed there, with its own
+upgrade, go-back and add buttons) and decide.
 
 ## What a package brings
 
