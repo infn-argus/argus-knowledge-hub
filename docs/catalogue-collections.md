@@ -1,8 +1,9 @@
 # Catalogue collections — design proposal (draft, for review)
 
-Status: **S2 in progress** — the format, its validator (`python -m app.catalogue validate`) and draft 0.x
+Status: **S3 in progress** — the format, its validator (`python -m app.catalogue validate`) and draft 0.x
 collections are in `backend/catalogue/` (S1). Install, preview and upgrade are in `app/catalogue/install.py`
-and `/v1/catalogue/collections` (S2): records change only when an administrator installs. The
+and `/v1/catalogue/collections` (S2): records change only when an administrator installs. The pages are
+`/catalogue/models`, `/catalogue/models/:uid` and `/catalogue/collections` (S3). The
 production inventory ran on 2026-10-31 (§0.1), and the format was revised from it.
 
 Template packages (`backend/packages/`, docs/packages.md) hold **definitions**: the Product Model and Vendor
@@ -422,8 +423,26 @@ entry.
   2.0.0, so the collections (≥2.1) wait for that upgrade.
 - **Not stored yet:** `part_number`, `instance_type`, `specifications` and `relations` have no field on the
   Product Model type; the preview counts them, and they are written once core-objects 2.2 adds the fields.
-- **Not yet:** the edit-time question on a managed field (local override or correction) is S3, with the UI;
-  the corrections' download as a patch is S6.
+- **Not yet:** the corrections' download as a patch is S6.
+
+### S3 as built
+
+- **Product catalogue** (`/catalogue/models`, `GET …/models`): search by name, key, code, vendor or catalogue
+  id; filters by device class, vendor, source (from a collection, local, retired) and collection, with counts;
+  units per model; a mark on models waiting for review.
+- **A model's page** (`/catalogue/models/:uid`, `GET …/records/{uid}`): each value with its source — *from
+  the collection*, *edited here*, *local override*, *proposed to Git*, or the record's own — the collection's
+  value beside any that differs, a release conflict with the value it kept; what the collection states that
+  the type cannot hold yet (specifications); related models; units per workspace, by name only where the
+  reader may read (the rest as "other workspaces"); sources; and the collection's releases.
+- **Deciding a field after the install** (`POST …/entries/{catalogue id}/fields`, owners and
+  administrators): *managed* (writes the collection's value), *local* or *propose*. It resolves a conflict.
+- **A managed value edited here** is not intercepted in the record's edit form. It shows as *edited here* on
+  the model's page and in the review queue, where a person says what it is; until then, the next release
+  treats it as a conflict and keeps it. Asking in the edit form itself is left for later.
+- **Catalogue collections** (`/catalogue/collections`): the shipped collections, invalid ones not offered,
+  installed versions and upgrades; preview, with each link decided (link or create, and every differing
+  field) before *Install* is enabled; the trial's failure if any; the review queue; the history.
 
 A dry run on the local copy of the production data: 15 entries → 9 links (6 vendors; NPort 5450,
 TPG 366, 4UHV) and 6 additions, every link offered for a decision, and the trial installation passing.

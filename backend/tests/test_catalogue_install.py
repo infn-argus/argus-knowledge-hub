@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.auth import OidcIdentity, get_identity
 from app.catalogue import install as inst
+from app.catalogue import views
 from app.catalogue.loader import load_tree
 from app.db import SessionLocal
 from app.ledger import service as ledger
@@ -304,3 +305,44 @@ def test_what_the_production_data_taught_the_matching(w):
     assert actions["model_code"] == "managed" and actions["datasheet_url"] == "managed"   # empty here: filled
     assert actions["name"] is None                                                         # differs: a person
     assert {f["field"]: f["action"] for f in found["moxa"]["fields"]}["website"] == "managed"
+
+
+def test_a_models_page_says_where_each_value_comes_from(w):
+    tree = release(w)
+    run(w, tree)
+    model, row = record(w, "moxa/nport-5450")
+    ledger.edit_values(w["db"], w["ws"], w["actor"], model.uid, {"attr:datasheet_url": "https://local.example/x.pdf"})
+    w["db"].commit()
+    page = views.provenance(w["db"], model.uid, {w["ws"]}, tree=tree)
+    source = {f["field"]: f["source"] for f in page["fields"]}
+    assert source["name"] == "collection" and source["datasheet_url"] == "edited"
+    assert source["firmware_version"] == "record"                         # not stated by the collection
+    assert page["entry"]["catalogue_id"] == "moxa/nport-5450"
+    assert page["stated_only"] == {"instance_type": "Serial Converter", "specifications": {"serial_ports": 4}}
+    assert [r["version"] for r in page["releases"]] == ["1.0.0"]
+    assert views.review_queue(w["db"], w["ws"])[0]["edited"] == ["datasheet_url"]
+
+    # The person says what the edit is: proposed back to Git. Then back to the collection's value.
+    views.decide_field(w["db"], w["ws"], w["actor"], "moxa/nport-5450", "datasheet_url", "propose")
+    w["db"].commit()
+    _, row = record(w, "moxa/nport-5450")
+    assert "datasheet_url" in row.corrections and "datasheet_url" not in row.managed_fields
+    views.decide_field(w["db"], w["ws"], w["actor"], "moxa/nport-5450", "datasheet_url", "managed")
+    w["db"].commit()
+    model, row = record(w, "moxa/nport-5450")
+    assert model.attributes["datasheet_url"] == NPORT["datasheet_url"] and row.corrections == {}
+    assert views.review_queue(w["db"], w["ws"]) == []
+    with pytest.raises(inst.CatalogueProblem, match="states no part_number"):
+        views.decide_field(w["db"], w["ws"], w["actor"], "moxa/nport-5450", "part_number", "local")
+
+
+def test_browsing_the_catalogue(w):
+    run(w, release(w))
+    existing(w, w["model"], "Hand-made thing", vendor="Moxa", model_code="HM-1", device_class="io")
+    found = views.browse(w["db"], w["ws"])
+    by_name = {m["name"]: m for m in found["models"]}
+    assert by_name["Moxa NPort 5450"]["status"] == "catalogue" and by_name["Moxa NPort 5450"]["collection"] == "it-network"
+    assert by_name["Hand-made thing"]["status"] == "local"
+    assert found["facets"]["status"] == {"catalogue": 1, "local": 1}
+    only = views.browse(w["db"], w["ws"], q="nport", status="catalogue")
+    assert [m["catalogue_id"] for m in only["models"]] == ["moxa/nport-5450"]

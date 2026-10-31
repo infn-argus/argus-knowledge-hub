@@ -20,6 +20,12 @@ from app.db import get_db
 router = APIRouter(prefix="/v1/catalogue/collections", tags=["catalogue"])
 
 
+class FieldDecisionIn(BaseModel):
+    field: str
+    decision: str                     # managed | local | propose
+    reason: Optional[str] = None
+
+
 class CollectionsIn(BaseModel):
     collections: list[str]
     # Per catalogue id: {"action": "link" | "create", "record_uid": optional, "fields": {field: managed | local |
@@ -137,3 +143,63 @@ def install(body: CollectionsIn, identity: Identity = Depends(get_identity), db:
         _problem(db, e)
     db.commit()
     return out
+
+
+def _readable(db: Session, identity: Identity) -> set[str]:
+    from app.catalogue.views import readable_workspaces
+    if isinstance(identity, PatIdentity):
+        return {identity.workspace_id}
+    return readable_workspaces(db, identity.user)
+
+
+@router.get("/models")
+def browse_models(q: Optional[str] = None, device_class: Optional[str] = None, vendor: Optional[str] = None,
+                  status: Optional[str] = None, collection: Optional[str] = None,
+                  identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """The catalogue's Product Models — from a collection, local, or retired — with search and facets."""
+    from app.catalogue.views import browse
+    ws = _workspace(db)
+    _may_read(db, identity, ws)
+    return browse(db, ws, q=q, device_class=device_class, vendor=vendor, status=status, collection=collection)
+
+
+@router.get("/records/{uid}")
+def record_provenance(uid: str, identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """A catalogue record's values, each with its source (the collection, edited here, local, a correction
+    proposed back), what the collection states beyond the type's fields, its units per workspace, and the
+    releases."""
+    from app.catalogue.views import provenance
+    ws = _workspace(db)
+    _may_read(db, identity, ws)
+    try:
+        return provenance(db, uid, _readable(db, identity))
+    except LookupError:
+        raise HTTPException(status_code=404, detail="No such record")
+
+
+@router.get("/review")
+def review(identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """Entries waiting for a person: release conflicts, managed values edited here, corrections proposed back."""
+    from app.catalogue.views import review_queue
+    ws = _workspace(db)
+    _may_read(db, identity, ws)
+    return review_queue(db, ws)
+
+
+@router.post("/entries/{catalogue_id:path}/fields")
+def decide_field(catalogue_id: str, body: FieldDecisionIn, identity: Identity = Depends(get_identity),
+                 db: Session = Depends(get_db)):
+    """One field of an installed entry: managed (the collection's value, now and in later releases), local
+    (this workspace's, which releases leave), or propose (kept, and proposed back to Git)."""
+    from app.catalogue import views
+    ws = _workspace(db)
+    _may_install(db, identity, ws)
+    try:
+        e = views.decide_field(db, ws, _actor(identity), catalogue_id, body.field, body.decision, body.reason)
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc))
+    except installer.CatalogueProblem as exc:
+        _problem(db, exc)
+    db.commit()
+    return _entry_view(e)

@@ -267,6 +267,9 @@ NOT_CARRIED = {
                  "portability_tags_seen", "portability_trusted_keys")},
     **{t: "instance-wide catalogue state, not one workspace's: the target installation keeps its own"
        for t in ("equipment_classes", "equipment_class_reviews", "package_snapshots")},
+    **{t: "which catalogue release this installation installed, and which of its records each catalogue id is: the "
+          "target installs the collections itself, and adopts the carried records with a migration manifest"
+       for t in ("catalogue_entries", "catalogue_installations")},
     **{t: "a type migration is this installation's administrative record of moving records between types; the "
           "records carry their result and history"
        for t in ("type_migrations", "type_migration_items")},

@@ -1,0 +1,253 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  catalogueCollectionsApi, type CatalogueDecision, type CatalogueFieldDecision, type CataloguePlan,
+  type CataloguePlanItem,
+} from "../../api/client";
+import { CATEGORY, problem, shown } from "./catalogueText";
+
+const FIELD_CHOICES: { v: CatalogueFieldDecision; label: string }[] = [
+  { v: "managed", label: "the collection's" },
+  { v: "local", label: "keep this record's" },
+  { v: "propose", label: "keep, and propose to Git" },
+];
+
+/** Whether an item still needs something from the person, given the decisions made so far. */
+export function stillOpen(item: CataloguePlanItem, d: CatalogueDecision | undefined): boolean {
+  if (item.category !== "link") return false;
+  if (!d?.action) return true;
+  if (d.action === "create") return false;
+  return item.fields.some((f) => f.action === null && !d.fields?.[f.field]);
+}
+
+/** A record that may already be the entry: link it (deciding the fields that differ) or create a separate one. */
+function LinkDecision({ item, d, onChange }: {
+  item: CataloguePlanItem; d: CatalogueDecision | undefined; onChange: (d: CatalogueDecision) => void;
+}) {
+  const differing = item.fields.filter((f) => f.action === null || (d?.fields && f.field in d.fields));
+  return (
+    <div className="mt-1 rounded border border-amber-200 bg-amber-50/50 p-2 text-xs">
+      <p>
+        <b>{item.record_name}</b> is already here and looks like the same {item.kind}.{" "}
+        <label className="ml-1"><input type="radio" name={`a:${item.catalogue_id}`} checked={d?.action === "link"}
+               onChange={() => onChange({ ...d, action: "link" })} /> link it (it keeps its id, key and references)</label>
+        <label className="ml-2"><input type="radio" name={`a:${item.catalogue_id}`} checked={d?.action === "create"}
+               onChange={() => onChange({ ...d, action: "create" })} /> create a separate one</label>
+      </p>
+      {d?.action === "link" && differing.length > 0 && (
+        <table className="mt-1">
+          <tbody>
+            {differing.map((f) => (
+              <tr key={f.field} className="align-top">
+                <td className="pr-2 text-slate-500">{f.field}</td>
+                <td className="pr-2">here: {shown(f.record)}<br />collection: {shown(f.release)}</td>
+                <td>
+                  {FIELD_CHOICES.map((c) => (
+                    <label key={c.v} className="mr-2 whitespace-nowrap">
+                      <input type="radio" name={`f:${item.catalogue_id}:${f.field}`} checked={d.fields?.[f.field] === c.v}
+                             onChange={() => onChange({ ...d, fields: { ...d.fields, [f.field]: c.v } })} /> {c.label}
+                    </label>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function PlanView({ plan, decisions, setDecision }: {
+  plan: CataloguePlan; decisions: Record<string, CatalogueDecision>;
+  setDecision: (id: string, d: CatalogueDecision) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {plan.releases.map((r) => (
+        <div key={r.collection} className="rounded border border-slate-200 p-3">
+          <h3 className="text-sm font-semibold text-slate-900">
+            {r.collection} {r.from_version ? `${r.from_version} → ` : ""}{r.version}
+            {r.already_installed && <span className="ml-2 font-normal text-slate-500">already installed — nothing to do</span>}
+          </h3>
+          {Object.keys(r.not_stored).length > 0 && (
+            <p className="text-xs text-slate-500">
+              Kept in the collection only, until the Product Model type has the fields:{" "}
+              {Object.entries(r.not_stored).map(([k, n]) => `${k} (${n})`).join(", ")}
+            </p>
+          )}
+          <ul className="mt-1 space-y-1 text-sm">
+            {r.items.filter((i) => i.category !== "unchanged").map((i) => (
+              <li key={i.catalogue_id}>
+                <span className="mr-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">{CATEGORY[i.category]}</span>
+                <span className="font-mono text-xs">{i.catalogue_id}</span>
+                {i.record_uid && i.category !== "link" && (
+                  <Link to={`/catalogue/models/${i.record_uid}`} className="ml-2 text-xs text-sky-800 hover:underline">{i.record_name}</Link>
+                )}
+                {i.category !== "link" && i.fields.filter((f) => f.action === "managed" || f.action === "conflict").length > 0 && (
+                  <span className="ml-2 text-xs text-slate-500">
+                    {i.fields.filter((f) => f.action === "managed" || f.action === "conflict")
+                      .map((f) => `${f.field}${f.action === "conflict" ? " (kept)" : ""}`).join(", ")}
+                  </span>
+                )}
+                {i.notes.filter((n) => i.category !== "link" || !n.startsWith("the same product")).map((n) => (
+                  <span key={n} className="block text-xs text-slate-500">{n}</span>
+                ))}
+                {i.category === "link" && (
+                  <LinkDecision item={i} d={decisions[i.catalogue_id]} onChange={(d) => setDecision(i.catalogue_id, d)} />
+                )}
+              </li>
+            ))}
+            {r.items.filter((i) => i.category === "unchanged").length > 0 && (
+              <li className="text-xs text-slate-500">{r.items.filter((i) => i.category === "unchanged").length} unchanged</li>
+            )}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The collections this installation ships, what the catalogue has installed, previewing and installing a
+ *  release, and the entries waiting for review. */
+export function CatalogueCollectionsPage() {
+  const queryClient = useQueryClient();
+  const list = useQuery({ queryKey: ["catalogue-collections"], queryFn: catalogueCollectionsApi.list });
+  const review = useQuery({ queryKey: ["catalogue-review"], queryFn: catalogueCollectionsApi.review });
+  const [chosen, setChosen] = useState<string[]>([]);
+  const [plan, setPlan] = useState<CataloguePlan | null>(null);
+  const [decisions, setDecisions] = useState<Record<string, CatalogueDecision>>({});
+  const preview = useMutation({ mutationFn: () => catalogueCollectionsApi.preview(chosen, decisions), onSuccess: setPlan });
+  const install = useMutation({
+    mutationFn: () => catalogueCollectionsApi.install(chosen, decisions),
+    onSuccess: () => {
+      setPlan(null);
+      setDecisions({});
+      setChosen([]);
+      for (const k of ["catalogue-collections", "catalogue-review", "catalogue-models"]) {
+        queryClient.invalidateQueries({ queryKey: [k] });
+      }
+    },
+  });
+  const toggle = (id: string) => {
+    setChosen(chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id]);
+    setPlan(null);
+  };
+  const items = plan?.releases.flatMap((r) => r.items) ?? [];
+  const open = items.filter((i) => stillOpen(i, decisions[i.catalogue_id]));
+  const nothing = plan?.releases.every((r) => r.already_installed || r.items.every((i) => i.category === "unchanged"));
+
+  return (
+    <div className="max-w-5xl space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Catalogue collections</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Versioned Vendor and Product Model records, reviewed in Git and shipped with ARGUS. Installing a release
+            adds what is new, updates the values the collection manages, and never overwrites a value kept here.
+          </p>
+        </div>
+        <Link to="/catalogue/models" className="text-sm font-medium text-sky-800 underline">Product catalogue</Link>
+      </div>
+      {list.isError && <p className="whitespace-pre-line text-sm text-red-600">{problem(list.error)}</p>}
+
+      <table className="w-full rounded border border-slate-200 bg-white text-sm">
+        <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+          <tr><th className="px-3 py-2"></th><th className="px-3 py-2">Collection</th><th className="px-3 py-2">Holds</th>
+            <th className="px-3 py-2">Shipped</th><th className="px-3 py-2">Installed</th></tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {(list.data?.collections ?? []).map((c) => (
+            <tr key={c.id} className="align-top">
+              <td className="px-3 py-2">
+                <input type="checkbox" aria-label={`Choose ${c.name}`} checked={chosen.includes(c.id)}
+                       disabled={c.problems.length > 0 || (!!c.installed_version && !c.upgrade_available)}
+                       onChange={() => toggle(c.id)} />
+              </td>
+              <td className="px-3 py-2">
+                <span className="font-medium text-slate-900">{c.name}</span>
+                <span className="block font-mono text-xs text-slate-400">{c.id} · {c.owner} · {c.license}</span>
+                {c.problems.length > 0 && (
+                  <ul className="mt-1 text-xs text-red-700">{c.problems.map((p) => <li key={p}>{p}</li>)}</ul>
+                )}
+              </td>
+              <td className="px-3 py-2 text-slate-600">{c.summary}</td>
+              <td className="px-3 py-2 font-mono">{c.version}</td>
+              <td className="px-3 py-2 font-mono">
+                {c.installed_version ?? <span className="font-sans text-slate-400">not installed</span>}
+                {c.upgrade_available && <span className="block font-sans text-xs text-amber-700">upgrade available</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="rounded border border-slate-200 bg-white p-4">
+        <div className="flex items-center gap-2">
+          <button type="button" disabled={chosen.length === 0 || preview.isPending} onClick={() => preview.mutate()}
+                  className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">
+            {preview.isPending ? "Working it out…" : plan ? "Preview again" : "Preview"}
+          </button>
+          <span className="text-xs text-slate-500">
+            {chosen.length ? `${chosen.join(", ")} (and the collections they require)` : "Choose the collections to install or upgrade."}
+          </span>
+        </div>
+        {preview.isError && <p className="mt-2 whitespace-pre-line text-sm text-red-600">{problem(preview.error)}</p>}
+        {plan && (
+          <div className="mt-3 space-y-3">
+            <PlanView plan={plan} decisions={decisions}
+                      setDecision={(id, d) => setDecisions({ ...decisions, [id]: d })} />
+            {plan.trial && plan.trial !== "ok" && (
+              <p className="text-sm text-red-700">A trial installation failed: {plan.trial.replace(/^failed: /, "")}</p>
+            )}
+            {open.length > 0 && (
+              <p className="text-sm text-amber-800">
+                {open.length} entr{open.length === 1 ? "y needs" : "ies need"} a decision before installing.
+              </p>
+            )}
+            <button type="button" disabled={!!nothing || open.length > 0 || install.isPending} onClick={() => install.mutate()}
+                    className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+              {install.isPending ? "Installing…" : nothing ? "Nothing to install" : "Install"}
+            </button>
+            {install.isError && <p className="whitespace-pre-line text-sm text-red-600">{problem(install.error)}</p>}
+          </div>
+        )}
+      </div>
+
+      <section>
+        <h2 className="mb-1 text-sm font-semibold text-slate-900">Waiting for review</h2>
+        {(review.data ?? []).length === 0 ? <p className="text-sm text-slate-500">Nothing.</p> : (
+          <ul className="space-y-1 text-sm">
+            {review.data!.map((r) => (
+              <li key={r.catalogue_id}>
+                <Link to={`/catalogue/models/${r.record_uid}`} className="font-medium text-sky-800 hover:underline">{r.name}</Link>{" "}
+                <span className="font-mono text-xs text-slate-500">{r.catalogue_id}</span>
+                <span className="text-xs text-slate-600">
+                  {Object.keys(r.conflicts).length > 0 && ` · release conflicts: ${Object.keys(r.conflicts).join(", ")}`}
+                  {r.edited.length > 0 && ` · edited here: ${r.edited.join(", ")}`}
+                  {Object.keys(r.corrections).length > 0 && ` · proposed to Git: ${Object.keys(r.corrections).join(", ")}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-1 text-sm font-semibold text-slate-900">History</h2>
+        <ul className="space-y-1 text-sm text-slate-600">
+          {(list.data?.history ?? []).map((h, i) => (
+            <li key={i}>
+              <span className="text-slate-400">{h.installed_at ? new Date(h.installed_at).toLocaleString() : ""}</span>{" "}
+              <span className="font-mono">{h.collection_id}</span> {h.from_version ? `${h.from_version} → ` : ""}
+              <span className="font-mono">{h.version}</span>
+              {h.result?.counts && Object.keys(h.result.counts).length > 0 &&
+                ` — ${Object.entries(h.result.counts).map(([k, n]) => `${n} ${k}`).join(", ")}`}
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}

@@ -2761,3 +2761,171 @@ export const typeMigrationsApi = {
   propose: (schema_uid: string, package_id: string, name?: string) =>
     request<TypeProposal>("/v1/admin/type-proposals", { method: "POST", body: json({ schema_uid, package_id, name }) }),
 };
+
+// --------------------------------------------------------------------------- catalogue collections
+
+/** One collection this installation ships, and the release the catalogue workspace has. */
+export interface CatalogueCollection {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  domain: string;
+  owner: string;
+  license: string;
+  checksum: string;
+  summary: string;
+  vendors: number;
+  models: number;
+  requires: { packages: Record<string, string>; collections: Record<string, string> };
+  problems: string[];
+  installed_version: string | null;
+  installed_at: string | null;
+  upgrade_available: boolean;
+}
+
+export interface CatalogueHistoryRow {
+  collection_id: string;
+  from_version: string | null;
+  version: string;
+  checksum: string;
+  result: { counts?: Record<string, number> };
+  installed_by: string;
+  installed_at: string | null;
+}
+
+export type CatalogueFieldDecision = "managed" | "local" | "propose";
+
+export interface CataloguePlanField {
+  field: string;
+  record: unknown;
+  release: unknown;
+  action: CatalogueFieldDecision | "conflict" | null;
+}
+
+export interface CataloguePlanItem {
+  catalogue_id: string;
+  kind: "vendor" | "model";
+  collection: string;
+  category: "add" | "change" | "link" | "conflict" | "transfer" | "retire" | "unchanged";
+  record_uid: string | null;
+  record_name: string | null;
+  fields: CataloguePlanField[];
+  notes: string[];
+  needs_decision: boolean;
+}
+
+export interface CataloguePlan {
+  workspace_id: string;
+  counts: Record<string, number>;
+  undecided: string[];
+  trial?: string | null;
+  releases: {
+    collection: string;
+    from_version: string | null;
+    version: string;
+    checksum: string;
+    already_installed: boolean;
+    counts: Record<string, number>;
+    not_stored: Record<string, number>;
+    items: CataloguePlanItem[];
+  }[];
+}
+
+export interface CatalogueDecision {
+  action?: "link" | "create";
+  record_uid?: string;
+  fields?: Record<string, CatalogueFieldDecision>;
+}
+
+export interface CatalogueModelRow {
+  uid: string;
+  key: string;
+  name: string;
+  vendor: string | null;
+  vendor_ref: string | null;
+  model_code: string | null;
+  device_class: string | null;
+  catalogue_id: string | null;
+  collection: string | null;
+  version: string | null;
+  status: "catalogue" | "local" | "retired";
+  review: boolean;
+  units: number;
+}
+
+export interface CatalogueBrowse {
+  workspace_id: string;
+  total: number;
+  models: CatalogueModelRow[];
+  facets: Record<"device_class" | "vendor" | "collection" | "status", Record<string, number>>;
+}
+
+export type CatalogueValueSource = "collection" | "edited" | "local" | "correction" | "record";
+
+export interface CatalogueRecordField {
+  field: string;
+  label: string;
+  value: unknown;
+  ref: string | null;
+  source: CatalogueValueSource;
+  collection_value: unknown;
+  conflict: { release: unknown; record: unknown; version: string } | null;
+  correction: { value: unknown; by: string; release: unknown; at?: string; reason?: string | null } | null;
+}
+
+export interface CatalogueRecord {
+  uid: string;
+  key: string;
+  name: string;
+  type: string;
+  kind: "vendor" | "model";
+  record_status: string;
+  is_global: boolean;
+  fields: CatalogueRecordField[];
+  entry: {
+    catalogue_id: string;
+    collection_id: string;
+    collection_version: string;
+    shipped_version?: string;
+    status: string;
+    adopted_at: string | null;
+    adopted_by: string | null;
+    managed_fields: string[];
+  } | null;
+  stated_only: Record<string, unknown>;
+  relations: { verb: string; model: string }[];
+  sources: { kind: string; ref?: string; revision?: string; checked?: string; note?: string }[];
+  retired: { since: string; reason: string; replaced_by?: string } | null;
+  units: { workspace_id: string | null; name: string; count: number }[];
+  releases: { version: string; from_version: string | null; installed_at: string | null; installed_by: string }[];
+}
+
+export interface CatalogueReviewItem {
+  catalogue_id: string;
+  record_uid: string;
+  name: string | null;
+  collection_id: string;
+  conflicts: Record<string, { release: unknown; record: unknown; version: string }>;
+  corrections: Record<string, { value: unknown; release: unknown; by: string }>;
+  edited: string[];
+}
+
+const CC = "/v1/catalogue/collections";
+
+export const catalogueCollectionsApi = {
+  list: () => request<{ workspace_id: string; collections: CatalogueCollection[]; history: CatalogueHistoryRow[] }>(CC),
+  models: (params: { q?: string; device_class?: string; vendor?: string; status?: string; collection?: string }) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
+    return request<CatalogueBrowse>(`${CC}/models${qs ? `?${qs}` : ""}`);
+  },
+  record: (uid: string) => request<CatalogueRecord>(`${CC}/records/${encodeURIComponent(uid)}`),
+  review: () => request<CatalogueReviewItem[]>(`${CC}/review`),
+  preview: (collections: string[], decisions: Record<string, CatalogueDecision>) =>
+    request<CataloguePlan>(`${CC}/preview`, { method: "POST", body: json({ collections, decisions }) }),
+  install: (collections: string[], decisions: Record<string, CatalogueDecision>) =>
+    request<CataloguePlan>(`${CC}/install`, { method: "POST", body: json({ collections, decisions }) }),
+  decideField: (catalogueId: string, field: string, decision: CatalogueFieldDecision, reason?: string) =>
+    request<unknown>(`${CC}/entries/${catalogueId.split("/").map(encodeURIComponent).join("/")}/fields`,
+                     { method: "POST", body: json({ field, decision, reason }) }),
+};
