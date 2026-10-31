@@ -3742,6 +3742,11 @@
             "title": "Auth Type",
             "type": "string"
           },
+          "catalogue_maintainer": {
+            "default": false,
+            "title": "Catalogue Maintainer",
+            "type": "boolean"
+          },
           "email": {
             "anyOf": [
               {

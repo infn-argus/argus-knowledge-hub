@@ -93,7 +93,7 @@ export function ProductCataloguePage() {
             a local one was made here, and can be proposed for a collection.
           </p>
         </div>
-        {me.data?.is_admin && (
+        {(me.data?.is_admin || me.data?.catalogue_maintainer) && (
           <Link to="/admin/catalogue" className="text-sm font-medium text-sky-800 underline">Collections and updates</Link>
         )}
       </div>

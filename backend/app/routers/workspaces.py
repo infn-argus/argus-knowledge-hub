@@ -100,12 +100,14 @@ def _require_owner_or_admin(workspace_id: str, identity: Identity, db: Session) 
 
 
 @router.get("/me", response_model=MeOut)
-def get_me(identity: Identity = Depends(get_identity)):
+def get_me(identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
     if isinstance(identity, PatIdentity):
         return MeOut(auth_type="pat", workspace_id=identity.workspace_id)
     user = identity.user
+    from app.catalogue.system import may_maintain
     return MeOut(
-        auth_type="oidc", user_id=user.id, email=user.email, name=user.name, is_admin=user.is_admin
+        auth_type="oidc", user_id=user.id, email=user.email, name=user.name, is_admin=user.is_admin,
+        catalogue_maintainer=may_maintain(db, user),
     )
 
 

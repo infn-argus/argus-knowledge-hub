@@ -9026,6 +9026,11 @@
             "title": "Auth Type",
             "type": "string"
           },
+          "catalogue_maintainer": {
+            "default": false,
+            "title": "Catalogue Maintainer",
+            "type": "boolean"
+          },
           "email": {
             "anyOf": [
               {
@@ -17239,7 +17244,7 @@
     },
     "/v1/admin/catalogue": {
       "get": {
-        "description": "Which workspace is the installation's catalogue, what it holds, which workspaces hang from it, the units\npointing at its models, and its collections (docs/system-catalogue.md).",
+        "description": "Which workspace is the installation's catalogue, what it holds, which workspaces hang from it, the units\npointing at its models, and its collections (docs/system-catalogue.md). Administrators and the catalogue's\nmaintainers.",
         "operationId": "catalogue_status_v1_admin_catalogue_get",
         "parameters": [
           {

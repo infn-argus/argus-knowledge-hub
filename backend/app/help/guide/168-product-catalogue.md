@@ -31,6 +31,14 @@ Neither ever holds site data: no serial numbers, installed units, locations, sel
 The catalogue workspace itself is in the workspace switcher only for those who can change it; everyone else
 reads its models from their own workspace.
 
+## Who maintains it
+
+Everyone can read the catalogue. It is **maintained** by the administrators and by the people and groups given
+*Curator* or *Owner* on the catalogue workspace — added and removed under **Maintainers** on *Administration ›
+Catalogue*. A maintainer edits Vendors and Product Models, installs and upgrades collections, decides the
+catalogue's review queue and downloads the corrections for Git; an Owner also grants access to the catalogue.
+Maintainers who are not administrators find *Catalogue* in Administration, and nothing else there.
+
 ## The catalogue workspace
 
 One workspace is the installation's catalogue: an administrator sees which in

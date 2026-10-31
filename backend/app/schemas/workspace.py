@@ -107,6 +107,8 @@ class MeOut(BaseModel):
     email: Optional[str] = None
     name: Optional[str] = None
     is_admin: bool = False
+    # May maintain the installation's catalogue (an administrator, or its workspace's Curator or Owner)
+    catalogue_maintainer: bool = False
 
 
 class UserOut(BaseModel):

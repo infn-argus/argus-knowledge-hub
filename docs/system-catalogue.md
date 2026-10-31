@@ -93,6 +93,13 @@ catalogue workspace only to those who can modify it.
   the catalogue's review queue and install collections. Everyone can read. Under the hood it is the catalogue
   workspace's own roles, managed from that page, so the permission checks do not change.
 
+**As built.** `system.may_maintain(user)`: an administrator, or anyone with full control of the catalogue
+workspace's objects (its Curators and Owners). It guards installing, deciding and correcting
+(`catalogue_collections._may_install`, which tokens with admin scope on the catalogue workspace also pass) and
+`GET /v1/admin/catalogue`; reading the catalogue needs no grant. `GET /v1/me` says `catalogue_maintainer`, and
+Administration shows *Catalogue* to maintainers who are not administrators. The Maintainers section lists and
+grants Curator and Owner on the catalogue workspace through the existing role bindings (administrators).
+
 ### C4 — Models by domain
 
 - A collection's `domain` is already a package id. A workspace's model picker (and GLPI matching) offers the

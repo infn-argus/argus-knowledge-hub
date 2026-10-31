@@ -47,6 +47,22 @@ def check_record(db: Session, workspace_id: str, type_name: str) -> None:
                                  f"Models only. A {type_name} belongs in a workspace, pointing at its model")
 
 
+def may_maintain(db: Session, user) -> bool:
+    """An administrator, or a maintainer: someone given full control of the catalogue workspace's content
+    (its Curators and Owners) — they edit its Vendors and Product Models, install and upgrade its collections,
+    decide its review queue and send its corrections to Git. Everyone else reads it."""
+    if user is None:
+        return False
+    if user.is_admin:
+        return True
+    from app.catalogue import install
+    ws = install.catalogue_workspace(db)
+    if ws is None:
+        return False
+    from app.services.permissions import has_permission
+    return has_permission(db, user, ws, "delete", "objects")
+
+
 def designate(db: Session, workspace_id: str) -> None:
     """Make `workspace_id` the catalogue. Refused while another is, or while it holds other records."""
     ws = db.get(Workspace, workspace_id)

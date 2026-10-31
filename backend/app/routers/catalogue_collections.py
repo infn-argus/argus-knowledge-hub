@@ -44,19 +44,22 @@ def _workspace(db: Session) -> str:
 
 
 def _may_read(db: Session, identity: Identity, ws: str) -> None:
-    from app.services.permissions import resolve_permission
-    if isinstance(identity, PatIdentity):
-        if identity.workspace_id != ws:
-            raise HTTPException(status_code=403, detail="This token belongs to another workspace")
-        return
-    if identity.user.is_admin or resolve_permission(db, identity.user, ws, "read", "objects"):
-        return
-    raise HTTPException(status_code=403, detail="You may not read the catalogue")
+    """Everyone reads the installation's catalogue: its models are shared with every workspace."""
+    return None
 
 
 def _may_install(db: Session, identity: Identity, ws: str) -> None:
-    from app.routers.workspaces import _require_owner_or_admin
-    _require_owner_or_admin(ws, identity, db)
+    """Installing, deciding and correcting: the catalogue's maintainers (app/catalogue/system.py)."""
+    from app.catalogue.system import may_maintain
+    if isinstance(identity, PatIdentity):
+        if identity.workspace_id != ws or not identity.may("admin"):
+            raise HTTPException(status_code=403, detail="Only the catalogue's maintainers may do this")
+        return
+    if identity.token is not None and (not identity.token.may("admin") or
+                                       identity.token.workspace_id not in (None, ws)):
+        raise HTTPException(status_code=403, detail="This token may not maintain the catalogue")
+    if not may_maintain(db, identity.user):
+        raise HTTPException(status_code=403, detail="Only the catalogue's maintainers may do this")
 
 
 def _actor(identity: Identity) -> str:
@@ -294,8 +297,11 @@ class DesignateIn(BaseModel):
 @system_router.get("")
 def catalogue_status(identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
     """Which workspace is the installation's catalogue, what it holds, which workspaces hang from it, the units
-    pointing at its models, and its collections (docs/system-catalogue.md)."""
-    _admin(identity)
+    pointing at its models, and its collections (docs/system-catalogue.md). Administrators and the catalogue's
+    maintainers."""
+    from app.catalogue.system import may_maintain
+    if isinstance(identity, PatIdentity) or not may_maintain(db, identity.user):
+        raise HTTPException(status_code=403, detail="Administrators and the catalogue's maintainers only")
     from app.catalogue.system import status
     return status(db)
 

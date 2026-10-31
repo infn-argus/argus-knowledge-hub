@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { systemCatalogueApi, workspacesApi } from "../../api/client";
+import { directoryApi, rolesApi, systemCatalogueApi, workspacesApi } from "../../api/client";
 import { CatalogueCollectionsPage } from "../catalogue/CatalogueCollections";
 import { problem } from "../catalogue/catalogueText";
 import { GlpiMatches } from "../catalogue/ProductCatalogue";
@@ -12,7 +12,7 @@ function count(n: number | undefined, one: string, many = `${one}s`) {
 
 /** Which workspace is the installation's catalogue, what it holds and what depends on it; with none, a way to
  *  designate one. */
-function Status() {
+function Status({ admin }: { admin: boolean }) {
   const queryClient = useQueryClient();
   const status = useQuery({ queryKey: ["system-catalogue"], queryFn: systemCatalogueApi.status });
   const [chosen, setChosen] = useState("");
@@ -28,6 +28,7 @@ function Status() {
   if (!s) return <p className="text-sm text-slate-500">Loading…</p>;
 
   if (!s.designated) {
+    if (!admin) return <p className="text-sm text-slate-500">This installation has no catalogue workspace yet: an administrator designates it.</p>;
     return (
       <section aria-label="Catalogue workspace" className="rounded border border-amber-300 bg-amber-50 p-4 text-sm">
         <h2 className="font-semibold text-amber-950">No catalogue workspace</h2>
@@ -90,6 +91,79 @@ function Status() {
   );
 }
 
+const MAINTAINER_ROLES: Record<string, string> = {
+  curator: "edits Vendors and Product Models, installs collections, decides the review",
+  owner: "also grants access to the catalogue",
+};
+
+/** Who maintains the catalogue: its workspace's Curators and Owners, granted and removed here. Everyone else
+ *  reads it. Administrators only. */
+function Maintainers({ catalogue }: { catalogue: string }) {
+  const queryClient = useQueryClient();
+  const bindings = useQuery({ queryKey: ["bindings", catalogue], queryFn: () => rolesApi.listBindings(catalogue) });
+  const users = useQuery({ queryKey: ["admin-users"], queryFn: workspacesApi.listUsers });
+  const groups = useQuery({ queryKey: ["groups"], queryFn: () => directoryApi.groups() });
+  const [subjectType, setSubjectType] = useState<"user" | "group">("user");
+  const [subjectId, setSubjectId] = useState("");
+  const [roleId, setRoleId] = useState("curator");
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["bindings", catalogue] });
+  const grant = useMutation({
+    mutationFn: () => rolesApi.createBinding(catalogue, { subject_type: subjectType, subject_id: subjectId, role_id: roleId }),
+    onSuccess: () => { setSubjectId(""); refresh(); },
+  });
+  const remove = useMutation({ mutationFn: (id: number) => rolesApi.deleteBinding(catalogue, id), onSuccess: refresh });
+  const maintainers = (bindings.data ?? []).filter((b) => b.role_id in MAINTAINER_ROLES);
+  const options = subjectType === "user"
+    ? (users.data ?? []).filter((u) => !u.is_admin).map((u) => ({ id: u.id, label: u.name ? `${u.name} (${u.email})` : u.email }))
+    : (groups.data ?? []).filter((g) => g.active).map((g) => ({ id: g.uid, label: g.name }));
+  return (
+    <section aria-label="Maintainers" className="space-y-2">
+      <h2 className="text-sm font-semibold text-slate-900">Maintainers</h2>
+      <p className="text-xs text-slate-500">
+        Administrators maintain the catalogue. So do the people and groups given here: a <b>Curator</b>{" "}
+        {MAINTAINER_ROLES.curator}; an <b>Owner</b> {MAINTAINER_ROLES.owner}. Everyone else reads it.
+      </p>
+      {bindings.isError && <p className="text-sm text-red-600">{problem(bindings.error)}</p>}
+      <ul className="divide-y divide-slate-100 rounded border border-slate-200 bg-white text-sm">
+        {maintainers.length === 0 && <li className="px-3 py-2 text-slate-500">Only administrators, so far.</li>}
+        {maintainers.map((b) => (
+          <li key={b.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+            <span>
+              {b.subject_label}
+              <span className="ml-1 text-xs text-slate-500">{b.subject_type === "group" ? "group" : "person"} · {b.role_name}</span>
+              {!b.subject_active && <span className="ml-1 text-xs text-amber-700">inactive</span>}
+            </span>
+            <button type="button" onClick={() => remove.mutate(b.id)} disabled={remove.isPending}
+                    aria-label={`Remove ${b.subject_label}`} className="text-xs text-red-700 hover:underline">Remove</button>
+          </li>
+        ))}
+      </ul>
+      <form onSubmit={(e) => { e.preventDefault(); if (subjectId) grant.mutate(); }}
+            className="flex flex-wrap items-center gap-2">
+        <select aria-label="Person or group" value={subjectType}
+                onChange={(e) => { setSubjectType(e.target.value as "user" | "group"); setSubjectId(""); }}
+                className="rounded border border-slate-300 px-2 py-1 text-sm">
+          <option value="user">Person</option>
+          <option value="group">Group</option>
+        </select>
+        <select aria-label="Who" value={subjectId} onChange={(e) => setSubjectId(e.target.value)}
+                className="min-w-0 max-w-full flex-1 rounded border border-slate-300 px-2 py-1 text-sm sm:max-w-xs">
+          <option value="">{subjectType === "user" ? "Choose a person…" : "Choose a group…"}</option>
+          {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+        </select>
+        <select aria-label="Role" value={roleId} onChange={(e) => setRoleId(e.target.value)}
+                className="rounded border border-slate-300 px-2 py-1 text-sm">
+          <option value="curator">Curator</option>
+          <option value="owner">Owner</option>
+        </select>
+        <button type="submit" disabled={!subjectId || grant.isPending}
+                className="rounded bg-slate-900 px-3 py-1 text-sm font-medium text-white disabled:opacity-50">Add</button>
+      </form>
+      {grant.isError && <p className="text-sm text-red-600">{problem(grant.error)}</p>}
+    </section>
+  );
+}
+
 /** GLPI's devices in a chosen workspace, matched to the catalogue's models through review. */
 function GlpiSection({ catalogue }: { catalogue: string | null }) {
   const mine = useQuery({ queryKey: ["my-workspaces"], queryFn: workspacesApi.listMine });
@@ -115,6 +189,7 @@ function GlpiSection({ catalogue }: { catalogue: string | null }) {
  *  collections and their upgrades, the corrections for Git, and matching GLPI's devices to its models. */
 export function AdminCataloguePage() {
   const status = useQuery({ queryKey: ["system-catalogue"], queryFn: systemCatalogueApi.status });
+  const me = useQuery({ queryKey: ["me"], queryFn: workspacesApi.me });
   return (
     <div className="max-w-5xl space-y-6">
       <div>
@@ -124,13 +199,14 @@ export function AdminCataloguePage() {
           units point at them. They come from versioned collections kept in Git, installed and upgraded here.
         </p>
       </div>
-      <Status />
+      <Status admin={!!me.data?.is_admin} />
       {status.data?.designated && (
         <>
           <section aria-label="Collections">
             <h2 className="mb-2 text-lg font-semibold text-slate-900">Collections</h2>
             <CatalogueCollectionsPage embedded />
           </section>
+          {me.data?.is_admin && <Maintainers catalogue={status.data.designated} />}
           <GlpiSection catalogue={status.data.designated} />
         </>
       )}

@@ -37,6 +37,8 @@ export function AdminShell() {
     globalItems.push({ to: "/admin/portability", label: "Portability" });
     globalItems.push({ to: "/admin/type-migrations", label: "Type migrations" });
     globalItems.push({ to: "/admin/statistics", label: "Statistics" });
+  } else if (me.data?.catalogue_maintainer) {
+    globalItems.push({ to: "/admin/catalogue", label: "Catalogue" });
   }
 
   const pageWorkspace = location.pathname.match(/^\/workspaces\/([^/]+)/)?.[1]

@@ -171,3 +171,36 @@ def test_the_workspace_lists_say_which_is_the_catalogue(w):
     db.commit()
     mine = {x["id"]: x for x in as_user(w["admin"]).get("/v1/me/workspaces").json()}
     assert mine[w["cat"]]["role"] == "catalogue" and mine[w["units"]]["role"] is None
+
+
+def test_maintainers_are_its_curators_and_owners_and_everyone_reads(w):
+    from datetime import datetime, timezone
+
+    from app.models.role import RoleBinding
+    from app.services.roles import ensure_system_roles
+    db = w["db"]
+    system.designate(db, w["cat"])
+    ensure_system_roles(db)
+    db.commit()
+    plain = w["plain"]
+    assert system.may_maintain(db, w["admin"]) and not system.may_maintain(db, plain)
+    reader = as_user(plain)
+    assert reader.get("/v1/me").json()["catalogue_maintainer"] is False
+    assert reader.get("/v1/catalogue/collections/models").status_code == 200        # everyone reads
+    assert reader.post("/v1/catalogue/collections/preview", json={"collections": []}).status_code == 403
+    assert reader.get("/v1/admin/catalogue").status_code == 403
+
+    db.add(RoleBinding(workspace_id=w["cat"], subject_type="user", subject_id=plain.id, role_id="viewer",
+                       created_at=datetime.now(timezone.utc)))
+    db.commit()
+    assert not system.may_maintain(db, plain)                                        # a viewer reads only
+    db.add(RoleBinding(workspace_id=w["cat"], subject_type="user", subject_id=plain.id, role_id="curator",
+                       created_at=datetime.now(timezone.utc)))
+    db.commit()
+    assert system.may_maintain(db, plain)
+    curator = as_user(plain)
+    assert curator.get("/v1/me").json()["catalogue_maintainer"] is True
+    assert curator.get("/v1/admin/catalogue").status_code == 200
+    r = curator.post("/v1/catalogue/collections/preview", json={"collections": []})
+    assert r.status_code != 403, r.text
+    assert curator.post("/v1/admin/catalogue/designate", json={"workspace_id": w["units"]}).status_code == 403
