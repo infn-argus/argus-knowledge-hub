@@ -1,12 +1,12 @@
 ---
 title: The product catalogue
 summary: The shared Vendors and Product Models every workspace points at — where they come from (two Git repositories, pinned), how a release is previewed and installed, how existing records are adopted without losing their links, which values Git manages and how a correction goes back, matching GLPI's devices to models, and what to check when something is refused.
-keywords: [catalogue, product model, vendor, manufacturer, collection, release, install, upgrade, preview, adopt, adoption, migration, manifest, export, netbox, device type, glpi, match, correction, git, pull request, lock, pin, datasheet, verification, duplicate, retire, transfer]
+keywords: [catalogue, catalogue workspace, system catalogue, status, protected, product model, vendor, manufacturer, collection, release, install, upgrade, preview, adopt, adoption, migration, manifest, export, netbox, device type, glpi, match, correction, git, pull request, lock, pin, datasheet, verification, duplicate, retire, transfer]
 order: 168
 ---
 
 Every workspace's units point at **one shared catalogue** of Product Models and Vendors, kept in the
-catalogue workspace. A model used by both the IT and the accelerator workspaces is one record: a Moxa NPort
+installation's catalogue workspace. A model used by both the IT and the accelerator workspaces is one record: a Moxa NPort
 5450 is `moxa/nport-5450` wherever it is installed. The units themselves — serial numbers, positions, owners —
 stay in their own workspaces.
 
@@ -27,6 +27,24 @@ Neither ever holds site data: no serial numbers, installed units, locations, sel
   and install, the entries waiting for review, the corrections for Git, and the history.
 
 Reading needs read access to the catalogue workspace; previewing and installing, its owner or an administrator.
+
+## The catalogue workspace
+
+One workspace is the installation's catalogue: an administrator sees which in
+`python -m app.catalogue status` (or `GET /v1/admin/catalogue`), with what it holds, the workspaces that take
+their shared types from it, and how many units in each point at its models. In an installation that had a
+catalogue before, it is the workspace that already held the shared types and models; in a new one, the first
+workspace given the object catalogue as the one others hang from, or the one an administrator designates.
+
+It is protected, because every workspace depends on it:
+
+- it holds **Vendors and Product Models only** — a unit put there would belong to no workspace, so it is
+  refused, whatever tries to write it;
+- it cannot be **deleted**, **exported as a workspace bundle** (its collections are its portable form), be a
+  transfer's **target**, have anything **moved out** of it (copying is allowed), or be made to **hang from**
+  another workspace.
+
+Its shared types are managed by its packages, as in any workspace.
 
 ## Which release ARGUS reads
 

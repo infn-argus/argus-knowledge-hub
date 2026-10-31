@@ -430,6 +430,11 @@ def delete_workspace(
     workspace = db.get(Workspace, workspace_id)
     if workspace is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    from app.catalogue.system import CatalogueProtected, refuse
+    try:
+        refuse(db, workspace_id, "deleted")
+    except CatalogueProtected as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "code": "catalogue_workspace"})
     # The one sanctioned purge of append-only audit rows: the workspace's own.
     from app.ledger.audit import allow_purge
     allow_purge(db)

@@ -275,3 +275,41 @@ def glpi_match(workspace_id: str = Depends(require_permission("update")), db: Se
         raise HTTPException(status_code=422, detail={"error": str(exc)})
     db.commit()
     return out
+
+
+# --------------------------------------------------------------------------- the system catalogue (administrators)
+
+system_router = APIRouter(prefix="/v1/admin/catalogue", tags=["catalogue"])
+
+
+def _admin(identity: Identity) -> None:
+    if isinstance(identity, PatIdentity) or not identity.user.is_admin:
+        raise HTTPException(status_code=403, detail="Admins only")
+
+
+class DesignateIn(BaseModel):
+    workspace_id: str
+
+
+@system_router.get("")
+def catalogue_status(identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """Which workspace is the installation's catalogue, what it holds, which workspaces hang from it, the units
+    pointing at its models, and its collections (docs/system-catalogue.md)."""
+    _admin(identity)
+    from app.catalogue.system import status
+    return status(db)
+
+
+@system_router.post("/designate")
+def designate_catalogue(body: DesignateIn, identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """Make a workspace the installation's catalogue, when there is none. Refused while another is, or while
+    it holds records other than Vendors and Product Models."""
+    _admin(identity)
+    from app.catalogue.system import CatalogueProtected, designate, status
+    try:
+        designate(db, body.workspace_id)
+    except CatalogueProtected as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail={"error": str(e), "code": "catalogue_workspace"})
+    db.commit()
+    return status(db)

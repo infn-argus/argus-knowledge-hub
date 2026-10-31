@@ -106,6 +106,12 @@ class ExportIn(BaseModel):
 @router.post("/admin/bundles/exports", status_code=201)
 def export_workspace(body: ExportIn, identity=Depends(require_admin), db: Session = Depends(get_db)):
     """The workspace as a bundle directory and its ZIP, kept here to download."""
+    from app.catalogue.system import CatalogueProtected, refuse
+    try:
+        refuse(db, body.workspace_id, "exported as a workspace bundle: its collections are its portable form "
+                                      "(python -m app.catalogue export)")
+    except CatalogueProtected as exc:
+        raise HTTPException(status_code=422, detail={"error": str(exc), "code": "catalogue_workspace"})
     bid = str(uuid.uuid4())
     folder = store() / "exports" / bid
     try:

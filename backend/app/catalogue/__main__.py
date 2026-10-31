@@ -1,5 +1,5 @@
 """python -m app.catalogue validate [<collection dir> …] [--against <previous catalogue dir>] | list
-                   | export --workspace <id> --out <dir> | sources
+                   | export --workspace <id> --out <dir> | sources | status
 
 `validate` checks every collection this installation ships, together; given directories, it checks those
 (collections being written) with the shipped ones. `--against` also compares with a previous release (a
@@ -7,7 +7,10 @@ checkout of the catalogue at the last tag): nothing may disappear without being 
 content that changed needs a newer version. It exits non-zero when anything is wrong, so CI can run it.
 
 `export` reads a workspace's Vendors and Product Models (it writes nothing in ARGUS) and writes candidate
-collections, this installation's migration manifest and a report to <dir> (app/catalogue/export.py)."""
+collections, this installation's migration manifest and a report to <dir> (app/catalogue/export.py).
+
+`status` says which workspace is the installation's catalogue, what it holds, which workspaces hang from it,
+how many units in each point at its models, and its collections (app/catalogue/system.py). Read-only."""
 import sys
 from pathlib import Path
 
@@ -54,6 +57,32 @@ def main(argv: list[str]) -> int:
             for p in report[cid]:
                 print(f"✗ {cid}: {p.message}")
         return 1 if bad else 0
+    if command == "status":
+        from app.catalogue.system import status
+        from app.db import SessionLocal
+        db = SessionLocal()
+        try:
+            s = status(db)
+        finally:
+            db.rollback()
+            db.close()
+        if s["designated"] is None:
+            print("no catalogue workspace designated")
+            print(f"workspaces holding the global Asset type: {', '.join(s['candidates']) or 'none'}")
+            return 1
+        print(f"catalogue: {s['designated']} ({s['name']})")
+        print("records: " + ", ".join(f"{n} {t}" for t, n in sorted(s["records"].items())))
+        print(f"not shared (is_global false): {s['not_shared']}")
+        print(f"other records: {', '.join(f'{n} {t}' for t, n in s['other_records'].items()) or 'none'}")
+        print(f"types: {s['shared_types']} shared, {s['own_types']} its own")
+        others = [c for c in s["candidates"] if c != s["designated"]]
+        if others:
+            print(f"other workspaces holding a global Asset type: {', '.join(others)}")
+        print("hanging from it: " + ("; ".join(f"{w} ({', '.join(p)})" for w, p in s["hanging"].items()) or "none"))
+        print(f"units pointing at its models: {sum(s['units'].values())} — "
+              + (", ".join(f"{w} {n}" for w, n in s["units"].items()) or "none"))
+        print("collections: " + (", ".join(f"{c} {v}" for c, v in s["collections"].items()) or "none installed"))
+        return 0
     if command == "sources":
         from app.catalogue.sources import describe, lock_path, materialize
         pins = describe()
