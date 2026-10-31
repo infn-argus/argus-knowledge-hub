@@ -1,0 +1,22 @@
+models:
+  - id: moxa/nport-5450
+    vendor: moxa
+    model_code: NPort 5450
+    name: Moxa NPort 5450 serial device server
+    device_class: converter
+    instance_type: Serial Converter
+    specifications:
+      serial_ports: 4
+      serial_interfaces: [RS-232, RS-422, RS-485]
+    sources:
+      - {kind: manufacturer-page, ref: https://www.moxa.com}
+  - id: cisco/c9200-24t
+    vendor: cisco
+    model_code: C9200-24T
+    name: Cisco Catalyst 9200 24-port switch
+    device_class: network switch
+    instance_type: Switch
+    specifications:
+      ethernet_ports: {count: 24, speed: 1G}
+    sources:
+      - {kind: manufacturer-page, ref: https://www.cisco.com}

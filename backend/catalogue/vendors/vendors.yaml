@@ -1,0 +1,36 @@
+vendors:
+  - id: moxa
+    name: Moxa Inc.
+    aliases: [Moxa, MOXA Technologies]
+    website: https://www.moxa.com
+    country: TW
+  - id: cisco
+    name: Cisco Systems, Inc.
+    aliases: [Cisco]
+    website: https://www.cisco.com
+    country: US
+  - id: instrumentation-technologies
+    name: Instrumentation Technologies d.o.o.
+    aliases: [I-Tech, Instrumentation Technologies]
+    website: https://www.i-tech.si
+    country: SI
+  - id: basler
+    name: Basler AG
+    aliases: [Basler]
+    website: https://www.baslerweb.com
+    country: DE
+  - id: pfeiffer-vacuum
+    name: Pfeiffer Vacuum GmbH
+    aliases: [Pfeiffer, Pfeiffer Vacuum, Pfeiffer Vacuum Components & Solutions GmbH]
+    website: https://www.pfeiffer-vacuum.com
+    country: DE
+  - id: agilent
+    name: Agilent Technologies, Inc.
+    aliases: [Agilent, Varian Vacuum, AGILENT TECHNOLOGIES ITALIA S.P.A.]
+    website: https://www.agilent.com
+    country: US
+  - id: caen
+    name: CAEN S.p.A.
+    aliases: [CAEN]
+    website: https://www.caen.it
+    country: IT

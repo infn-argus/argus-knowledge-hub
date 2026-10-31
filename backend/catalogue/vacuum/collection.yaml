@@ -1,0 +1,11 @@
+id: vacuum
+version: 0.1.0
+name: Vacuum equipment
+description: Pumps, gauges and their controllers.
+domain: vacuum-cryo
+owner: INFN ARGUS — vacuum
+license: CC-BY-4.0
+requires:
+  packages: {core-objects: ">=2.1,<3", vacuum-cryo: ">=1.0,<2"}
+  collections: {vendors: ">=0.1,<1"}
+contents: [models.yaml]

@@ -1,0 +1,11 @@
+id: accelerator-diagnostics
+version: 0.1.0
+name: Beam diagnostics
+description: Beam position electronics, cameras and current transformers.
+domain: accelerator
+owner: INFN ARGUS — diagnostics
+license: CC-BY-4.0
+requires:
+  packages: {core-objects: ">=2.1,<3", accelerator: ">=2.1,<3"}
+  collections: {vendors: ">=0.1,<1"}
+contents: [models.yaml]

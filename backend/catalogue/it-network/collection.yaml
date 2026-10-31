@@ -1,0 +1,11 @@
+id: it-network
+version: 0.1.0
+name: IT network equipment
+description: Switches, routers, firewalls, wireless access points and serial device servers.
+domain: it
+owner: INFN ARGUS — network team
+license: CC-BY-4.0
+requires:
+  packages: {core-objects: ">=2.1,<3", it: ">=1.1,<2"}
+  collections: {vendors: ">=0.1,<1"}
+contents: [models.yaml]

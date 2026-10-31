@@ -62,6 +62,8 @@ COPY alembic.ini .
 COPY scripts scripts
 # The template packages (YAML) workspaces are made from (app/packages).
 COPY packages packages
+# The catalogue collections (YAML): shared Vendor and Product Model records (app/catalogue).
+COPY catalogue catalogue
 COPY demo_workspaces demo_workspaces
 
 ENV PORT=8080

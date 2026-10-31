@@ -53,7 +53,7 @@ ACTIONS = ("create_model", "merge", "create_vendor")
 EXTRA_FIELDS = ("cpu", "cpu_type", "memory", "disk", "resolution", "diagonal", "aspect_ratio", "frequency",
                 "io_description", "port_number", "git_repo", "inventory")
 COMPANY_SUFFIX = re.compile(r"\b(s\.?r\.?l|s\.?p\.?a|inc|ltd|llc|gmbh|ag|corp(oration)?|co|company|sa|s\.?a\.?s|"
-                            r"bv|oy|ab|plc|srls|group|systems?|technolog(y|ies)|international)\b\.?")
+                            r"bv|oy|ab|plc|srls|d\.?d|d\.?o\.?o|group|systems?|technolog(y|ies)|international)\b\.?")
 
 
 class MappingError(ValueError):

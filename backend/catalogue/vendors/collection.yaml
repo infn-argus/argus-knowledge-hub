@@ -1,0 +1,12 @@
+id: vendors
+version: 0.1.0
+name: Manufacturers
+description: >-
+  Every manufacturer, once. Domain collections name their vendors by id from here, so IT and accelerator
+  models share one Moxa, one Siemens.
+domain: catalogue
+owner: INFN ARGUS
+license: CC-BY-4.0
+requires:
+  packages: {core-objects: ">=2.1,<3"}
+contents: [vendors.yaml]
