@@ -647,6 +647,7 @@ def plan(db: Session, workspace_id: str, collection_ids: list[str], *, actor: st
         if apply:
             db.add(CatalogueInstallation(workspace_id=workspace_id, collection_id=c.id, from_version=release.from_version,
                                          version=c.version, checksum=c.checksum, installed_by=actor,
+                                         domains=list(c.domains) or None,
                                          result={"counts": release.counts(),
                                                  "attention": [i.as_dict() for i in release.items
                                                                if i.category in ("conflict", "retire", "transfer")]}))

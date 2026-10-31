@@ -61,5 +61,7 @@ class CatalogueInstallation(Base):
     checksum: Mapped[str] = mapped_column(String)
     # {"add": n, "change": n, …} and the items that need a person (conflicts, flagged retirements)
     result: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # the packages whose workspaces its models are offered to; null (installed before C4): every workspace
+    domains: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     installed_by: Mapped[str] = mapped_column(String)
     installed_at: Mapped[object] = mapped_column(DateTime(timezone=True), default=utcnow)

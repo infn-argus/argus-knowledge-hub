@@ -204,3 +204,47 @@ def test_maintainers_are_its_curators_and_owners_and_everyone_reads(w):
     r = curator.post("/v1/catalogue/collections/preview", json={"collections": []})
     assert r.status_code != 403, r.text
     assert curator.post("/v1/admin/catalogue/designate", json={"workspace_id": w["units"]}).status_code == 403
+
+
+def test_a_workspace_is_offered_the_models_of_its_domains(w):
+    from app.catalogue.loader import load
+    from app.models.catalogue_entry import CatalogueEntry, CatalogueInstallation
+    from app.models.package import WorkspacePackage
+    db = w["db"]
+    system.designate(db, w["cat"])
+
+    def model(name):
+        a = Asset(uid=str(uuid.uuid4()), workspace_id=w["cat"], schema_uid=w["model"].uid,
+                  key=f"M-{uuid.uuid4().hex[:6]}", name=name, type="Product Model", attributes={}, is_global=True)
+        db.add(a)
+        db.flush()
+        return a
+    gauge, switch, old, local = model("PKR 251"), model("NPort 5450"), model("Old thing"), model("Made here")
+    for cid, domains in (("vacuum", ["vacuum-cryo"]), ("it-devices", ["it"]), ("legacy", None)):
+        db.add(CatalogueInstallation(workspace_id=w["cat"], collection_id=cid, version="0.1.0", checksum="x",
+                                     result={}, installed_by="t", domains=domains))
+    for rec, cid in ((gauge, "vacuum"), (switch, "it-devices"), (old, "legacy")):
+        db.add(CatalogueEntry(catalogue_id=f"{cid}/{rec.name}", record_uid=rec.uid, workspace_id=w["cat"],
+                              kind="model", collection_id=cid, collection_version="0.1.0", collection_checksum="x"))
+    db.query(WorkspacePackage).filter(WorkspacePackage.workspace_id == w["units"]).delete()
+    db.add(WorkspacePackage(workspace_id=w["units"], package_id="it", version="1.1.0", checksum="x"))
+    db.commit()
+
+    out = system.offered(db, w["units"])
+    assert out["hidden"] == [gauge.uid]                      # vacuum is not its domain; IT, legacy, local are
+    assert out["collections"]["legacy"]["offered"] is True
+    r = as_user(w["admin"]).get("/v1/catalogue/collections/offered", headers={"X-Workspace-Id": w["units"]})
+    assert r.status_code == 200 and r.json()["hidden"] == [gauge.uid]
+    assert system.offered(db, w["cat"])["hidden"] == []      # the catalogue itself sees everything
+
+    # A collection's domain may name several packages, or `catalogue` for every workspace.
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d) / "motion"
+        root.mkdir()
+        (root / "collection.yaml").write_text(
+            "id: motion\nversion: 0.1.0\nname: M\nowner: o\nlicense: CC0-1.0\n"
+            "domain: [accelerator, optics-alignment]\ncontents: []\n")
+        c = load(root)
+        assert c.domains == ["accelerator", "optics-alignment"] and c.domain == "accelerator, optics-alignment"

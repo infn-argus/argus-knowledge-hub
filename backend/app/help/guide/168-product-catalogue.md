@@ -31,6 +31,14 @@ Neither ever holds site data: no serial numbers, installed units, locations, sel
 The catalogue workspace itself is in the workspace switcher only for those who can change it; everyone else
 reads its models from their own workspace.
 
+## Which models a workspace is offered
+
+Each collection names its **domain**: the packages whose workspaces its models are for (the IT devices for
+workspaces with the IT package; vacuum, motion, diagnostics, power and timing for those with the accelerator,
+vacuum or optics packages). When a unit's *Product model* is chosen, the picker shows the models of the
+workspace's domains and the local ones; **Show every model** shows the rest. Nothing is hidden from search, and
+a unit keeps the model it points at. Collections installed before domains were kept are offered everywhere.
+
 ## Who maintains it
 
 Everyone can read the catalogue. It is **maintained** by the administrators and by the people and groups given

@@ -167,3 +167,35 @@ def install_guard() -> None:
 
 
 install_guard()
+
+
+# --------------------------------------------------------------------------- models by domain (C4)
+
+def offered(db: Session, workspace_id: str) -> dict:
+    """Which of the catalogue's models a workspace is offered: those of the collections whose domains are
+    among its packages (a collection for `catalogue`, or installed before domains were kept, is for every
+    workspace), and every local model (made in the catalogue, from no collection). Returns the models it is
+    not offered — the picker hides them behind "show every model" — and the packages it was judged by.
+    Nothing is hidden from search, or from a unit that already points at a model."""
+    from app.catalogue import install
+    from app.models.catalogue_entry import CatalogueEntry, CatalogueInstallation
+    from app.models.package import WorkspacePackage
+    ws = install.catalogue_workspace(db)
+    packages = sorted(db.scalars(select(WorkspacePackage.package_id).where(
+        WorkspacePackage.workspace_id == workspace_id)))
+    out = {"workspace_id": workspace_id, "packages": packages, "hidden": [], "collections": {}}
+    if ws is None or ws == workspace_id:
+        return out
+    domains: dict[str, Optional[list]] = {}
+    for row in db.scalars(select(CatalogueInstallation).where(CatalogueInstallation.workspace_id == ws)
+                          .order_by(CatalogueInstallation.id)):
+        domains[row.collection_id] = row.domains                     # the latest installation's
+    have = set(packages)
+    offered_to = {cid: (not d or "catalogue" in d or bool(have & set(d))) for cid, d in domains.items()}
+    out["collections"] = {cid: {"domains": domains[cid], "offered": ok} for cid, ok in sorted(offered_to.items())}
+    hidden = [cid for cid, ok in offered_to.items() if not ok]
+    if hidden:
+        out["hidden"] = sorted(db.scalars(select(CatalogueEntry.record_uid).where(
+            CatalogueEntry.workspace_id == ws, CatalogueEntry.kind == "model",
+            CatalogueEntry.collection_id.in_(hidden))))
+    return out

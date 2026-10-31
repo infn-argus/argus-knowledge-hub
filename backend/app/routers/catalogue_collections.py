@@ -116,7 +116,7 @@ def list_collections(identity: Identity = Depends(get_identity), db: Session = D
     for c in tree.values():
         got = have.get(c.id)
         rows.append({"id": c.id, "name": c.name, "description": c.description, "version": c.version,
-                     "domain": c.domain, "owner": c.owner, "license": c.license, "checksum": c.checksum,
+                     "domain": c.domain, "domains": c.domains, "owner": c.owner, "license": c.license, "checksum": c.checksum,
                      "summary": c.summary(), "vendors": len(c.vendors), "models": len(c.models),
                      "requires": {"packages": c.requires_packages, "collections": c.requires_collections},
                      "problems": [str(p) for p in problems.get(c.id, [])],
@@ -278,6 +278,14 @@ def glpi_match(workspace_id: str = Depends(require_permission("update")), db: Se
         raise HTTPException(status_code=422, detail={"error": str(exc)})
     db.commit()
     return out
+
+
+@router.get("/offered")
+def offered_models(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """The catalogue's models this workspace is not offered by default (`hidden`): those of collections for
+    domains it has no package of. A model picker hides them behind "show every model"."""
+    from app.catalogue.system import offered
+    return offered(db, workspace_id)
 
 
 # --------------------------------------------------------------------------- the system catalogue (administrators)

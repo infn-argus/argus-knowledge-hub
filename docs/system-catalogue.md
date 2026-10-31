@@ -102,10 +102,22 @@ grants Curator and Owner on the catalogue workspace through the existing role bi
 
 ### C4 — Models by domain
 
-- A collection's `domain` is already a package id. A workspace's model picker (and GLPI matching) offers the
-  models of collections whose domain is among its packages (an IT workspace: it-network, it-compute; a beamline:
-  accelerator, vacuum, motion, timing, power), plus local models, with a "show every model" switch. Nothing is
-  hidden from search or from a unit that already points at a model.
+- A workspace's model picker offers the models of collections whose domain is among its packages (an IT
+  workspace: the IT devices; a beamline: accelerator, vacuum, motion, timing, power), plus local models, with a
+  "show every model" switch. Nothing is hidden from search or from a unit that already points at a model.
+
+**As built.** The proposal assumed a collection's `domain` already named a package; it did not — every
+collection said `catalogue`. So: `domain` is one package id, a list of them, or `catalogue` (every workspace),
+checked by the validator (`Collection.domains`); each installation keeps the collection's domains
+(`catalogue_installations.domains`, migration `d4e6f8a0b2c3`), so offering models never reads Git; an
+installation made before has none and is offered everywhere, as before. `system.offered(workspace)` and
+`GET /v1/catalogue/collections/offered` list the models a workspace is not offered by default; the picker of a
+reference to Product Model hides them behind *Show every model (n more)*, never the unit's own value. GLPI
+matching still considers every model: a match in another domain is caught by its review. The NetBox-sourced
+collection is `it-devices` 0.1.1, domain `it` (sources.lock.yaml). The domains of the Argus-native collections
+are set in argus-catalogue (accelerator-diagnostics, accelerator-power, accelerator-rf, timing-control:
+accelerator; motion: accelerator and optics-alignment; vacuum: vacuum-cryo; it-classification: it), released as
+v0.2.0 after this ARGUS release, then pinned here.
 
 ### C5 — Production
 

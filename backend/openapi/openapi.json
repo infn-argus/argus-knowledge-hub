@@ -30480,6 +30480,75 @@
         ]
       }
     },
+    "/v1/catalogue/collections/offered": {
+      "get": {
+        "description": "The catalogue's models this workspace is not offered by default (`hidden`): those of collections for\ndomains it has no package of. A model picker hides them behind \"show every model\".",
+        "operationId": "offered_models_v1_catalogue_collections_offered_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Offered Models",
+        "tags": [
+          "catalogue"
+        ]
+      }
+    },
     "/v1/catalogue/collections/preview": {
       "post": {
         "description": "What installing these collections (and those they require) would do, entry by entry: add, change, link,\nconflict, transfer, retire, unchanged. Nothing is kept.",

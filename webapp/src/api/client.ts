@@ -3017,6 +3017,9 @@ export const catalogueCollectionsApi = {
     return request<CatalogueBrowse>(`${CC}/models${qs ? `?${qs}` : ""}`);
   },
   record: (uid: string) => request<CatalogueRecord>(`${CC}/records/${encodeURIComponent(uid)}`),
+  /** The catalogue's models this workspace is not offered by default: collections for domains it has no package of. */
+  offered: () => request<{ workspace_id: string; packages: string[]; hidden: string[];
+                           collections: Record<string, { domains: string[] | null; offered: boolean }> }>(`${CC}/offered`),
   review: () => request<CatalogueReviewItem[]>(`${CC}/review`),
   corrections: () => request<CataloguePatches>(`${CC}/corrections`),
   /** `manifest`: a migration manifest's YAML text (`python -m app.catalogue export`), read by the server. */
