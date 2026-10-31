@@ -59,8 +59,13 @@ def _norm_name(name: Any) -> str:
     return norm(str(name or ""))
 
 
-def _norm_code(code: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", "", str(code or "").lower())
+def code_key(code: Any) -> str:
+    """A model code for matching: case, spaces and punctuation do not count, but a `+` does — Libera
+    Brilliance and Libera Brilliance+ are two products."""
+    return re.sub(r"[^a-z0-9]+", "", str(code or "").lower().replace("+", "plus"))
+
+
+_norm_code = code_key
 
 
 def object_types() -> dict[str, tuple[str, bool]]:

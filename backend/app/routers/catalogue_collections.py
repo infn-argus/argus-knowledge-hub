@@ -1,0 +1,139 @@
+"""Catalogue collections (app/catalogue, docs/catalogue-collections.md): the versioned Vendor and Product Model
+records this installation ships, what the catalogue workspace has installed, and installing them — previewed
+first, applied all or nothing.
+
+Reading needs read on objects in the catalogue workspace. Previewing and installing are for its owners and
+administrators, as installing a package is.
+"""
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.auth import Identity, OidcIdentity, PatIdentity, get_identity
+from app.catalogue import install as installer
+from app.catalogue.loader import load_tree
+from app.catalogue.validate import tree_problems
+from app.db import get_db
+
+router = APIRouter(prefix="/v1/catalogue/collections", tags=["catalogue"])
+
+
+class CollectionsIn(BaseModel):
+    collections: list[str]
+    # Per catalogue id: {"action": "link" | "create", "record_uid": optional, "fields": {field: managed | local |
+    # propose}}. A link names the record an entry is, when the match is not found by vendor and model code.
+    decisions: dict[str, dict] = {}
+
+
+def _workspace(db: Session) -> str:
+    ws = installer.catalogue_workspace(db)
+    if ws is None:
+        raise HTTPException(status_code=404, detail={"error": "this installation has no catalogue workspace"})
+    return ws
+
+
+def _may_read(db: Session, identity: Identity, ws: str) -> None:
+    from app.services.permissions import resolve_permission
+    if isinstance(identity, PatIdentity):
+        if identity.workspace_id != ws:
+            raise HTTPException(status_code=403, detail="This token belongs to another workspace")
+        return
+    if identity.user.is_admin or resolve_permission(db, identity.user, ws, "read", "objects"):
+        return
+    raise HTTPException(status_code=403, detail="You may not read the catalogue")
+
+
+def _may_install(db: Session, identity: Identity, ws: str) -> None:
+    from app.routers.workspaces import _require_owner_or_admin
+    _require_owner_or_admin(ws, identity, db)
+
+
+def _actor(identity: Identity) -> str:
+    return identity.user.id if isinstance(identity, OidcIdentity) else "api-token"
+
+
+def _problem(db: Session, e: installer.CatalogueProblem):
+    db.rollback()
+    raise HTTPException(status_code=422, detail={"error": str(e), "details": e.details})
+
+
+def _entry_view(r) -> dict:
+    return {"catalogue_id": r.catalogue_id, "record_uid": r.record_uid, "kind": r.kind,
+            "collection_id": r.collection_id, "collection_version": r.collection_version, "status": r.status,
+            "retired": r.retired, "managed_fields": r.managed_fields, "conflicts": r.conflicts,
+            "corrections": r.corrections, "adopted_at": r.adopted_at, "adopted_by": r.adopted_by}
+
+
+@router.get("")
+def list_collections(identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """The collections this installation ships, whether each is valid, and the release the catalogue workspace
+    has installed (with the history)."""
+    ws = _workspace(db)
+    _may_read(db, identity, ws)
+    tree = load_tree()
+    problems = tree_problems(tree)
+    have = installer.installed(db, ws)
+    rows = []
+    for c in tree.values():
+        got = have.get(c.id)
+        rows.append({"id": c.id, "name": c.name, "description": c.description, "version": c.version,
+                     "domain": c.domain, "owner": c.owner, "license": c.license, "checksum": c.checksum,
+                     "summary": c.summary(), "vendors": len(c.vendors), "models": len(c.models),
+                     "requires": {"packages": c.requires_packages, "collections": c.requires_collections},
+                     "problems": [str(p) for p in problems.get(c.id, [])],
+                     "installed_version": got.version if got else None,
+                     "installed_at": got.installed_at if got else None,
+                     "upgrade_available": bool(got and got.version != c.version)})
+    history = [{"collection_id": h.collection_id, "from_version": h.from_version, "version": h.version,
+                "checksum": h.checksum, "result": h.result, "installed_by": h.installed_by,
+                "installed_at": h.installed_at} for h in installer.history(db, ws)]
+    return {"workspace_id": ws, "collections": rows, "history": history}
+
+
+@router.get("/entries")
+def list_entries(collection: Optional[str] = None, status: Optional[str] = None, needs_review: bool = False,
+                 identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """Which record each catalogue id is, with its managed fields, and the conflicts and corrections waiting for
+    review (`needs_review=true`)."""
+    ws = _workspace(db)
+    _may_read(db, identity, ws)
+    out = []
+    for r in sorted(installer.entries(db, ws).values(), key=lambda r: r.catalogue_id):
+        if collection and r.collection_id != collection:
+            continue
+        if status and r.status != status:
+            continue
+        if needs_review and not (r.conflicts or r.corrections):
+            continue
+        out.append(_entry_view(r))
+    return out
+
+
+@router.post("/preview")
+def preview(body: CollectionsIn, identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """What installing these collections (and those they require) would do, entry by entry: add, change, link,
+    conflict, transfer, retire, unchanged. Nothing is kept."""
+    ws = _workspace(db)
+    _may_install(db, identity, ws)
+    try:
+        out = installer.preview(db, ws, body.collections, actor=_actor(identity), decisions=body.decisions)
+    except installer.CatalogueProblem as e:
+        _problem(db, e)
+    db.rollback()
+    return out
+
+
+@router.post("/install")
+def install(body: CollectionsIn, identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """Install or upgrade these collections, all or nothing. Every link needs its decision first; installing the
+    version already installed changes nothing."""
+    ws = _workspace(db)
+    _may_install(db, identity, ws)
+    try:
+        out = installer.install(db, ws, body.collections, actor=_actor(identity), decisions=body.decisions)
+    except installer.CatalogueProblem as e:
+        _problem(db, e)
+    db.commit()
+    return out

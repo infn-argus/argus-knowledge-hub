@@ -11,6 +11,7 @@ from app.routers import beam_model  # noqa: E402
 from app.routers import (
     access_reviews,
     catalogue,
+    catalogue_collections,
     catalogue_mapping,
     extensions as extensions_router,
     intake as intake_router,
@@ -244,6 +245,7 @@ app.include_router(roles.router)
 app.include_router(sync.router)
 app.include_router(transfers.router)
 app.include_router(catalogue_mapping.router)
+app.include_router(catalogue_collections.router)
 app.include_router(catalogue.types_router)
 for _r in beam_model.ROUTERS:
     app.include_router(_r)

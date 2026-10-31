@@ -1,7 +1,8 @@
 # Catalogue collections — design proposal (draft, for review)
 
-Status: **S1 in progress** — the format, its validator (`python -m app.catalogue validate`) and draft 0.x
-collections are in `backend/catalogue/`. Nothing installs them yet (S2), and no existing record changes. The
+Status: **S2 in progress** — the format, its validator (`python -m app.catalogue validate`) and draft 0.x
+collections are in `backend/catalogue/` (S1). Install, preview and upgrade are in `app/catalogue/install.py`
+and `/v1/catalogue/collections` (S2): records change only when an administrator installs. The
 production inventory ran on 2026-10-31 (§0.1), and the format was revised from it.
 
 Template packages (`backend/packages/`, docs/packages.md) hold **definitions**: the Product Model and Vendor
@@ -290,7 +291,8 @@ Absence from a collection never retires anything. Each entry's fate is stated:
   of content without a new version is refused.
 - **One transaction** per release. Nothing is applied when any step fails.
 
-The preview (`POST /v1/catalogue/collections/preview`) runs the real installation and rolls it back. It
+The preview (`POST /v1/catalogue/collections/preview`) compares each entry with the records and, once every
+decision is made, also runs the real installation and rolls it back (`trial: ok`, or why it would fail). It
 lists, per record:
 
 | Category | Meaning | Applied |
@@ -398,6 +400,33 @@ entry.
 | S4 | export (portable YAML, installation migration manifest, report); adoption with field decisions | report: no. Adoption: on install |
 | S5 | NetBox selected import (to YAML); GLPI match proposals (to review) | no / reviewed only |
 | S6 | local entry → promotion item → YAML for Git | no |
+
+### S2 as built
+
+- **API** (catalogue workspace): `GET /v1/catalogue/collections` (shipped, valid or not, installed version,
+  history), `GET /v1/catalogue/collections/entries` (`needs_review=true`: conflicts and corrections),
+  `POST …/preview` and `POST …/install` with `{collections, decisions}`. Reading needs read on objects there;
+  preview and install, the workspace's owner or an administrator.
+- **Decisions**, per catalogue id: `{action: link | create, record_uid?, fields: {field: managed | local |
+  propose}}`. `record_uid` names the record when the match is not found — the hook the migration manifest
+  (S4) uses. A field whose values agree, or that is empty on the record, needs no decision: it is managed.
+- **Writes** go through the ledger as the administrator, with `catalogue <collection> <version>` as the
+  reason. A collection is a stream of the ledger only in this sense: precedence is replaced by the explicit
+  managed-field rule (§3), so no `stated` claims are needed to decide which value wins.
+- **Matching** a link candidate: the same vendor (its record, or a name or alias) and the same model code —
+  or, for a record with no code, the code found inside its name ("TPG 366 control unit"), when exactly one
+  record has it. A `+` counts (Libera Brilliance ≠ Libera Brilliance+). A candidate is always a person's
+  decision.
+- **Refused:** a collection that does not validate; the same version with other content; an older version;
+  a package the collection requires missing or out of range. Locally, `accelerator-infn` has `core-objects`
+  2.0.0, so the collections (≥2.1) wait for that upgrade.
+- **Not stored yet:** `part_number`, `instance_type`, `specifications` and `relations` have no field on the
+  Product Model type; the preview counts them, and they are written once core-objects 2.2 adds the fields.
+- **Not yet:** the edit-time question on a managed field (local override or correction) is S3, with the UI;
+  the corrections' download as a patch is S6.
+
+A dry run on the local copy of the production data: 15 entries → 9 links (6 vendors; NPort 5450,
+TPG 366, 4UHV) and 6 additions, every link offered for a decision, and the trial installation passing.
 
 **Outside the first release:** opening the Git pull request automatically; fetching an external catalogue
 repository at runtime (the first release reads collections shipped with the release, and an INFN fork is used
