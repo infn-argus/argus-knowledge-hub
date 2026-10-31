@@ -38,8 +38,8 @@ def base(root: Path, models=None) -> Path:
 
 
 def test_the_shipped_collections_are_valid():
+    # Whatever this installation ships (since the sources moved to their own repositories: nothing yet).
     tree = load_tree()
-    assert {"vendors", "it-network", "accelerator-diagnostics", "vacuum", "accelerator-power"} <= set(tree)
     assert tree_problems(tree) == {cid: [] for cid in tree}
 
 

@@ -1,11 +1,14 @@
-# Catalogue collections
+# Catalogue sources
 
-The reusable Vendor and Product Model records, reviewed in Git and installed into the shared catalogue
-workspace. The format, the rules and how a release is installed: docs/catalogue-collections.md.
+The shared catalogue's Vendor and Product Model records come from two Git repositories, each pinned to a
+reviewed revision (docs/catalogue-collections.md):
 
-    python -m app.catalogue validate                     # every collection here, together
-    python -m app.catalogue validate --against <dir>     # and against the previous release (a checkout of the last tag)
+- `infn-argus/argus-catalogue` — ARGUS-native collections: manufacturers, accelerator equipment, and the
+  ARGUS metadata of IT models (CC0-1.0);
+- `infn-argus/devicetype-library` — the fork of the NetBox Device Type Library, for IT devices.
 
-These first collections are **drafts (0.x)**: a few representative entries, to be revised once the read-only
-inventory of the production catalogue has run. They hold no site data: no serial numbers, positions, prices or
-people.
+This directory will hold the lock file that pins them (stage R3). Until then it is empty: the draft collections
+that were here were examples, not checked against manufacturer documentation, and were removed.
+
+    python -m app.catalogue validate                     # the collections in ARGUS_CATALOGUE_DIR (default: here)
+    python -m app.catalogue validate --against <dir>     # and against the previous release

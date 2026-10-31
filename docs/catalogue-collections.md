@@ -1,7 +1,9 @@
 # Catalogue collections — design proposal (draft, for review)
 
-Status: **S4 in progress** — the format, its validator (`python -m app.catalogue validate`) and draft 0.x
-collections are in `backend/catalogue/` (S1). Install, preview and upgrade are in `app/catalogue/install.py`
+Status: **R1 done (2026-10-31)** — the collections live in two Git repositories under `infn-argus` (§A,
+below), no longer in `backend/catalogue/`; the draft collections that were there, written as examples and not
+checked against manufacturer documentation, were removed. The format and its validator
+(`python -m app.catalogue validate`) are in `app/catalogue/` (S1). Install, preview and upgrade are in `app/catalogue/install.py`
 and `/v1/catalogue/collections` (S2): records change only when an administrator installs. The pages are
 `/catalogue/models`, `/catalogue/models/:uid` and `/catalogue/collections` (S3). The export, the migration
 manifest and the report are `python -m app.catalogue export` (S4). The
@@ -15,9 +17,53 @@ workspace. Installed equipment stays in its own workspace and points at the shar
 | | Template package | Catalogue collection | Installed asset |
 |---|---|---|---|
 | Holds | types, attributes, workflows | Vendors, Product Models | a unit: serial number, position, owner |
-| Lives in | `backend/packages/` (Git) | `backend/catalogue/` (Git) | a workspace's database |
+| Lives in | `backend/packages/` (Git) | `infn-argus/argus-catalogue`, `infn-argus/devicetype-library` (Git, pinned) | a workspace's database |
 | Goes into | every workspace that installs it | the shared catalogue workspace only | its own workspace |
 | Example | `Product Model` has `model_code` | `moxa/nport-5450` | `SPARC-CONV-07`, instance of `moxa/nport-5450` |
+
+## A. Two sources, one catalogue (decided 2026-10-31)
+
+| Repository | What | Format | Licence |
+|---|---|---|---|
+| [`infn-argus/devicetype-library`](https://github.com/infn-argus/devicetype-library) | IT devices: a fork of the NetBox Device Type Library. INFN's additions on branch `infn`, under the upstream schema and checks, so suitable ones go back upstream from topic branches. Nothing ARGUS-specific. | NetBox device type YAML | CC0-1.0 (upstream's) |
+| [`infn-argus/argus-catalogue`](https://github.com/infn-argus/argus-catalogue) | Manufacturers (all of them, once); accelerator equipment (pumps, gauges, power supplies, DAQ, ADCs, motion, …); the ARGUS metadata of the IT models (device class, instance type, EOL, successor). Releases are tags `vX.Y.Z`; CI runs this validator, with `--against` the previous tag. | the collections of §2 | CC0-1.0 |
+
+Inspected before creating them: upstream (head `f3a04d6`) already defines all five Moxa serial device servers
+INFN uses (NPort 5250A, 5410, 5450, 5650-8, 5650-16), so the fork adds nothing for Moxa; it has no Basler
+device type, so INFN's three Basler cameras (a2A1920-51gmBAS, a2A2600-20gmBAS, scA640-70gm) are its first
+additions, each checked against Basler's documentation first.
+
+**Identity, across both sources:**
+
+- One commercial model, one entry. Model ids are `vendor/model-slug`, unique over both sources: the validator
+  runs over every collection of both, and a model the NetBox library defines is never defined again in
+  `argus-catalogue` — which may only add its ARGUS metadata, keyed by the same id.
+- A NetBox device type's id is its vendor's id and its slug without the manufacturer's prefix
+  (`moxa-nport-5650-16` → `moxa/nport-5650-16`).
+- Vendors live only in `argus-catalogue/collections/vendors`. A NetBox `manufacturer` is matched through the
+  vendors' aliases; an unknown one stops the import until it is added.
+- No site data in either repository: serial numbers, installed units, locations, sellers, prices, people.
+- Each source is pinned by a lock file in ARGUS (`backend/catalogue/`, stage R3): repository, commit (and tag),
+  and for NetBox the selected device types. ARGUS reads the files at that commit, never a branch head; changing
+  a pin is a reviewed pull request, and the install records each collection's checksum.
+
+**Which fields Git manages:**
+
+| Fields | Managed by |
+|---|---|
+| name, model code, part number, physical and port specifications of an IT device | the NetBox fork |
+| the same, for accelerator equipment | `argus-catalogue` |
+| device class, instance type, EOL, successor, datasheet, related models | `argus-catalogue` |
+| description, seller, support, firmware in service, anything no collection states | the workspace (local) |
+
+A value a site corrects is marked *propose to Git* (§3); the correction is exported as a patch against the
+file it belongs in — the fork's device type or `argus-catalogue`'s entry — for a pull request (stage R5).
+
+**Stages from here:** R1 the repositories (done); R2 entries from INFN's records, each verified against the
+manufacturer's documentation, and the Basler additions in the fork; R3 ARGUS reads the pinned sources (lock
+file, NetBox mapping) under the existing preview, adoption and upgrade; R4 GLPI devices matched to models
+through review; R5 corrections as patches, administrator documentation, and an upstream pull request with
+the owner's go-ahead.
 
 ## 1. What is there today (inspected)
 

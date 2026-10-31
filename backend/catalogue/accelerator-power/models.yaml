@@ -1,9 +1,0 @@
-models:
-  - id: caen/sy5527
-    vendor: caen
-    model_code: SY5527
-    name: CAEN SY5527 universal multichannel power supply mainframe
-    device_class: power supply
-    instance_type: Power Supply
-    sources:
-      - {kind: manufacturer-page, ref: https://www.caen.it}
