@@ -612,6 +612,16 @@ export type LedgerReviewProposal = {
   rule_id: string | null;
   stream_id: string;
   record: RecordBrief | null;
+  /** A catalogue match (rule match.glpi_model/1): what GLPI says, and the model proposed. */
+  match?: {
+    glpi_manufacturer: string;
+    glpi_model: string;
+    match: "exact" | "near";
+    score: number;
+    catalogue_id: string | null;
+    model_name: string;
+    confidence: number | null;
+  };
   ai?: {
     confidence: number | null;
     quote: string | null;

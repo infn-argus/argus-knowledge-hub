@@ -172,6 +172,14 @@ RULES: dict[str, dict] = {
                       "subject_types": ["Installation"]},
         "impl": ["1"],
     },
+    "match.glpi_model/1": {
+        "family": "match.glpi_model",
+        "meaning": "a unit from GLPI whose manufacturer and model name a shared catalogue Product Model (the vendor's "
+                   "name or alias, and its model code or part number; or near it, scored) is proposed to be of "
+                   "that model — never set without a person's acceptance",
+        "signature": {"outputs": ["attr:product_model"], "subject_types": ["*"]},
+        "impl": ["1"],
+    },
     "resolve.asset_url/1": {
         "family": "resolve.asset_url",
         "meaning": "a device's asset: URL naming one inventory object, on a device acting on exactly one "

@@ -286,11 +286,25 @@ export function ReviewQueuePage() {
             ) : (
               <li key={p.claim_id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
                 <div className="min-w-0 text-sm">
-                  <RecordLink r={p.record} /> <span className="font-mono text-xs text-slate-500">{p.predicate}</span>{" "}
-                  <span className="font-mono text-xs">{show(p.value)}</span>
-                  <p className="text-xs text-slate-500">
-                    {p.method} {p.rule_id ? `by ${p.rule_id}` : ""} · {p.stream_id}
-                  </p>
+                  <RecordLink r={p.record} />{" "}
+                  {p.match ? (
+                    <>
+                      is a <b>{p.match.model_name}</b>
+                      {p.match.catalogue_id && <span className="font-mono text-xs text-slate-500"> ({p.match.catalogue_id})</span>}
+                      <p className="text-xs text-slate-500">
+                        GLPI says {p.match.glpi_manufacturer} / {p.match.glpi_model} ·{" "}
+                        {p.match.match === "exact" ? "exact match" : `near match, score ${p.match.score}`}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-mono text-xs text-slate-500">{p.predicate}</span>{" "}
+                      <span className="font-mono text-xs">{show(p.value)}</span>
+                      <p className="text-xs text-slate-500">
+                        {p.method} {p.rule_id ? `by ${p.rule_id}` : ""} · {p.stream_id}
+                      </p>
+                    </>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button

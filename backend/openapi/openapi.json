@@ -31060,6 +31060,142 @@
         ]
       }
     },
+    "/v1/catalogue/glpi-matches": {
+      "get": {
+        "description": "This workspace's GLPI models that no catalogue model matches, with how many units are of each:\ncandidates for new catalogue entries. Read only.",
+        "operationId": "glpi_unmatched_v1_catalogue_glpi_matches_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Glpi Unmatched",
+        "tags": [
+          "catalogue"
+        ]
+      },
+      "post": {
+        "description": "Propose a catalogue model for each of this workspace's GLPI units that has none. The proposals wait in the\nreview queue (Facts to confirm) until a person accepts or rejects each; the ambiguous and the unmatched are\nreported.",
+        "operationId": "glpi_match_v1_catalogue_glpi_matches_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Glpi Match",
+        "tags": [
+          "catalogue"
+        ]
+      }
+    },
     "/v1/catalogue/types": {
       "get": {
         "description": "Every object type this workspace can use, as one map: tree, description, attributes (own and\ninherited), aliases, what references mean in the graph, record counts, and the equipment classes.",

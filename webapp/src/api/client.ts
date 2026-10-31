@@ -2923,6 +2923,21 @@ export interface CatalogueReviewItem {
 
 const CC = "/v1/catalogue/collections";
 
+export interface GlpiMatchReport {
+  status: "ran" | "unchanged";
+  proposals: number;
+  exact: number;
+  near: number;
+  ambiguous: { manufacturer: string; model: string; candidates: string[] }[];
+  unmatched: { manufacturer: string; model: string; units: number }[];
+}
+
+/** GLPI's devices in the current workspace matched to catalogue models, through the review queue. */
+export const glpiMatchesApi = {
+  unmatched: () => request<{ workspace_id: string; unmatched: GlpiMatchReport["unmatched"] }>("/v1/catalogue/glpi-matches"),
+  run: () => request<GlpiMatchReport>("/v1/catalogue/glpi-matches", { method: "POST" }),
+};
+
 export const catalogueCollectionsApi = {
   list: () => request<{ workspace_id: string; sources: CatalogueSourcePin[]; collections: CatalogueCollection[];
                          history: CatalogueHistoryRow[] }>(CC),

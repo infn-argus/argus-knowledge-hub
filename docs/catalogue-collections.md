@@ -1,6 +1,6 @@
 # Catalogue collections — design proposal (draft, for review)
 
-Status: **R3 in progress (2026-10-31)** — the collections live in two Git repositories under `infn-argus` (§A,
+Status: **R4 in progress (2026-10-31)** — the collections live in two Git repositories under `infn-argus` (§A,
 below), no longer in `backend/catalogue/`; the draft collections that were there, written as examples and not
 checked against manufacturer documentation, were removed. The format and its validator
 (`python -m app.catalogue validate`) are in `app/catalogue/` (S1). Install, preview and upgrade are in `app/catalogue/install.py`
@@ -467,6 +467,25 @@ catalogue model its GLPI manufacturer and model name match: the normalised vendo
 part number, exact first, then a near match with its score. The proposals are `resolved` claims on the review
 queue, and a person accepts them. A GLPI model that matches nothing is listed as a candidate for a new local
 entry.
+
+### §8 as built (R4)
+
+- `app/catalogue/glpi.py`; `POST /v1/catalogue/glpi-matches` (update on objects in the workspace) runs it for the
+  current workspace, `GET` lists what nothing matches; the Product catalogue page has the button and the list.
+- Units: those with `argus_source: GLPI` and GLPI's `manufacturer` and `model`. Models: the catalogue
+  workspace's live Product Models with a model code or part number; a vendor matches by its name or any alias
+  (the `alias` labels the install writes), legal-name words aside.
+- **Exact** (score 1): the same vendor, and the model code or part number, case, spaces and punctuation aside.
+  **Near**: the same vendor and a code at least 85 % alike (score 0.9 × ratio), or the code inside GLPI's model
+  text (0.8). Two equally good models: no proposal, reported as ambiguous.
+- Each proposal is an `attr:product_model` claim, method `inferred`, rule `match.glpi_model/1` (locked in
+  `rules.lock.json`), from the stream `catalogue-match:<workspace>`, with GLPI's text, the catalogue id, the kind
+  and the score as evidence. `inferred` is advisory, so nothing is set until a person accepts it in the review
+  queue (Facts to confirm), where it reads "is a Moxa NPort 5450 — GLPI says Moxa / NPORT-5450, exact match".
+  A rejection is remembered: the same proposal does not come back.
+- A unit whose model someone set is never proposed over; one whose model is the accepted match keeps its
+  claim on every run, so accepting is never undone by the next run.
+- Not tried on the local copy of production: it has no GLPI units. The tests use GLPI-like units.
 
 ## 9. Stages
 

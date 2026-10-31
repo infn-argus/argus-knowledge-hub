@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { catalogueCollectionsApi } from "../../api/client";
+import { catalogueCollectionsApi, glpiMatchesApi, type GlpiMatchReport } from "../../api/client";
 import { problem } from "./catalogueText";
 
 const STATUS: Record<string, string> = { catalogue: "From a collection", local: "Local", retired: "Retired" };
@@ -20,6 +20,55 @@ function Facet({ label, value, counts, onChange, names }: {
         {entries.map(([k, n]) => <option key={k} value={k === "—" ? "" : k}>{names?.[k] ?? k} ({n})</option>)}
       </select>
     </label>
+  );
+}
+
+/** GLPI's devices in the current workspace: propose their catalogue models for review, and list the GLPI
+ *  models nothing matches (candidates for new entries). */
+export function GlpiMatches() {
+  const [report, setReport] = useState<GlpiMatchReport | null>(null);
+  const run = useMutation({ mutationFn: glpiMatchesApi.run, onSuccess: setReport });
+  const unmatched = report?.unmatched;
+  return (
+    <section aria-label="GLPI devices" className="rounded border border-slate-200 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">GLPI devices in this workspace</h2>
+          <p className="text-xs text-slate-500">
+            Proposes the catalogue model GLPI's manufacturer and model name, for each device that has none. Each
+            proposal waits in the <Link to="/review" className="text-sky-800 underline">review queue</Link> until someone
+            accepts or rejects it.
+          </p>
+        </div>
+        <button type="button" disabled={run.isPending} onClick={() => run.mutate()}
+                className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">
+          {run.isPending ? "Matching…" : "Propose models"}
+        </button>
+      </div>
+      {run.isError && <p className="mt-2 whitespace-pre-line text-sm text-red-600">{problem(run.error)}</p>}
+      {report && (
+        <div className="mt-2 space-y-1 text-sm">
+          <p>
+            {report.proposals} proposal{report.proposals === 1 ? "" : "s"} ({report.exact} exact, {report.near} near)
+            {report.status === "unchanged" && " — the same as last time"}.
+          </p>
+          {report.ambiguous.length > 0 && (
+            <p className="text-amber-800">
+              Not proposed, two models fit equally:{" "}
+              {report.ambiguous.map((a) => `${a.manufacturer} ${a.model} (${a.candidates.join(" or ")})`).join("; ")}
+            </p>
+          )}
+          {unmatched && unmatched.length > 0 && (
+            <div>
+              <p className="text-slate-600">No catalogue model matches these — candidates for new entries:</p>
+              <ul className="text-xs text-slate-600">
+                {unmatched.map((u) => <li key={`${u.manufacturer}|${u.model}`}>{u.manufacturer} {u.model}: {u.units} unit{u.units === 1 ? "" : "s"}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -57,6 +106,8 @@ export function ProductCataloguePage() {
         <Facet label="Source" value={status} onChange={setStatus} counts={found.data?.facets.status} names={STATUS} />
         <Facet label="Collection" value={collection} onChange={setCollection} counts={found.data?.facets.collection} />
       </div>
+
+      <GlpiMatches />
 
       {found.isError && <p className="whitespace-pre-line text-sm text-red-600">{problem(found.error)}</p>}
       {found.isLoading && <p className="text-sm text-slate-500">Loading…</p>}

@@ -121,3 +121,19 @@ describe("a catalogue model's page", () => {
     await waitFor(() => expect(decide).toHaveBeenCalledWith("moxa/nport-5450", "datasheet_url", "propose"));
   });
 });
+
+describe("GLPI devices", () => {
+  it("proposes models for review and lists what nothing matches", async () => {
+    const { GlpiMatches } = await import("../pages/catalogue/ProductCatalogue");
+    const { glpiMatchesApi } = await import("../api/client");
+    vi.spyOn(glpiMatchesApi, "run").mockResolvedValue({
+      status: "ran", proposals: 3, exact: 2, near: 1,
+      ambiguous: [{ manufacturer: "Cisco", model: "C9200-24T", candidates: ["a", "b"] }],
+      unmatched: [{ manufacturer: "Acme", model: "Thing 9", units: 2 }] });
+    renderWith(<GlpiMatches />);
+    fireEvent.click(screen.getByRole("button", { name: "Propose models" }));
+    expect(await screen.findByText(/3 proposals \(2 exact, 1 near\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Cisco C9200-24T \(a or b\)/)).toBeInTheDocument();
+    expect(screen.getByText("Acme Thing 9: 2 units")).toBeInTheDocument();
+  });
+});

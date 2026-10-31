@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import Identity, OidcIdentity, PatIdentity, get_identity
+from app.auth import Identity, OidcIdentity, PatIdentity, get_identity, require_permission
 from app.catalogue import install as installer
 from app.catalogue.loader import load_tree
 from app.catalogue.validate import tree_problems
@@ -235,3 +235,29 @@ def decide_field(catalogue_id: str, body: FieldDecisionIn, identity: Identity = 
         _problem(db, exc)
     db.commit()
     return _entry_view(e)
+
+
+glpi_router = APIRouter(prefix="/v1/catalogue/glpi-matches", tags=["catalogue"])
+
+
+@glpi_router.get("")
+def glpi_unmatched(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    """This workspace's GLPI models that no catalogue model matches, with how many units are of each:
+    candidates for new catalogue entries. Read only."""
+    from app.catalogue import glpi
+    return {"workspace_id": workspace_id, "unmatched": glpi.unmatched(db, workspace_id, _workspace(db))}
+
+
+@glpi_router.post("")
+def glpi_match(workspace_id: str = Depends(require_permission("update")), db: Session = Depends(get_db)):
+    """Propose a catalogue model for each of this workspace's GLPI units that has none. The proposals wait in the
+    review queue (Facts to confirm) until a person accepts or rejects each; the ambiguous and the unmatched are
+    reported."""
+    from app.catalogue import glpi
+    try:
+        out = glpi.match(db, workspace_id, _workspace(db))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail={"error": str(exc)})
+    db.commit()
+    return out
