@@ -80,6 +80,13 @@ hanging from it, 272 units in `euaps` pointing at its models.
 - The catalogue workspace leaves the workspace switcher for everyone but its maintainers; links to a model
   still open its record wherever they are followed.
 
+**As built.** `/admin/catalogue` (webapp/src/pages/admin/Catalogue.tsx): the catalogue workspace's status
+(`GET /v1/admin/catalogue`), designating one when there is none, the collections page embedded, and GLPI matching
+for a chosen workspace (`POST /v1/catalogue/glpi-matches` with that workspace's header). `/catalogue/collections`
+redirects there and leaves the app's navigation; the product catalogue keeps browsing for everyone and links to
+the administration page for administrators. The workspace lists carry `role`, and the switcher offers the
+catalogue workspace only to those who can modify it.
+
 ### C3 — Catalogue maintainers
 
 - A catalogue maintainers list on *Administration › Catalogue*: who may edit Vendors and Product Models, decide

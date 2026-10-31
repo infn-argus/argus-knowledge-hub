@@ -116,7 +116,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
         if ws is None:
             return []
         return [MyWorkspaceOut(
-            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
+            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at, role=ws.role,
             can_read=True, can_create=True, can_modify=True, can_delete=True,
             can_read_tickets=True, can_create_tickets=True,
             can_modify_tickets=True, can_delete_tickets=True,
@@ -128,7 +128,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     if user.is_admin:
         return [
             MyWorkspaceOut(
-                id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
+                id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at, role=ws.role,
                 can_read=True, can_create=True, can_modify=True, can_delete=True,
                 can_read_tickets=True, can_create_tickets=True,
                 can_modify_tickets=True, can_delete_tickets=True,
@@ -157,7 +157,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     for ws in db.scalars(select(Workspace).where(Workspace.id.in_(granted_ws_ids), NOT_STAGED)) if granted_ws_ids else []:
         granted = effective_permissions(db, user, ws.id)
         result.append(MyWorkspaceOut(
-            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
+            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at, role=ws.role,
             can_read="read" in granted["objects"], can_create="create" in granted["objects"],
             can_modify="modify" in granted["objects"], can_delete="delete" in granted["objects"],
             can_read_tickets="read" in granted["tickets"],
@@ -193,7 +193,7 @@ def list_my_workspaces(identity: Identity = Depends(get_identity), db: Session =
     ).all()
     result.extend(
         MyWorkspaceOut(
-            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at,
+            id=ws.id, name=ws.name, is_global=ws.is_global, created_at=ws.created_at, role=ws.role,
             can_read=ws.default_can_read, can_create=ws.default_can_create,
             can_modify=ws.default_can_modify, can_delete=ws.default_can_delete,
             can_read_tickets=ws.default_can_read_tickets,

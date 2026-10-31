@@ -30,6 +30,8 @@ class WorkspaceOut(BaseModel):
     name: str
     is_global: bool
     created_at: datetime
+    # `catalogue` for the installation's catalogue workspace (docs/system-catalogue.md)
+    role: Optional[str] = None
 
 
 class MyWorkspaceOut(WorkspaceOut):

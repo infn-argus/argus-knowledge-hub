@@ -544,6 +544,8 @@ export interface MyWorkspace {
   name: string;
   is_global: boolean;
   created_at: string;
+  /** "catalogue" for the installation's catalogue workspace. */
+  role?: string | null;
   can_read: boolean;
   can_create: boolean;
   can_modify: boolean;

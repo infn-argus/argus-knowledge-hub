@@ -36,6 +36,11 @@ export function WorkspaceSwitcher() {
     window.location.reload();
   };
 
+  // The installation's catalogue is for those who maintain it: everyone else reads its models from their own
+  // workspace, so it is not offered to them.
+  const shown = (myWorkspaces ?? []).filter((ws) => ws.role !== "catalogue" || ws.can_modify ||
+                                                     ws.id === active?.activeWorkspaceId);
+
   const activeWorkspaceName =
     active?.authType === "oidc"
       ? myWorkspaces?.find((w) => w.id === active.activeWorkspaceId)?.name
@@ -62,12 +67,12 @@ export function WorkspaceSwitcher() {
 
       {open && (
         <div className="absolute left-2 right-2 top-full z-20 mt-1 rounded border border-slate-200 bg-white py-1 shadow-lg">
-          {active?.authType === "oidc" && myWorkspaces && myWorkspaces.length > 1 && (
+          {active?.authType === "oidc" && shown.length > 1 && (
             <>
               <p className="px-3 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                 Workspaces
               </p>
-              {myWorkspaces.map((ws) => (
+              {shown.map((ws) => (
                 <button
                   key={ws.id}
                   onClick={() => switchWorkspace(ws.id)}
@@ -79,6 +84,7 @@ export function WorkspaceSwitcher() {
                   }`}
                 >
                   {ws.name}
+                  {ws.role === "catalogue" && <span className="ml-1 text-xs text-slate-400">· catalogue</span>}
                 </button>
               ))}
               <div className="my-1 border-t border-slate-100" />

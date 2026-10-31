@@ -21,12 +21,15 @@ Neither ever holds site data: no serial numbers, installed units, locations, sel
 
 ## Where to find it
 
-- **Settings › Product catalogue** — browse and search the models: from a collection (with their catalogue id),
-  local (made here), or retired; how many units are of each; and the GLPI matching.
-- **Settings › Catalogue collections** — the pinned sources, the collections and the version installed, preview
-  and install, the entries waiting for review, the corrections for Git, and the history.
+- **Settings › Product catalogue** — everyone: browse and search the models, from a collection (with their
+  catalogue id), local (made here), or retired, and how many units are of each.
+- **Administration › Catalogue** — administrators: which workspace is the catalogue and what depends on it, the
+  pinned sources, the collections and the version installed, preview and install, the entries waiting for
+  review, the corrections for Git, the history, and matching GLPI's devices (for the workspace you choose).
+  The old *Catalogue collections* address leads there.
 
-Reading needs read access to the catalogue workspace; previewing and installing, its owner or an administrator.
+The catalogue workspace itself is in the workspace switcher only for those who can change it; everyone else
+reads its models from their own workspace.
 
 ## The catalogue workspace
 

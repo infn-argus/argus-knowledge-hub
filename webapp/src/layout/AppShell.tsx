@@ -271,7 +271,6 @@ export function AppShell() {
         { to: `/workspaces/${currentWorkspaceId}/packages`, label: "Packages", hint: "Types, kinds and workflows" },
         { to: "/catalogue/types", label: "Type catalogue", hint: "Object, ticket and document types" },
         { to: "/catalogue/models", label: "Product catalogue", hint: "Shared vendors and product models" },
-        { to: "/catalogue/collections", label: "Catalogue collections", hint: "Versioned releases, updates, review" },
         { to: "/global-values", label: "Global values", hint: "Shared lists: states, priorities…" },
         { to: "/tickets/workflows", label: "Ticket workflows" },
         ...(has(features, "equipment") ? [{ to: "/catalogue/equipment-classes", label: "Equipment classes" }] : []),

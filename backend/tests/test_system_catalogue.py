@@ -163,3 +163,11 @@ def test_status_says_what_it_holds_and_what_depends_on_it_for_administrators(w):
     assert r.status_code == 200 and r.json()["designated"] == w["cat"]
     r = as_user(w["admin"]).post("/v1/admin/catalogue/designate", json={"workspace_id": w["units"]})
     assert r.status_code == 422 and "already" in r.json()["detail"]["error"]
+
+
+def test_the_workspace_lists_say_which_is_the_catalogue(w):
+    db = w["db"]
+    system.designate(db, w["cat"])
+    db.commit()
+    mine = {x["id"]: x for x in as_user(w["admin"]).get("/v1/me/workspaces").json()}
+    assert mine[w["cat"]]["role"] == "catalogue" and mine[w["units"]]["role"] is None

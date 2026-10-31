@@ -70,7 +70,7 @@ import { AccessReviews } from "./pages/workspace/AccessReviews";
 import { EquipmentClassesPage } from "./pages/catalogue/EquipmentClasses";
 import { ProductCataloguePage } from "./pages/catalogue/ProductCatalogue";
 import { CatalogueModelPage } from "./pages/catalogue/CatalogueModel";
-import { CatalogueCollectionsPage } from "./pages/catalogue/CatalogueCollections";
+import { AdminCataloguePage } from "./pages/admin/Catalogue";
 import { WorkspaceTransfer } from "./pages/workspace/Transfer";
 import { TransferList } from "./pages/workspace/TransferList";
 import { TransferStatus } from "./pages/workspace/TransferStatus";
@@ -156,7 +156,7 @@ export function App() {
           <Route path="/catalogue/equipment-classes" element={<EquipmentClassesPage />} />
           <Route path="/catalogue/models" element={<ProductCataloguePage />} />
           <Route path="/catalogue/models/:uid" element={<CatalogueModelPage />} />
-          <Route path="/catalogue/collections" element={<CatalogueCollectionsPage />} />
+          <Route path="/catalogue/collections" element={<Navigate to="/admin/catalogue" replace />} />
           <Route path="/lookup/*" element={<LookupPage />} />
           {["/asset/:id", "/position/:id", "/installation/:id", "/document/:id", "/ticket/*", "/review/:id"].map((p) => (
             <Route key={p} path={p} element={<LinkRedirect />} />
@@ -200,6 +200,7 @@ export function App() {
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/statistics" element={<StatisticsPage />} />
           <Route path="/admin/packages" element={<AdminPackagesPage />} />
+          <Route path="/admin/catalogue" element={<AdminCataloguePage />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/admin/ai" element={<InstallationAI />} />
           <Route path="/admin/tokens" element={<AdminTokensPage />} />
