@@ -67,6 +67,9 @@ import { WorkspacePackages } from "./pages/workspace/Packages";
 import { GlpiPage } from "./pages/workspace/Glpi";
 import { AccessReviews } from "./pages/workspace/AccessReviews";
 import { EquipmentClassesPage } from "./pages/catalogue/EquipmentClasses";
+import { ProductCataloguePage } from "./pages/catalogue/ProductCatalogue";
+import { CatalogueModelPage } from "./pages/catalogue/CatalogueModel";
+import { CatalogueCollectionsPage } from "./pages/catalogue/CatalogueCollections";
 import { WorkspaceTransfer } from "./pages/workspace/Transfer";
 import { TransferList } from "./pages/workspace/TransferList";
 import { TransferStatus } from "./pages/workspace/TransferStatus";
@@ -150,6 +153,9 @@ export function App() {
           <Route path="/migration/catalogue/:id" element={<CatalogueMappingReview />} />
           <Route path="/bulk-changes" element={<BulkChangesPage />} />
           <Route path="/catalogue/equipment-classes" element={<EquipmentClassesPage />} />
+          <Route path="/catalogue/models" element={<ProductCataloguePage />} />
+          <Route path="/catalogue/models/:uid" element={<CatalogueModelPage />} />
+          <Route path="/catalogue/collections" element={<CatalogueCollectionsPage />} />
           <Route path="/lookup/*" element={<LookupPage />} />
           {["/asset/:id", "/position/:id", "/installation/:id", "/document/:id", "/ticket/*", "/review/:id"].map((p) => (
             <Route key={p} path={p} element={<LinkRedirect />} />

@@ -260,6 +260,11 @@ def review(workspace_id: str = Depends(require_permission("read")), db: Session 
         item = {"claim_id": claim.claim_id, "predicate": f.predicate, "member": f.member,
                 "value": claim.value, "method": claim.method, "rule_id": claim.rule_id,
                 "stream_id": claim.stream_id, "record": _record_brief(db, f.subject_uid)}
+        if claim.rule_id == "match.glpi_model/1":
+            # A catalogue match shows what GLPI says and which model, not a bare uid.
+            from app.intake.proposals import evidence_of
+            ev = evidence_of(db, claim.claim_id)
+            item["match"] = {**(ev["evidence"] or {}), "confidence": ev["confidence"]}
         if claim.method.startswith("ai_"):
             # An AI proposal shows where it was read, how sure the reading is, and what it would replace (§23.11).
             from app.intake.proposals import evidence_of

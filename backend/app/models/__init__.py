@@ -78,3 +78,4 @@ from app.models import document_template  # noqa: F401,E402
 from app.models import activity  # noqa: F401,E402
 from app.models import indoor  # noqa: F401,E402
 from app.models import type_migration  # noqa: F401,E402
+from app.models import catalogue_entry  # noqa: F401,E402
