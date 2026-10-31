@@ -65,7 +65,25 @@ describe("catalogue collections", () => {
     expect(button).toBeEnabled();
     fireEvent.click(button);
     await waitFor(() => expect(install).toHaveBeenCalledWith(["it-network"], {
-      "moxa/nport-5450": { action: "link", fields: { name: "local" } } }));
+      "moxa/nport-5450": { action: "link", fields: { name: "local" } } }, undefined));
+  });
+
+  it("sends a migration manifest, and leaves what it decided alone", async () => {
+    vi.spyOn(catalogueCollectionsApi, "list").mockResolvedValue({
+      workspace_id: "cat", history: [], collections: [collection("it-network")] });
+    vi.spyOn(catalogueCollectionsApi, "review").mockResolvedValue([]);
+    const preview = vi.spyOn(catalogueCollectionsApi, "preview").mockResolvedValue({ ...plan, undecided: [] });
+    const install = vi.spyOn(catalogueCollectionsApi, "install").mockResolvedValue({ ...plan, undecided: [] });
+    renderWith(<CatalogueCollectionsPage />);
+    fireEvent.click(await screen.findByLabelText("Choose it-network"));
+    const file = new File(["workspace: cat\nlinks: {}\n"], "migration-cat.yaml", { type: "application/yaml" });
+    fireEvent.change(screen.getByLabelText("Migration manifest"), { target: { files: [file] } });
+    expect(await screen.findByText("migration-cat.yaml")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByText(/linked as the migration manifest says/)).toBeInTheDocument();
+    expect(preview).toHaveBeenCalledWith(["it-network"], {}, "workspace: cat\nlinks: {}\n");
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    await waitFor(() => expect(install).toHaveBeenCalledWith(["it-network"], {}, "workspace: cat\nlinks: {}\n"));
   });
 });
 

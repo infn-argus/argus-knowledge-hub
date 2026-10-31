@@ -13,6 +13,15 @@ const FIELD_CHOICES: { v: CatalogueFieldDecision; label: string }[] = [
   { v: "propose", label: "keep, and propose to Git" },
 ];
 
+function readText(f: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(f);
+  });
+}
+
 /** Whether an item still needs something from the person, given the decisions made so far. */
 export function stillOpen(item: CataloguePlanItem, d: CatalogueDecision | undefined): boolean {
   if (item.category !== "link") return false;
@@ -59,10 +68,11 @@ function LinkDecision({ item, d, onChange }: {
   );
 }
 
-function PlanView({ plan, decisions, setDecision }: {
+function PlanView({ plan, decisions, setDecision, manifest }: {
   plan: CataloguePlan; decisions: Record<string, CatalogueDecision>;
-  setDecision: (id: string, d: CatalogueDecision) => void;
+  setDecision: (id: string, d: CatalogueDecision) => void; manifest: boolean;
 }) {
+  const undecided = new Set(plan.undecided);
   return (
     <div className="space-y-3">
       {plan.releases.map((r) => (
@@ -94,7 +104,12 @@ function PlanView({ plan, decisions, setDecision }: {
                 {i.notes.filter((n) => i.category !== "link" || !n.startsWith("the same product")).map((n) => (
                   <span key={n} className="block text-xs text-slate-500">{n}</span>
                 ))}
-                {i.category === "link" && (
+                {i.category === "link" && manifest && !undecided.has(i.catalogue_id) && (
+                  <span className="ml-2 text-xs text-slate-600">
+                    {i.record_name}: linked as the migration manifest says
+                  </span>
+                )}
+                {i.category === "link" && (!manifest || undecided.has(i.catalogue_id)) && (
                   <LinkDecision item={i} d={decisions[i.catalogue_id]} onChange={(d) => setDecision(i.catalogue_id, d)} />
                 )}
               </li>
@@ -118,13 +133,16 @@ export function CatalogueCollectionsPage() {
   const [chosen, setChosen] = useState<string[]>([]);
   const [plan, setPlan] = useState<CataloguePlan | null>(null);
   const [decisions, setDecisions] = useState<Record<string, CatalogueDecision>>({});
-  const preview = useMutation({ mutationFn: () => catalogueCollectionsApi.preview(chosen, decisions), onSuccess: setPlan });
+  const [manifest, setManifest] = useState<{ name: string; text: string } | null>(null);
+  const preview = useMutation({ mutationFn: () => catalogueCollectionsApi.preview(chosen, decisions, manifest?.text),
+                                onSuccess: setPlan });
   const install = useMutation({
-    mutationFn: () => catalogueCollectionsApi.install(chosen, decisions),
+    mutationFn: () => catalogueCollectionsApi.install(chosen, decisions, manifest?.text),
     onSuccess: () => {
       setPlan(null);
       setDecisions({});
       setChosen([]);
+      setManifest(null);
       for (const k of ["catalogue-collections", "catalogue-review", "catalogue-models"]) {
         queryClient.invalidateQueries({ queryKey: [k] });
       }
@@ -135,7 +153,10 @@ export function CatalogueCollectionsPage() {
     setPlan(null);
   };
   const items = plan?.releases.flatMap((r) => r.items) ?? [];
-  const open = items.filter((i) => stillOpen(i, decisions[i.catalogue_id]));
+  // The server applied the manifest's decisions to this plan: an item it left undecided is still open.
+  const undecided = new Set(plan?.undecided ?? []);
+  const open = items.filter((i) => (manifest ? undecided.has(i.catalogue_id) : true) &&
+                                   stillOpen(i, decisions[i.catalogue_id]));
   const nothing = plan?.releases.every((r) => r.already_installed || r.items.every((i) => i.category === "unchanged"));
 
   return (
@@ -193,10 +214,26 @@ export function CatalogueCollectionsPage() {
             {chosen.length ? `${chosen.join(", ")} (and the collections they require)` : "Choose the collections to install or upgrade."}
           </span>
         </div>
+        <div className="mt-2 text-xs text-slate-600">
+          <label>
+            Migration manifest (optional):{" "}
+            <input type="file" accept=".yaml,.yml" aria-label="Migration manifest"
+                   onChange={async (e) => {
+                     const f = e.target.files?.[0];
+                     setManifest(f ? { name: f.name, text: await readText(f) } : null);
+                     setPlan(null);
+                   }} />
+          </label>
+          <span className="block text-slate-500">
+            From <span className="font-mono">python -m app.catalogue export</span>: which existing record each
+            entry is, the duplicates merged into it, and the references checked after the install.
+            {manifest && <> Using <b>{manifest.name}</b>.</>}
+          </span>
+        </div>
         {preview.isError && <p className="mt-2 whitespace-pre-line text-sm text-red-600">{problem(preview.error)}</p>}
         {plan && (
           <div className="mt-3 space-y-3">
-            <PlanView plan={plan} decisions={decisions}
+            <PlanView plan={plan} decisions={decisions} manifest={!!manifest}
                       setDecision={(id, d) => setDecisions({ ...decisions, [id]: d })} />
             {plan.trial && plan.trial !== "ok" && (
               <p className="text-sm text-red-700">A trial installation failed: {plan.trial.replace(/^failed: /, "")}</p>

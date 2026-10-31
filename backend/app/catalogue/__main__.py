@@ -1,9 +1,13 @@
 """python -m app.catalogue validate [<collection dir> …] [--against <previous catalogue dir>] | list
+                   | export --workspace <id> --out <dir>
 
 `validate` checks every collection this installation ships, together; given directories, it checks those
 (collections being written) with the shipped ones. `--against` also compares with a previous release (a
 checkout of the catalogue at the last tag): nothing may disappear without being retired or transferred, and
-content that changed needs a newer version. It exits non-zero when anything is wrong, so CI can run it."""
+content that changed needs a newer version. It exits non-zero when anything is wrong, so CI can run it.
+
+`export` reads a workspace's Vendors and Product Models (it writes nothing in ARGUS) and writes candidate
+collections, this installation's migration manifest and a report to <dir> (app/catalogue/export.py)."""
 import sys
 from pathlib import Path
 
@@ -50,6 +54,21 @@ def main(argv: list[str]) -> int:
             for p in report[cid]:
                 print(f"✗ {cid}: {p.message}")
         return 1 if bad else 0
+    if command == "export":
+        args = dict(zip(rest[::2], rest[1::2]))
+        if "--workspace" not in args or "--out" not in args:
+            print("export needs --workspace <id> --out <dir>")
+            return 2
+        from app.catalogue.export import export
+        from app.db import SessionLocal
+        db = SessionLocal()
+        try:
+            result = export(db, args["--workspace"], Path(args["--out"]))
+        finally:
+            db.close()
+        print(f"{result['rows']} records: {result['becomes']}; candidates for {', '.join(result['collections'])}; "
+              f"{result['problems']} validator problem(s). Read {result['out']}/report.md")
+        return 0
     print(f"unknown command {command!r}\n{__doc__}")
     return 2
 

@@ -2921,10 +2921,11 @@ export const catalogueCollectionsApi = {
   },
   record: (uid: string) => request<CatalogueRecord>(`${CC}/records/${encodeURIComponent(uid)}`),
   review: () => request<CatalogueReviewItem[]>(`${CC}/review`),
-  preview: (collections: string[], decisions: Record<string, CatalogueDecision>) =>
-    request<CataloguePlan>(`${CC}/preview`, { method: "POST", body: json({ collections, decisions }) }),
-  install: (collections: string[], decisions: Record<string, CatalogueDecision>) =>
-    request<CataloguePlan>(`${CC}/install`, { method: "POST", body: json({ collections, decisions }) }),
+  /** `manifest`: a migration manifest's YAML text (`python -m app.catalogue export`), read by the server. */
+  preview: (collections: string[], decisions: Record<string, CatalogueDecision>, manifest?: string | null) =>
+    request<CataloguePlan>(`${CC}/preview`, { method: "POST", body: json({ collections, decisions, manifest: manifest ?? null }) }),
+  install: (collections: string[], decisions: Record<string, CatalogueDecision>, manifest?: string | null) =>
+    request<CataloguePlan>(`${CC}/install`, { method: "POST", body: json({ collections, decisions, manifest: manifest ?? null }) }),
   decideField: (catalogueId: string, field: string, decision: CatalogueFieldDecision, reason?: string) =>
     request<unknown>(`${CC}/entries/${catalogueId.split("/").map(encodeURIComponent).join("/")}/fields`,
                      { method: "POST", body: json({ field, decision, reason }) }),

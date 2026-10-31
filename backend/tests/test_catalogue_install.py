@@ -346,3 +346,83 @@ def test_browsing_the_catalogue(w):
     assert found["facets"]["status"] == {"catalogue": 1, "local": 1}
     only = views.browse(w["db"], w["ws"], q="nport", status="catalogue")
     assert [m["catalogue_id"] for m in only["models"]] == ["moxa/nport-5450"]
+
+
+def test_export_then_install_with_the_manifest_adopts_merges_and_keeps_every_reference(w, monkeypatch, tmp_path):
+    """S4: a workspace's records exported as candidates and a migration manifest; the candidates reviewed into
+    the collections; installed with the manifest — every record adopted in place, the duplicate merged, and
+    no reference lost."""
+    from app.catalogue.export import export, manifest_decisions
+    shipped = w["root"] / "shipped"
+    write(shipped, "vendors", "1.0.0", vendors=[MOXA])
+    write(shipped, "it-network", "1.0.0", models=[NPORT])
+    monkeypatch.setenv("ARGUS_CATALOGUE_DIR", str(shipped))
+
+    moxa = existing(w, w["vendor"], "MOXA Technologies")
+    acme = existing(w, w["vendor"], "Acme GmbH")
+    acme2 = existing(w, w["vendor"], "ACME")                              # the same company, spelt again
+    nport = existing(w, w["model"], "NPort 5450 serial server", vendor="Moxa", vendor_ref=moxa.uid,
+                     device_class="converter")
+    widget = existing(w, w["model"], "Widget 9", vendor="Acme", vendor_ref=acme.uid, device_class="switch",
+                      description="A widget.\nSold by: Shop S.r.l. (Mario)")
+    widget2 = existing(w, w["model"], "WIDGET-9", vendor="ACME", vendor_ref=acme2.uid, device_class="switch")
+    orphan = existing(w, w["model"], "Mystery box", device_class="io")
+    from app.models.schema import Schema
+    unit_type = w["db"].scalar(select(Schema).where(Schema.workspace_id == w["ws"], Schema.applies_to == "objects",
+                                                    Schema.name.notin_(("Product Model", "Vendor"))).limit(1))
+    for model, n in ((widget, 2), (widget2, 1), (nport, 1)):
+        for _ in range(n):
+            w["db"].add(Asset(uid=str(uuid.uuid4()), workspace_id=w["ws"], schema_uid=unit_type.uid,
+                              key=f"U-{uuid.uuid4().hex[:8]}", name="unit", type=unit_type.name,
+                              attributes={"product_model": model.uid}))
+    w["db"].commit()
+
+    out = tmp_path / "export"
+    result = export(w["db"], w["ws"], out)
+    assert result["problems"] == 0
+    man = yaml.safe_load((out / f"migration-{w['ws']}.yaml").read_text())
+    assert man["links"]["moxa"]["record_uid"] == moxa.uid                       # a shipped vendor, by alias
+    assert man["links"]["moxa/nport-5450"]["record_uid"] == nport.uid           # code found in the name
+    assert man["links"]["moxa/nport-5450"]["fields"]["name"] == "local"
+    widget_id = next(cid for cid, l in man["links"].items() if l["record_uid"] == widget.uid)
+    assert widget_id == "acme/widget-9" and [m["record_uid"] for m in man["merge"][widget_id]] == [widget2.uid]
+    assert [m["record_uid"] for m in man["merge"]["acme"]] == [acme2.uid]
+    assert man["references"][widget_id]["units"] == 3
+    candidates = (out / "collections" / "it-network" / "models.yaml").read_text()
+    assert "Sold by" not in candidates and "description" not in candidates   # never exported
+    assert widget.uid not in candidates and "device_class: network switch" in candidates
+    report = (out / "report.md").read_text()
+    assert "Mystery box" in report and "no vendor" in report and "names the seller" in report
+    assert orphan.uid not in yaml.safe_dump(man["links"])
+
+    # The reviewer merges the candidates into the collections (new versions), then installs with the manifest.
+    vendors_new = yaml.safe_load((out / "collections" / "vendors" / "vendors.yaml").read_text())["vendors"]
+    models_new = yaml.safe_load(candidates)["models"]
+    write(shipped, "vendors", "1.1.0", vendors=[MOXA, *vendors_new])
+    write(shipped, "it-network", "1.1.0", models=[NPORT, *models_new])
+    decisions, merges, expected = manifest_decisions(man)
+    decisions["moxa/nport-5450"]["fields"]["datasheet_url"] = "managed"
+    done = inst.install(w["db"], w["ws"], ["it-network"], actor=w["actor"], decisions=decisions, merges=merges,
+                        expected=expected, tree=load_tree(shipped))
+    w["db"].commit()
+    assert done["counts"] == {"link": 4}                                        # nothing created
+    model, row = record(w, widget_id)
+    assert model.uid == widget.uid and row.adopted_by == w["actor"]
+    assert model.attributes["device_class"] == "network switch"                  # the cleaned spelling, managed
+    assert "Sold by" in model.attributes["description"]                          # the record keeps its own
+    w["db"].expire_all()
+    assert w["db"].get(Asset, widget2.uid).record_status == "Merged"
+    assert w["db"].get(Asset, acme2.uid).record_status == "Merged"
+    # A unit of the duplicate still names it, and the duplicate redirects to the survivor.
+    assert w["db"].get(Asset, widget2.uid).merged_into_uid == widget.uid
+
+
+def test_an_install_that_would_lose_references_keeps_nothing(w):
+    tree = release(w)
+    nport = existing(w, w["model"], "NPort 5450", vendor="Moxa", model_code="NPort 5450", device_class="converter")
+    decisions = {"moxa/nport-5450": {"action": "link", "record_uid": nport.uid, "fields": {"name": "local"}}}
+    with pytest.raises(inst.CatalogueProblem, match="references would be lost"):
+        inst.install(w["db"], w["ws"], ["it-network"], actor=w["actor"], decisions=decisions, tree=tree,
+                     expected={"moxa/nport-5450": {"units": 5, "relations": 0, "documents": 0}})
+    w["db"].rollback()
+    assert w["db"].scalar(select(CatalogueEntry).where(CatalogueEntry.workspace_id == w["ws"])) is None

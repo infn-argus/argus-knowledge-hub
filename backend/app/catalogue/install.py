@@ -313,9 +313,12 @@ class _Candidates:
 # --------------------------------------------------------------------------- the comparison
 
 class _Run:
-    def __init__(self, db: Session, workspace_id: str, actor: str, decisions: dict, apply: bool):
+    def __init__(self, db: Session, workspace_id: str, actor: str, decisions: dict, apply: bool,
+                 merges: Optional[dict] = None):
         self.db, self.ws, self.actor, self.apply = db, workspace_id, actor, apply
         self.decisions = decisions or {}
+        # From a migration manifest: per catalogue id, the duplicates merged into its record.
+        self.merges = merges or {}
         self.model_schema, self.vendor_schema = _types(db, workspace_id)
         self.model_keys = _attribute_keys(db, self.model_schema)
         self.vendor_keys = _attribute_keys(db, self.vendor_schema)
@@ -349,6 +352,20 @@ class _Run:
             ledger_service.edit_values(self.db, self.ws, self.actor, uid, _changes(self.db, values),
                                        reason=self._reason(c))
 
+    def _merge(self, c: Collection, survivor: str, losers: list[str]) -> None:
+        """The ledger's merge: the survivor keeps its uid, every reference to a duplicate moves to it, and the
+        duplicate stays as a Merged tombstone that still resolves."""
+        from app.ledger.identity import merge
+        for loser in losers:
+            record = self.db.get(Asset, loser)
+            if record is None or record.workspace_id != self.ws:
+                raise CatalogueProblem(f"the manifest names {loser} to merge, and {self.ws} has no such record")
+            if record.record_status == "Merged":
+                continue
+            if any(r.record_uid == loser for r in self.rows.values()):
+                raise CatalogueProblem(f"{record.name} has a catalogue id of its own: it is not merged")
+            merge(self.db, self.ws, self.actor, survivor, loser, reason=self._reason(c) + ": a duplicate")
+
     def _labels(self, uid: str, e: Entry) -> None:
         from app.ledger.identity import add_label
         add_label(self.db, uid, "catalogue_id", e.id, "catalogue")
@@ -378,6 +395,12 @@ class _Run:
             item = self._new(c, e, stated, item)
         else:
             item = self._existing(c, e, row, stated, item)
+        losers = [u for u in self.merges.get(e.id, []) if u != item.record_uid]
+        if losers:
+            item.notes.append(f"merges {len(losers)} duplicate{'s' if len(losers) > 1 else ''} into it "
+                              "(the migration manifest)")
+            if self.apply and item.record_uid:
+                self._merge(c, item.record_uid, losers)
         if e.kind == "vendor" and item.record_uid:
             self.vendor_uids[e.id] = item.record_uid
         elif e.kind == "vendor":
@@ -564,7 +587,8 @@ def _units_using(db: Session, model_uid: str) -> int:
 # --------------------------------------------------------------------------- entry points
 
 def plan(db: Session, workspace_id: str, collection_ids: list[str], *, actor: str, decisions: Optional[dict] = None,
-         apply: bool = False, tree: Optional[dict[str, Collection]] = None) -> Plan:
+         apply: bool = False, tree: Optional[dict[str, Collection]] = None, merges: Optional[dict] = None,
+         expected: Optional[dict] = None) -> Plan:
     """Compare the releases with the records; with `apply`, also write them. The caller commits or rolls back."""
     tree = tree if tree is not None else load_tree()
     order = _order(tree, collection_ids)
@@ -573,7 +597,7 @@ def plan(db: Session, workspace_id: str, collection_ids: list[str], *, actor: st
     if bad:
         raise CatalogueProblem("the collections are not valid: run `python -m app.catalogue validate`", bad)
     have = installed(db, workspace_id)
-    run = _Run(db, workspace_id, actor, decisions or {}, apply)
+    run = _Run(db, workspace_id, actor, decisions or {}, apply, merges)
     for c in tree.values():                       # every vendor, so a model finds its vendor's entry
         for v in c.vendors:
             run.vendor_entries[v.id] = v
@@ -621,20 +645,52 @@ def plan(db: Session, workspace_id: str, collection_ids: list[str], *, actor: st
                                                  "attention": [i.as_dict() for i in release.items
                                                                if i.category in ("conflict", "retire", "transfer")]}))
             db.flush()
+    if apply and expected:
+        _check_references(db, out, run, expected)
     return out
 
 
+def _check_references(db: Session, out: Plan, run: _Run, expected: dict) -> None:
+    """After an install with a manifest: each adopted record (with its merged duplicates) is pointed at by at
+    least the units and document links the export counted. Fewer means a reference was lost, and nothing is
+    kept. Relations are not compared: a merge rightly folds two identical edges (each duplicate's edge to the
+    same vendor) into one."""
+    from app.catalogue.export import reference_counts
+    linked = {i.catalogue_id: i.record_uid for r in out.releases for i in r.items if i.record_uid}
+    # A reference to a merged duplicate still resolves: the tombstone redirects to the survivor
+    # (merged_into_uid). So a record's references are its own and its tombstones'.
+    merged: dict[str, list[str]] = {}
+    for uid, into in db.execute(select(Asset.uid, Asset.merged_into_uid).where(
+            Asset.merged_into_uid.in_(list(linked.values())))):
+        merged.setdefault(into, []).append(uid)
+    counts = reference_counts(db, [*linked.values(), *(u for us in merged.values() for u in us)])
+    lost = []
+    for cid, want in expected.items():
+        uid = linked.get(cid)
+        if uid is None:
+            continue
+        have = {k: sum(counts.get(u, {}).get(k, 0) for u in [uid, *merged.get(uid, [])])
+                for k in ("units", "documents")}
+        for k in ("units", "documents"):
+            if have.get(k, 0) < int((want or {}).get(k, 0)):
+                lost.append(f"{cid}: {k} {have.get(k, 0)}, the export counted {want[k]}")
+    if lost:
+        raise CatalogueProblem("references would be lost: nothing was installed", lost)
+
+
 def preview(db: Session, workspace_id: str, collection_ids: list[str], *, actor: str,
-            decisions: Optional[dict] = None, tree: Optional[dict[str, Collection]] = None) -> dict:
+            decisions: Optional[dict] = None, tree: Optional[dict[str, Collection]] = None,
+            merges: Optional[dict] = None, expected: Optional[dict] = None) -> dict:
     """What installing would do. When every decision is made, the installation also runs for real and is
     rolled back, so whatever would make it fail (an attribute a type refuses) shows here."""
-    shown = plan(db, workspace_id, collection_ids, actor=actor, decisions=decisions, tree=tree)
+    shown = plan(db, workspace_id, collection_ids, actor=actor, decisions=decisions, tree=tree, merges=merges)
     out = shown.as_dict()
     out["trial"] = None
     if not shown.undecided():
         savepoint = db.begin_nested()
         try:
-            plan(db, workspace_id, collection_ids, actor=actor, decisions=decisions, apply=True, tree=tree)
+            plan(db, workspace_id, collection_ids, actor=actor, decisions=decisions, apply=True, tree=tree,
+                 merges=merges, expected=expected)
             out["trial"] = "ok"
         except Exception as exc:                                      # reported, never kept
             out["trial"] = f"failed: {exc}"
@@ -644,6 +700,9 @@ def preview(db: Session, workspace_id: str, collection_ids: list[str], *, actor:
 
 
 def install(db: Session, workspace_id: str, collection_ids: list[str], *, actor: str,
-            decisions: Optional[dict] = None, tree: Optional[dict[str, Collection]] = None) -> dict:
-    """Install or upgrade, all or nothing: the caller commits on success."""
-    return plan(db, workspace_id, collection_ids, actor=actor, decisions=decisions, apply=True, tree=tree).as_dict()
+            decisions: Optional[dict] = None, tree: Optional[dict[str, Collection]] = None,
+            merges: Optional[dict] = None, expected: Optional[dict] = None) -> dict:
+    """Install or upgrade, all or nothing: the caller commits on success. With a migration manifest's merges
+    and expected references, duplicates are merged and the references checked before anything is kept."""
+    return plan(db, workspace_id, collection_ids, actor=actor, decisions=decisions, apply=True, tree=tree,
+                merges=merges, expected=expected).as_dict()

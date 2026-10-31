@@ -1,9 +1,10 @@
 # Catalogue collections — design proposal (draft, for review)
 
-Status: **S3 in progress** — the format, its validator (`python -m app.catalogue validate`) and draft 0.x
+Status: **S4 in progress** — the format, its validator (`python -m app.catalogue validate`) and draft 0.x
 collections are in `backend/catalogue/` (S1). Install, preview and upgrade are in `app/catalogue/install.py`
 and `/v1/catalogue/collections` (S2): records change only when an administrator installs. The pages are
-`/catalogue/models`, `/catalogue/models/:uid` and `/catalogue/collections` (S3). The
+`/catalogue/models`, `/catalogue/models/:uid` and `/catalogue/collections` (S3). The export, the migration
+manifest and the report are `python -m app.catalogue export` (S4). The
 production inventory ran on 2026-10-31 (§0.1), and the format was revised from it.
 
 Template packages (`backend/packages/`, docs/packages.md) hold **definitions**: the Product Model and Vendor
@@ -446,6 +447,40 @@ entry.
 
 A dry run on the local copy of the production data: 15 entries → 9 links (6 vendors; NPort 5450,
 TPG 366, 4UHV) and 6 additions, every link offered for a decision, and the trial installation passing.
+
+### S4 as built
+
+- `python -m app.catalogue export --workspace <id> --out <dir>` (`app/catalogue/export.py`) reads in a
+  read-only transaction and writes `collections/<id>/models.yaml` (and `vendors/vendors.yaml`) with the
+  candidate entries, a draft `collection.yaml` for a collection that does not ship yet,
+  `migration-<workspace>.yaml`, `report.md` and `report.csv`. The candidates are validated together with the
+  shipped collections before anything is written, and the report says what the validator would refuse.
+- **What becomes of a record:** *export* (a new entry), *link* (a shipped entry is the same product: same
+  vendor, and the same code or the code inside its name), *merge* (a duplicate: same vendor and code as
+  another; the one with most units survives), *skip* (no vendor; a company's name; synthetic demo data), or
+  *already* (has a catalogue id).
+- **What an entry takes:** name, vendor, model code (proposed from the name when empty, flagged to confirm),
+  device class (spellings merged to the list: `switch` → `network switch`, `host` → `server`, `chassi` →
+  `chassis`, `controller motor` → `motion controller`), datasheet, firmware, end of life, the instance type of
+  its units when the collection requires that type's package, and an `argus-export` source. **Descriptions are
+  not exported**: what they hold today is manufacturers' text and sellers. They stay on the records.
+- **The collection** follows from the units' type (Motor Axis → `motion`, Turbo Pump → `vacuum`, …), else from
+  the device class. New collections proposed: `motion`, `it-compute`, `accelerator-rf`, `timing-control`.
+- **The manifest** holds, per catalogue id, the record (uid and key) and the field decisions: `vendor` and a
+  cleaned device class *managed*; a field where the record differs from a shipped entry *local*. It also holds
+  the duplicates to merge, the values that stay local, and the references counted per entry.
+- **Installing with the manifest** (`manifest` in `POST …/preview` and `…/install`, or a file on the
+  collections page): its decisions, under any made on the page; the duplicates merged with the ledger's merge;
+  then units and document links counted again, through the merged records' redirects. Fewer than the export
+  counted, and nothing is installed. Relations are not compared, since a merge rightly folds two identical
+  edges into one.
+- **A dry run on the local copy of the production data:** 172 records → 141 exported, 9 matched shipped entries,
+  1 duplicate vendor (`INSTRUMENTATION TECHNOLOGIES DD`), 21 skipped (no vendor: among them `Hi Scroll 6` and
+  `Micro pusher MP21`, with 17 and 18 units, which need a vendor first). With the candidates merged into the
+  collections, the install with the manifest linked 150 entries, created 6 (shipped drafts with no record),
+  merged the duplicate, and lost no reference. It was rolled back.
+- **Not done:** a merged duplicate's units still name it (it redirects); they are not rewritten to the survivor,
+  so unit counts on the catalogue pages count the survivor's own units only.
 
 **Outside the first release:** opening the Git pull request automatically; fetching an external catalogue
 repository at runtime (the first release reads collections shipped with the release, and an INFN fork is used

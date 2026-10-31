@@ -31,6 +31,9 @@ class CollectionsIn(BaseModel):
     # Per catalogue id: {"action": "link" | "create", "record_uid": optional, "fields": {field: managed | local |
     # propose}}. A link names the record an entry is, when the match is not found by vendor and model code.
     decisions: dict[str, dict] = {}
+    # A migration manifest (`python -m app.catalogue export`), as its YAML text: which record each catalogue id
+    # is, the duplicates to merge, the field decisions and the references to check. Decisions given here win.
+    manifest: Optional[str] = None
 
 
 def _workspace(db: Session) -> str:
@@ -63,6 +66,26 @@ def _actor(identity: Identity) -> str:
 def _problem(db: Session, e: installer.CatalogueProblem):
     db.rollback()
     raise HTTPException(status_code=422, detail={"error": str(e), "details": e.details})
+
+
+def _manifest(body: CollectionsIn, ws: str) -> tuple[dict, dict, dict]:
+    """The request's decisions, with a manifest's under them; and the manifest's merges and references."""
+    if not body.manifest:
+        return body.decisions, {}, {}
+    import yaml
+    from app.catalogue.export import manifest_decisions
+    try:
+        data = yaml.safe_load(body.manifest)
+        decisions, merges, expected = manifest_decisions(data)
+    except (yaml.YAMLError, ValueError, KeyError, TypeError) as e:
+        raise HTTPException(status_code=422, detail={"error": f"the migration manifest cannot be read: {e}"})
+    if data.get("workspace") != ws:
+        raise HTTPException(status_code=422, detail={"error": f"the manifest is for {data.get('workspace')!r}, "
+                                                              f"and the catalogue workspace is {ws!r}"})
+    for cid, d in body.decisions.items():
+        decisions[cid] = {**decisions.get(cid, {}), **d,
+                          "fields": {**(decisions.get(cid, {}).get("fields") or {}), **(d.get("fields") or {})}}
+    return decisions, merges, expected
 
 
 def _entry_view(r) -> dict:
@@ -123,8 +146,10 @@ def preview(body: CollectionsIn, identity: Identity = Depends(get_identity), db:
     conflict, transfer, retire, unchanged. Nothing is kept."""
     ws = _workspace(db)
     _may_install(db, identity, ws)
+    decisions, merges, expected = _manifest(body, ws)
     try:
-        out = installer.preview(db, ws, body.collections, actor=_actor(identity), decisions=body.decisions)
+        out = installer.preview(db, ws, body.collections, actor=_actor(identity), decisions=decisions, merges=merges,
+                                expected=expected)
     except installer.CatalogueProblem as e:
         _problem(db, e)
     db.rollback()
@@ -137,8 +162,10 @@ def install(body: CollectionsIn, identity: Identity = Depends(get_identity), db:
     version already installed changes nothing."""
     ws = _workspace(db)
     _may_install(db, identity, ws)
+    decisions, merges, expected = _manifest(body, ws)
     try:
-        out = installer.install(db, ws, body.collections, actor=_actor(identity), decisions=body.decisions)
+        out = installer.install(db, ws, body.collections, actor=_actor(identity), decisions=decisions, merges=merges,
+                                expected=expected)
     except installer.CatalogueProblem as e:
         _problem(db, e)
     db.commit()
