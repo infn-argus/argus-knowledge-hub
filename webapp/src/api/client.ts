@@ -2921,6 +2921,13 @@ export interface CatalogueReviewItem {
   edited: string[];
 }
 
+/** Corrections proposed back to Git, as one unified diff per source repository. */
+export interface CataloguePatches {
+  patches: { repo: "argus-catalogue" | "devicetype-library"; diff: string }[];
+  items: { catalogue_id: string; field: string; from: unknown; to: unknown; by: string | null; reason: string | null;
+           repo?: string; file?: string; status: "patched" | "skipped"; why?: string }[];
+}
+
 const CC = "/v1/catalogue/collections";
 
 export interface GlpiMatchReport {
@@ -2947,6 +2954,7 @@ export const catalogueCollectionsApi = {
   },
   record: (uid: string) => request<CatalogueRecord>(`${CC}/records/${encodeURIComponent(uid)}`),
   review: () => request<CatalogueReviewItem[]>(`${CC}/review`),
+  corrections: () => request<CataloguePatches>(`${CC}/corrections`),
   /** `manifest`: a migration manifest's YAML text (`python -m app.catalogue export`), read by the server. */
   preview: (collections: string[], decisions: Record<string, CatalogueDecision>, manifest?: string | null) =>
     request<CataloguePlan>(`${CC}/preview`, { method: "POST", body: json({ collections, decisions, manifest: manifest ?? null }) }),

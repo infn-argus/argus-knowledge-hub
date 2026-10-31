@@ -1,0 +1,153 @@
+---
+title: The product catalogue
+summary: The shared Vendors and Product Models every workspace points at — where they come from (two Git repositories, pinned), how a release is previewed and installed, how existing records are adopted without losing their links, which values Git manages and how a correction goes back, matching GLPI's devices to models, and what to check when something is refused.
+keywords: [catalogue, product model, vendor, manufacturer, collection, release, install, upgrade, preview, adopt, adoption, migration, manifest, export, netbox, device type, glpi, match, correction, git, pull request, lock, pin, datasheet, verification, duplicate, retire, transfer]
+order: 168
+---
+
+Every workspace's units point at **one shared catalogue** of Product Models and Vendors, kept in the
+catalogue workspace. A model used by both the IT and the accelerator workspaces is one record: a Moxa NPort
+5450 is `moxa/nport-5450` wherever it is installed. The units themselves — serial numbers, positions, owners —
+stay in their own workspaces.
+
+The catalogue's content is kept in Git, reviewed, and released:
+
+| Repository | Holds |
+|---|---|
+| `infn-argus/argus-catalogue` | every manufacturer; accelerator equipment (vacuum, motion, diagnostics, power, RF, timing and I/O); ARGUS's classification of the IT devices |
+| `infn-argus/devicetype-library` | IT devices, in the NetBox Device Type Library's format (a fork, so additions can go back to NetBox) |
+
+Neither ever holds site data: no serial numbers, installed units, locations, sellers, prices or people.
+
+## Where to find it
+
+- **Settings › Product catalogue** — browse and search the models: from a collection (with their catalogue id),
+  local (made here), or retired; how many units are of each; and the GLPI matching.
+- **Settings › Catalogue collections** — the pinned sources, the collections and the version installed, preview
+  and install, the entries waiting for review, the corrections for Git, and the history.
+
+Reading needs read access to the catalogue workspace; previewing and installing, its owner or an administrator.
+
+## Which release ARGUS reads
+
+ARGUS reads each repository at exactly the commit pinned in `backend/catalogue/sources.lock.yaml` (the
+collections page shows the pins). A release tag must still point at its commit: if someone moved it, ARGUS
+refuses to read it. To take a new release:
+
+1. In the repository, the release is a tag (`v0.2.0`), with its changes in `CHANGELOG.md`; its CI has run the
+   ARGUS validator, including the check against the previous tag.
+2. Change the pin (the tag and the full commit) in a pull request to ARGUS, and release ARGUS.
+3. On the collections page, **Preview** the collections that changed, then **Install** (below).
+
+The API pod needs to reach github.com to fetch a new pin; each pin is fetched once. `python -m app.catalogue
+sources` in the pod shows the pins and reads them.
+
+## Installing or upgrading a release
+
+1. **Catalogue collections**: tick the collections to install or upgrade (those they require come with them; one
+   that does not validate cannot be ticked), then **Preview**.
+2. Read the preview, entry by entry:
+   - *New* — created, shared, every value it states managed by the collection;
+   - *Changed* — a managed value the release changed, written;
+   - *Already here: link or create* — a record that looks like the same product: decide (below);
+   - *Kept local (review)* — the release changes a value this workspace keeps, or one edited here: the record
+     keeps its value, and the entry goes to *Waiting for review*;
+   - *Moved between collections* — the entry follows; the record does not change;
+   - *Retired* — marked retired; the record stays, with every unit and link, and is still offered.
+3. **Install** is enabled when every link has its decision. A release is installed in one go or not at all;
+   installing the version already installed changes nothing.
+
+An install is refused when a collection does not validate, when the same version arrives with other content,
+when the version is older than the one installed, or when the catalogue workspace lacks a package a collection
+requires (the message names it: upgrade it on the workspace's **Packages** page first).
+
+## Adopting the records you already have
+
+A record that existed before its catalogue entry is **adopted**, never replaced: it keeps its uid and key, and
+every unit, relation, document link and alias stays where it is. For each field where the record and the
+collection differ, choose:
+
+- **the collection's** — the value is replaced now, and later releases keep it up to date;
+- **keep this record's** — a local override: releases leave it alone;
+- **keep, and propose to Git** — the record's value is the right one: it stays, and it is proposed back
+  (below).
+
+A field that agrees, or is empty on the record, needs no decision. A match found only because the model code
+appears inside the record's name ("TPG 366 control unit") is always a person's decision: the controller of a
+pump can carry the pump's name.
+
+### The first migration: export, review, install with the manifest
+
+For a workspace with many records, prepare the decisions in advance. In the API pod:
+
+    python -m app.catalogue export --workspace accelerator-infn --out /tmp/export
+
+It only reads, and writes: candidate entries for the repositories (no ARGUS ids), `report.md` and `report.csv`
+(what each record becomes, and what to look at), and `migration-accelerator-infn.yaml` — **this installation's
+migration manifest**: which record each catalogue id is, the duplicates to merge into it, the field decisions,
+and the references counted. Keep the manifest with the installation's operations records; never put it in a
+repository.
+
+Review the candidates into the repositories and release them. Then, on the collections page, load the manifest
+under **Migration manifest**, **Preview** and **Install**. The duplicates are merged (the survivor keeps its
+uid; a merged record redirects to it), and afterwards the units and document links are counted again: if any
+were lost, nothing is installed.
+
+## Which values Git manages
+
+| Values | Managed by |
+|---|---|
+| name, model code, part number, physical and port specifications of an IT device | the NetBox fork |
+| the same, for accelerator equipment | `argus-catalogue` |
+| device class, the ARGUS type of its units, end of life, successor, datasheet, related models | `argus-catalogue` |
+| description, seller, support, firmware in service, anything the collection does not state | this workspace |
+
+Each value on a model's page shows where it comes from: *from the collection*, *edited here*, *local override*,
+*proposed to Git*, or the record's own.
+
+## Editing a managed value, and proposing corrections
+
+Editing a managed value on the record's form is allowed; the model's page then shows it as **edited here**, and
+it appears under *Waiting for review*. Until someone decides, the next release keeps it and reports a conflict.
+On the model's page, choose: keep it as a local override, propose it to Git, or use the collection's value.
+
+To send the proposed corrections back: **Catalogue collections › Waiting for review › Download the corrections as
+patches**. You get one patch per repository (`argus-catalogue-corrections.patch`,
+`devicetype-library-corrections.patch`), against the pinned commit:
+
+    git switch -c corrections <pinned commit>
+    git apply argus-catalogue-corrections.patch
+    git commit -am "Corrections from ARGUS"      # then open a pull request
+
+A value a source's format has no place for (a NetBox model's datasheet or description) is listed instead,
+with the reason. When a release carrying the corrected value is installed, the correction closes and the field
+is managed again.
+
+## Matching GLPI's devices to models
+
+In a workspace synced from GLPI, **Product catalogue › GLPI devices in this workspace › Propose models**. For
+each device with no product model, the catalogue model its GLPI manufacturer and model name is proposed —
+*exact* (the vendor's name or alias, and the model code or part number) or *near* (scored). Each proposal waits
+in the **review queue** under *Facts to confirm*: **Accept** sets the device's model; **Reject** keeps it from
+being proposed again. Nothing is set without a person. Two equally good models are reported, not guessed; the
+GLPI models nothing matches are listed, with their device counts, as candidates for new catalogue entries.
+
+## Adding or verifying a model
+
+New models are added to the repositories by pull request, never in ARGUS: an accelerator model to
+`argus-catalogue`, an IT device as a NetBox device type to the fork (and its classification to
+`argus-catalogue`). Every specification cites the manufacturer's document it was checked against. Entries added
+from INFN's records first carry their identity only; `VERIFICATION.md` in `argus-catalogue` lists those still
+waiting for their datasheet.
+
+## When something is refused
+
+| Message | What to do |
+|---|---|
+| *the collections are not valid* | the list names each problem; fix it in the repository and release again |
+| *needs the package … and … has …* | install or upgrade that package on the catalogue workspace's Packages page |
+| *… is installed with other content* | the release changed without a new version: ask its maintainers for one |
+| *the tag … no longer points at the pinned commit* | someone moved a release tag: check the release before pinning again |
+| *the catalogue's sources cannot be read as pinned* | the API pod cannot reach github.com, or the commit is gone |
+| *no vendor named … in the catalogue* | a NetBox device type's manufacturer is not in `vendors.yaml` (or its aliases): add it |
+| *references would be lost* | an install with a manifest would leave a unit or document pointing nowhere: nothing was installed; check the manifest's merges |

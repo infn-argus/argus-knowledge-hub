@@ -1,6 +1,6 @@
 # Catalogue collections — design proposal (draft, for review)
 
-Status: **R4 in progress (2026-10-31)** — the collections live in two Git repositories under `infn-argus` (§A,
+Status: **R5 done (2026-10-31); first release pending deployment** — the collections live in two Git repositories under `infn-argus` (§A,
 below), no longer in `backend/catalogue/`; the draft collections that were there, written as examples and not
 checked against manufacturer documentation, were removed. The format and its validator
 (`python -m app.catalogue validate`) are in `app/catalogue/` (S1). Install, preview and upgrade are in `app/catalogue/install.py`
@@ -486,6 +486,20 @@ entry.
 - A unit whose model someone set is never proposed over; one whose model is the accepted match keeps its
   claim on every run, so accepting is never undone by the next run.
 - Not tried on the local copy of production: it has no GLPI units. The tests use GLPI-like units.
+
+### R5 as built
+
+- **Corrections as patches** (`app/catalogue/corrections.py`, `GET /v1/catalogue/collections/corrections`, and
+  *Download the corrections as patches* on the collections page): every open correction becomes a change of the
+  file its value is written in, at the pinned commit — an Argus-native entry's key; a NetBox model's `model:`
+  in its device type; its device class, end of life or spares in its `classifications` entry (added when there is
+  none). Only the changed lines move; the result is one unified diff per repository for `git apply`. A field a
+  source's format has no place for is listed with the reason.
+- **Administrator documentation**: the user guide's topic *The product catalogue*
+  (`backend/app/help/guide/168-product-catalogue.md`), also found by Ask ARGUS.
+- **Upstream**: the fork's branch `basler-cameras` is NetBox's master plus the three Basler device types only,
+  ready for a pull request to `netbox-community/devicetype-library`, which is opened only with the owner's
+  go-ahead.
 
 ## 9. Stages
 

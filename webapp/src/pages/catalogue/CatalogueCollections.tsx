@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  catalogueCollectionsApi, type CatalogueDecision, type CatalogueFieldDecision, type CataloguePlan,
-  type CataloguePlanItem,
+  catalogueCollectionsApi, type CatalogueDecision, type CatalogueFieldDecision, type CataloguePatches,
+  type CataloguePlan, type CataloguePlanItem,
 } from "../../api/client";
 import { CATEGORY, problem, shown } from "./catalogueText";
 
@@ -20,6 +20,52 @@ function readText(f: File): Promise<string> {
     reader.onerror = () => reject(reader.error);
     reader.readAsText(f);
   });
+}
+
+function save(name: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/x-diff" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** The corrections proposed back to Git, as a patch per source repository to apply on a branch and propose. */
+export function CorrectionPatches() {
+  const [got, setGot] = useState<CataloguePatches | null>(null);
+  const load = useMutation({
+    mutationFn: catalogueCollectionsApi.corrections,
+    onSuccess: (r) => {
+      setGot(r);
+      for (const p of r.patches) save(`${p.repo}-corrections.patch`, p.diff);
+    },
+  });
+  const skipped = got?.items.filter((i) => i.status === "skipped") ?? [];
+  return (
+    <div className="mt-2">
+      <button type="button" disabled={load.isPending} onClick={() => load.mutate()}
+              className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-50 disabled:opacity-50">
+        {load.isPending ? "Preparing…" : "Download the corrections as patches"}
+      </button>
+      {load.isError && <p className="mt-1 whitespace-pre-line text-xs text-red-600">{problem(load.error)}</p>}
+      {got && (
+        <div className="mt-1 text-xs text-slate-600">
+          {got.patches.length === 0 ? <p>No correction is waiting to go back to Git.</p> : (
+            <p>
+              {got.patches.map((p) => `${p.repo}-corrections.patch`).join(" and ")}: apply on a branch at the pinned
+              commit (<span className="font-mono">git apply</span>) and open a pull request.
+            </p>
+          )}
+          {skipped.length > 0 && (
+            <ul className="mt-1 text-amber-800">
+              {skipped.map((i) => <li key={`${i.catalogue_id}:${i.field}`}>{i.catalogue_id} {i.field}: {i.why}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Whether an item still needs something from the person, given the decisions made so far. */
@@ -275,6 +321,7 @@ export function CatalogueCollectionsPage() {
 
       <section>
         <h2 className="mb-1 text-sm font-semibold text-slate-900">Waiting for review</h2>
+        <CorrectionPatches />
         {(review.data ?? []).length === 0 ? <p className="text-sm text-slate-500">Nothing.</p> : (
           <ul className="space-y-1 text-sm">
             {review.data!.map((r) => (

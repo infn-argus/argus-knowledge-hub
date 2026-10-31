@@ -137,3 +137,20 @@ describe("GLPI devices", () => {
     expect(screen.getByText("Acme Thing 9: 2 units")).toBeInTheDocument();
   });
 });
+
+describe("corrections back to Git", () => {
+  it("downloads a patch per repository and says what could not go", async () => {
+    const { CorrectionPatches } = await import("../pages/catalogue/CatalogueCollections");
+    vi.spyOn(catalogueCollectionsApi, "corrections").mockResolvedValue({
+      patches: [{ repo: "argus-catalogue", diff: "--- a/x\n+++ b/x\n" }],
+      items: [{ catalogue_id: "moxa/nport-5450", field: "datasheet_url", from: null, to: "u", by: "me", reason: null,
+                status: "skipped", why: "no place in the NetBox device type format" }] });
+    const created = vi.fn(() => "blob:x");
+    Object.assign(URL, { createObjectURL: created, revokeObjectURL: vi.fn() });
+    renderWith(<CorrectionPatches />);
+    fireEvent.click(screen.getByRole("button", { name: "Download the corrections as patches" }));
+    expect(await screen.findByText(/argus-catalogue-corrections.patch: apply on a branch/)).toBeInTheDocument();
+    expect(screen.getByText(/datasheet_url: no place in the NetBox/)).toBeInTheDocument();
+    expect(created).toHaveBeenCalledTimes(1);
+  });
+});

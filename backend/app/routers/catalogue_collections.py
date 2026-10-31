@@ -218,6 +218,20 @@ def review(identity: Identity = Depends(get_identity), db: Session = Depends(get
     return review_queue(db, ws)
 
 
+@router.get("/corrections")
+def corrections(identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
+    """Every correction proposed back to Git, as one unified diff per source repository (argus-catalogue, the
+    NetBox fork) against the pinned commit — for `git apply` and a pull request — and what each became."""
+    from app.catalogue.corrections import patches
+    from app.catalogue.sources import SourceProblem
+    ws = _workspace(db)
+    _may_read(db, identity, ws)
+    try:
+        return patches(db, ws)
+    except SourceProblem as e:
+        raise HTTPException(status_code=502, detail={"error": f"the catalogue's sources cannot be read as pinned: {e}"})
+
+
 @router.post("/entries/{catalogue_id:path}/fields")
 def decide_field(catalogue_id: str, body: FieldDecisionIn, identity: Identity = Depends(get_identity),
                  db: Session = Depends(get_db)):

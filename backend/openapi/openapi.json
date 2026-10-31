@@ -29494,6 +29494,75 @@
         ]
       }
     },
+    "/v1/catalogue/collections/corrections": {
+      "get": {
+        "description": "Every correction proposed back to Git, as one unified diff per source repository (argus-catalogue, the\nNetBox fork) against the pinned commit — for `git apply` and a pull request — and what each became.",
+        "operationId": "corrections_v1_catalogue_collections_corrections_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Corrections",
+        "tags": [
+          "catalogue"
+        ]
+      }
+    },
     "/v1/catalogue/collections/entries": {
       "get": {
         "description": "Which record each catalogue id is, with its managed fields, and the conflicts and corrections waiting for\nreview (`needs_review=true`).",
