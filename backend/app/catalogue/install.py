@@ -590,7 +590,12 @@ def plan(db: Session, workspace_id: str, collection_ids: list[str], *, actor: st
          apply: bool = False, tree: Optional[dict[str, Collection]] = None, merges: Optional[dict] = None,
          expected: Optional[dict] = None) -> Plan:
     """Compare the releases with the records; with `apply`, also write them. The caller commits or rolls back."""
-    tree = tree if tree is not None else load_tree()
+    if tree is None:
+        from app.catalogue.sources import SourceProblem
+        try:
+            tree = load_tree()
+        except SourceProblem as e:
+            raise CatalogueProblem(f"the catalogue's sources cannot be read as pinned: {e}")
     order = _order(tree, collection_ids)
     report = tree_problems(tree)
     bad = [str(p) for c in order for p in report.get(c.id, [])]

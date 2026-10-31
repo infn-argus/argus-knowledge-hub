@@ -382,8 +382,8 @@ def test_export_then_install_with_the_manifest_adopts_merges_and_keeps_every_ref
     assert result["problems"] == 0
     man = yaml.safe_load((out / f"migration-{w['ws']}.yaml").read_text())
     assert man["links"]["moxa"]["record_uid"] == moxa.uid                       # a shipped vendor, by alias
-    assert man["links"]["moxa/nport-5450"]["record_uid"] == nport.uid           # code found in the name
-    assert man["links"]["moxa/nport-5450"]["fields"]["name"] == "local"
+    # Its code is only inside its name: a possible match for a person, never linked or merged by the export.
+    assert "moxa/nport-5450" not in man["links"] and nport.uid not in yaml.safe_dump(man["merge"])
     widget_id = next(cid for cid, l in man["links"].items() if l["record_uid"] == widget.uid)
     assert widget_id == "acme/widget-9" and [m["record_uid"] for m in man["merge"][widget_id]] == [widget2.uid]
     assert [m["record_uid"] for m in man["merge"]["acme"]] == [acme2.uid]
@@ -393,6 +393,7 @@ def test_export_then_install_with_the_manifest_adopts_merges_and_keeps_every_ref
     assert widget.uid not in candidates and "device_class: network switch" in candidates
     report = (out / "report.md").read_text()
     assert "Mystery box" in report and "no vendor" in report and "names the seller" in report
+    assert "may be moxa/nport-5450 (its code is inside the name)" in report
     assert orphan.uid not in yaml.safe_dump(man["links"])
 
     # The reviewer merges the candidates into the collections (new versions), then installs with the manifest.
@@ -401,7 +402,9 @@ def test_export_then_install_with_the_manifest_adopts_merges_and_keeps_every_ref
     write(shipped, "vendors", "1.1.0", vendors=[MOXA, *vendors_new])
     write(shipped, "it-network", "1.1.0", models=[NPORT, *models_new])
     decisions, merges, expected = manifest_decisions(man)
-    decisions["moxa/nport-5450"]["fields"]["datasheet_url"] = "managed"
+    # The person decides the possible match on the collections page: it is the same product.
+    decisions["moxa/nport-5450"] = {"action": "link", "record_uid": nport.uid,
+                                    "fields": {"name": "local", "datasheet_url": "managed"}}
     done = inst.install(w["db"], w["ws"], ["it-network"], actor=w["actor"], decisions=decisions, merges=merges,
                         expected=expected, tree=load_tree(shipped))
     w["db"].commit()

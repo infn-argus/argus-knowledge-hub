@@ -32,6 +32,8 @@ MODEL_KEYS = {"id", "vendor", "model_code", "part_number", "name", "description"
               "specifications", "datasheet_url", "eol_date", "firmware_version", "typical_spares",
               "relations", "sources", "retired", "transferred_from", "former_ids"}
 MOVED_KEYS = {"id", "moved_to"}
+# What ARGUS states about a model another source defines (a NetBox device type): never its physical definition.
+CLASSIFICATION_KEYS = {"id", "device_class", "instance_type", "eol_date", "typical_spares", "relations", "sources"}
 RETIRED_KEYS = {"since", "reason", "replaced_by"}
 SOURCE_KEYS = {"kind", "ref", "revision", "checked", "note"}
 SOURCE_KINDS = {"netbox-devicetype-library", "datasheet", "manufacturer-page", "argus-export", "other"}
@@ -265,6 +267,28 @@ def validate_collection(c: Collection, tree: dict[str, Collection]) -> list[Prob
         _sources(r, e, where)
         _retired(r, e, where, all_models)
 
+    for e in c.classifications:
+        d, where = e.data, f"classifications › {e.id or '?'}"
+        for k in sorted(set(d) - CLASSIFICATION_KEYS):
+            r.add(e.file, where, f"unknown key {k!r} (a classification holds ARGUS's metadata only)")
+        if not MODEL_ID.match(e.id):
+            r.add(e.file, where, "id must be vendor/model (e.g. moxa/nport-5450)")
+        if not d.get("device_class"):
+            r.add(e.file, where, "needs a device_class")
+        elif d["device_class"] not in DEVICE_CLASSES:
+            r.add(e.file, f"{where} › device_class", f"{d['device_class']!r} is not one of: {', '.join(sorted(DEVICE_CLASSES))}")
+        if d.get("instance_type"):
+            t = types.get(str(d["instance_type"]))
+            if t is None:
+                r.add(e.file, f"{where} › instance_type", f"no object type {d['instance_type']!r} in the packages")
+            elif t[1]:
+                r.add(e.file, f"{where} › instance_type", f"{d['instance_type']!r} is abstract: units cannot be of it")
+            elif t[0] not in packages:
+                r.add(e.file, f"{where} › instance_type", f"{d['instance_type']!r} comes from {t[0]!r}: add it to requires › packages")
+        if d.get("eol_date") is not None and not isinstance(d["eol_date"], date):
+            r.add(e.file, f"{where} › eol_date", "must be a date (YYYY-MM-DD)")
+        _sources(r, e, where)
+
     for e in c.moved:
         where = f"moved › {e.id or '?'}"
         for k in sorted(set(e.data) - MOVED_KEYS):
@@ -293,6 +317,26 @@ def validate_tree(tree: dict[str, Collection]) -> dict[str, list[Problem]]:
     def add(c: Collection, e: Entry, message: str) -> None:
         out[c.id].append(Problem(c.id, e.file, f"{e.kind}s › {e.id}", message))
 
+    # A classification belongs to a model another source defines. Only checked when that source is in the tree
+    # (ARGUS reading its pinned sources): the catalogue repository's own CI does not have it.
+    if any(c.origin == "netbox" for c in tree.values()):
+        defined = {m.id: c for c in tree.values() for m in c.models}
+        for c in tree.values():
+            for e in c.classifications:
+                owner = defined.get(e.id)
+                if owner is None:
+                    out[c.id].append(Problem(c.id, e.file, f"classifications › {e.id}",
+                                             "no model with this id in any source: nothing to classify"))
+                elif owner.origin != "netbox":
+                    out[c.id].append(Problem(c.id, e.file, f"classifications › {e.id}",
+                                             f"{owner.id} defines this model itself: state its metadata there"))
+    seen_class: dict[str, str] = {}
+    for c in tree.values():
+        for e in c.classifications:
+            if e.id in seen_class:
+                out[c.id].append(Problem(c.id, e.file, f"classifications › {e.id}",
+                                         f"already classified in {seen_class[e.id]!r}: one classification per model"))
+            seen_class.setdefault(e.id, c.id)
     seen_ids: dict[str, str] = {}
     vendor_names: dict[str, tuple[str, str]] = {}
     products: dict[tuple[str, str], tuple[str, str]] = {}

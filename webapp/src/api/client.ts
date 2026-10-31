@@ -2784,6 +2784,16 @@ export interface CatalogueCollection {
   upgrade_available: boolean;
 }
 
+/** A pinned source: a Git repository read at exactly `commit` (backend/catalogue/sources.lock.yaml). */
+export interface CatalogueSourcePin {
+  id: string;
+  kind: "argus-collections" | "netbox-devicetype-library";
+  repo: string;
+  ref: string | null;
+  commit: string;
+  select: string[] | null;
+}
+
 export interface CatalogueHistoryRow {
   collection_id: string;
   from_version: string | null;
@@ -2914,7 +2924,8 @@ export interface CatalogueReviewItem {
 const CC = "/v1/catalogue/collections";
 
 export const catalogueCollectionsApi = {
-  list: () => request<{ workspace_id: string; collections: CatalogueCollection[]; history: CatalogueHistoryRow[] }>(CC),
+  list: () => request<{ workspace_id: string; sources: CatalogueSourcePin[]; collections: CatalogueCollection[];
+                         history: CatalogueHistoryRow[] }>(CC),
   models: (params: { q?: string; device_class?: string; vendor?: string; status?: string; collection?: string }) => {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
     return request<CatalogueBrowse>(`${CC}/models${qs ? `?${qs}` : ""}`);

@@ -1,6 +1,6 @@
 # Catalogue collections — design proposal (draft, for review)
 
-Status: **R1 done (2026-10-31)** — the collections live in two Git repositories under `infn-argus` (§A,
+Status: **R3 in progress (2026-10-31)** — the collections live in two Git repositories under `infn-argus` (§A,
 below), no longer in `backend/catalogue/`; the draft collections that were there, written as examples and not
 checked against manufacturer documentation, were removed. The format and its validator
 (`python -m app.catalogue validate`) are in `app/catalogue/` (S1). Install, preview and upgrade are in `app/catalogue/install.py`
@@ -58,6 +58,37 @@ additions, each checked against Basler's documentation first.
 
 A value a site corrects is marked *propose to Git* (§3); the correction is exported as a patch against the
 file it belongs in — the fork's device type or `argus-catalogue`'s entry — for a pull request (stage R5).
+
+### As built (R2, R3)
+
+- **The fork** (`infn` branch, `25e998f`): INFN's three Basler cameras, each value from Basler's own
+  documentation (the ace 2 pages of docs.baslerweb.com; the scout GigE user's manual AW00011919000 v19), passing
+  upstream's yamllint and schema tests. The five Moxa NPort models INFN uses are upstream already.
+- **`argus-catalogue` v0.1.0** (`63a81dd`): 18 manufacturers; 50 accelerator models in six collections, identity
+  only (manufacturer, model code, name, device class, the ARGUS type of their units), each saying its
+  specifications are not yet verified, listed in `VERIFICATION.md`; and `it-classification`, the ARGUS side of
+  the eight NetBox device types. Records whose identity is not a clear manufacturer designation (25:
+  pump-and-controller combinations, product families, site-made or unclear names) are left for a person.
+- **The format** gains `classifications`: ARGUS's metadata (device class, instance type, EOL, spares,
+  relations) for a model another source defines, by the same id. When ARGUS reads its sources, a NetBox model
+  with no classification, a classification with no model, and a classification of a model the Argus-native
+  collections define themselves are each refused.
+- **`backend/catalogue/sources.lock.yaml`** pins both repositories by full commit (and the release tag, which must
+  still point at it); `app/catalogue/sources.py` fetches only that commit into a bare cache and reads files with
+  `git show` — nothing is checked out or run — maps the selected NetBox device types to the `it-devices`
+  collection (id, vendor by alias, model code, part number; height, weight, network, serial and power ports
+  as specifications) with their classification, and writes the result once per lock. `load_tree()` reads
+  it, so validation, preview, install, upgrade and export all work on both sources together.
+  `python -m app.catalogue sources` shows the pins. The API pod must reach github.com.
+- **A code found only inside a record's name** (the export, and the install's link candidates) is a
+  possible match for a person, never a link or a merge by itself: the export's first run against the
+  sources would otherwise have merged the TwisTorr 305 FS pump's remote controller (8 units) into the pump.
+- **Migration report on the local copy:** 172 records → 70 match the pinned entries exactly, 8 possible
+  matches for a person (six are the same product: TPG 366, 4UHV, XGS-600, the two ace 2 cameras, a Parker
+  valve; two are not: the TwisTorr controller, an ET-7226/PET-7226 pair), 72 to export, 1 duplicate vendor, 21
+  skipped. Installed with the manifest and the six same-product matches decided (rolled back): 76 records
+  adopted in place, none created, only the duplicate vendor merged — the TwisTorr controller untouched — and
+  every reference kept.
 
 **Stages from here:** R1 the repositories (done); R2 entries from INFN's records, each verified against the
 manufacturer's documentation, and the Basler additions in the fork; R3 ARGUS reads the pinned sources (lock

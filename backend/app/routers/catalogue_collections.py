@@ -99,9 +99,14 @@ def _entry_view(r) -> dict:
 def list_collections(identity: Identity = Depends(get_identity), db: Session = Depends(get_db)):
     """The collections this installation ships, whether each is valid, and the release the catalogue workspace
     has installed (with the history)."""
+    from app.catalogue.sources import SourceProblem, describe
     ws = _workspace(db)
     _may_read(db, identity, ws)
-    tree = load_tree()
+    try:
+        pins = describe()
+        tree = load_tree()
+    except SourceProblem as e:
+        raise HTTPException(status_code=502, detail={"error": f"the catalogue's sources cannot be read as pinned: {e}"})
     problems = tree_problems(tree)
     have = installer.installed(db, ws)
     rows = []
@@ -118,7 +123,7 @@ def list_collections(identity: Identity = Depends(get_identity), db: Session = D
     history = [{"collection_id": h.collection_id, "from_version": h.from_version, "version": h.version,
                 "checksum": h.checksum, "result": h.result, "installed_by": h.installed_by,
                 "installed_at": h.installed_at} for h in installer.history(db, ws)]
-    return {"workspace_id": ws, "collections": rows, "history": history}
+    return {"workspace_id": ws, "sources": pins, "collections": rows, "history": history}
 
 
 @router.get("/entries")

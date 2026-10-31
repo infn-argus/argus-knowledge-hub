@@ -1,5 +1,5 @@
 """python -m app.catalogue validate [<collection dir> …] [--against <previous catalogue dir>] | list
-                   | export --workspace <id> --out <dir>
+                   | export --workspace <id> --out <dir> | sources
 
 `validate` checks every collection this installation ships, together; given directories, it checks those
 (collections being written) with the shipped ones. `--against` also compares with a previous release (a
@@ -54,6 +54,16 @@ def main(argv: list[str]) -> int:
             for p in report[cid]:
                 print(f"✗ {cid}: {p.message}")
         return 1 if bad else 0
+    if command == "sources":
+        from app.catalogue.sources import describe, lock_path, materialize
+        pins = describe()
+        if not pins:
+            print(f"no lock file ({lock_path()}): the collections are the folders there")
+            return 0
+        for p in pins:
+            print(f"{p['id']}: {p['kind']} {p['repo']} @ {p['ref'] or ''} {p['commit']}")
+        print(f"read into {materialize()}")
+        return 0
     if command == "export":
         args = dict(zip(rest[::2], rest[1::2]))
         if "--workspace" not in args or "--out" not in args:

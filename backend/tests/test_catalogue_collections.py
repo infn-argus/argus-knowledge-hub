@@ -38,8 +38,13 @@ def base(root: Path, models=None) -> Path:
 
 
 def test_the_shipped_collections_are_valid():
-    # Whatever this installation ships (since the sources moved to their own repositories: nothing yet).
-    tree = load_tree()
+    # The sources this installation pins, read at their commits (from GitHub: skipped with no network).
+    import pytest
+    from app.catalogue.sources import SourceProblem
+    try:
+        tree = load_tree()
+    except SourceProblem as e:
+        pytest.skip(f"the pinned sources cannot be fetched here: {e}")
     assert tree_problems(tree) == {cid: [] for cid in tree}
 
 

@@ -44,6 +44,8 @@ describe("catalogue collections", () => {
   it("previews, asks for the decisions, and installs with them", async () => {
     vi.spyOn(catalogueCollectionsApi, "list").mockResolvedValue({
       workspace_id: "cat", history: [],
+      sources: [{ id: "argus", kind: "argus-collections", repo: "https://github.com/infn-argus/argus-catalogue.git",
+                  ref: "v0.1.0", commit: "63a81dded8c09c500ee8ffb7cffa69f5a705f75f", select: null }],
       collections: [collection("it-network"), collection("vacuum", { problems: ["vacuum: models › x: needs a model_code"] })],
     });
     vi.spyOn(catalogueCollectionsApi, "review").mockResolvedValue([]);
@@ -52,6 +54,8 @@ describe("catalogue collections", () => {
     renderWith(<CatalogueCollectionsPage />);
 
     expect(await screen.findByLabelText("Choose vacuum")).toBeDisabled();             // invalid: not offered
+    expect(screen.getByText("infn-argus/argus-catalogue")).toBeInTheDocument();
+    expect(screen.getByText("v0.1.0 @ 63a81dded8c0")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Choose it-network"));
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(await screen.findByText(/NPort 5450/, { selector: "b" })).toBeInTheDocument();
@@ -70,7 +74,7 @@ describe("catalogue collections", () => {
 
   it("sends a migration manifest, and leaves what it decided alone", async () => {
     vi.spyOn(catalogueCollectionsApi, "list").mockResolvedValue({
-      workspace_id: "cat", history: [], collections: [collection("it-network")] });
+      workspace_id: "cat", history: [], sources: [], collections: [collection("it-network")] });
     vi.spyOn(catalogueCollectionsApi, "review").mockResolvedValue([]);
     const preview = vi.spyOn(catalogueCollectionsApi, "preview").mockResolvedValue({ ...plan, undecided: [] });
     const install = vi.spyOn(catalogueCollectionsApi, "install").mockResolvedValue({ ...plan, undecided: [] });

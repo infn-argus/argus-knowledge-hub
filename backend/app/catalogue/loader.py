@@ -10,8 +10,10 @@ from typing import Any, Optional
 import yaml
 
 MANIFEST = "collection.yaml"
-MANIFEST_KEYS = {"id", "version", "name", "description", "domain", "owner", "license", "requires", "contents"}
-SECTIONS = {"vendors", "models", "moved"}
+MANIFEST_KEYS = {"id", "version", "name", "description", "domain", "owner", "license", "requires", "contents",
+                 "origin"}
+# `classifications`: ARGUS's metadata for a model defined elsewhere (a NetBox device type), by the same id.
+SECTIONS = {"vendors", "models", "moved", "classifications"}
 
 
 @dataclass
@@ -55,7 +57,11 @@ class Collection:
     models: list[Entry] = field(default_factory=list)
     # Tombstones: an entry that moved to another collection ({id, moved_to}).
     moved: list[Entry] = field(default_factory=list)
+    classifications: list[Entry] = field(default_factory=list)
     read_problems: list[Problem] = field(default_factory=list)
+    # Where it came from when not written as collection files: e.g. "netbox" for device types read from a
+    # NetBox library at a pinned revision (app/catalogue/sources.py).
+    origin: Optional[str] = None
 
     def entries(self) -> list[Entry]:
         return [*self.vendors, *self.models]
@@ -63,7 +69,8 @@ class Collection:
     def summary(self) -> str:
         def n(count: int, word: str) -> str:
             return f"{count} {word}{'' if count == 1 else 's'}" if count else ""
-        parts = [n(len(self.vendors), "vendor"), n(len(self.models), "model"), f"{len(self.moved)} moved" if self.moved else ""]
+        parts = [n(len(self.vendors), "vendor"), n(len(self.models), "model"), f"{len(self.moved)} moved" if self.moved else "",
+                 n(len(self.classifications), "classification")]
         return ", ".join(p for p in parts if p) or "empty"
 
 
@@ -115,7 +122,7 @@ def load(path: Path | str) -> Collection:
         problems.append(Problem(cid, MANIFEST, "requires", "may only name `packages` and `collections`"))
         requires = requires if isinstance(requires, dict) else {}
     files = [MANIFEST]
-    found: dict[str, list[Entry]] = {"vendors": [], "models": [], "moved": []}
+    found: dict[str, list[Entry]] = {"vendors": [], "models": [], "moved": [], "classifications": []}
     contents = manifest.get("contents") or []
     if not isinstance(contents, list):
         problems.append(Problem(cid, MANIFEST, "contents", "must be a list of file names"))
@@ -154,12 +161,19 @@ def load(path: Path | str) -> Collection:
         requires_packages=_ranges(requires.get("packages"), cid, "requires › packages", problems),
         requires_collections=_ranges(requires.get("collections"), cid, "requires › collections", problems),
         path=root, checksum=digest.hexdigest(), vendors=found["vendors"], models=found["models"],
-        moved=found["moved"], read_problems=problems)
+        origin=str(manifest["origin"]) if manifest.get("origin") else None,
+        moved=found["moved"], classifications=found["classifications"], read_problems=problems)
 
 
 def load_tree(root: Path | str | None = None) -> dict[str, Collection]:
-    """id -> collection, for every collection directory under `root` (default: this installation's)."""
+    """id -> collection, for every collection directory under `root`. By default, this installation's: the
+    sources its lock file pins (app/catalogue/sources.py), read at their commits, or else the collection
+    folders in its catalogue directory."""
     base = Path(root) if root is not None else catalogue_dir()
+    if root is None:
+        from app.catalogue.sources import lock_path, materialize
+        if lock_path(base).is_file():
+            base = materialize(lock_path(base))
     out: dict[str, Collection] = {}
     if not base.is_dir():
         return out

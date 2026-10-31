@@ -173,6 +173,27 @@ export function CatalogueCollectionsPage() {
       </div>
       {list.isError && <p className="whitespace-pre-line text-sm text-red-600">{problem(list.error)}</p>}
 
+      {(list.data?.sources ?? []).length > 0 && (
+        <section aria-label="Sources">
+          <h2 className="mb-1 text-sm font-semibold text-slate-900">Sources</h2>
+          <ul className="space-y-1 text-sm text-slate-700">
+            {list.data!.sources.map((s) => (
+              <li key={s.id}>
+                <a href={s.repo.replace(/\.git$/, "")} className="font-medium text-sky-800 hover:underline" target="_blank"
+                   rel="noreferrer">{s.repo.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "")}</a>{" "}
+                <span className="font-mono text-xs">{s.ref ?? ""} @ {s.commit.slice(0, 12)}</span>
+                <span className="text-xs text-slate-500">
+                  {s.kind === "netbox-devicetype-library" ? ` · NetBox device types: ${(s.select ?? []).length} selected` : " · ARGUS collections"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-xs text-slate-500">
+            Read at exactly these commits. Changing a pin is a reviewed change to <span className="font-mono">backend/catalogue/sources.lock.yaml</span>.
+          </p>
+        </section>
+      )}
+
       <table className="w-full rounded border border-slate-200 bg-white text-sm">
         <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
           <tr><th className="px-3 py-2"></th><th className="px-3 py-2">Collection</th><th className="px-3 py-2">Holds</th>

@@ -118,7 +118,7 @@ def reference_counts(db: Session, uids: list[str]) -> dict[str, dict]:
 
 def _description_flags(text_: Any) -> list[str]:
     """Descriptions are not exported: what is in them today is the manufacturer's text (a datasheet or a shop
-    page, pasted in), which a CC-BY collection cannot relicense, and the seller. They stay on the record."""
+    page, pasted in), which a public collection cannot republish, and the seller. They stay on the record."""
     if not isinstance(text_, str) or not text_.strip():
         return []
     flags = ["names the seller (stays on the record)"] if SOLD_BY.search(text_) else []
@@ -231,7 +231,10 @@ class _Export:
             return self._shipped_vendor([a["vendor"]])
         return None
 
-    def _shipped_model(self, vendor: str, code: str, name: str) -> Optional[str]:
+    def _shipped_model(self, vendor: str, code: str, name: str) -> tuple[Optional[str], bool]:
+        """The shipped entry this record is: (id, exact). Exact is the same vendor and model code. A code found
+        only inside the record's name ("TwisTorr 305 FS" inside "TwisTorr 305 FS CTR", the pump's controller) is
+        a candidate for a person, never a link or a merge by itself."""
         inside = []
         for c in self.tree.values():
             for e in c.models:
@@ -239,10 +242,10 @@ class _Export:
                     continue
                 k = code_key(e.data.get("model_code"))
                 if k and k == code:
-                    return e.id
+                    return e.id, True
                 if k and len(k) >= 4 and k in code_key(name):
                     inside.append(e.id)
-        return inside[0] if len(inside) == 1 else None
+        return (inside[0], False) if len(inside) == 1 else (None, False)
 
     def _unit_types(self, uid: str) -> Counter:
         pm = Asset.attributes["product_model"].astext
@@ -275,7 +278,12 @@ class _Export:
             if not code:
                 code = m.name.strip()
                 row.flags.append(f"model code proposed from the name: {code!r} — confirm it")
-            shipped = self._shipped_model(vendor, code_key(code), m.name)
+            shipped, exact = self._shipped_model(vendor, code_key(code), m.name)
+            if shipped and not exact:
+                row.becomes, row.catalogue_id = "review", shipped
+                row.flags.append(f"may be {shipped} (its code is inside the name), or another product: a person "
+                                 "decides — on the Catalogue collections page, or by adding it to the manifest")
+                continue
             if shipped:
                 row.becomes, row.catalogue_id = "link", shipped
                 # Matched with the same vendor: its record is the vendor, or a duplicate merged into it.
@@ -368,7 +376,7 @@ class _Export:
                 _dump(d / MANIFEST, {"id": collection, "version": "0.1.0",
                                      "name": COLLECTION_NAMES.get(collection, collection.replace("-", " ").title()),
                                      "description": "Exported from ARGUS: a draft for review.",
-                                     "domain": "catalogue", "owner": "INFN ARGUS", "license": "CC-BY-4.0",
+                                     "domain": "catalogue", "owner": "INFN ARGUS", "license": "CC0-1.0",
                                      "requires": self._requires(collection), "contents": ["models.yaml"]},
                       "A draft manifest.")
             _dump(d / "models.yaml", {"models": sorted(es, key=lambda e: e["id"])}, note)
@@ -377,7 +385,9 @@ class _Export:
         """The shipped collections with the candidates added, through the validator."""
         tmp = Path(tempfile.mkdtemp(prefix="catalogue-export-"))
         try:
-            shutil.copytree(catalogue_dir(), tmp, dirs_exist_ok=True)
+            from app.catalogue.sources import lock_path, materialize
+            base = materialize(lock_path()) if lock_path().is_file() else catalogue_dir()
+            shutil.copytree(base, tmp, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".complete"))
             additions = {"vendors": {"vendors": list(self.vendor_entries.values())},
                          **{c: {"models": es} for c, es in self.model_entries.items()}}
             for cid, sections in additions.items():
@@ -393,7 +403,7 @@ class _Export:
                     d.mkdir(parents=True, exist_ok=True)
                     (d / MANIFEST).write_text(yaml.safe_dump({
                         "id": cid, "version": "0.1.0", "name": cid, "domain": "catalogue", "owner": "INFN ARGUS",
-                        "license": "CC-BY-4.0", "requires": self._requires(cid), "contents": ["models.yaml"]}))
+                        "license": "CC0-1.0", "requires": self._requires(cid), "contents": ["models.yaml"]}))
                     (d / "models.yaml").write_text(yaml.safe_dump(sections, sort_keys=False, allow_unicode=True))
             report = tree_problems(load_tree(tmp))
             return [str(p) for ps in report.values() for p in ps]
@@ -424,6 +434,7 @@ def _dump(path: Path, data: dict, note: str) -> None:
 
 
 BECOMES = {"export": "a new catalogue entry", "link": "adopted by a shipped entry", "merge": "a duplicate, merged",
+           "review": "a possible match, for a person",
            "skip": "not exported", "already": "already linked"}
 
 
@@ -433,14 +444,17 @@ def report_md(ex: _Export, problems: list[str]) -> str:
     out = [f"# Catalogue export: `{ex.ws}`", "", f"Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC. "
            "Read-only: nothing in ARGUS was changed.", "",
            "| | Vendors | Models |", "|---|---|---|"]
-    for b in ("export", "link", "merge", "skip", "already"):
+    for b in ("export", "link", "review", "merge", "skip", "already"):
         v = sum(1 for r in rows if r.becomes == b and r.kind == "vendor")
         m = sum(1 for r in rows if r.becomes == b and r.kind == "model")
         if v or m:
             out.append(f"| {BECOMES[b]} | {v} | {m} |")
     out += ["", f"New collections: {', '.join(sorted(c for c in ex.model_entries if c not in ex.tree)) or 'none'}.", "",
-            "Descriptions are not exported: they hold manufacturers' text and sellers, which a CC-BY collection "
-            "cannot publish. They stay on the records. A reviewer may write a short description of their own.", ""]
+            "Descriptions are not exported: they hold manufacturers' text and sellers, which a public collection "
+            "cannot republish. They stay on the records. A reviewer may write a short description of their own.", "",
+            "IT devices (the `it-network` and `it-compute` candidates) belong in the NetBox Device Type Library "
+            "fork, as device types checked against the manufacturer's documentation, with their ARGUS "
+            "classification in `it-classification`: the candidates here are their identity only.", ""]
     out += ["## What the validator says about the candidates", ""]
     out += ([f"- {p}" for p in problems] or ["Nothing: the candidates and the shipped collections validate together."])
     flagged = [r for r in rows if r.flags]
