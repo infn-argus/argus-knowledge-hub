@@ -232,7 +232,17 @@ def guide_asset(db: Session, workspace_id: str, draft: dict, grants=None) -> dic
         if attrs.get("serial") and not attrs.get("manufacturer"):
             checks.append(_check(WARNING, "A serial number identifies a unit only together with its "
                                  "manufacturer. Add the manufacturer.", "attributes.manufacturer"))
-        if not ids:
+        if attrs.get("serial") and not attrs.get("manufacturer") and isinstance(attrs["serial"], str):
+            # Not yet an identifier, but the same number on another record of this workspace is worth a look
+            # before the manufacturer is filled in.
+            same = [h for h in db.scalars(select(Asset).where(
+                Asset.workspace_id == workspace_id, Asset.attributes["serial"].astext == attrs["serial"].strip(),
+                Asset.record_status != "Retired").limit(4)) if h.uid != own]
+            if same:
+                checks.append(_check(WARNING, f"{same[0].name} has the same serial number. If it is the same unit, "
+                                     "open it; a unit has one record.", "attributes.serial",
+                                     links=[_link(h) for h in same[:3]], id="serial-seen"))
+        if not ids and not attrs.get("serial"):
             checks.append(_check(WARNING, "No serial number or inventory number yet. Without one, this unit "
                                  "cannot be told apart from others of the same model. Add it if the unit has "
                                  "a label.", "attributes.serial", id="identifiers"))

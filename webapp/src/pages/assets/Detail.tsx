@@ -1,3 +1,4 @@
+import { ask, notify } from "../../lib/dialogs";
 import { OwnerBadge } from "../../components/OwnerBadge";
 import { SuggestFromFile } from "../../components/SuggestFromFile";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -68,6 +69,8 @@ export function AssetDetail() {
   const [showEmpty, setShowEmpty] = useState(false);
   const [relationTarget, setRelationTarget] = useState("");
   const [relationType, setRelationType] = useState("related_to");
+  const [relationTargetText, setRelationTargetText] = useState("");
+  const targetLabel = (x: { name: string; key?: string | null }) => (x.key ? `${x.name} (${x.key})` : x.name);
   const [showGraph, setShowGraph] = useState(false);
   const [labelType, setLabelType] = useState<string>(LABEL_TYPES[0]);
   const [labelValue, setLabelValue] = useState("");
@@ -120,7 +123,7 @@ export function AssetDetail() {
       queryClient.invalidateQueries({ queryKey: ["assets"] });
       navigate("/assets/search");
     },
-    onError: () => alert("Delete failed."),
+    onError: () => notify("Delete failed."),
   });
 
   const uploadMutation = useMutation({
@@ -164,6 +167,7 @@ export function AssetDetail() {
     mutationFn: () => relationsApi.create(uid!, relationTarget, relationType),
     onSuccess: () => {
       setRelationTarget("");
+      setRelationTargetText("");
       queryClient.invalidateQueries({ queryKey: ["relations"] });
       queryClient.invalidateQueries({ queryKey: ["assets", uid] });
     },
@@ -280,7 +284,7 @@ export function AssetDetail() {
                 ].filter(Boolean);
                 if (parts.length) hangs = `\n\n${parts.join("; ")}.`;
               } catch { /* the question is still asked, without the counts */ }
-              if (confirm(`Delete object "${a.name}"? This cannot be undone.${hangs}`)) deleteMutation.mutate();
+              if (await ask(`Delete object "${a.name}"? This cannot be undone.${hangs}`)) deleteMutation.mutate();
             }}
             disabled={deleteMutation.isPending}
             className="rounded border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
@@ -426,20 +430,19 @@ export function AssetDetail() {
             }}
             className="mt-3 flex gap-2"
           >
-            <select
-              value={relationTarget}
-              onChange={(e) => setRelationTarget(e.target.value)}
-              className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
-            >
-              <option value="">Target asset…</option>
-              {allAssets.data
-                ?.filter((x) => x.uid !== a.uid)
-                .map((x) => (
-                  <option key={x.uid} value={x.uid}>
-                    {x.name}
-                  </option>
-                ))}
-            </select>
+            <input
+              list="relation-targets" placeholder="Target: type its name or key…"
+              value={relationTargetText}
+              onChange={(e) => {
+                setRelationTargetText(e.target.value);
+                const hit = allAssets.data?.find((x) => x.uid !== a.uid && targetLabel(x) === e.target.value);
+                setRelationTarget(hit ? hit.uid : "");
+              }}
+              className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+            />
+            <datalist id="relation-targets">
+              {(allAssets.data ?? []).filter((x) => x.uid !== a.uid).map((x) => <option key={x.uid} value={targetLabel(x)} />)}
+            </datalist>
             <input
               value={relationType}
               onChange={(e) => setRelationType(e.target.value)}

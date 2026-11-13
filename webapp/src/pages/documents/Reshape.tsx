@@ -1,3 +1,4 @@
+import { notify } from "../../lib/dialogs";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -127,7 +128,7 @@ export function DocumentReshape() {
       try {
         await documentsApi.uploadRevisionAttachment(saved.document_uid, saved.revision_uid, original);
       } catch (e) {
-        alert(`The draft was saved, but its original file was not attached: ${problemText(e)}. Add it on the document page.`);
+        notify(`The draft was saved, but its original file was not attached: ${problemText(e)}. Add it on the document page.`);
       }
     }
     return saved;

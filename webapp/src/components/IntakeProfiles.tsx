@@ -1,3 +1,4 @@
+import { askText } from "../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError, intakeApi, type IntakeKind, type IntakeProfileView } from "../api/client";
@@ -27,11 +28,11 @@ export function IntakeProfiles() {
   const error = [create, evaluate, activate, retire].find((m) => m.isError)?.error;
   if (!q.data) return null;
 
-  const onActivate = (p: IntakeProfileView) => {
-    const reason = prompt(`Why use ${p.model} for ${p.kind} entry?`);
+  const onActivate = async (p: IntakeProfileView) => {
+    const reason = await askText(`Why use ${p.model} for ${p.kind} entry?`);
     if (!reason) return;
     const exception = p.evaluation?.passed ? undefined
-      : prompt(`The evaluation did not pass:\n${(p.evaluation?.failures ?? []).join("\n")}\n\nState the exception, or cancel:`) ?? undefined;
+      : await askText(`The evaluation did not pass:\n${(p.evaluation?.failures ?? []).join("\n")}\n\nState the exception, or cancel:`) ?? undefined;
     if (!p.evaluation?.passed && !exception) return;
     activate.mutate({ id: p.id, reason, exception });
   };
@@ -90,7 +91,7 @@ export function IntakeProfiles() {
                   <button onClick={() => onActivate(p)} className="rounded border border-slate-300 px-2 py-0.5 text-xs">Activate</button>
                 )}
                 {p.status === "active" && (
-                  <button onClick={() => { const r = prompt("Why suspend it?"); if (r) retire.mutate({ id: p.id, reason: r }); }}
+                  <button onClick={async () => { const r = await askText("Why suspend it?"); if (r) retire.mutate({ id: p.id, reason: r }); }}
                           className="rounded border border-slate-300 px-2 py-0.5 text-xs">Suspend</button>
                 )}
               </div>

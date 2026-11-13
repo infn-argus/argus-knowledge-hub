@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { IntakeProfiles } from "../../components/IntakeProfiles";
 import { KnowledgeIndex } from "../../components/KnowledgeIndex";
@@ -184,7 +185,7 @@ function AIEndpointSettings({ scope }: { scope: "workspace" | "installation" }) 
         <div className="mt-4 flex flex-wrap items-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
           This workspace uses settings of its own.
           <button type="button" disabled={backToShared.isPending}
-                  onClick={() => { if (confirm("Remove this workspace's own AI settings and use the installation's?")) backToShared.mutate(); }}
+                  onClick={async () => { if (await ask("Remove this workspace's own AI settings and use the installation's?")) backToShared.mutate(); }}
                   className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-50">
             Use the installation's settings instead
           </button>
@@ -443,8 +444,8 @@ function AIEndpointSettings({ scope }: { scope: "workspace" | "installation" }) 
           </button>
           {saved && (
             <button
-              onClick={() => {
-                if (confirm(workspace ? "Remove this workspace's own AI settings? It then uses the installation's."
+              onClick={async () => {
+                if (await ask(workspace ? "Remove this workspace's own AI settings? It then uses the installation's."
                   : "Remove the installation's AI settings? Workspaces without their own lose AI."))
                   api.remove().then(() => {
                     queryClient.invalidateQueries({ queryKey: [api.key] });

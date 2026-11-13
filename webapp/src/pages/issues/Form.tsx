@@ -1,3 +1,4 @@
+import { notify } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -143,6 +144,7 @@ export function IssueForm() {
       queryClient.invalidateQueries({ queryKey: ["issues"] });
       if (isEdit) queryClient.invalidateQueries({ queryKey: ["issues", uid] });
       queryClient.invalidateQueries({ queryKey: ["issue-links", uid] });
+      notify(isEdit ? "Ticket saved." : `Ticket ${issue!.key ?? ""} created.`.replace("  ", " "), "info");
       navigate(`/tickets/${issue!.uid}`);
     },
   });

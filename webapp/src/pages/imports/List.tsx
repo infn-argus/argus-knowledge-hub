@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -113,8 +114,8 @@ function SavedConfigs({ workspaceId }: { workspaceId: string }) {
                   Edit
                 </Link>
                 <button
-                  onClick={() => {
-                    if (confirm(`Delete configuration "${c.name}"?`)) deleteMutation.mutate(c.uid);
+                  onClick={async () => {
+                    if (await ask(`Delete configuration "${c.name}"?`)) deleteMutation.mutate(c.uid);
                   }}
                   className="text-xs text-red-500 hover:text-red-700"
                 >

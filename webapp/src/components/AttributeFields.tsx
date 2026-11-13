@@ -61,7 +61,9 @@ export function AttributeFields({ attrs, values, onChange }: {
   const hasModel = !empty(values.product_model);
   return (
     <div className="space-y-3">
-      {blocks(orderedFields(attrs)).map((b, i) => {
+      {/* A field only a source fills (a GLPI link, a source revision) is shown once it has a value: empty, it is a
+          greyed box nobody can type in. */}
+      {blocks(orderedFields(attrs.filter((a) => !a.readOnly || !empty(values[keyOf(a)])))).map((b, i) => {
         const fields = b.attrs.map((a) => (
           <Field key={keyOf(a)} attr={a} value={values[keyOf(a)]} onChange={(v) => onChange(keyOf(a), v)} />
         ));

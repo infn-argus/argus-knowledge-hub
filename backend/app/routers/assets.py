@@ -462,12 +462,23 @@ def _give_usable_type(db: Session, asset: Asset, schema_uid: str, workspace_id: 
                         details=f"type {was} (of another workspace) → {target.name}", timestamp=datetime.now(timezone.utc)))
 
 
+def _tickets_about(db: Session, asset: Asset) -> list:
+    """The tickets raised on a record or linked to it by a person (not those only derived from where it sits)."""
+    from sqlalchemy import or_
+    from app.models.issue import Issue
+    from app.models.ledger import TicketLink
+    linked = select(TicketLink.ticket_uid).where(TicketLink.asset_uid == asset.uid,
+                                                 TicketLink.role.in_(("subject", "related")))
+    return list(db.scalars(select(Issue).where(or_(Issue.asset_uid == asset.uid, Issue.uid.in_(linked)),
+                                               Issue.deleted_at.is_(None))))
+
+
 def _what_hangs_on(db: Session, asset: Asset) -> dict:
     """What points at a record: shown before it is deleted, so nobody erases a subject by accident."""
     from sqlalchemy import func, or_
     from app.models.document import DocumentRelation
     from app.models.issue import Issue
-    tickets = list(db.scalars(select(Issue).where(Issue.asset_uid == asset.uid, Issue.deleted_at.is_(None))))
+    tickets = _tickets_about(db, asset)
     return {
         "tickets": len(tickets),
         "open_tickets": sum(1 for t in tickets if t.closed_at is None),
@@ -485,7 +496,7 @@ def _before_erasing(db: Session, asset: Asset, actor: Optional[str]) -> None:
     from app.models.document import DocumentRelation
     from app.models.issue import Issue, IssueHistory
     label = f"{asset.name} ({asset.key})" if asset.key else asset.name
-    for issue in db.scalars(select(Issue).where(Issue.asset_uid == asset.uid)):
+    for issue in _tickets_about(db, asset):
         db.add(IssueHistory(uid=str(uuid.uuid4()), issue_uid=issue.uid, type="updated", author=actor or "api",
                             field="Object", from_value=label, to_value="deleted",
                             timestamp=datetime.now(timezone.utc)))

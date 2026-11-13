@@ -1,3 +1,4 @@
+import { ask } from "../lib/dialogs";
 import "leaflet/dist/leaflet.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -103,7 +104,7 @@ export function IndoorCard({ uid, editable }: { uid: string; editable: boolean }
             <button type="button" onClick={() => setEditing(true)} className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-50">
               {p ? "Move it" : "Place it inside"}
             </button>
-            {p && <button type="button" onClick={() => confirm("Take it out of its place?") && remove.mutate()}
+            {p && <button type="button" onClick={async () => await ask("Take it out of its place?") && remove.mutate()}
                           className="text-xs text-red-600 underline">remove</button>}
           </div>
         )}
@@ -308,7 +309,7 @@ function FloorsAndPlans({ placeUid, levels, plans, contents, editable, onChanged
             <li key={l.uid} className="text-xs">
               <span className="font-medium">{l.name}</span> <span className="text-slate-500">(order {l.ordinal}
               {l.elevation_m != null && `, at ${l.elevation_m} m`}{l.height_m != null && `, ${l.height_m} m high`})</span>
-              {editable && <button type="button" onClick={() => confirm(`Remove the floor ${l.name}?`) && removeLevel.mutate(l.uid)}
+              {editable && <button type="button" onClick={async () => await ask(`Remove the floor ${l.name}?`) && removeLevel.mutate(l.uid)}
                                    className="ml-2 text-red-600 underline">remove</button>}
             </li>
           ))}
@@ -342,7 +343,7 @@ function FloorsAndPlans({ placeUid, levels, plans, contents, editable, onChanged
                 {open === pl.uid ? "hide" : "show"}</button>
               {editable && <button type="button" onClick={() => setPlacing(placing === pl.uid ? null : pl.uid)} className="ml-2 text-indigo-700 underline">
                 {pl.corners ? "re-place on the map" : "place on the map"}</button>}
-              {editable && <button type="button" onClick={() => confirm(`Remove the plan ${pl.name}?`) && removePlan.mutate(pl.uid)}
+              {editable && <button type="button" onClick={async () => await ask(`Remove the plan ${pl.name}?`) && removePlan.mutate(pl.uid)}
                                    className="ml-2 text-red-600 underline">remove</button>}
               {open === pl.uid && <OpenPlan uid={pl.uid} />}
               {placing === pl.uid && (
@@ -476,7 +477,7 @@ function PlanPlacer({ plan, onDone }: { plan: FloorPlanView; onDone: () => void 
         <button type="button" disabled={points.length < 2 || save.isPending} onClick={() => save.mutate()}
                 className="rounded bg-slate-900 px-3 py-1 text-white disabled:opacity-40">{result ? "Place it again" : "Place it"}</button>
         {result && <button type="button" onClick={onDone} className="rounded border border-slate-300 px-3 py-1">Done</button>}
-        {plan.corners && <button type="button" onClick={() => confirm("Take the plan off the map?") && unplace.mutate()} className="text-red-600 underline">take it off the map</button>}
+        {plan.corners && <button type="button" onClick={async () => await ask("Take the plan off the map?") && unplace.mutate()} className="text-red-600 underline">take it off the map</button>}
       </div>
     </div>
   );

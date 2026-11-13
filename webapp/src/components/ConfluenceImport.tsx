@@ -1,3 +1,4 @@
+import { ask } from "../lib/dialogs";
 import { useRef, useState } from "react";
 import { convertConfluenceMarkdown, type ImportedPage, type ImportOptions } from "../lib/confluenceImport";
 import { MarkdownView } from "./MarkdownView";
@@ -59,8 +60,8 @@ export function ConfluenceImport({ disabled, hasContent, onImport }: {
           <ul className="list-disc pl-4 text-xs text-amber-800">{preview.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
           <p className="text-xs text-slate-500">Source metadata is retained with the body and under argus_confluence_import. Confirm the document type, facility and source catalogue attributes in the main form. This version does not check server-side duplicates.</p>
           <details className="text-xs"><summary className="cursor-pointer">Preview converted document</summary><div className="mt-2 max-h-96 overflow-auto border p-2"><MarkdownView markdown={preview.body} /></div></details>
-          <button type="button" disabled={!confirmed} className="rounded bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-40" onClick={() => {
-            if (hasContent && !window.confirm("Replace the current title and body with this Confluence export?")) return;
+          <button type="button" disabled={!confirmed} className="rounded bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-40" onClick={async () => {
+            if (hasContent && !await ask("Replace the current title and body with this Confluence export?")) return;
             onImport({ page: preview, original: original!, attachments });
           }}>Use in document form</button>
           <p className="text-xs text-slate-500">Review in the main form, then press Create document. The original export is attached unless you uncheck that option. Confidentiality is preserved; sharing with every workspace is turned off.</p>

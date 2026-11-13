@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -794,8 +795,8 @@ export function RecordMappingReview({ mapping: m }: { mapping: CatalogueMapping 
           )}
           {applied > 0 && (
             <button
-              onClick={() => {
-                if (confirm(`Retire the ${applied} records this mapping created in ${m.target_workspace_id}?`)) undo.mutate();
+              onClick={async () => {
+                if (await ask(`Retire the ${applied} records this mapping created in ${m.target_workspace_id}?`)) undo.mutate();
               }}
               className="rounded px-2 py-1.5 text-xs text-red-600 hover:bg-red-50"
             >

@@ -101,6 +101,18 @@ def test_the_asset_guide_walks_a_person_to_a_correct_entry(world):
     assert all(s["done"] for s in good["steps"])
 
 
+def test_a_serial_typed_without_its_manufacturer_is_not_called_missing_and_a_repeat_is_shown(world):
+    w = world
+    r = guide(w, "asset", {"schema_uid": w["types"]["Ion Pump"], "name": "Another pump", "key": f"{w['ws']}-IP-7",
+                           "attributes": {"serial": w["serial"]}})
+    said = " ".join(c["message"] for c in r["checks"])
+    assert "No serial number" not in said and "Add the manufacturer" in said
+    seen = next(c for c in r["checks"] if c["id"] == "serial-seen")
+    assert seen["links"][0]["uid"] == w["pump"]
+    none = guide(w, "asset", {"schema_uid": w["types"]["Ion Pump"], "name": "Another pump", "key": f"{w['ws']}-IP-8"})
+    assert any("No serial number" in c["message"] for c in none["checks"])
+
+
 def test_required_details_and_restricted_records_are_handled(world):
     w = world
     r = guide(w, "asset", {"schema_uid": w["required"], "name": "Gauge", "key": f"{w['ws']}-G1"})

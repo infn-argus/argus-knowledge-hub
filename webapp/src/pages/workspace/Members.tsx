@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -308,8 +309,8 @@ export function WorkspaceMembers() {
                   ))}
                   <td className="px-4 py-2 text-right">
                     <button
-                      onClick={() => {
-                        if (confirm(`Remove ${m.email} from ${workspace.data?.name ?? workspaceId}?`)) {
+                      onClick={async () => {
+                        if (await ask(`Remove ${m.email} from ${workspace.data?.name ?? workspaceId}?`)) {
                           removeMutation.mutate(m.user_id);
                         }
                       }}

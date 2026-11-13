@@ -31,6 +31,12 @@ export function PortabilityPage() {
       </div>
       {config.data && <ConfigNotes c={config.data} />}
       {config.isError && <p className="text-sm text-rose-700">{problemText(config.error)}</p>}
+      {config.data && !admin && (wanted === "bundles" || wanted === "setup") && (
+        <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {wanted === "bundles" ? "Workspace bundles" : "Set-up"} is for administrators of the installation: you are
+          shown the exports instead.
+        </p>
+      )}
       <div className="flex gap-1 border-b border-slate-200">
         {tabs.map((t) => (
           <button key={t} type="button" onClick={() => setParams({ tab: t })}

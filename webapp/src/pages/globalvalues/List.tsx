@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { globalValuesApi } from "../../api/client";
@@ -58,8 +59,8 @@ export function GlobalValueList() {
                       Edit
                     </Link>
                     <button
-                      onClick={() => {
-                        if (confirm(`Delete "${gv.name}"?`)) deleteMutation.mutate(gv.uid);
+                      onClick={async () => {
+                        if (await ask(`Delete "${gv.name}"?`)) deleteMutation.mutate(gv.uid);
                       }}
                       className="text-red-500 hover:text-red-700"
                     >

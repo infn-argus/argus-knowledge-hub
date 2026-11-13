@@ -1,3 +1,4 @@
+import { ask } from "../lib/dialogs";
 import "leaflet/dist/leaflet.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -183,9 +184,9 @@ export function LocationCard({ uid, editable }: { uid: string; editable: boolean
                         className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-50">
                   {l.outline ? "Redraw its outline" : "Draw its outline"}
                 </button>
-                {l.route && <button type="button" onClick={() => confirm("Remove its route?") && remove.mutate("route")}
+                {l.route && <button type="button" onClick={async () => await ask("Remove its route?") && remove.mutate("route")}
                                     className="text-xs text-red-600 underline">remove route</button>}
-                {l.outline && <button type="button" onClick={() => confirm("Remove its outline?") && remove.mutate("outline")}
+                {l.outline && <button type="button" onClick={async () => await ask("Remove its outline?") && remove.mutate("outline")}
                                       className="text-xs text-red-600 underline">remove outline</button>}
               </div>
             )}

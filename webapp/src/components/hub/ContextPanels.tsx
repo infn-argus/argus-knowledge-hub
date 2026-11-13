@@ -284,7 +284,10 @@ export function TicketContextPanel({ ticketUid }: { ticketUid: string }) {
       {c.access.documents && c.assets.length > 0 && (
         <Card title="Relevant knowledge" action={<span className="text-xs text-slate-400">for this equipment</span>}>
           {c.suggested_documents.length === 0 ? (
-            <Empty>No procedure or manual is linked to this equipment, its product or its type.</Empty>
+            <Empty>
+              No procedure or manual is linked to this equipment, its product or its type. A document linked to
+              the ticket itself is listed with what the ticket is about.
+            </Empty>
           ) : (
             <ul className="divide-y divide-slate-100">
               {c.suggested_documents.map((d: HubDocument) => (

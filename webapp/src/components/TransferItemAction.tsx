@@ -1,3 +1,4 @@
+import { notify } from "../lib/dialogs";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -65,7 +66,7 @@ export function TransferItemAction({
       setOpen(false);
       if (workspaceId) navigate(`/workspaces/${workspaceId}/transfers/${job.uid}`);
     },
-    onError: (err) => alert(err instanceof Error ? err.message : "Could not start the transfer."),
+    onError: (err) => notify(err instanceof Error ? err.message : "Could not start the transfer."),
   });
 
   return (

@@ -1,3 +1,4 @@
+import { ask, notify } from "../lib/dialogs";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -48,7 +49,7 @@ export function BulkActionsBar({
       onStarted();
       if (workspaceId) navigate(`/workspaces/${workspaceId}/transfers/${job.uid}`);
     },
-    onError: (err) => alert(err instanceof Error ? err.message : "Could not start the transfer."),
+    onError: (err) => notify(err instanceof Error ? err.message : "Could not start the transfer."),
   });
 
   const deleteMutation = useMutation({
@@ -56,16 +57,16 @@ export function BulkActionsBar({
     onSuccess: (result) => {
       onStarted();
       if (result.not_found.length) {
-        alert(`Deleted ${result.deleted}. ${result.not_found.length} could not be found.`);
+        notify(`Deleted ${result.deleted}. ${result.not_found.length} could not be found.`);
       }
     },
-    onError: () => alert(`Could not delete those ${label}.`),
+    onError: () => notify(`Could not delete those ${label}.`),
   });
 
   if (selected.size === 0) return null;
   return (
     <div role="region" aria-label={`Actions on the selected ${label}`}
-         className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm shadow-sm">
+         className="fixed bottom-4 left-1/2 z-30 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap items-center gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm shadow-lg">
       <span className="font-medium text-slate-800" aria-live="polite">{selected.size} selected</span>
       {extra}
       {canTransfer && (
@@ -96,8 +97,8 @@ export function BulkActionsBar({
       {bulkDelete && (
         <button
           type="button"
-          onClick={() => {
-            if (confirm(`Delete ${selected.size} ${label}? This cannot be undone.`)) {
+          onClick={async () => {
+            if (await ask(`Delete ${selected.size} ${label}? This cannot be undone.`)) {
               deleteMutation.mutate();
             }
           }}

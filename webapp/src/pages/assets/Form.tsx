@@ -1,3 +1,4 @@
+import { notify } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -181,6 +182,7 @@ export function AssetForm() {
       }
       queryClient.invalidateQueries({ queryKey: ["assets"] });
       queryClient.invalidateQueries({ queryKey: ["asset-next-key"] });
+      if (asset) notify(`Saved ${asset.name}${asset.key ? ` (${asset.key})` : ""}.`, "info");
       navigate(`/assets/${asset!.uid}`);
     },
   });

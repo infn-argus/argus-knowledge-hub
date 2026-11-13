@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { assetsApi, documentsApi, graphApi, issuesApi } from "../../api/client";
 import type { FailureNode, FailureStep, ImpactResult, RootCauseCandidate } from "../../api/types";
 import { GraphCanvas, IN, OUT } from "../../components/graph/GraphCanvas";
@@ -224,8 +224,12 @@ function StartPicker({
 
 export function GraphExplorer() {
   const [mode, setMode] = useState<Mode>("explore");
-  const [startKind, setStartKind] = useState<StartKind>("asset");
-  const [start, setStart] = useState<{ uid: string; label: string } | null>(null);
+  // Opened on a record from its page (/graph?kind=asset&uid=…&label=…): the graph starts there.
+  const [params] = useSearchParams();
+  const fromUrl = params.get("uid") ? { uid: params.get("uid")!, label: params.get("label") || params.get("uid")! } : null;
+  const [startKind, setStartKind] = useState<StartKind>(
+    (["asset", "ticket", "document"].includes(params.get("kind") ?? "") ? params.get("kind") : "asset") as StartKind);
+  const [start, setStart] = useState<{ uid: string; label: string } | null>(fromUrl);
   const [kinds, setKinds] = useState<string[]>([]);
   const [layers, setLayers] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);

@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { workflowApi } from "../../api/client";
+import { membersApi, workflowApi } from "../../api/client";
 import type { NotificationView, WorkflowTransition } from "../../api/ledgerTypes";
 import { openInWorkspace } from "../../api/session";
 import { useCurrentWorkspaceId } from "../../api/useCurrentWorkspaceId";
@@ -37,7 +37,7 @@ export function TicketWorkflowCard({ ticketUid }: { ticketUid: string }) {
       setAssignee("");
       setResolution("");
       setComment("");
-      for (const key of ["ticket-transitions", "issues", "issue-comments", "ticket-watchers", "hub-ticket", "notifications"])
+      for (const key of ["ticket-transitions", "issues", "issue-comments", "issue-history", "ticket-watchers", "hub-ticket", "notifications"])
         queryClient.invalidateQueries({ queryKey: [key] });
     },
   });
@@ -98,6 +98,12 @@ export function TicketWorkflowCard({ ticketUid }: { ticketUid: string }) {
 export function WatchersCard({ ticketUid }: { ticketUid: string }) {
   const queryClient = useQueryClient();
   const watchers = useQuery({ queryKey: ["ticket-watchers", ticketUid], queryFn: () => workflowApi.watchers(ticketUid) });
+  // A watcher is kept by id or address: shown by name where the person is known here.
+  const members = useQuery({ queryKey: ["members"], queryFn: membersApi.directory });
+  const nameOf = (w: string) => {
+    const m = members.data?.find((x) => x.user_id === w || x.email === w);
+    return m ? m.name || m.email : w;
+  };
   const [who, setWho] = useState("");
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["ticket-watchers", ticketUid] });
   const add = useMutation({ mutationFn: (u?: string) => workflowApi.watch(ticketUid, u), onSuccess: () => { setWho(""); refresh(); } });
@@ -107,7 +113,7 @@ export function WatchersCard({ ticketUid }: { ticketUid: string }) {
       <ul className="flex flex-wrap gap-1.5 py-1">
         {(watchers.data ?? []).map((w) => (
           <li key={w} className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
-            {w}
+            {nameOf(w)}
             <button onClick={() => remove.mutate(w)} className="text-slate-400 hover:text-red-600" aria-label={`Remove ${w}`}>
               ×
             </button>

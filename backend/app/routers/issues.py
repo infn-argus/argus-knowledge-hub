@@ -442,7 +442,8 @@ def link_issue_ticket(
     db.add(IssueHistory(
         uid=str(uuid.uuid4()), issue_uid=issue.uid, type="updated",
         author=current_user_id or "api", field="Linked ticket",
-        to_value=f"{body.relation} {(other.attributes or {}).get('argus_source_key') or other.title}",
+        to_value=f"{'relates to' if body.relation == 'relates' else body.relation} "
+                     f"{(other.attributes or {}).get('argus_source_key') or other.title}",
         timestamp=now,
     ))
     db.commit()

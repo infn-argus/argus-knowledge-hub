@@ -1,3 +1,4 @@
+import { ask, notify } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { iconsApi } from "../../api/client";
@@ -25,7 +26,7 @@ export function IconLibrary() {
       invalidate();
       setUploadName("");
     },
-    onError: () => alert("Upload failed."),
+    onError: () => notify("Upload failed."),
   });
 
   const updateMutation = useMutation({
@@ -39,7 +40,7 @@ export function IconLibrary() {
     onSuccess: invalidate,
     onError: (err) => {
       const detail = err instanceof ApiError ? err.detail : null;
-      alert(detail ?? "Could not delete this icon.");
+      notify(detail ?? "Could not delete this icon.");
     },
   });
 
@@ -156,8 +157,8 @@ export function IconLibrary() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (confirm(`Delete "${icon.name}"? This only works if no type is using it.`)) {
+                    onClick={async () => {
+                      if (await ask(`Delete "${icon.name}"? This only works if no type is using it.`)) {
                         deleteMutation.mutate(icon.uid);
                       }
                     }}

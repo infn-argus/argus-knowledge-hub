@@ -1,3 +1,4 @@
+import { ask, notify } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -79,7 +80,7 @@ export function SchemaDetail() {
   const deleteMutation = useMutation({
     mutationFn: assetsApi.delete,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["assets"] }),
-    onError: () => alert("Delete failed."),
+    onError: () => notify("Delete failed."),
   });
 
   // The icon shows up in the type tree and next to every object of the type,
@@ -109,7 +110,7 @@ export function SchemaDetail() {
       queryClient.invalidateQueries({ queryKey: ["issues"] });
       navigate("/");
     },
-    onError: () => alert("Delete failed."),
+    onError: () => notify("Delete failed."),
   });
 
   const filteredAssets = useMemo(() => {
@@ -200,8 +201,8 @@ export function SchemaDetail() {
               Edit
             </Link>
             <button
-              onClick={() => {
-                if (confirm(`Delete asset "${a.name}"?`)) deleteMutation.mutate(a.uid);
+              onClick={async () => {
+                if (await ask(`Delete asset "${a.name}"?`)) deleteMutation.mutate(a.uid);
               }}
               className="text-red-500 hover:text-red-700"
             >
@@ -430,12 +431,12 @@ export function SchemaDetail() {
           </Link>
           <TransferItemAction kind="type" uid={schema.uid} hasChildren={children.length > 0} />
           <button
-            onClick={() => {
+            onClick={async () => {
               const noun = isTicketType ? "ticket" : isDocumentType ? "document" : "object";
               const warning = children.length > 0
                 ? `Delete "${schema.name}"? This also permanently deletes its ${children.length} child type(s) and every ${noun} of this type or any child type — including ones in other workspaces if it's global. This cannot be undone.`
                 : `Delete "${schema.name}"? This also permanently deletes every ${noun} of this type — including ones in other workspaces if it's global. This cannot be undone.`;
-              if (confirm(warning)) deleteSchemaMutation.mutate();
+              if (await ask(warning)) deleteSchemaMutation.mutate();
             }}
             disabled={deleteSchemaMutation.isPending}
             className="rounded border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"

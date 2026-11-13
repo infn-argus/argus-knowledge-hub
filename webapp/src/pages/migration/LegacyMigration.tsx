@@ -2,6 +2,7 @@
  * Installations. The plan changes nothing; owners read the report and may
  * override an outcome; applying checks itself item by item; a rollback is
  * possible until the plan is finalized or the domain cuts over. */
+import { ask, askText } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -199,7 +200,7 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
             </button>
           )}
           {open && p.applied_at && (
-            <button onClick={() => confirm("Undo every applied item of this plan?") && rollback.mutate()}
+            <button onClick={async () => await ask("Undo every applied item of this plan?") && rollback.mutate()}
                     className="rounded border border-red-200 px-2 py-1 text-red-700">
               Roll back
             </button>
@@ -212,10 +213,10 @@ function PlanDetail({ id, onChange }: { id: string; onChange: () => void }) {
           )}
           {p.status === "verified" && deep?.ok && (
             <button
-              onClick={() => {
-                if (!confirm("After finalizing, the plan can no longer be rolled back.")) return;
+              onClick={async () => {
+                if (!await ask("After finalizing, the plan can no longer be rolled back.")) return;
                 if (deep?.["I-MIG-7"]?.ok === null) {
-                  const waiver = prompt("No golden incidents were checked (I-MIG-7). Why can the plan be finalized without them?");
+                  const waiver = await askText("No golden incidents were checked (I-MIG-7). Why can the plan be finalized without them?");
                   if (waiver) finalize.mutate(waiver);
                 } else finalize.mutate(undefined);
               }}
@@ -301,8 +302,8 @@ function Row({ r, open, onOverride }: { r: MigrationRow; open: boolean; onOverri
         {open && r.status !== "applied" && r.outcome !== "M-FUNC" && !r.outcome.startsWith("M-EDGE") && (
           <select
             value=""
-            onChange={(e) => {
-              const reason = e.target.value && prompt(`Why ${e.target.value}?`);
+            onChange={async (e) => {
+              const reason = e.target.value && await askText(`Why ${e.target.value}?`);
               if (reason) onOverride(e.target.value, reason);
             }}
             className="mt-1 block rounded border border-slate-200 text-[11px]"
@@ -346,8 +347,8 @@ export function LedgerOnlyCard() {
   });
   if (!status.data) return null;
   const s = status.data;
-  const toggle = (enabled: boolean) => {
-    const reason = prompt(enabled ? "Why switch this workspace to ledger-only?" : "Why switch ledger-only off?");
+  const toggle = async (enabled: boolean) => {
+    const reason = await askText(enabled ? "Why switch this workspace to ledger-only?" : "Why switch ledger-only off?");
     if (reason) set.mutate({ enabled, reason });
   };
   return (
@@ -409,13 +410,13 @@ export function RegistryCard() {
           <li key={v.id} className="flex items-center gap-2 py-1">
             <span className="rounded bg-slate-100 px-1.5 text-[11px] text-slate-600">{v.rule}</span>
             <span className="flex-1 text-slate-700">{v.message}</span>
-            <button onClick={() => { const why = prompt("Why is this edge right although the registry would not allow it?"); if (why) accept.mutate({ id: v.id, reason: why }); }}
+            <button onClick={async () => { const why = await askText("Why is this edge right although the registry would not allow it?"); if (why) accept.mutate({ id: v.id, reason: why }); }}
                     className="text-xs text-indigo-700 hover:underline">Accept as exception</button>
           </li>
         ))}
       </ul>
       <button
-        onClick={() => { const why = prompt(enforce ? "Why go back to warn mode?" : "Why enforce the registry here?"); if (why) mode.mutate({ mode: enforce ? "warn" : "enforce", reason: why }); }}
+        onClick={async () => { const why = await askText(enforce ? "Why go back to warn mode?" : "Why enforce the registry here?"); if (why) mode.mutate({ mode: enforce ? "warn" : "enforce", reason: why }); }}
         disabled={!enforce && r.unexplained > 0}
         className="mt-2 rounded-md border border-slate-300 px-3 py-1 text-xs disabled:opacity-40"
       >
@@ -447,14 +448,14 @@ export function SerialLinesCard() {
   if (!q.data) return null;
   const lines = q.data.lines;
 
-  function run(p: SerialLineProposal, ap?: string) {
-    const reason = prompt(`Why convert ${p.line.key}?`);
+  async function run(p: SerialLineProposal, ap?: string) {
+    const reason = await askText(`Why convert ${p.line.key}?`);
     if (!reason) return;
     convert.mutate({ uid: p.line.uid, key: p.line.key, reason, access_point_uid: ap }, {
-      onError: (e) => {
+      onError: async (e) => {
         const text = errorText(e);
         if (!text.includes("lose a cause")) return;
-        const accept = prompt(`${text}\n\nConvert anyway? Say why the walk may lose it.`);
+        const accept = await askText(`${text}\n\nConvert anyway? Say why the walk may lose it.`);
         if (accept) convert.mutate({ uid: p.line.uid, key: p.line.key, reason, access_point_uid: ap, accept_golden_loss: accept });
       },
     });

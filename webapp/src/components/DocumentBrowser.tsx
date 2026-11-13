@@ -1,3 +1,4 @@
+import { ask } from "../lib/dialogs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -140,7 +141,7 @@ export function DocumentBrowser({ onFullTable }: { onFullTable: () => void }) {
     finally { setBusy(false); }
   };
   const removeFolder = async () => {
-    if (!selected || selected.kind !== "folder" || !window.confirm(`Delete the empty folder “${selected.title}”? Documents are not deleted.`)) return;
+    if (!selected || selected.kind !== "folder" || !await ask(`Delete the empty folder “${selected.title}”? Documents are not deleted.`)) return;
     setBusy(true); setError("");
     try { await nav.deleteFolder(selected.uid); await refresh(); setDialog(null); }
     catch (e) { setError(message(e)); }

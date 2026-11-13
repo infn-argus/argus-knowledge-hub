@@ -1,3 +1,4 @@
+import { ask, notify } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -85,20 +86,20 @@ export function AdminWorkspaces() {
       queryClient.invalidateQueries({ queryKey: ["me-workspaces"] });
       setEditingId(null);
     },
-    onError: () => alert("Rename failed."),
+    onError: () => notify("Rename failed."),
   });
 
   const toggleGlobalMutation = useMutation({
     mutationFn: (vars: { id: string; is_global: boolean }) =>
       workspacesApi.update(vars.id, { is_global: vars.is_global }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["me-workspaces"] }),
-    onError: () => alert("Failed to update global flag."),
+    onError: () => notify("Failed to update global flag."),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => workspacesApi.delete(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["me-workspaces"] }),
-    onError: () => alert("Delete failed."),
+    onError: () => notify("Delete failed."),
   });
 
   if (workspaces.isError) {
@@ -170,11 +171,11 @@ export function AdminWorkspaces() {
                         type="checkbox"
                         checked={ws.is_global}
                         disabled={toggleGlobalMutation.isPending}
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           const next = e.target.checked;
                           if (
                             !next ||
-                            confirm(
+                            await ask(
                               `Make every schema in "${ws.name}" global? This makes every object type (and its objects) in this workspace visible and referenceable from every other workspace.`,
                             )
                           ) {
@@ -245,9 +246,9 @@ export function AdminWorkspaces() {
                           Rename
                         </button>
                         <button
-                          onClick={() => {
+                          onClick={async () => {
                             if (
-                              confirm(
+                              await ask(
                                 `Delete workspace "${ws.name}"? This permanently deletes every schema, object, ticket, label, global value and import in it. This cannot be undone.`,
                               )
                             ) {

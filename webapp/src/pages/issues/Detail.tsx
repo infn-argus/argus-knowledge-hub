@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -10,6 +11,7 @@ import {
   issueSubresourcesApi,
   issuesApi,
   membersApi,
+  workspacesApi,
   schemasApi,
 } from "../../api/client";
 import { ApiError } from "../../api/client";
@@ -137,6 +139,26 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
+/** A long list picked by typing: the browser narrows it to what matches, instead of a menu of hundreds. */
+function PickFromList({ id, options, placeholder, onPick }: {
+  id: string; options: { id: string; label: string }[]; placeholder: string; onPick: (id: string) => void;
+}) {
+  const [text, setText] = useState("");
+  const sorted = [...options].sort((a, b) => a.label.localeCompare(b.label));
+  return (
+    <>
+      <input
+        value={text} list={id} placeholder={placeholder}
+        onChange={(e) => {
+          const hit = options.find((o) => o.label === e.target.value);
+          if (hit) { onPick(hit.id); setText(""); } else setText(e.target.value);
+        }}
+        className="min-w-48 flex-1 rounded border border-slate-300 px-2 py-1 text-xs" />
+      <datalist id={id}>{sorted.map((o) => <option key={o.id} value={o.label} />)}</datalist>
+    </>
+  );
+}
+
 export function IssueDetail() {
   const { uid } = useParams<{ uid: string }>();
   const navigate = useNavigate();
@@ -175,6 +197,7 @@ export function IssueDetail() {
     queryFn: () => assetsApi.list(),
   });
   const members = useQuery({ queryKey: ["members"], queryFn: membersApi.directory });
+  const me = useQuery({ queryKey: ["me"], queryFn: workspacesApi.me, staleTime: 300_000 });
   const globalValues = useQuery({ queryKey: ["global-values"], queryFn: globalValuesApi.list });
   const ticketGlobals = globalValues.data?.filter((gv) => gv.applies_to === "tickets") ?? [];
   const statusOptions = ticketGlobals.find((gv) => gv.key === "status")?.options ?? [];
@@ -331,6 +354,9 @@ export function IssueDetail() {
         <div className="min-w-0">
           <p className="text-xs text-slate-500">
             {i.key && <span className="mr-2 font-mono text-slate-600">{i.key}</span>}
+            {schema.data?.name && schema.data.name !== "Ticket" && (
+              <span className="mr-2 rounded bg-slate-100 px-1.5 py-0.5 text-slate-700">{schema.data.name}</span>
+            )}
             {sourceProject && <span>{sourceProject} / </span>}
             {sourceUrl && sourceKey ? (
               <a
@@ -389,8 +415,8 @@ export function IssueDetail() {
             buttonClassName="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
           />
           <button
-            onClick={() => {
-              if (confirm("Delete this ticket?")) deleteMutation.mutate();
+            onClick={async () => {
+              if (await ask("Delete this ticket?")) deleteMutation.mutate();
             }}
             className="rounded border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
           >
@@ -530,36 +556,14 @@ export function IssueDetail() {
             </ul>
 
             <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-              <select
-                defaultValue=""
-                onChange={(e) => {
-                  if (e.target.value) linkAssetMutation.mutate(e.target.value);
-                  e.target.value = "";
-                }}
-                className="min-w-48 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
-              >
-                <option value="">Link an object…</option>
-                {allAssets.data?.map((a) => (
-                  <option key={a.uid} value={a.uid}>
-                    {a.name} ({a.key})
-                  </option>
-                ))}
-              </select>
-              <select
-                defaultValue=""
-                onChange={(e) => {
-                  if (e.target.value) linkDocumentMutation.mutate(e.target.value);
-                  e.target.value = "";
-                }}
-                className="min-w-48 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
-              >
-                <option value="">Link a document…</option>
-                {documents.data?.map((d) => (
-                  <option key={d.uid} value={d.uid}>
-                    {d.title} ({d.code})
-                  </option>
-                ))}
-              </select>
+              <PickFromList
+                id="link-object" placeholder="Link an object: type its name or key…"
+                options={(allAssets.data ?? []).map((a) => ({ id: a.uid, label: a.key ? `${a.name} (${a.key})` : a.name }))}
+                onPick={(id) => linkAssetMutation.mutate(id)} />
+              <PickFromList
+                id="link-document" placeholder="Link a document: type its title or code…"
+                options={(documents.data ?? []).map((d) => ({ id: d.uid, label: `${d.title} (${d.code})` }))}
+                onPick={(id) => linkDocumentMutation.mutate(id)} />
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <select
@@ -717,12 +721,15 @@ export function IssueDetail() {
               }}
               className="mt-4 space-y-2 border-t border-slate-100 pt-3"
             >
-              <input
-                value={commentAuthor}
-                onChange={(e) => setCommentAuthor(e.target.value)}
-                className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
-                placeholder="Your name"
-              />
+              {/* A signed-in person's comment carries their name; only a token session says who writes. */}
+              {me.data?.auth_type === "pat" && (
+                <input
+                  value={commentAuthor}
+                  onChange={(e) => setCommentAuthor(e.target.value)}
+                  className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                  placeholder="Your name"
+                />
+              )}
               <textarea
                 value={commentBody}
                 onChange={(e) => setCommentBody(e.target.value)}
@@ -763,7 +770,9 @@ export function IssueDetail() {
                   )}
                   {members.data?.map((m) => (
                     <option key={m.user_id} value={m.user_id}>
-                      {m.name || m.email}
+                      {m.name
+                        ? (members.data ?? []).filter((x) => x.name === m.name).length > 1 ? `${m.name} (${m.email})` : m.name
+                        : m.email}
                     </option>
                   ))}
                 </select>
@@ -776,7 +785,7 @@ export function IssueDetail() {
           <Panel title="Dates">
             <dl>
               {DATE_KEYS.map(renderAttr)}
-              <FieldRow label="Imported">{new Date(i.created_at).toLocaleString()}</FieldRow>
+              <FieldRow label={sourceKey ? "Imported" : "Created"}>{new Date(i.created_at).toLocaleString()}</FieldRow>
               {i.due_date && (
                 <FieldRow label="Due">{new Date(i.due_date).toLocaleDateString()}</FieldRow>
               )}

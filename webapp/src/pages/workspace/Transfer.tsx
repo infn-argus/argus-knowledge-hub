@@ -1,3 +1,4 @@
+import { notify } from "../../lib/dialogs";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -48,7 +49,7 @@ export function WorkspaceTransfer() {
         force: mode === "copy" ? force : undefined,
       }),
     onSuccess: (job) => navigate(`/workspaces/${workspaceId}/transfers/${job.uid}`),
-    onError: (err) => alert(err instanceof Error ? err.message : "Could not start the transfer."),
+    onError: (err) => notify(err instanceof Error ? err.message : "Could not start the transfer."),
   });
 
   // Only types actually owned here — an is_global type from elsewhere just

@@ -67,7 +67,12 @@ export function RelationGraph({ assetUid, onClose }: { assetUid: string; onClose
             {byMeaning && semantic.isFetching && " …"}
           </label>
           <span className="text-xs text-slate-400">Click to select · double-click to open or fold · drag to pan · scroll to zoom</span>
-          <button onClick={onClose} className="ml-auto rounded px-2 py-1 text-sm text-slate-500 hover:bg-slate-100">Close</button>
+          {/* This view is the object's relations; its tickets and documents are in the knowledge graph. */}
+          <button onClick={() => { onClose(); navigate(`/graph?kind=asset&uid=${encodeURIComponent(assetUid)}&label=${encodeURIComponent(name(nodeId("asset", assetUid)))}`); }}
+                  className="ml-auto rounded px-2 py-1 text-sm text-indigo-600 hover:bg-indigo-50">
+            With tickets and documents →
+          </button>
+          <button onClick={onClose} className="rounded px-2 py-1 text-sm text-slate-500 hover:bg-slate-100">Close</button>
         </div>
         {graph.error && <p className="px-4 py-2 text-sm text-red-600">{graph.error}</p>}
         <div className="flex min-h-0 flex-1">

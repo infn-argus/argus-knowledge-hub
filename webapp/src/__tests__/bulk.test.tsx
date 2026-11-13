@@ -1,6 +1,7 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { BulkActionsBar } from "../components/BulkActionsBar";
+import { DialogHost } from "../lib/dialogs";
 import { renderWith } from "../test/render";
 
 const base = { kind: "issue_uids" as const, label: "tickets", onStarted: vi.fn(), onClear: vi.fn() };
@@ -29,13 +30,20 @@ describe("the bulk toolbar", () => {
     expect(screen.getByRole("button", { name: "Clear selection" })).toBeInTheDocument();
   });
 
-  it("asks before deleting", async () => {
+  it("asks before deleting, in the app's own dialog", async () => {
     const del = vi.fn().mockResolvedValue({ deleted: 1, not_found: [] });
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    renderWith(<BulkActionsBar {...base} selected={new Set(["a"])} bulkDelete={del} />, { cache });
+    const native = vi.spyOn(window, "confirm");
+    renderWith(<><BulkActionsBar {...base} selected={new Set(["a"])} bulkDelete={del} /><DialogHost /></>, { cache });
     screen.getByRole("button", { name: "Delete" }).click();
-    expect(confirm).toHaveBeenCalledWith("Delete 1 tickets? This cannot be undone.");
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Delete 1 tickets? This cannot be undone.");
+    within(dialog).getByRole("button", { name: "Cancel" }).click();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(del).not.toHaveBeenCalled();
-    confirm.mockRestore();
+    screen.getByRole("button", { name: "Delete" }).click();
+    within(await screen.findByRole("dialog")).getByRole("button", { name: "Yes, go ahead" }).click();
+    await waitFor(() => expect(del).toHaveBeenCalled());
+    expect(native).not.toHaveBeenCalled();
+    native.mockRestore();
   });
 });

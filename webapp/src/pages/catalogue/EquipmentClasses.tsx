@@ -1,5 +1,6 @@
 /** §5.5: governing Other Equipment. The class vocabulary, the report the
  * catalogue reads monthly, promotion reviews and promotion. */
+import { askText } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError, catalogueApi, extensionsApi } from "../../api/client";
@@ -127,7 +128,7 @@ function ExtensionsCard({ canAdmit }: { canAdmit: boolean }) {
                     </span>
                     <span className="flex-1" />
                     {canAdmit && !e.admitted && passes && (
-                      <button onClick={() => { const why = prompt(`Why admit ${e.id}?`); if (why) admit.mutate({ id: e.id, reason: why }); }}
+                      <button onClick={async () => { const why = await askText(`Why admit ${e.id}?`); if (why) admit.mutate({ id: e.id, reason: why }); }}
                               className="rounded-md border border-slate-300 px-2 py-0.5">Admit</button>
                     )}
                   </div>
@@ -216,9 +217,9 @@ function ReviewRow({ r, canDecide, onDone }: { r: ClassReview; canDecide: boolea
       {canDecide && r.status === "open" && (
         <div className="mt-1 flex flex-wrap gap-2 text-xs">
           <input value={typeName} onChange={(e) => setTypeName(e.target.value)} placeholder="New type name" className="rounded border border-slate-300 px-2 py-1" />
-          <button onClick={() => { const why = prompt(`Why promote ${r.class} to the type ${typeName}?`); if (why) promote.mutate(why); }}
+          <button onClick={async () => { const why = await askText(`Why promote ${r.class} to the type ${typeName}?`); if (why) promote.mutate(why); }}
                   className="rounded bg-slate-900 px-2 py-1 font-medium text-white">Promote</button>
-          <button onClick={() => { const why = prompt("Why not now?"); if (why) decline.mutate(why); }}
+          <button onClick={async () => { const why = await askText("Why not now?"); if (why) decline.mutate(why); }}
                   className="rounded border border-slate-300 px-2 py-1">Decline</button>
         </div>
       )}

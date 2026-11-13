@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -374,8 +375,8 @@ export function CatalogueMappingReview() {
               </button>
               {applied > 0 && (
                 <button
-                  onClick={() => {
-                    if (confirm(`Retire the ${applied} applied rows' records in ${m.target_workspace_id}?`)) undo.mutate();
+                  onClick={async () => {
+                    if (await ask(`Retire the ${applied} applied rows' records in ${m.target_workspace_id}?`)) undo.mutate();
                   }}
                   disabled={undo.isPending}
                   className="rounded px-2 py-1.5 text-xs text-red-600 hover:bg-red-50"

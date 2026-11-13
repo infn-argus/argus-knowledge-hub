@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { LayoutView, LineView, place } from "./LatticeViews";
@@ -93,8 +94,8 @@ export function BeamModelPage() {
                           onClick={() => void beamModelApi.exportModel(s.model_id!).then((m) => downloadJson(`${s.model_id}.json`, m))}>export</button>
                   <button type="button" className="text-rose-700 hover:underline" disabled={remove.isPending}
                           title="Remove the whole model from this workspace"
-                          onClick={() => {
-                            if (window.confirm(`Remove the beam model ${s.model_id} from this workspace?\n\n` +
+                          onClick={async () => {
+                            if (await ask(`Remove the beam model ${s.model_id} from this workspace?\n\n` +
                                 "Its systems, paths, elements and datasets are retired (their history, tickets and " +
                                 "installations stay); its values, stored documents and asset bindings are deleted. " +
                                 "Importing the model again brings it back.")) remove.mutate(s.model_id!);

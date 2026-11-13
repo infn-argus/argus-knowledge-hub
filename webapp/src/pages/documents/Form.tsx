@@ -1,3 +1,4 @@
+import { notify } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -184,12 +185,13 @@ export function DocumentForm() {
       return created;
     },
     onSuccess: async (doc) => {
+      if (doc) notify("Document saved as a draft.", "info");
       if (doc && sourceFile && attachSource) {
         // The document is already saved; tell the author if the original needs to be attached from its page.
         try {
           await documentsApi.uploadRevisionAttachment(doc.uid, `${doc.uid}-r1`, sourceFile);
         } catch (e) {
-          alert(`The draft was saved, but its original file was not attached: ${e instanceof Error ? e.message : String(e)}. Add it on the document page.`);
+          notify(`The draft was saved, but its original file was not attached: ${e instanceof Error ? e.message : String(e)}. Add it on the document page.`);
         }
       }
       if (assisted && doc) {

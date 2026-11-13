@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -181,8 +182,8 @@ export function WorkspaceAccess() {
                 <td className="px-4 py-2 text-slate-700">{b.role_name}</td>
                 <td className="px-4 py-2 text-right">
                   <button
-                    onClick={() => {
-                      if (confirm(`Remove ${b.role_name} from ${b.subject_label}?`)) {
+                    onClick={async () => {
+                      if (await ask(`Remove ${b.role_name} from ${b.subject_label}?`)) {
                         deleteMutation.mutate(b.id);
                       }
                     }}
@@ -525,7 +526,7 @@ export function SiteWideGroupAccess({ siteId, heading = true }: { siteId: string
             <span><span className="font-medium">{g.group_name}</span> · {g.role_name}
               {!g.group_active && <span className="ml-2 text-xs text-slate-400">group deactivated: gives nothing</span>}</span>
             <button type="button" className="text-xs text-red-500 hover:text-red-700"
-                    onClick={() => { if (confirm(`Take ${g.role_name} away from ${g.group_name} in every workspace of this site?`)) revoke.mutate(g.id); }}>
+                    onClick={async () => { if (await ask(`Take ${g.role_name} away from ${g.group_name} in every workspace of this site?`)) revoke.mutate(g.id); }}>
               Revoke
             </button>
           </li>

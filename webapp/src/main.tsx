@@ -6,6 +6,7 @@ import { App } from "./App";
 import { ApiError } from "./api/client";
 import { adoptWorkspaceFromUrl } from "./api/session";
 import { ToastHost, showToast } from "./components/Toast";
+import { DialogHost } from "./lib/dialogs";
 import "./index.css";
 
 function handleError(error: unknown) {
@@ -31,6 +32,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <App />
       </BrowserRouter>
       <ToastHost />
+      <DialogHost />
     </QueryClientProvider>
   </React.StrictMode>,
 );

@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -171,7 +172,7 @@ function GroupDetail({ group: g, onChanged, editable, canAppoint, currentUserId 
               {!m.active && <span className="ml-2 text-xs text-slate-400">inactive</span>}</span>
             {canEditMembers && (
               <button type="button" className="text-xs text-red-500 hover:text-red-700"
-                      onClick={() => { if (confirm(`Take ${m.email} out of ${g.name}?`)) remove.mutate(m.user_id); }}>
+                      onClick={async () => { if (await ask(`Take ${m.email} out of ${g.name}?`)) remove.mutate(m.user_id); }}>
                 Remove
               </button>
             )}

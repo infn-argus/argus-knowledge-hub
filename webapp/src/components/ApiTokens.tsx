@@ -1,3 +1,4 @@
+import { ask } from "../lib/dialogs";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import {
@@ -226,7 +227,7 @@ export function TokenTable({
               <td className="px-3 py-2 text-xs">{date(t.last_used_at)}</td>
               <td className="px-3 py-2 text-right">
                 {t.status === "active" && (
-                  <button type="button" onClick={() => { if (confirm(`Revoke “${t.name}”? Anything using it stops working.`)) onRevoke(t); }}
+                  <button type="button" onClick={async () => { if (await ask(`Revoke “${t.name}”? Anything using it stops working.`)) onRevoke(t); }}
                           className="text-xs text-red-600 hover:text-red-800">
                     Revoke
                   </button>

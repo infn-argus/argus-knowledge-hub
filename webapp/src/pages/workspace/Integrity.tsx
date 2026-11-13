@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, workspacesApi } from "../../api/client";
@@ -90,8 +91,8 @@ export function WorkspaceIntegrity() {
               </h2>
               {data.counts.missing_references > 0 && (
                 <button
-                  onClick={() => {
-                    if (confirm(`Clear ${data.counts.missing_references} broken reference value(s)? Each is set to empty; the object itself is not touched otherwise.`)) {
+                  onClick={async () => {
+                    if (await ask(`Clear ${data.counts.missing_references} broken reference value(s)? Each is set to empty; the object itself is not touched otherwise.`)) {
                       cleanupMutation.mutate({ clear_missing_references: true });
                     }
                   }}
@@ -144,8 +145,8 @@ export function WorkspaceIntegrity() {
               </h2>
               {data.counts.dangling_objects > 0 && (
                 <button
-                  onClick={() => {
-                    if (confirm(`Remove ${data.counts.dangling_objects} relation(s) pointing at objects that are no longer visible? The target objects themselves are untouched.`)) {
+                  onClick={async () => {
+                    if (await ask(`Remove ${data.counts.dangling_objects} relation(s) pointing at objects that are no longer visible? The target objects themselves are untouched.`)) {
                       cleanupMutation.mutate({ remove_dangling_relations: true });
                     }
                   }}
@@ -197,8 +198,8 @@ export function WorkspaceIntegrity() {
               </h2>
               {data.counts.orphaned_objects > 0 && (
                 <button
-                  onClick={() => {
-                    if (confirm(`Permanently delete ${data.counts.orphaned_objects} orphaned object(s)? This cannot be undone.`)) {
+                  onClick={async () => {
+                    if (await ask(`Permanently delete ${data.counts.orphaned_objects} orphaned object(s)? This cannot be undone.`)) {
                       cleanupMutation.mutate({ delete_orphaned_objects: true });
                     }
                   }}

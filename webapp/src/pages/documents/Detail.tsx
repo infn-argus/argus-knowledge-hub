@@ -1,3 +1,4 @@
+import { ask, askText, notify } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -42,6 +43,9 @@ const STATE_STYLES: Record<string, string> = {
   superseded: "bg-slate-100 text-slate-400",
   retired: "bg-red-100 text-red-700",
 };
+
+/** A revision's state as people say it ("in review"), not as it is stored ("in_review"). */
+const stateWord = (state: string) => state.replace(/_/g, " ");
 
 export function DocumentDetail() {
   const showKeys = useShowKeys();
@@ -177,22 +181,22 @@ export function DocumentDetail() {
     mutationFn: () =>
       documentsApi.updateRevision(uid!, viewed!.uid, { body_markdown: bodyMarkdown, steps, attributes }),
     onSuccess: invalidate,
-    onError: () => alert("Save failed."),
+    onError: () => notify("Save failed."),
   });
   const submitMutation = useMutation({
     mutationFn: () => documentsApi.submitRevision(uid!, viewed!.uid),
     onSuccess: invalidate,
-    onError: () => alert("Submit failed."),
+    onError: () => notify("Submit failed."),
   });
   const withdrawMutation = useMutation({
     mutationFn: () => documentsApi.withdrawRevision(uid!, viewed!.uid),
     onSuccess: invalidate,
-    onError: (e) => alert(`Could not withdraw review — ${errorText(e)}`),
+    onError: (e) => notify(`Could not withdraw review — ${errorText(e)}`),
   });
   const shareMutation = useMutation({
     mutationFn: (shared: boolean) => documentsApi.update(uid!, { is_global: shared }),
     onSuccess: invalidate,
-    onError: (e) => alert(`Could not change sharing — ${errorText(e)}`),
+    onError: (e) => notify(`Could not change sharing — ${errorText(e)}`),
   });
   const attachMutation = useMutation({
     mutationFn: (file: File) => documentsApi.uploadRevisionAttachment(uid!, viewed!.uid, file),
@@ -202,7 +206,7 @@ export function DocumentDetail() {
     mutationFn: () => documentsApi.approveRevision(uid!, viewed!.uid),
     onSuccess: invalidate,
     // The author of a revision cannot approve it (separation of duties).
-    onError: (e) => alert(`Approve failed — ${errorText(e)}`),
+    onError: (e) => notify(`Approve failed — ${errorText(e)}`),
   });
   const rejectMutation = useMutation({
     mutationFn: () => documentsApi.rejectRevision(uid!, viewed!.uid, rejectComment),
@@ -211,12 +215,12 @@ export function DocumentDetail() {
       setShowReject(false);
       setRejectComment("");
     },
-    onError: () => alert("Reject failed."),
+    onError: () => notify("Reject failed."),
   });
   const publishMutation = useMutation({
     mutationFn: () => documentsApi.publishRevision(uid!, viewed!.uid),
     onSuccess: invalidate,
-    onError: () => alert("Publish failed — you may not have approval rights."),
+    onError: () => notify("Publish failed — you may not have approval rights."),
   });
   const newRevisionMutation = useMutation({
     mutationFn: () =>
@@ -229,12 +233,12 @@ export function DocumentDetail() {
       invalidate();
       setViewedRevisionUid(rev!.uid);
     },
-    onError: () => alert("Could not start a new revision."),
+    onError: () => notify("Could not start a new revision."),
   });
   const retireMutation = useMutation({
     mutationFn: (reason: string) => documentsApi.retire(uid!, reason),
     onSuccess: invalidate,
-    onError: (e) => alert(errorText(e)),
+    onError: (e) => notify(errorText(e)),
   });
   const addRelationMutation = useMutation({
     mutationFn: (input: { to_type: "asset" | "issue" | "document"; to_uid: string }) =>
@@ -254,7 +258,7 @@ export function DocumentDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["document-relations", uid] });
     },
-    onError: (e) => alert((e as ApiError).detail ?? "Could not add that link."),
+    onError: (e) => notify((e as ApiError).detail ?? "Could not add that link."),
   });
   const removeRelationMutation = useMutation({
     mutationFn: (relationId: number) => documentsApi.removeRelation(uid!, relationId),
@@ -267,13 +271,13 @@ export function DocumentDetail() {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       queryClient.invalidateQueries({ queryKey: ["documents", uid] });
     },
-    onError: () => alert("Could not change the type."),
+    onError: () => notify("Could not change the type."),
   });
   const deleteMutation = useMutation({
     mutationFn: () => documentsApi.delete(uid!),
     onSuccess: () => navigate("/documents"),
     // A released document under retention is refused with the date it is kept until.
-    onError: (e) => alert(errorText(e)),
+    onError: (e) => notify(errorText(e)),
   });
 
   const sourceUrl = (viewed?.attributes?.argus_source_url as string | undefined) ?? null;
@@ -400,8 +404,8 @@ export function DocumentDetail() {
           <ExportMenu kind="document" uid={doc.uid} revisionUid={viewed?.uid} />
           {doc.current_revision_uid && (
             <button
-              onClick={() => {
-                const reason = prompt("Reason for retiring this document?");
+              onClick={async () => {
+                const reason = await askText("Reason for retiring this document?");
                 if (reason) retireMutation.mutate(reason);
               }}
               className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
@@ -415,8 +419,8 @@ export function DocumentDetail() {
             buttonClassName="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
           />
           <button
-            onClick={() => {
-              if (confirm(`Delete document "${doc.title}"? This cannot be undone.`)) {
+            onClick={async () => {
+              if (await ask(`Delete document "${doc.title}"? This cannot be undone.`)) {
                 deleteMutation.mutate();
               }
             }}
@@ -445,7 +449,7 @@ export function DocumentDetail() {
               viewed?.uid === r.uid ? "ring-2 ring-slate-900" : ""
             } ${STATE_STYLES[r.state] ?? "bg-slate-100 text-slate-600"}`}
           >
-            rev {r.revision_number} · {r.state}
+            rev {r.revision_number} · {stateWord(r.state)}
             {r.uid === doc.current_revision_uid ? " · current" : ""}
           </button>
         ))}
@@ -474,7 +478,7 @@ export function DocumentDetail() {
         <div className="mt-4 rounded-lg border border-slate-200 bg-white p-5">
           <div className="flex items-center justify-between">
             <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATE_STYLES[viewed.state]}`}>
-              {viewed.state}
+              {stateWord(viewed.state)}
             </span>
             <div className="flex gap-2">
               {viewed.state === "draft" && (
@@ -509,10 +513,13 @@ export function DocumentDetail() {
                   >
                     Reject
                   </button>
+                  {/* Separation of duties: the server refuses the author; say so here instead of after the click. */}
                   <button
                     onClick={() => approveMutation.mutate()}
-                    disabled={approveMutation.isPending}
-                    className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-800"
+                    disabled={approveMutation.isPending || (!!viewed.authored_by && profile.data?.user?.id === viewed.authored_by)}
+                    title={viewed.authored_by && profile.data?.user?.id === viewed.authored_by
+                      ? "You wrote this revision: another approver must approve it" : undefined}
+                    className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Approve
                   </button>

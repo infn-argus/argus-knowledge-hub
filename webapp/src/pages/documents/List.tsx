@@ -1,3 +1,4 @@
+import { notify } from "../../lib/dialogs";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -102,9 +103,9 @@ function DocumentTable() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["documents"] }); queryClient.invalidateQueries({ queryKey: ["document-navigation"] });
       selection.clear();
-      if (result!.not_found.length) alert(`Moved ${result!.moved}. ${result!.not_found.length} could not be found.`);
+      if (result!.not_found.length) notify(`Moved ${result!.moved}. ${result!.not_found.length} could not be found.`);
     },
-    onError: () => alert("Could not move those documents."),
+    onError: () => notify("Could not move those documents."),
   });
 
   const { sorted, sort, toggle: sortBy } = useSort(

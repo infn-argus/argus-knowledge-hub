@@ -1,3 +1,4 @@
+import { ask } from "../lib/dialogs";
 import { useEffect, useState } from "react";
 import { workspacesApi } from "../api/client";
 import {
@@ -109,8 +110,8 @@ export function WorkspaceSwitcher() {
               </button>
               {profiles.length > 1 && (
                 <button
-                  onClick={() => {
-                    if (confirm(`Remove "${p.name}"?`)) {
+                  onClick={async () => {
+                    if (await ask(`Remove "${p.name}"?`)) {
                       removeProfile(p.id);
                       window.location.reload();
                     }

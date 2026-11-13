@@ -1,3 +1,4 @@
+import { askText } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { ApiError, intakeApi, ledgerApi } from "../../api/client";
@@ -459,13 +460,13 @@ function AIProposal({ p, onDone }: { p: LedgerReviewProposal; onDone: () => void
       <div className="flex gap-2">
         <button onClick={() => decide.mutate({ action: "confirm" })}
                 className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white">Confirm</button>
-        <button onClick={() => {
-                  const v = prompt(`The right value for ${field}:`, String(p.value ?? ""));
+        <button onClick={async () => {
+                  const v = await askText(`The right value for ${field}:`, String(p.value ?? ""));
                   if (v) decide.mutate({ action: "edit", value: v });
                 }}
                 className="rounded border border-slate-300 px-3 py-1.5 text-xs">Correct</button>
-        <button onClick={() => {
-                  const why = prompt("Why is it wrong?");
+        <button onClick={async () => {
+                  const why = await askText("Why is it wrong?");
                   if (why) decide.mutate({ action: "reject", reason: why });
                 }}
                 className="rounded border border-slate-300 px-3 py-1.5 text-xs">Reject</button>

@@ -1,3 +1,4 @@
+import { ask } from "../../lib/dialogs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -121,8 +122,8 @@ export function LabelList() {
                   </td>
                   <td className="px-4 py-2 text-right">
                     <button
-                      onClick={() => {
-                        if (confirm(`Remove label "${l.value}"?`)) {
+                      onClick={async () => {
+                        if (await ask(`Remove label "${l.value}"?`)) {
                           deleteMutation.mutate({ assetUid: l.asset_uid, labelUid: l.uid });
                         }
                       }}

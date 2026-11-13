@@ -1,3 +1,4 @@
+import { ask } from "../lib/dialogs";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -185,11 +186,11 @@ export function GuidedEntry({
     }
   };
 
-  const keepAsIs = () => {
+  const keepAsIs = async () => {
     const body = sourceText().trim();
     if (!body) return;
     const now = String(draft.body_markdown ?? "").trim();
-    if (now && now !== body && !confirm("Replace what the body says now with this text?")) return;
+    if (now && now !== body && !await ask("Replace what the body says now with this text?")) return;
     onApply({ body_markdown: body });
     if (canAssist) {
       autoFill.current = true;
