@@ -462,6 +462,44 @@ def _give_usable_type(db: Session, asset: Asset, schema_uid: str, workspace_id: 
                         details=f"type {was} (of another workspace) → {target.name}", timestamp=datetime.now(timezone.utc)))
 
 
+def _what_hangs_on(db: Session, asset: Asset) -> dict:
+    """What points at a record: shown before it is deleted, so nobody erases a subject by accident."""
+    from sqlalchemy import func, or_
+    from app.models.document import DocumentRelation
+    from app.models.issue import Issue
+    tickets = list(db.scalars(select(Issue).where(Issue.asset_uid == asset.uid, Issue.deleted_at.is_(None))))
+    return {
+        "tickets": len(tickets),
+        "open_tickets": sum(1 for t in tickets if t.closed_at is None),
+        "documents": db.scalar(select(func.count()).select_from(DocumentRelation).where(
+            DocumentRelation.to_type == "asset", DocumentRelation.to_uid == asset.uid)) or 0,
+        "relations": db.scalar(select(func.count()).select_from(Relation).where(
+            or_(Relation.from_asset_uid == asset.uid, Relation.to_asset_uid == asset.uid))) or 0,
+    }
+
+
+def _before_erasing(db: Session, asset: Asset, actor: Optional[str]) -> None:
+    """A record erased outright leaves no dangling link behind: its tickets say in their history what they
+    were about, and the documents that described it stop pointing at nothing."""
+    from datetime import datetime, timezone
+    from app.models.document import DocumentRelation
+    from app.models.issue import Issue, IssueHistory
+    label = f"{asset.name} ({asset.key})" if asset.key else asset.name
+    for issue in db.scalars(select(Issue).where(Issue.asset_uid == asset.uid)):
+        db.add(IssueHistory(uid=str(uuid.uuid4()), issue_uid=issue.uid, type="updated", author=actor or "api",
+                            field="Object", from_value=label, to_value="deleted",
+                            timestamp=datetime.now(timezone.utc)))
+    for link in db.scalars(select(DocumentRelation).where(DocumentRelation.to_type == "asset",
+                                                          DocumentRelation.to_uid == asset.uid)):
+        db.delete(link)
+    db.flush()
+
+
+@router.get("/{uid}/dependents")
+def asset_dependents(uid: str, workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
+    return _what_hangs_on(db, _get_owned_asset(uid, workspace_id, db))
+
+
 @router.delete("/{uid}", status_code=204)
 def delete_asset(
     uid: str, identity=Depends(get_identity), workspace_id: str = Depends(require_permission("delete")),
@@ -477,6 +515,7 @@ def delete_asset(
         except LedgerError as exc:
             _ledger_failed(db, exc)
     else:
+        _before_erasing(db, asset, identity.user.id if isinstance(identity, OidcIdentity) else "api")
         db.delete(asset)
     db.commit()
 
@@ -506,6 +545,7 @@ def bulk_delete_assets(
         if _ledger_only(db, workspace_id):
             ledger_service.retire_record(db, workspace_id, _actor(identity), uid, "deleted")
         else:
+            _before_erasing(db, asset, identity.user.id if isinstance(identity, OidcIdentity) else "api")
             db.delete(asset)
         deleted += 1
     db.commit()

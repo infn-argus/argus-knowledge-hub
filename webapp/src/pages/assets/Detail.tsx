@@ -8,6 +8,7 @@ import {
   assetSubresourcesApi,
   assetsApi,
   attachmentsApi,
+  graphApi,
   membersApi,
   relationsApi,
   schemasApi,
@@ -157,6 +158,8 @@ export function AssetDetail() {
       queryClient.invalidateQueries({ queryKey: ["asset-comments", uid] });
     },
   });
+  // The relations the hub knows the meaning of: one of these counts in impact and root-cause analysis.
+  const knownRelations = useQuery({ queryKey: ["relation-semantics"], queryFn: graphApi.relationSemantics, staleTime: 3600_000 });
   const addRelationMutation = useMutation({
     mutationFn: () => relationsApi.create(uid!, relationTarget, relationType),
     onSuccess: () => {
@@ -265,8 +268,19 @@ export function AssetDetail() {
                       className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50" />
           <TransferItemAction kind="asset" uid={a.uid} />
           <button
-            onClick={() => {
-              if (confirm(`Delete object "${a.name}"? This cannot be undone.`)) deleteMutation.mutate();
+            onClick={async () => {
+              // Say what hangs on it first: a ticket loses its subject, a procedure the thing it describes.
+              let hangs = "";
+              try {
+                const d = await assetsApi.dependents(a.uid);
+                const parts = [
+                  d.tickets ? `${d.tickets} ticket${d.tickets === 1 ? "" : "s"} (${d.open_tickets} open) will lose their object` : "",
+                  d.documents ? `${d.documents} document link${d.documents === 1 ? "" : "s"} will be removed` : "",
+                  d.relations ? `${d.relations} relation${d.relations === 1 ? "" : "s"} will go with it` : "",
+                ].filter(Boolean);
+                if (parts.length) hangs = `\n\n${parts.join("; ")}.`;
+              } catch { /* the question is still asked, without the counts */ }
+              if (confirm(`Delete object "${a.name}"? This cannot be undone.${hangs}`)) deleteMutation.mutate();
             }}
             disabled={deleteMutation.isPending}
             className="rounded border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
@@ -355,12 +369,12 @@ export function AssetDetail() {
                       {assetName(r.to_asset_uid)}
                     </Link>
                   </span>
-                  {r.derivation ? (
+                  {r.derivation && r.derivation !== "ledger" ? (
                     <span
                       className="text-[11px] text-slate-400"
-                      title="Maintained by the fact ledger from sources, installations and decisions; not edited here"
+                      title="Follows from other facts (a location, an installation, a port): change those, not this"
                     >
-                      {r.derivation === "derived" ? "derived" : "from sources"}
+                      derived
                     </span>
                   ) : (
                     <button
@@ -386,12 +400,12 @@ export function AssetDetail() {
                     </Link>{" "}
                     → {r.relation_type}
                   </span>
-                  {r.derivation ? (
+                  {r.derivation && r.derivation !== "ledger" ? (
                     <span
                       className="text-[11px] text-slate-400"
-                      title="Maintained by the fact ledger from sources, installations and decisions; not edited here"
+                      title="Follows from other facts (a location, an installation, a port): change those, not this"
                     >
-                      {r.derivation === "derived" ? "derived" : "from sources"}
+                      derived
                     </span>
                   ) : (
                     <button
@@ -429,8 +443,14 @@ export function AssetDetail() {
             <input
               value={relationType}
               onChange={(e) => setRelationType(e.target.value)}
-              className="w-28 rounded border border-slate-300 px-2 py-1 text-xs"
+              list="relation-types"
+              placeholder="relation…"
+              title={knownRelations.data?.relations[relationType]?.note || undefined}
+              className="w-36 rounded border border-slate-300 px-2 py-1 text-xs"
             />
+            <datalist id="relation-types">
+              {Object.keys(knownRelations.data?.relations ?? {}).sort().map((name) => <option key={name} value={name} />)}
+            </datalist>
             <button
               type="submit"
               className="rounded bg-slate-900 px-3 py-1 text-xs text-white hover:bg-slate-800"
@@ -438,6 +458,12 @@ export function AssetDetail() {
               Add
             </button>
           </form>
+          {knownRelations.data && relationType.trim() && !knownRelations.data.relations[relationType.trim()] && (
+            <p className="mt-1 text-[11px] text-amber-700">
+              “{relationType.trim()}” is not a relation ARGUS knows the meaning of: it is kept as a plain link and does
+              not count in impact or root-cause analysis. Pick one from the list for that.
+            </p>
+          )}
         </SectionCard>
 
         <SectionCard

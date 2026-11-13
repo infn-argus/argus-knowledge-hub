@@ -309,6 +309,9 @@ export const assetsApi = {
       `/v1/assets/next-key${schemaUid ? `?schema_uid=${encodeURIComponent(schemaUid)}` : ""}`,
     ),
   delete: (uid: string) => request<void>(`/v1/assets/${uid}`, { method: "DELETE" }),
+  /** What points at a record: its tickets, the documents about it, its relations. Asked before deleting it. */
+  dependents: (uid: string) =>
+    request<{ tickets: number; open_tickets: number; documents: number; relations: number }>(`/v1/assets/${uid}/dependents`),
   bulkDelete: (uids: string[]) =>
     request<BulkDeleteResult>("/v1/assets/bulk-delete", { method: "POST", body: json({ uids }) }),
   uploadAvatar: async (uid: string, file: File): Promise<Asset> => {
@@ -995,6 +998,10 @@ export const directoryApi = {
 
 export const graphApi = {
   summary: () => request<GraphSummary>("/v1/graph/summary"),
+  /** The relations the hub knows the meaning of, and what a failure does along each. */
+  relationSemantics: () =>
+    request<{ layers: string[]; relations: Record<string, { layer: string; flows: string; carries: string | null; weak: boolean; note: string }> }>(
+      "/v1/graph/relation-semantics"),
   /** The records whose written knowledge is about the same thing as this one's (the knowledge index). */
   semantic: (kind: "asset" | "ticket" | "document", uid: string, limit = 10) =>
     request<SemanticGraph>(`/v1/graph/semantic?${new URLSearchParams({ kind, uid, limit: String(limit) }).toString()}`),

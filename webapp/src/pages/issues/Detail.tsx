@@ -187,6 +187,8 @@ export function IssueDetail() {
       queryClient.invalidateQueries({ queryKey: ["issues", uid] });
       queryClient.invalidateQueries({ queryKey: ["ticket-transitions", uid] });
       queryClient.invalidateQueries({ queryKey: ["issues"] });
+      // A move, a new priority or assignee is a line of the history: show it without a reload.
+      queryClient.invalidateQueries({ queryKey: ["issue-history", uid] });
     },
   });
   const addCommentMutation = useMutation({

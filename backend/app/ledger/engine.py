@@ -1511,11 +1511,16 @@ def derive_located_in(db: Session, workspace_ids: Optional[Iterable[str]] = None
         if hits and hits[0].uid != a.uid:
             wanted[(a.uid, hits[0].uid)] = a.workspace_id
     current = {(r.from_asset_uid, r.to_asset_uid): r for r in db.scalars(rq)}
+    # The same edge stated in the ledger (a person set "Located in" on the form) is the edge: the derived one
+    # beside it would show the place twice and count it twice.
+    stated = {(r.from_asset_uid, r.to_asset_uid) for r in db.scalars(select(Relation).where(
+        Relation.relation_type == "located in", Relation.derivation.is_distinct_from("derived"),
+        Relation.from_asset_uid.in_({frm for frm, _to in set(wanted) | set(current)})))} if wanted or current else set()
     for key, row in current.items():
-        if key not in wanted:
+        if key not in wanted or key in stated:
             db.delete(row)
     for (frm, to), ws in wanted.items():
-        if (frm, to) not in current:
+        if (frm, to) not in current and (frm, to) not in stated:
             db.add(Relation(workspace_id=ws, from_asset_uid=frm, to_asset_uid=to, relation_type="located in",
                             derivation="derived", rule="located-in/1"))
     db.flush()
