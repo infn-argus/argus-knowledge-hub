@@ -34,7 +34,7 @@ from app.models.intake import IntakeRun
 from app.models.schema import Schema
 from app.services.llm import Endpoint, LLMError
 
-PROMPT_VERSION = "2026.10.1"
+PROMPT_VERSION = "2026.11.1"
 RULES = {"asset": "ai.asset.describe/1", "ticket": "ai.ticket.describe/1", "document": "ai.document.describe/1"}
 MAX_TEXT = 8000
 LOW = 0.5            # confidence cap when the evidence cannot be found in the input
@@ -76,8 +76,10 @@ TICKET_SYSTEM = COMMON + (
     "\"type\": <one of the ticket types listed, or null>, \"occurred_at\": <ISO date or date-time the "
     "problem happened, only if the text says it, or null; a relative time such as 'this morning', "
     "'since last night' or 'yesterday' is counted from Now, given before the input>, \"occurred_precision\": <\"instant\", "
-    "\"day\" or \"month\">, \"attributes\": {<attribute key>: <value>}, \"hypotheses\": [<possible "
-    "causes the text suggests, as short sentences>], \"evidence\": {<field>: <quote>}, "
+    "\"day\" or \"month\">, \"attributes\": {<attribute key>: <value>}, \"hypotheses\": [<up to "
+    "three possible causes of what the text describes, as short sentences: what could make it happen (a "
+    "failing power supply, a firmware fault, a cable), never the symptoms or the facts restated; [] when "
+    "none comes to mind>], \"evidence\": {<field>: <quote>}, "
     "\"confidence\": {<field>: <number>}}\n"
     "Field names in evidence and confidence: title, type, occurred_at, and attributes.<key>.\n"
     "Enumerated attributes take exactly one of the ids listed. A cause is never a finding: put what "

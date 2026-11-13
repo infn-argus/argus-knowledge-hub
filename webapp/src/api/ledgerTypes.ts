@@ -162,6 +162,8 @@ export interface RecordTickets {
 }
 
 export interface RuleEntry {
+  /** A source of this workspace has run this rule family. */
+  used_here?: boolean;
   rule_id: string;
   family: string;
   meaning: string;

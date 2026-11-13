@@ -801,7 +801,14 @@ def activate(body: Optional[dict] = None, identity=Depends(get_identity),
 @router.get("/rules")
 def rule_catalogue(workspace_id: str = Depends(require_permission("read")), db: Session = Depends(get_db)):
     active = engine.active_ruleset(db, workspace_id)
-    return {"rules": [{"rule_id": rid, "family": r["family"], "meaning": r["meaning"],
+    # The families a source of this workspace has actually run: a rule for magnets means nothing in an IT
+    # workspace that never read a control configuration.
+    # A revision's parser version names the rules it ran: "epik8s-slice/2+infer.vac.sip/1+infer.mag.ps/1".
+    versions = db.scalars(select(SourceRevision.parser_version).join(
+        LedgerStream, LedgerStream.id == SourceRevision.stream_id).where(
+        LedgerStream.workspace_id == workspace_id).distinct())
+    used = {rule.rsplit("/", 1)[0] for v in versions for rule in (v or "").split("+")[1:]}
+    return {"rules": [{"rule_id": rid, "family": r["family"], "meaning": r["meaning"], "used_here": r["family"] in used,
                        "supersedes": r.get("supersedes"), "carries_rejections": bool(r.get("carries_rejections")),
                        "implementations": r["impl"], "signature": rules.signature_hash(rid),
                        "active": active.rules.get(r["family"]) == rid,

@@ -108,3 +108,23 @@ def test_the_queues_are_served_and_hide_what_the_viewer_may_not_see():
     dash = client.get("/v1/ledger/review/queues", headers=headers).json()
     assert {q["queue"]: q["size"] for q in dash["queues"]}["identity_candidate"] == 1
     assert client.post("/v1/ledger/review/escalate", headers=headers).status_code == 200
+
+
+def test_the_review_queue_lists_only_the_inference_rules_a_source_here_runs():
+    """An IT workspace never read a control configuration: the rules about magnets and ion pumps are not its
+    business. Once one of its sources ran them (the parser version names them), they are."""
+    from app.models.ledger import LedgerStream, SourceRevision
+    db, ws = setup()
+    headers = token(db, ws)
+    db.commit()
+    used = {r["family"]: r["used_here"] for r in client.get("/v1/ledger/rules", headers=headers).json()["rules"]}
+    assert used and not any(used.values())
+    sid = f"s-{ws}"
+    db.add(LedgerStream(id=sid, workspace_id=ws, kind="epik8s", facility=ws))
+    db.flush()
+    db.add(SourceRevision(id=f"r-{ws}", stream_id=sid, number=1, revision="abc", content_hash="h",
+                          parser_version="epik8s-slice/2+infer.vac.sip/1+infer.mag.ps/1", observed_at=NOW))
+    db.commit()
+    db.close()
+    used = {r["family"]: r["used_here"] for r in client.get("/v1/ledger/rules", headers=headers).json()["rules"]}
+    assert used["infer.mag.ps"] and used["infer.vac.sip"]

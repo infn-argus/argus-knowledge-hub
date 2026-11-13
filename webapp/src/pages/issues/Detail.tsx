@@ -281,6 +281,11 @@ export function IssueDetail() {
       ]
     : null;
   const assignedMember = members.data?.find((m) => m.user_id === i.assignee);
+  // A person's name where we know them; otherwise what was recorded (an e-mail, an imported name).
+  const who = (id: string | null | undefined) => {
+    const m = id ? members.data?.find((x) => x.user_id === id) : undefined;
+    return m ? m.name || m.email : id;
+  };
   const priorityLabel = priorityOptions.find((o) => o.id === i.priority)?.value ?? i.priority;
   const attr = (key: string) => i.attributes?.[key];
   const sourceKey = attr("argus_source_key") as string | undefined;
@@ -694,7 +699,7 @@ export function IssueDetail() {
                 <li key={c.uid} className="border-l-2 border-slate-100 pl-3">
                   <p className="whitespace-pre-wrap break-words text-sm text-slate-800">{c.body}</p>
                   <p className="mt-1 text-xs text-slate-400">
-                    {c.author} · {new Date(c.created_at).toLocaleString()}
+                    {who(c.author)} · {new Date(c.created_at).toLocaleString()}
                   </p>
                 </li>
               ))}
@@ -762,7 +767,7 @@ export function IssueDetail() {
                 </select>
               </FieldRow>
               {PEOPLE_KEYS.map(renderAttr)}
-              {i.created_by && <FieldRow label="Created by">{i.created_by}</FieldRow>}
+              {i.created_by && <FieldRow label="Created by">{who(i.created_by)}</FieldRow>}
             </dl>
           </Panel>
 
@@ -801,7 +806,7 @@ export function IssueDetail() {
                     )}
                   </p>
                   <p className="text-xs text-slate-400">
-                    {h.author} · {new Date(h.timestamp).toLocaleString()}
+                    {who(h.author)} · {new Date(h.timestamp).toLocaleString()}
                   </p>
                 </li>
               ))}

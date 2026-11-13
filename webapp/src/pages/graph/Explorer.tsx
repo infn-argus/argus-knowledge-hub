@@ -97,13 +97,15 @@ function causeGraph(c: RootCauseCandidate, symptoms: FailureNode[]) {
   const nodes = new Map<string, GNode>();
   const edges: GEdge[] = [];
   const idOf = (key: string) => nodeId("asset", names.get(key)?.uid ?? key);
-  const put = (key: string, col: number, parent: string | null) => {
+  const put = (key: string, col: number, parent: string | null, stepName?: string | null) => {
     const id = idOf(key);
     if (nodes.has(id)) return nodes.get(id)!;
     const known = names.get(key);
     const taken = [...nodes.values()].filter((n) => n.col === col).length;
-    // A step in the middle of a path is known only by its key (SPARC-IOC-vac-gunvpc): its last part reads as a name.
-    const n: GNode = { id, kind: "asset", uid: known?.uid ?? key, label: known?.name ?? key.replace(/^[^-:]+[-:][A-Z]+[-:]/, ""),
+    // A step in the middle of a path comes with its name; an older server gave only its key
+    // (SPARC-IOC-vac-gunvpc), whose last part reads as a name.
+    const n: GNode = { id, kind: "asset", uid: known?.uid ?? key,
+                       label: known?.name ?? stepName ?? key.replace(/^[^-:]+[-:][A-Z]+[-:]/, ""),
                        sub: known?.type ?? (known ? null : key),
                        col, y: taken * 58, parent, seq: seq.current++,
                        mark: key === c.key ? "cause" : symptomKeys.has(key) ? "symptom" : undefined };
@@ -113,8 +115,8 @@ function causeGraph(c: RootCauseCandidate, symptoms: FailureNode[]) {
   put(c.key, 0, null);
   for (const e of c.explains) {
     e.path.forEach((step: FailureStep, i: number) => {
-      const from = put(step.provider, i, null);
-      const to = put(step.dependent, i + 1, from.id);
+      const from = put(step.provider, i, null, step.provider_name);
+      const to = put(step.dependent, i + 1, from.id, step.dependent_name);
       edges.push({ from: from.id, to: to.id, relation: step.relation, via: step.layer });
     });
   }

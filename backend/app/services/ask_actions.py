@@ -94,13 +94,15 @@ def tool_specs() -> list[dict]:
             }, "required": ["from", "relation_type", "to"]}}},
         {"type": "function", "function": {
             "name": "propose_ticket",
-            "description": "Propose opening a ticket — a fault, a request, a change, maintenance — on an object. "
+            "description": "Propose opening a ticket — an incident, a service request, a change, maintenance — on "
+                           "an object. "
                            "Changes nothing until the person confirms. The type is one of this workspace's ticket "
                            "types (an unknown one is refused with the list); a date the person gives as 'next "
                            "month' or 'tomorrow' is counted from today, given in your instructions.",
             "parameters": {"type": "object", "properties": {
                 "title": {"type": "string"},
-                "type": {"type": "string", "description": "A ticket type of this workspace, e.g. Change."},
+                "type": {"type": "string", "description": "A ticket type of this workspace by its name, e.g. "
+                         "Incident, Service Request, Change. Leave it out when unsure: the ticket is then generic."},
                 "object": {"type": "string", "description": "The object it is about: its key or uid."},
                 "description": {"type": "string"},
                 "priority": {"type": "string", "enum": ["low", "medium", "high", "critical"]},

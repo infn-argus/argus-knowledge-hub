@@ -875,3 +875,18 @@ def test_in_the_it_demo_glpi_and_a_technician_disagree_and_both_are_kept(tmp_pat
             db.close()
     finally:
         _drop(ws)
+
+
+@pytest.mark.parametrize("bundle", sorted(p.name for p in (Path(__file__).resolve().parents[1] / "demo_workspaces").iterdir()
+                                          if (p / "records" / "tickets.jsonl").exists()))
+def test_every_demo_ticket_was_opened_before_it_was_closed(bundle):
+    """A ticket stamped with the day the demo was built makes Ask say "yesterday" of a September job."""
+    records = Path(__file__).resolve().parents[1] / "demo_workspaces" / bundle / "records"
+    wrong = []
+    for line in (records / "tickets.jsonl").read_text().splitlines():
+        t = json.loads(line)
+        if t.get("closed_at") and t["created_at"] > t["closed_at"]:
+            wrong.append(f"{t['uid']}: opened {t['created_at']}, closed {t['closed_at']}")
+        if t.get("updated_at") and t["updated_at"] < t["created_at"]:
+            wrong.append(f"{t['uid']}: updated before it was opened")
+    assert not wrong, wrong

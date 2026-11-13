@@ -44,6 +44,7 @@ const TOOL_WORDS: Record<string, string> = {
   propose_create_record: "Proposing a new record",
   propose_update_record: "Proposing a change",
   propose_relation: "Proposing a relation",
+  propose_ticket: "Proposing a ticket",
 };
 
 interface Turn {
@@ -185,7 +186,9 @@ function StepRow({ step }: { step: Turn["steps"][number] }) {
         </span>
         <span className="shrink-0 font-medium text-slate-700">{TOOL_WORDS[step.tool] ?? step.tool}</span>
         <span className="min-w-0 flex-1 truncate text-slate-500">{argsText(step.arguments)}</span>
-        {summary && <span className={`shrink-0 ${step.error ? "text-rose-600" : "text-slate-500"}`}>{summary}</span>}
+        {/* A refusal can be long (it lists what would be accepted): cut to the row, whole on hover and when opened. */}
+        {summary && <span title={step.error ? summary : undefined}
+                          className={step.error ? "min-w-0 max-w-[60%] truncate text-rose-600" : "shrink-0 text-slate-500"}>{summary}</span>}
         {!step.running && <span className="shrink-0 text-slate-400">{open ? "▾" : "▸"}</span>}
       </button>
       {open && (

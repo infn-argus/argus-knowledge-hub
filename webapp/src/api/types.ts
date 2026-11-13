@@ -1685,6 +1685,8 @@ export interface FailureStep {
   relation: string;
   layer: string;
   carries: string;
+  provider_name?: string | null;
+  dependent_name?: string | null;
 }
 
 export interface FailureNode {

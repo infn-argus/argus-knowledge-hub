@@ -127,6 +127,8 @@ def test_ask_tells_a_manager_everyone_and_anyone_else_only_about_themselves(lab)
     assert {p[n].email for n in ("site_admin", "ws_admin", "it_member", "site_member", "area", "viewer")} <= set(listed)
     # Administrators of the installation with no route of their own here are named, not detailed.
     assert p["root"].email not in listed and p["root"].email in out["installation_administrators_only"]
+    # …and the answer says what that list means, so they are not taken for people without access.
+    assert "do everything in it" in out["how_to_read"]
     one = mcp_tools.workspace_access(db, ws, person=f"site_member-{lab['t']}")
     assert [x["email"] for x in one["people"]] == [p["site_member"].email]
 

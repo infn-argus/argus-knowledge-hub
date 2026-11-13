@@ -26,7 +26,7 @@ function Clicks({ height, onPick }: { height: number; onPick: (x: number, y: num
 
 /** [lo, hi] widened about its middle to at least half of `size`, then moved to lie inside 0..size. */
 export function span(lo: number, hi: number, size: number): [number, number] {
-  const want = Math.min(size, Math.max(hi - lo, size / 2));
+  const want = Math.min(size, Math.max(hi - lo, size * 0.7));
   const mid = (lo + hi) / 2;
   const start = Math.min(Math.max(0, mid - want / 2), size - want);
   return [start, start + want];
@@ -39,8 +39,8 @@ function Fit({ width, height, focus }: { width: number; height: number; focus?: 
     if (focus && focus.length > 0) {
       // Around the records looked for, with room to see what is next to them: a plan full of labels is unreadable
       // at its whole size.
-      // Never less than half the plan each way, so a single record still shows its room, its corner and its
-      // neighbours rather than filling the screen with its own label.
+      // Never less than 70% of the plan each way, so a single record still shows its room, its corner and its
+      // neighbours rather than filling the screen with its own label (half was still too close on a wide page).
       const pad = Math.max(40, 0.12 * Math.max(width, height));
       const xs = focus.map((p) => p.x), ys = focus.map((p) => p.y);
       const [x0, x1] = span(Math.min(...xs) - pad, Math.max(...xs) + pad, width);

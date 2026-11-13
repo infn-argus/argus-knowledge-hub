@@ -61,7 +61,7 @@
             "attr:serial": "SYN92604956"
           },
           "person": "teo.lindqvist@northfield-it.example",
-          "reason": "AP replaced after repeated reboots; old unit returned under RMA (IT-SERVICES ticket on LIB-02)",
+          "reason": "AP replaced after repeated reboots; old unit returned under RMA (ticket “Access points rebooting under high client load”)",
           "record": "nf-ap-lib-02"
         },
         {
@@ -261,8 +261,8 @@
     },
     "document_relations": {
       "file": "records/document_relations.jsonl",
-      "rows": 119,
-      "sha256": "33c7f1a415ba4ac5de30b8c601816189fb8b5b2e82237bbbc55b5b0b78f17d0c"
+      "rows": 120,
+      "sha256": "0449287c3dab4f64e517797a165b958be7fd8cd36947b0ffcbb1beb4abf6b4ef"
     },
     "document_revisions": {
       "file": "records/document_revisions.jsonl",
@@ -868,8 +868,8 @@
     },
     {
       "path": "records/document_relations.jsonl",
-      "sha256": "33c7f1a415ba4ac5de30b8c601816189fb8b5b2e82237bbbc55b5b0b78f17d0c",
-      "size": 25546
+      "sha256": "0449287c3dab4f64e517797a165b958be7fd8cd36947b0ffcbb1beb4abf6b4ef",
+      "size": 25752
     },
     {
       "path": "records/document_revisions.jsonl",

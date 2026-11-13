@@ -200,6 +200,8 @@ def _describe_hop(graph: DependencyGraph, hop: Hop) -> dict:
     return {
         "provider": graph.nodes[hop.provider].key, "dependent": graph.nodes[hop.dependent].key,
         "relation": hop.relation, "layer": hop.layer, "carries": hop.carries,
+        # Names too: a step in the middle of a path is drawn, and its key alone reads badly.
+        "provider_name": graph.nodes[hop.provider].name, "dependent_name": graph.nodes[hop.dependent].name,
     }
 
 

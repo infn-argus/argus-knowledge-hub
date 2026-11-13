@@ -321,7 +321,7 @@
     "ticket_comments": {
       "file": "records/ticket_comments.jsonl",
       "rows": 11,
-      "sha256": "bb8f3a2353832064c3f64c0ed6f5ecf0fd157dd2cd18dc615bcca5d008d3d6f7"
+      "sha256": "ab4ad05234e71b7146afef5c9d13d2a39deebe539ecbfa898d9fb6f7f21cf44d"
     },
     "ticket_escalations": {
       "file": "records/ticket_escalations.jsonl",
@@ -351,7 +351,7 @@
     "tickets": {
       "file": "records/tickets.jsonl",
       "rows": 26,
-      "sha256": "a04c9a30696510ebb0509b8341fb154c82cd74e00c84353d0d050c074629b3af"
+      "sha256": "3d0747f025afac57b2430fe42708511baeb843e5fafd2f9aecce47f23a408d03"
     },
     "types": {
       "file": "records/types.jsonl",
@@ -1187,8 +1187,8 @@
     },
     {
       "path": "records/ticket_comments.jsonl",
-      "sha256": "bb8f3a2353832064c3f64c0ed6f5ecf0fd157dd2cd18dc615bcca5d008d3d6f7",
-      "size": 2889
+      "sha256": "ab4ad05234e71b7146afef5c9d13d2a39deebe539ecbfa898d9fb6f7f21cf44d",
+      "size": 2847
     },
     {
       "path": "records/ticket_escalations.jsonl",
@@ -1217,8 +1217,8 @@
     },
     {
       "path": "records/tickets.jsonl",
-      "sha256": "a04c9a30696510ebb0509b8341fb154c82cd74e00c84353d0d050c074629b3af",
-      "size": 18864
+      "sha256": "3d0747f025afac57b2430fe42708511baeb843e5fafd2f9aecce47f23a408d03",
+      "size": 18752
     },
     {
       "path": "records/types.jsonl",

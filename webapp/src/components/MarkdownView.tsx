@@ -129,8 +129,10 @@ export function MarkdownView({
               </code>
             );
           },
+          // A fenced block without a language arrives as "inline" code: inside a block it must not take the
+          // inline span's light background, or every line of a MAD-X deck shows as a pale bar.
           pre: ({ children }) => (
-            <pre className="my-3 overflow-x-auto rounded bg-slate-900 p-3 text-slate-100">
+            <pre className="my-3 overflow-x-auto rounded bg-slate-900 p-3 text-slate-100 [&_code]:rounded-none [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-xs [&_code]:text-slate-100">
               {children}
             </pre>
           ),

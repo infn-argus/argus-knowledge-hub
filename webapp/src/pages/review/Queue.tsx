@@ -351,7 +351,9 @@ export function ReviewQueuePage() {
 function RulesCard() {
   const rules = useQuery({ queryKey: ["ledger-rules"], queryFn: ledgerApi.rules });
   if (!rules.data) return null;
-  const active = rules.data.rules.filter((r) => r.active);
+  // Only the rules a source of this workspace runs: an IT workspace has no magnet power supplies to infer.
+  const active = rules.data.rules.filter((r) => r.active && r.used_here !== false);
+  if (active.length === 0 && rules.data.check.length === 0) return null;
   return (
     <Card
       title="Inference rules in force"

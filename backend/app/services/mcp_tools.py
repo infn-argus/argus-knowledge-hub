@@ -796,6 +796,11 @@ def workspace_access(db: Session, workspace_id: str, person: str = "") -> dict:
             admins = [p for p in out["people"] if p["installation_administrator"] and len(p["routes"]) == 1]
             out["people"] = [p for p in out["people"] if p not in admins]
             out["installation_administrators_only"] = [p["email"] for p in admins]
+            out["how_to_read"] = (
+                "people: who can open this workspace through a grant here (a role, a group, area permissions). "
+                "installation_administrators_only: administrators of the whole installation — they can open this "
+                "workspace and do everything in it, with no grant here; named, not detailed. counts.people is "
+                "everyone who can open it, both kinds together.")
         return out
     user = db.get(User, viewer.user_id) if viewer is not None and viewer.user_id else None
     if user is None:

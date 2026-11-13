@@ -86,6 +86,11 @@ export function AssetDetail() {
   const allSchemas = useQuery({ queryKey: ["schemas"], queryFn: schemasApi.list });
   const allAssets = useQuery({ queryKey: ["assets"], queryFn: () => assetsApi.list() });
   const members = useQuery({ queryKey: ["members"], queryFn: membersApi.directory });
+  // A person's name where we know them; otherwise what was recorded (an e-mail, an import's name).
+  const who = (id: string | null | undefined) => {
+    const m = id ? members.data?.find((x) => x.user_id === id) : undefined;
+    return m ? m.name || m.email : id;
+  };
   const relations = useQuery({ queryKey: ["relations"], queryFn: relationsApi.list });
   const attachments = useQuery({
     queryKey: ["attachments", uid],
@@ -613,7 +618,7 @@ export function AssetDetail() {
             {history.data?.map((h) => (
               <li key={h.uid} className="border-l-2 border-slate-200 pl-2">
                 <p className="text-slate-900">
-                  {h.type} — <span className="text-slate-500">{h.author}</span>
+                  {h.type} — <span className="text-slate-500">{who(h.author)}</span>
                 </p>
                 <p className="text-xs text-slate-400">
                   {new Date(h.timestamp).toLocaleString()}
@@ -630,7 +635,7 @@ export function AssetDetail() {
               <li key={c.uid}>
                 <p className="text-slate-900">{c.text}</p>
                 <p className="text-xs text-slate-400">
-                  {c.author} · {new Date(c.created).toLocaleString()}
+                  {who(c.author)} · {new Date(c.created).toLocaleString()}
                 </p>
               </li>
             ))}

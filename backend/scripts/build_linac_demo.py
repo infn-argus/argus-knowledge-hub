@@ -122,12 +122,15 @@ def ticket(uid, kind, state, prio, title, desc, asset_uid, created, assignee, by
            comments=()):
     if db.get(Issue, uid):
         return
+    # The dates the story gives, not the day the demo is built: Ask reads them ("yesterday", "in August").
+    last = closed or created
     db.add(Issue(uid=uid, workspace_id=WS, schema_uid=schemas[kind], title=title, description=desc, state=state,
                  priority=prio, asset_uid=asset_uid, assignee=assignee, created_by=by, labels=KW,
-                 attributes=attrs or {}, closed_at=closed))
+                 attributes=attrs or {}, closed_at=closed, created_at=created, updated_at=last))
     db.flush()
     for i, (author, body) in enumerate(comments, start=1):
-        db.add(IssueComment(uid=f"{uid}-c{i}", issue_uid=uid, author=author, body=body))
+        db.add(IssueComment(uid=f"{uid}-c{i}", issue_uid=uid, author=author, body=body, created_at=last,
+                            updated_at=last))
     made["tickets"] += 1
 
 
