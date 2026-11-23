@@ -14,6 +14,8 @@ submodules:
 | `docs/architecture.md` | how the image, ioc-chart, epik8s-chart and the beamlines fit together | `ioc_guide` |
 | beamline repositories (optional) | the deploy value files: `iocDefaults` and the IOC entries | list, render and check a beamline's IOCs as deployed |
 | Python IOC repositories (optional) | `pyioc.yaml` (the parameters an IOC entry may set), README, `example.yaml` | find a Python IOC, explain its parameters, check its entries (*Python IOCs*) |
+| a beamline's `softiocs:` and each task's `config/iocs/<name>/config.yaml` | the iocmng soft IOCs: wired inputs, rules, outputs | show a soft IOC and what it reads and writes, check its config (*Soft IOCs*) |
+| `epik8s-softioc-mng` (optional, read as text) | the config schema, the expression evaluator's whitelist and functions, README and MANUAL | check rule conditions as iocmng accepts them; `ioc_guide` sections *Soft IOCs (iocmng): …* |
 | `epik8s-pyioc` (the installed library) | the pyioc.yaml format, the entry checks, the project generator and its documentation | the same checks `pyioc-run` makes at pod start; `ioc_scaffold_pyioc`; `ioc_guide` sections *Python IOCs: …* |
 
 ## The tools
@@ -40,7 +42,9 @@ submodules and tagging an image stay with people.
 | `ioc_check_beamline` | Every enabled, templated IOC of a beamline rendered and checked: what its next sync would break |
 | `ioc_get_pyioc` | One Python IOC: repository and image, every parameter an entry may set (type, default, range, unit), the PV prefix rules, the `iocDefaults` block, an example entry, the beamline IOCs that run it |
 | `ioc_scaffold_pyioc` | A complete Python IOC project from a description of the device (transport, PVs with type and access): spec, caproto IOC, simulator, driver to complete, CA tests, Dockerfile, CI, with a self-check |
-| `ioc_guide` | The architecture document by section, the epik8s-pyioc documentation (*Python IOCs: …*), the workflow, and which commit the catalogue was read from |
+| `ioc_get_softioc` | One iocmng soft IOC as deployed: entry with `softiocDefaults`, its config's rules, rule_defaults and transforms, the wiring (PVs read, PVs each rule writes and with what), its own PVs, and the check of its config |
+| `ioc_softioc_wiring` | Every soft IOC rule that reads or can write a PV (a name or part of one): condition, tolerance, value written |
+| `ioc_guide` | The architecture document by section, the epik8s-pyioc documentation (*Python IOCs: …*), iocmng's manual (*Soft IOCs (iocmng): …*), the workflow, and which commit the catalogue was read from; a word in no title lists the sections whose text has it |
 
 ### What `ioc_render` reproduces
 
@@ -117,6 +121,26 @@ it. The library's documentation is in `ioc_guide` (*Python IOCs: How to*, *speci
   logs, blocking calls. Its self-check parses the spec, resolves the example entry and compiles the Python;
   nothing generated is run in the hub. The person builds and tests it (`pytest` runs the IOC on its simulator
   over Channel Access) and tags it, and CI publishes the image.
+
+### Soft IOCs (iocmng)
+
+A soft IOC owns no device. It is an entry under the beamline's `softiocs:` (epik8s-chart merges `softiocDefaults`
+under it like `iocDefaults`) and a task of epik8s-softioc-mng, whose logic is the `config.yaml` in
+`gitRepoConfig.path` (the beamline repository, or another one cloned shallow). The task reads other IOCs' PVs
+(inputs with a `link`), evaluates `rules` each cycle, sets its own `outputs`, and writes other IOCs' PVs through
+`actuators`. Its PVs are `<iocprefix>:<name>`, its inputs and outputs and the system PVs (`ENABLE`, `STATUS`,
+`MESSAGE`, …).
+
+- **Wiring.** `ioc_get_softioc` lists what a task reads (and which rules use each PV) and every write a rule makes:
+  the PV, the value, the condition and how long it must hold (`tolerance`). `ioc_softioc_wiring(pv)` searches all
+  soft IOCs for one PV: "what can switch off SPARC:LLRF1?" is answered from the configs.
+- **Checks** (`ioc_get_softioc`, `ioc_check_beamline`): unknown top-level keys (iocmng's schema), conditions and
+  transform expressions that do not parse, use a construct or function iocmng's safe evaluator refuses, or a
+  name that is no wired input, buffer (`<name>_buf`) or parameter (the rule would fail at every cycle); outputs,
+  `message_pv` and `rule_defaults` that are not outputs or system PVs; actuators without a `link` to write to;
+  duplicate rule ids; negative tolerances; a missing `config.yaml`, `iocprefix`, `module` or `className`.
+- The evaluator's whitelist (AST nodes, registered functions) is read from epik8s-softioc-mng's source text when
+  the catalogue is built (`--iocmng`); without it the checks use the 2.7 whitelist. Nothing of iocmng is imported.
 
 ### Retired modules and stale examples
 
@@ -353,6 +377,10 @@ that can reach it:
 README and `example.yaml`. It is cloned shallow, without submodules or Git LFS objects, and nothing in it is
 run. infn-epics-ioc's CI passes the repositories of its variable `IOC_CATALOG_PYIOCS` (default `thorlabscct`).
 
+`--iocmng URL[@REF]` (or a path) reads epik8s-softioc-mng as text: its config schema, the AST nodes and
+functions its expression evaluator allows, README and MANUAL. The beamlines' `softiocs:` and their task configs
+are read with `--beamline`. infn-epics-ioc's CI passes `IOC_CATALOG_IOCMNG` (default the GitHub repository).
+
 `--sources DIR` also clones each INFN driver at the version its install.yml names (`organization` + `module`)
 and indexes its db templates (macros, record sample), protocol files (commands), startup scripts and README.
 Repositories the build cannot reach are listed under `sources.failed`. The drivers on `baltig.infn.it`
@@ -404,3 +432,7 @@ set. Rebuild it with the command above when you want a newer offline default.
    `ioc_render` the entry. A new one: `ioc_scaffold_pyioc`, then complete the driver, run its tests and tag it.
    Add the `iocDefaults` block and the entry (`devtype`, never `template`; a `devices` list for the screens),
    check it with `ioc_render(values, beamline=…)`, and add the repository to `IOC_CATALOG_PYIOCS`.
+7. **Logic over existing PVs** (interlocks, sequences, monitoring): an iocmng soft IOC, not a new IOC. Read a
+   similar one with `ioc_get_softioc`, write its `config.yaml` under `config/iocs/<name>/` and its entry under
+   `softiocs:`, and check it with `ioc_check_beamline`. Before changing an IOC that soft IOCs drive,
+   `ioc_softioc_wiring(pv)` says which rules write it.

@@ -12,7 +12,8 @@ an entity type nobody defines or the image does not compile, a parameter that is
 unknown or of the wrong type, an object reference to nothing.
 
 Python IOCs (epik8s-pyioc) have no template: their entry is checked against the IOC's pyioc.yaml
-with the library `pyioc-run` itself uses, so a check here fails where the pod would.
+with the library `pyioc-run` itself uses, so a check here fails where the pod would. iocmng soft IOCs
+(a beamline's `softiocs:`) are checked and explained from their config.yaml: wiring, rules, conditions.
 """
 from __future__ import annotations
 
@@ -122,7 +123,7 @@ def _score(words: list, fields: list) -> int:
 
 
 def ioc_search(db, workspace_id: str, query: str, kind: Optional[str] = None, limit: int = 15) -> dict:
-    """Modules, entity models, templates, examples and Python IOCs that match the words."""
+    """Modules, entity models, templates, examples, Python IOCs and soft IOCs that match the words."""
     words = [w.lower() for w in WORD.findall(query or "")]
     if not words:
         return {"error": "Say what to look for: a vendor, a device, a driver, a devtype…"}
@@ -159,6 +160,18 @@ def ioc_search(db, workspace_id: str, query: str, kind: Optional[str] = None, li
                 hits.append((s, {"kind": "pyioc", "name": x["name"], "description": spec.get("description"),
                                  "devgroup": spec.get("devgroup"), "image": spec.get("image"),
                                  "repository": (x.get("repository") or {}).get("url")}))
+    if kind in (None, "softioc"):
+        for line, d, rec in _softioc_entries():
+            cfg = rec.get("config") or {}
+            m = _softioc_model(cfg)
+            text = " ".join([str(r.get("message") or "") + " " + str(r.get("id") or "") for r in m["rules"]] +
+                            [str(spec.get("link")) for spec in m["inputs"].values() if isinstance(spec, dict)])
+            s = _score(words, [(6, d["values"]["iocname"]), (2, d["values"].get("description")),
+                               (2, d["values"].get("iocprefix")), (1, text)])
+            if s:
+                hits.append((s, {"kind": "softioc", "name": d["values"]["iocname"], "beamline": line["name"],
+                                 "iocprefix": d["values"].get("iocprefix"),
+                                 "description": d["values"].get("description"), "rules": len(m["rules"])}))
     if kind in (None, "example"):
         for x in load()["examples"]:
             s = _score(words, [(4, x["name"]), (3, x["template"]), (3, x["devtype"]), (1, x["iocprefix"])])
@@ -272,6 +285,18 @@ def _pyioc_guide() -> dict:
         return {}
 
 
+def _iocmng_guide() -> dict:
+    """iocmng's README and MANUAL (by its ## sections), from the catalogue."""
+    mng = _iocmng()
+    out = {}
+    if mng.get("readme"):
+        out["Soft IOCs (iocmng): README"] = mng["readme"]
+    for part in re.split(r"(?m)^## ", mng.get("manual") or "")[1:]:
+        title, _nl, body = part.partition("\n")
+        out[f"Soft IOCs (iocmng): {title.strip()}"] = body
+    return out
+
+
 def ioc_guide(db, workspace_id: str, section: Optional[str] = None) -> dict:
     """How infn-epics-ioc, ibek-support-infn, ibek-templates, Python IOCs and the beamlines fit together."""
     cat = load()
@@ -279,6 +304,7 @@ def ioc_guide(db, workspace_id: str, section: Optional[str] = None) -> dict:
     parts = re.split(r"(?m)^## ", text)
     sections = {p.split("\n", 1)[0].strip(): p.split("\n", 1)[1] if "\n" in p else "" for p in parts[1:]}
     sections.update(_pyioc_guide())
+    sections.update(_iocmng_guide())
     about = {"repository": cat.get("repository"), "generated_at": cat.get("generated_at"),
              "loaded_from": cat.get("loaded_from"),
              "beamlines": {b["name"]: {"iocs": len(b.get("iocs") or []), "commit": b.get("commit")}
@@ -286,6 +312,9 @@ def ioc_guide(db, workspace_id: str, section: Optional[str] = None) -> dict:
              "modules": len(cat["modules"]), "entity_models": len(cat["entity_models"]),
              "templates": len(cat["templates"]), "examples": len(cat["examples"]),
              "pyiocs": [x["name"] for x in cat.get("pyiocs") or []],
+             "softiocs": {b["name"]: len(b.get("softiocs") or []) for b in cat.get("beamlines") or []
+                          if b.get("softiocs")},
+             "iocmng": (cat.get("iocmng") or {}).get("version"),
              "problems": cat.get("problems", [])[:30]}
     if section:
         s = section.lower()
@@ -326,6 +355,11 @@ WORKFLOW = [
     "project; complete its driver, run its tests on the simulator, tag it to publish the image, then add the "
     "iocDefaults block and the entry (devtype, never template; a devices list). ioc_guide section 'Python IOCs' "
     "has the specification and the pitfalls.",
+    "7. Logic over PVs that already exist (interlocks, sequences, monitoring) is an iocmng soft IOC, not a new "
+    "IOC: an entry under the beamline's softiocs: and a config.yaml of wired inputs, rules and outputs. "
+    "ioc_get_softioc shows one with what it reads and writes and its check; ioc_softioc_wiring(pv) answers "
+    "'what can write this PV?'; ioc_check_beamline checks every soft IOC's config. ioc_guide section "
+    "'Soft IOCs (iocmng)' is its manual.",
 ]
 
 
@@ -819,9 +853,18 @@ def ioc_list_beamline(db, workspace_id: str, beamline: Optional[str] = None, tem
     by_template: dict = {}
     for r in rows:
         by_template[r["template"] or f"({r['mode']})"] = by_template.get(r["template"] or f"({r['mode']})", 0) + 1
+    soft = []
+    for sline, d, rec in _softioc_entries():
+        if sline is line:
+            w = _wiring(d["values"], rec.get("config"))
+            soft.append({"name": d["values"]["iocname"], "iocprefix": d["values"].get("iocprefix"),
+                         "module": d["values"].get("module"), "className": d["values"].get("className"),
+                         "disabled": bool(d["values"].get("disable")),
+                         "rules": len(_softioc_model(rec.get("config") or {})["rules"]),
+                         "reads": len(w["reads"]), "writes": sorted({x["pv"] for x in w["writes"] if x["pv"]})})
     return {"beamline": line["name"], "url": line.get("url"), "commit": line.get("commit"),
             "value_files": line.get("value_files"), "ioc_defaults": sorted(line.get("ioc_defaults") or {}),
-            "total": len(rows), "by_template": by_template, "iocs": rows}
+            "total": len(rows), "by_template": by_template, "iocs": rows, "softiocs": soft}
 
 
 def _entry(line: dict, name: str) -> Optional[dict]:
@@ -878,8 +921,19 @@ def ioc_check_beamline(db, workspace_id: str, beamline: str, template: Optional[
         failed.append({"ioc": v["iocname"], "template": v.get("template") or
                        (f"(pyioc {v.get('devtype')})" if _mode(v) == "pyioc" else None), "devtype": v.get("devtype"),
                        "errors": errors[:5], "more": max(0, len(errors) - 5)})
+    soft = {"passed": [], "failed": []}
+    if not template:
+        for sline, d, rec in _softioc_entries():
+            if sline is not line or d["values"].get("disable"):
+                continue
+            c = softioc_check(d["values"], rec.get("config"))
+            if c["ok"]:
+                soft["passed"].append(d["values"]["iocname"])
+            else:
+                soft["failed"].append({"softioc": d["values"]["iocname"], "errors": c["errors"][:5],
+                                       "more": max(0, len(c["errors"]) - 5)})
     return {"beamline": line["name"], "commit": line.get("commit"), "passed": len(passed), "failed": failed,
-            "skipped": skipped, "ignored_by_merge": ignored,
+            "skipped": skipped, "ignored_by_merge": ignored, "softiocs": soft,
             "next": "ioc_get_beamline_ioc shows one IOC's deployed values and full render."}
 
 
@@ -1064,3 +1118,230 @@ def ioc_scaffold_pyioc(db, workspace_id: str, description: Any) -> dict:
             "Add the repository to IOC_CATALOG_PYIOCS of infn-epics-ioc, so the catalogue knows the IOC.",
         ],
     }
+
+
+# --- iocmng soft IOCs (epik8s-softioc-mng) ----------------------------------------------
+#
+# A soft IOC owns no device: it reads other IOCs' PVs ("wired" inputs), evaluates rules and writes PVs of
+# other IOCs (actuators). Its logic is the config.yaml in the beamline repository, so the wiring and the
+# checks below come from that file alone. Conditions are checked the way iocmng's safe evaluator accepts them
+# (the AST nodes and functions read from its source when the catalogue was built); nothing is evaluated.
+
+import ast as _ast
+
+# The evaluator's whitelist when the catalogue has no iocmng section (epik8s-softioc-mng 2.7).
+_SAFE_NODES = {"Expression", "BoolOp", "And", "Or", "UnaryOp", "Not", "USub", "UAdd", "Compare", "Eq", "NotEq",
+               "Lt", "LtE", "Gt", "GtE", "BinOp", "Add", "Sub", "Mult", "Div", "Mod", "Constant", "Name", "Load",
+               "IfExp", "Call", "keyword", "Tuple", "List"}
+_FUNCTIONS = {"abs", "round", "sqrt", "log", "exp", "pow", "floor", "ceil", "clamp", "mean", "std", "variance",
+              "median", "rms", "min", "max", "any_of", "all_of", "count_true", "length", "sum_of", "diff", "last",
+              "moving_avg", "derivative"}
+_CONFIG_KEYS = {"prefix", "parameters", "pvs", "arguments", "rules", "rule_defaults", "transforms"}
+# The PVs every iocmng task gets besides its own inputs and outputs (MANUAL, "System PVs").
+SYSTEM_PVS = ("ENABLE", "STATUS", "MESSAGE", "VERSION", "CYCLE_COUNT", "RUN", "CLEAR", "RESET", "CONN_INP",
+              "CONN_OUT")
+
+
+def _iocmng() -> dict:
+    return load().get("iocmng") or {}
+
+
+def _softioc_lines() -> list:
+    return [b for b in _beamlines() if b.get("softiocs")]
+
+
+def _softioc_values(line: dict, entry: dict) -> dict:
+    """The soft IOC entry as epik8s-chart deploys it: softiocDefaults merged under it (empty values in the entry
+    do not override), iocname in lower case, the beamline."""
+    ignored: list = []
+    values = _merge_overwrite(line.get("softioc_defaults") or {}, entry, ignored=ignored)
+    values["iocname"] = str(values.get("name") or "").lower()
+    values["beamline"] = (line.get("globals") or {}).get("beamline") or line["name"]
+    return {"values": values, "ignored_by_merge": ignored}
+
+
+def _softioc_model(cfg: dict) -> dict:
+    """inputs/outputs (under `arguments`, or its older alias `pvs`), rules, rule_defaults, transforms, parameters."""
+    pvs = cfg.get("arguments") or cfg.get("pvs") or {}
+    return {"inputs": pvs.get("inputs") or {}, "outputs": pvs.get("outputs") or {},
+            "rules": [r for r in cfg.get("rules") or [] if isinstance(r, dict)],
+            "rule_defaults": cfg.get("rule_defaults") or {}, "transforms": cfg.get("transforms") or [],
+            "parameters": cfg.get("parameters") or {}}
+
+
+def _expression_problems(expr: Any, names: set) -> list:
+    """What iocmng's safe_eval would refuse, or fail on at run time, in one expression."""
+    mng = _iocmng()
+    safe = set(mng.get("safe_nodes") or _SAFE_NODES)
+    functions = set(mng.get("functions") or _FUNCTIONS)
+    if not isinstance(expr, str) or not expr.strip():
+        return ["is empty"]
+    try:
+        tree = _ast.parse(expr, mode="eval")
+    except SyntaxError as e:
+        return [f"does not parse: {e.msg}"]
+    out = []
+    for node in _ast.walk(tree):
+        kind = type(node).__name__
+        if isinstance(node, _ast.Call):
+            if not isinstance(node.func, _ast.Name):
+                out.append("only direct function calls are allowed")
+            elif node.func.id not in functions:
+                out.append(f"function {node.func.id!r} is not registered in iocmng")
+        elif kind not in safe:
+            out.append(f"{kind} is not allowed by iocmng's safe evaluator")
+        if isinstance(node, _ast.Name) and node.id not in names and node.id not in functions:
+            out.append(f"{node.id!r} is not a wired input, a buffer (<name>_buf) or a parameter: the rule fails at "
+                       "every cycle")
+    return list(dict.fromkeys(out))
+
+
+def softioc_check(values: dict, config: Optional[dict]) -> dict:
+    """A soft IOC's entry and config.yaml, checked against what iocmng needs."""
+    errors, warnings = [], []
+    if not values.get("iocprefix"):
+        errors.append("iocprefix is missing: the start script passes it as the task's PV prefix")
+    for key in ("module", "className"):
+        if not values.get(key):
+            warnings.append(f"{key} is missing: start.sh.j2 passes it to iocmng-run (iocmng.declarative / "
+                            "DeclarativeTask for a rules-only task)")
+    if config is None:
+        return {"ok": False, "errors": errors + ["no config.yaml found for this task (gitRepoConfig url/path)"],
+                "warnings": warnings}
+    schema = (_iocmng().get("schema") or {}).get("properties")
+    allowed = set(schema) if schema else _CONFIG_KEYS
+    for key in sorted(set(config) - allowed):
+        errors.append(f"config.yaml: unknown top-level key {key!r} (iocmng knows {', '.join(sorted(allowed))})")
+    m = _softioc_model(config)
+    inputs, outputs = m["inputs"], m["outputs"]
+    wired = {n for n, spec in {**inputs, **outputs}.items() if isinstance(spec, dict) and spec.get("link")}
+    names = {n for n, spec in inputs.items() if isinstance(spec, dict) and spec.get("link")}
+    names |= {f"{n}_buf" for n, spec in inputs.items() if isinstance(spec, dict) and spec.get("buffer_size")}
+    names |= {str(k) for k in m["parameters"]}
+    for group, specs in (("inputs", inputs), ("outputs", outputs)):
+        for n, spec in specs.items():
+            if isinstance(spec, dict) and spec.get("link_mode") not in (None, "poll", "monitor"):
+                errors.append(f"{group}.{n}: link_mode {spec['link_mode']!r} is not poll or monitor")
+    unwired_used = set()
+    ids = set()
+    for i, rule in enumerate(m["rules"]):
+        where = f"rules[{i}] {rule.get('id') or ''}".rstrip()
+        if not rule.get("id"):
+            errors.append(f"{where}: no id")
+        elif rule["id"] in ids:
+            errors.append(f"{where}: id used twice")
+        ids.add(rule.get("id"))
+        for problem in _expression_problems(rule.get("condition"), names):
+            errors.append(f"{where}: condition {problem}")
+        for name in re.findall(r"[A-Za-z_]\w*", str(rule.get("condition") or "")):
+            if name in inputs and name not in names:
+                unwired_used.add(name)
+        tolerance = rule.get("tolerance")
+        if tolerance is not None and (not isinstance(tolerance, (int, float)) or isinstance(tolerance, bool)
+                                      or tolerance < 0):
+            errors.append(f"{where}: tolerance must be seconds >= 0, got {tolerance!r}")
+        for key in (rule.get("outputs") or {}):
+            if key not in outputs and key not in SYSTEM_PVS:
+                errors.append(f"{where}: sets output {key!r}, which outputs does not define")
+        if rule.get("message_pv") and rule["message_pv"] not in outputs and rule["message_pv"] not in SYSTEM_PVS:
+            errors.append(f"{where}: message_pv {rule['message_pv']!r} is neither an output nor a system PV")
+        for key in (rule.get("actuators") or {}):
+            if key not in wired:
+                errors.append(f"{where}: actuator {key!r} has no link to write to (it must be a wired input or "
+                              "output)")
+    for key in m["rule_defaults"]:
+        if key not in outputs:
+            errors.append(f"rule_defaults: {key!r} is not an output")
+    for i, t in enumerate(m["transforms"]):
+        if not isinstance(t, dict):
+            continue
+        target = t.get("output") or t.get("name")
+        if target and target not in outputs:
+            errors.append(f"transforms[{i}]: writes {target!r}, which outputs does not define")
+        for problem in _expression_problems(t.get("expression"), names):
+            errors.append(f"transforms[{i}]: expression {problem}")
+    for name in sorted(unwired_used):
+        warnings.append(f"input {name!r} is used in a condition but has no link: conditions see wired inputs only")
+    return {"ok": not errors, "errors": list(dict.fromkeys(errors)), "warnings": warnings}
+
+
+def _wiring(values: dict, config: Optional[dict]) -> dict:
+    """What the task reads and writes: each wired PV, which rules read it, which rules write it and with what."""
+    if not config:
+        return {"reads": [], "writes": [], "forwards": [], "pvs": []}
+    m = _softioc_model(config)
+    prefix = str(values.get("iocprefix") or "").rstrip(":")
+    reads, writes = [], []
+    for name, spec in m["inputs"].items():
+        if isinstance(spec, dict) and spec.get("link"):
+            used_by = [r.get("id") for r in m["rules"] if re.search(rf"\b{re.escape(name)}\b",
+                                                                     str(r.get("condition") or ""))]
+            reads.append({"input": name, "pv": spec["link"], "mode": spec.get("link_mode") or "poll",
+                          "in_conditions_of": used_by})
+    links = {n: spec.get("link") for n, spec in {**m["inputs"], **m["outputs"]}.items()
+             if isinstance(spec, dict) and spec.get("link")}
+    for rule in m["rules"]:
+        for key, value in (rule.get("actuators") or {}).items():
+            writes.append({"pv": links.get(key), "input": key, "value": value, "rule": rule.get("id"),
+                           "condition": rule.get("condition"), "tolerance_s": rule.get("tolerance", 0),
+                           "message": rule.get("message")})
+    forwards = [{"output": n, "pv": spec["link"]} for n, spec in m["outputs"].items()
+                if isinstance(spec, dict) and spec.get("link")]
+    own = [f"{prefix}:{n}" for n in list(m["inputs"]) + list(m["outputs"]) + list(SYSTEM_PVS)]
+    return {"reads": reads, "writes": writes, "forwards": forwards, "pvs": own}
+
+
+def _softioc_entries():
+    """(beamline, deployed values, config record) for every soft IOC in the catalogue."""
+    for line in _softioc_lines():
+        configs = line.get("softioc_configs") or {}
+        for entry in line.get("softiocs") or []:
+            d = _softioc_values(line, entry)
+            yield line, d, configs.get(str(d["values"].get("name") or "")) or {}
+
+
+def ioc_get_softioc(db, workspace_id: str, beamline: str, name: str) -> dict:
+    """One iocmng soft IOC as deployed: its entry, the task's config, what it reads and writes, and its check."""
+    for line, d, rec in _softioc_entries():
+        v = d["values"]
+        if line["name"].lower() == (beamline or line["name"]).lower() and v["iocname"] == (name or "").lower():
+            cfg = rec.get("config")
+            m = _softioc_model(cfg) if cfg else None
+            return {
+                "found": True, "beamline": line["name"], "entry": v, "ignored_by_merge": d["ignored_by_merge"],
+                "config_source": rec.get("source"), "files": rec.get("files"),
+                "parameters": m["parameters"] if m else None,
+                "rules": [{k: r.get(k) for k in ("id", "condition", "tolerance", "message", "outputs", "actuators")
+                           if r.get(k) is not None} for r in (m["rules"] if m else [])],
+                "rule_defaults": m["rule_defaults"] if m else None,
+                "transforms": m["transforms"] if m else None,
+                "wiring": _wiring(v, cfg),
+                "check": softioc_check(v, cfg),
+                "config_yaml": rec.get("config_text"),
+                "problems": rec.get("problems") or [],
+                "next": "ioc_softioc_wiring(pv) finds every soft IOC rule that reads or writes a PV; ioc_guide section "
+                        "'Soft IOCs (iocmng)' explains rules, tolerance, latches and transforms.",
+            }
+    return {"found": False, "softiocs": [{"beamline": line["name"], "name": d["values"]["iocname"]}
+                                         for line, d, _rec in _softioc_entries()]}
+
+
+def ioc_softioc_wiring(db, workspace_id: str, pv: str, beamline: Optional[str] = None) -> dict:
+    """Every soft IOC that reads or can write a PV (a full name or part of one): which rule, on what condition,
+    after how long, writing what. "What can switch off SPARC:LLRF1?" is answered from the configs themselves."""
+    q = (pv or "").strip().lower()
+    if not q:
+        return {"error": "Give a PV name, or part of one."}
+    reads, writes, forwards = [], [], []
+    for line, d, rec in _softioc_entries():
+        if beamline and line["name"].lower() != beamline.lower():
+            continue
+        w = _wiring(d["values"], rec.get("config"))
+        where = {"beamline": line["name"], "softioc": d["values"]["iocname"]}
+        reads += [{**where, **r} for r in w["reads"] if q in str(r["pv"]).lower()]
+        writes += [{**where, **x} for x in w["writes"] if q in str(x["pv"]).lower()]
+        forwards += [{**where, **f} for f in w["forwards"] if q in str(f["pv"]).lower()]
+    return {"pv": pv, "written_by": writes, "read_by": reads, "forwarded_by": forwards,
+            "softiocs_searched": sum(1 for _ in _softioc_entries()),
+            "note": "From the soft IOCs' config.yaml in the catalogue; a rule writes when its condition has held for "
+                    "tolerance_s seconds. IOCs other than iocmng tasks are not included."}
