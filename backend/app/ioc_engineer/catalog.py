@@ -16,6 +16,9 @@ What is read, and from where:
     sources         (with --sources) each driver's own repository: db templates, protocols, README
     beamlines       (with --beamline) a beamline repository's value files: iocDefaults and the IOC entries
     pyiocs          (with --pyioc) a Python IOC repository (epik8s-pyioc): its pyioc.yaml, README, example
+    softiocs        (with --beamline) the beamline's `softiocs:` (iocmng tasks) and each task's config.yaml
+    iocmng          (with --iocmng) epik8s-softioc-mng: its config schema, the names its expression evaluator
+                    accepts (read from the source, never imported), README and manual
 
 A module's git source is `organization` + `module`, exactly as the ansible role clones it.
 """
@@ -410,6 +413,14 @@ def _beamline(spec: str, into: Path) -> dict:
         else [dict(v) for v in raw if isinstance(v, dict)]
     globals_ = {k: values.get(k) for k in ("beamline", "namespace", "ioc_version", "nfsMounts", "targetRevision",
                                            "giturl", "gitrev", "baseIp", "startIp") if k in values}
+    soft = [dict(v) for v in values.get("softiocs") or [] if isinstance(v, dict)]
+    soft_defaults = values.get("softiocDefaults") or {}
+    soft_configs = {}
+    for e in soft:
+        merged = _merge_empty_safe(soft_defaults, e)
+        name = str(merged.get("name") or "")
+        if name:
+            soft_configs[name] = _softioc_config(merged, checkout, url, into)
     return {
         "name": str(values.get("beamline") or checkout.name),
         "url": url if not Path(url).is_dir() else None,
@@ -419,7 +430,91 @@ def _beamline(spec: str, into: Path) -> dict:
         "globals": globals_,
         "ioc_defaults": values.get("iocDefaults") or {},
         "iocs": entries,
+        "softioc_defaults": soft_defaults,
+        "softiocs": soft,
+        "softioc_configs": soft_configs,
     }
+
+
+# --- iocmng soft IOCs ---------------------------------------------------------------
+
+def _merge_empty_safe(defaults: dict, entry: dict) -> dict:
+    """epik8s-chart's mustMergeOverwrite(deepCopy(softiocDefaults), entry): the entry wins, maps merge, and an empty
+    value in the entry does not replace a non-empty default (tools.deployed_values reports such keys)."""
+    out = dict(defaults or {})
+    for key, value in (entry or {}).items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _merge_empty_safe(out[key], value)
+        elif value in (None, False, "", [], {}) or (value == 0 and not isinstance(value, bool)):
+            out.setdefault(key, value)
+        else:
+            out[key] = value
+    return out
+
+
+def _repo_name(url: Optional[str]) -> str:
+    return re.sub(r"\.git$", "", (url or "").rstrip("/").rsplit("/", 1)[-1]).lower()
+
+
+def _softioc_config(entry: dict, checkout: Path, beamline_url: str, into: Path) -> dict:
+    """The task's config directory (gitRepoConfig url/path/branch): from the beamline checkout when it is the
+    beamline's own repository, else a shallow clone. Its config.yaml and the names of its other files."""
+    git = entry.get("gitRepoConfig") or {}
+    url, path, branch = git.get("url"), str(git.get("path") or f"config/iocs/{entry.get('name')}"), git.get("branch")
+    source = {"url": url, "path": path, "branch": branch}
+    if not url or _repo_name(url) in (_repo_name(beamline_url), checkout.name.lower()):
+        base, source["from_beamline"] = checkout, True
+    else:
+        base, _u, _r, error = _clone(f"{url}@{branch}" if branch else url, into / "softioc-sources")
+        if error:
+            return {"source": {**source, "error": error}, "files": [], "config": None,
+                    "problems": [f"cannot read {url}: {error}"]}
+    folder = base / path
+    if not folder.is_dir():
+        return {"source": source, "files": [], "config": None,
+                "problems": [f"{path}: no such directory in {url or 'the beamline repository'}"]}
+    files = sorted(p.name for p in folder.iterdir() if p.is_file())
+    cfg_path = folder / "config.yaml"
+    if not cfg_path.exists():
+        return {"source": source, "files": files, "config": None, "problems": [f"{path}/config.yaml is missing"]}
+    data = _yaml(cfg_path)
+    problems = [f"{path}/config.yaml: {data['__error__']}"] if isinstance(data, dict) and "__error__" in data else []
+    return {"source": source, "files": files, "config": data if not problems and isinstance(data, dict) else None,
+            "config_text": cfg_path.read_text(encoding="utf-8", errors="replace")[:20000], "problems": problems}
+
+
+SAFE_NODES = re.compile(r"ast\.([A-Z][A-Za-z]*)")
+REGISTERED = re.compile(r"""^\s*register\(\s*["']([A-Za-z_]\w*)["']""", re.M)
+VERSION = re.compile(r"""__version__\s*=\s*["']([^"']+)["']""")
+
+
+def _iocmng(spec: str, into: Path) -> dict:
+    """epik8s-softioc-mng read as text: the config schema, the AST nodes and functions its safe evaluator allows
+    (src/iocmng/core/safe_eval.py, functions.py), README and MANUAL. Nothing in it is imported or run."""
+    checkout, url, ref, error = _clone(spec, into)
+    out = {"url": url if not Path(url).is_dir() else None, "ref": ref}
+    if error:
+        return {**out, "error": error}
+    out["commit"] = _git_head(checkout)
+    core = checkout / "src" / "iocmng" / "core"
+    init = checkout / "src" / "iocmng" / "__init__.py"
+    version = VERSION.search(init.read_text(encoding="utf-8", errors="replace")) if init.exists() else None
+    out["version"] = version.group(1) if version else None
+    schema = checkout / "schemas" / "iocmng-config.schema.json"
+    out["schema"] = json.loads(schema.read_text(encoding="utf-8")) if schema.exists() else None
+    safe = core / "safe_eval.py"
+    if safe.exists():
+        text = safe.read_text(encoding="utf-8", errors="replace")
+        block = text[text.find("_SAFE_NODES"):]
+        block = block[:block.find(")\n)") + 3] if ")\n)" in block else block[:3000]
+        out["safe_nodes"] = sorted(set(SAFE_NODES.findall(block)))
+    functions = core / "functions.py"
+    if functions.exists():
+        out["functions"] = sorted(set(REGISTERED.findall(functions.read_text(encoding="utf-8", errors="replace"))))
+    for name in ("README.md", "MANUAL.md"):
+        doc = checkout / name
+        out[name.split(".")[0].lower()] = doc.read_text(encoding="utf-8", errors="replace") if doc.exists() else None
+    return out
 
 
 # --- Python IOCs (epik8s-pyioc) ----------------------------------------------------
@@ -514,7 +609,8 @@ def _pyioc_repo(spec: str, into: Path) -> list:
 # --- the catalogue -----------------------------------------------------------------
 
 def build(repo: Path, sources: Optional[Path] = None, only_collections: tuple = ("infn",),
-          beamlines: tuple = (), workdir: Optional[Path] = None, pyiocs: tuple = ()) -> dict:
+          beamlines: tuple = (), workdir: Optional[Path] = None, pyiocs: tuple = (),
+          iocmng: Optional[str] = None) -> dict:
     repo = Path(repo).resolve()
     built = _built(repo)
     modules, models, problems = _modules(repo, built)
@@ -545,6 +641,16 @@ def build(repo: Path, sources: Optional[Path] = None, only_collections: tuple = 
             for entry in _pyioc_repo(spec, into):
                 problems += [f"pyioc {spec}: {p}" for p in entry.get("problems") or []]
                 python_iocs.append(entry)
+    mng = None
+    if iocmng:
+        into = (workdir or sources or Path(os.environ.get("TMPDIR", "/tmp")) / "argus-ioc-beamlines") / "iocmng"
+        into.mkdir(parents=True, exist_ok=True)
+        mng = _iocmng(iocmng, into)
+        if mng.get("error"):
+            problems.append(f"iocmng {iocmng}: {mng['error']}")
+    for line in lines:
+        for name, c in (line.get("softioc_configs") or {}).items():
+            problems += [f"softioc {line['name']}/{name}: {p}" for p in c.get("problems") or []]
     guide = repo / "docs" / "architecture.md"
     return {
         "format": FORMAT,
@@ -565,6 +671,7 @@ def build(repo: Path, sources: Optional[Path] = None, only_collections: tuple = 
         "schemas": schemas,
         "beamlines": lines,
         "pyiocs": python_iocs,
+        "iocmng": mng,
         "guide": guide.read_text(encoding="utf-8") if guide.exists() else "",
         "problems": problems,
     }

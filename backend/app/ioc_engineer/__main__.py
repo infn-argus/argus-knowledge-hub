@@ -1,7 +1,7 @@
 """The IOC catalogue from the command line.
 
     python -m app.ioc_engineer build --repo PATH [--sources DIR] [--beamline URL[@REF]|PATH ...]
-                                     [--pyioc URL[@REF]|PATH ...] [--out FILE]
+                                     [--pyioc URL[@REF]|PATH ...] [--iocmng URL[@REF]|PATH] [--out FILE]
         read a checkout of infn-epics-ioc (git submodule update --init first) into the catalogue;
         --sources also clones each INFN driver's repository (organization + module from its
         install.yml) into DIR and indexes its db templates, protocols and README.
@@ -9,6 +9,8 @@
         so its IOCs can be listed, rendered and checked as deployed.
         --pyioc (repeatable) reads a Python IOC repository (epik8s-pyioc): its pyioc.yaml, README and example,
         so the IOC can be found, explained and its beamline entries checked.
+        --iocmng reads epik8s-softioc-mng (config schema, expression whitelist, README, MANUAL) so the
+        beamlines' iocmng soft IOCs (softiocs:) can be checked and explained.
         --out defaults to the bundled snapshot, app/ioc_engineer/data/catalog.json.gz
     python -m app.ioc_engineer summary [--catalog FILE]
         what a catalogue holds, and what it found wrong while reading
@@ -34,6 +36,7 @@ def main(argv=None) -> int:
                    help="a beamline repository (git URL, optionally @ref, or a path); repeatable")
     b.add_argument("--pyioc", action="append", default=[],
                    help="a Python IOC repository (git URL, optionally @ref, or a path); repeatable")
+    b.add_argument("--iocmng", help="epik8s-softioc-mng (git URL, optionally @ref, or a path)")
     b.add_argument("--out", type=Path, default=catalog.BUNDLED)
     s = sub.add_parser("summary")
     s.add_argument("--catalog", type=Path)
@@ -41,7 +44,7 @@ def main(argv=None) -> int:
 
     if args.command == "build":
         built = catalog.build(args.repo, sources=args.sources, beamlines=tuple(args.beamline),
-                              pyiocs=tuple(args.pyioc))
+                              pyiocs=tuple(args.pyioc), iocmng=args.iocmng)
         catalog.write(built, args.out)
         cat = built
         print(f"wrote {args.out}")
@@ -59,6 +62,8 @@ def main(argv=None) -> int:
         "examples": len(cat["examples"]),
         "beamlines": {b["name"]: len(b.get("iocs", [])) for b in cat.get("beamlines", [])},
         "pyiocs": [p["name"] for p in cat.get("pyiocs", [])],
+        "softiocs": {b["name"]: len(b.get("softiocs") or []) for b in cat.get("beamlines", [])},
+        "iocmng": (cat.get("iocmng") or {}).get("version"),
         "sources": {"indexed": sum(1 for m in with_source if not m["source"].get("error")),
                     "failed": {m["folder"]: m["source"]["error"] for m in with_source if m["source"].get("error")}},
         "problems": cat.get("problems", []),

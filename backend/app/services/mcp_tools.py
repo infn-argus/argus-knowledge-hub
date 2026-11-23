@@ -1139,14 +1139,16 @@ TOOLS += [
         "name": "ioc_search",
         "description": "Search the EPICS IOC catalogue (infn-epics-ioc: ibek-support-infn drivers, upstream "
                        "ibek-support, ibek-templates and their example entries; and the Python IOCs built with "
-                       "epik8s-pyioc) by vendor, device, driver, devtype or entity type. Start here for any "
-                       "question about building, configuring or deploying a containerised IOC, ibek or Python.",
+                       "epik8s-pyioc; and the beamlines' iocmng soft IOCs) by vendor, device, driver, devtype, "
+                       "entity type, or a soft IOC's name, rule message or wired PV. Start here for any question "
+                       "about building, configuring or deploying a containerised IOC, ibek or Python.",
         "handler": ioc.ioc_search,
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "e.g. 'pfeiffer gauge', 'ocem', 'modbus', 'technosoft'"},
-                "kind": {"type": "string", "enum": ["module", "entity_model", "template", "example", "pyioc"]},
+                "kind": {"type": "string", "enum": ["module", "entity_model", "template", "example", "pyioc",
+                                                    "softioc"]},
                 "limit": {"type": "integer"},
             },
             "required": ["query"],
@@ -1254,7 +1256,8 @@ TOOLS += [
         "name": "ioc_list_beamline",
         "description": "The beamlines in the IOC catalogue (their deploy repositories), or one beamline's IOCs "
                        "as deployed: template, devtype, devgroup, iocprefix, how the pod starts them (template, "
-                       "remote host, git config), disabled ones, and the count per template.",
+                       "remote host, git config, pyioc), disabled ones, the count per template, and its iocmng soft "
+                       "IOCs (softiocs:) with their rules and the PVs they write.",
         "handler": ioc.ioc_list_beamline,
         "inputSchema": {"type": "object", "properties": {
             "beamline": {"type": "string", "description": "e.g. eli, sparc, btf; omit to list the beamlines"},
@@ -1275,8 +1278,9 @@ TOOLS += [
         "name": "ioc_check_beamline",
         "description": "Render and check every enabled, templated IOC of a beamline against the catalogue's image "
                        "and templates, and every Python (epik8s-pyioc) IOC against its pyioc.yaml: which would "
-                       "fail at their next sync, and why. Use it before bumping the image or changing a template "
-                       "the beamline uses.",
+                       "fail at their next sync, and why; and every iocmng soft IOC's config.yaml (conditions iocmng "
+                       "would refuse or fail on, outputs and actuators that do not exist or have no link). Use it "
+                       "before bumping the image or changing a template the beamline uses.",
         "handler": ioc.ioc_check_beamline,
         "inputSchema": {"type": "object", "properties": {
             "beamline": {"type": "string"}, "template": {"type": "string", "description": "Only this template"}},
@@ -1379,12 +1383,38 @@ TOOLS += [
         },
     },
     {
+        "name": "ioc_get_softioc",
+        "description": "One iocmng soft IOC of a beamline (an entry under softiocs:, logic over other IOCs' PVs: "
+                       "interlocks, sequences, monitoring), as deployed: the entry with softiocDefaults merged, "
+                       "where its config.yaml is, its parameters, rules (condition, tolerance, message, outputs, "
+                       "actuators), rule_defaults and transforms, the wiring (every PV it reads and which rules use "
+                       "it, every PV a rule writes and with what value, outputs forwarded to other PVs), its own "
+                       "PVs, and the check of its config.",
+        "handler": ioc.ioc_get_softioc,
+        "inputSchema": {"type": "object", "properties": {
+            "beamline": {"type": "string"}, "name": {"type": "string", "description": "e.g. softinterlock"}},
+            "required": ["beamline", "name"]},
+    },
+    {
+        "name": "ioc_softioc_wiring",
+        "description": "Which iocmng soft IOCs read or can write a PV (a full name or part of one), from their "
+                       "config.yaml: for every write the rule, its condition, how long it must hold (tolerance) "
+                       "and the value written. Answers 'what can switch off / close / set X?' and 'what depends "
+                       "on X?' across the beamlines in the catalogue.",
+        "handler": ioc.ioc_softioc_wiring,
+        "inputSchema": {"type": "object", "properties": {
+            "pv": {"type": "string", "description": "e.g. SPARC:LLRF1 or SPARC:LLRF1:app:rf_ctrl"},
+            "beamline": {"type": "string"}}, "required": ["pv"]},
+    },
+    {
         "name": "ioc_guide",
         "description": "How infn-epics-ioc, ibek-support-infn, ibek-templates, epik8s-chart and the beamline "
                        "repositories fit together (the architecture document, by section), the epik8s-pyioc "
                        "documentation for Python IOCs (sections 'Python IOCs: ...': how-to, pyioc.yaml "
-                       "specification, runtime contract, pitfalls, tools), the workflow for a new IOC or driver, "
-                       "and which commit the catalogue was read from.",
+                       "specification, runtime contract, pitfalls, tools), iocmng's manual for soft IOCs (sections "
+                       "'Soft IOCs (iocmng): ...': rules, tolerance, latches, transforms, wired inputs), the workflow "
+                       "for a new IOC or driver, and which commit the catalogue was read from. A word in no title "
+                       "returns the sections whose text mentions it.",
         "handler": ioc.ioc_guide,
         "inputSchema": {"type": "object", "properties": {
             "section": {"type": "string", "description": "A section title or a word in it; omit for all"}}},
