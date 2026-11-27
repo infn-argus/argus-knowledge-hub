@@ -31,7 +31,9 @@ PERMISSION = {"create": "create", "update": "modify", "relate": "create", "unrel
               # Leaves ARGUS: a person who may approve in this workspace, signed in, never an API token.
               "pull_request": "approve",
               # A site's help centre: checked as its administration is (services/service_portal.manager_of).
-              "help_centre_service": "manage"}
+              "help_centre_service": "manage",
+              # The review queue: a fact as the page decides it (modify); an installation needs approve, as there.
+              "review_fact": "modify", "review_installation": "approve"}
 RESOURCE = {"ticket": "tickets", "document": "documents"}
 SKIPPED_ATTRIBUTES = ("argus_source", "argus_facility")
 
@@ -45,7 +47,9 @@ SYSTEM = (
     "(N is in the proposal's reply) until it exists, so you can relate it in the same answer (a relation only: an "
     "attribute takes a key once the record exists, and a text attribute takes the name). 'A composed of "
     "B' means B is a part of A; 'X part of Y' means X belongs to Y. If a proposal is refused, correct it from "
-    "the reason given rather than repeating it."
+    "the reason given rather than repeating it. When the person asks for help with the review queue, read it with "
+    "review_queue, check each item against the records and documents, and propose a decision with "
+    "propose_review_decision only where the evidence supports it; say plainly when it does not."
 )
 
 
@@ -163,6 +167,21 @@ def tool_specs() -> list[dict]:
                     "allow_attachments": {"type": "boolean"}}, "required": ["name"]}},
                 "reason": {"type": "string"},
             }, "required": ["site", "name", "destination", "team", "request_types"]}}},
+        {"type": "function", "function": {
+            "name": "propose_review_decision",
+            "description": "Propose deciding an item of the review queue (read it with review_queue): a proposed "
+                           "or inferred fact by its claim_id — confirm it, correct it (an AI reading only: give the "
+                           "right value) or reject it (say why) — or a proposed installation by its uid — confirm "
+                           "or reject it. Only when the evidence supports the decision: for an installation, that "
+                           "the physical unit is installed at that position, not a similar name. Changes nothing "
+                           "until the person confirms; the decision is then recorded in the record's provenance as "
+                           "theirs. Conflicts, held revisions and merges are decided on the Review queue page.",
+            "parameters": {"type": "object", "properties": {
+                "item": {"type": "string", "description": "A proposal's claim_id or an installation proposal's uid."},
+                "decision": {"type": "string", "enum": ["confirm", "correct", "reject"]},
+                "value": {"description": "For correct: the right value."},
+                "reason": {"type": "string", "description": "Why, from the evidence looked at; required to reject."},
+            }, "required": ["item", "decision", "reason"]}}},
     ] + _pull_request_specs()
 
 
@@ -194,7 +213,7 @@ def _pull_request_specs() -> list[dict]:
 
 
 TOOL_NAMES = {"propose_create_record", "propose_update_record", "propose_relation", "propose_ioc_pull_request",
-              "propose_ticket", "propose_document", "propose_help_centre_service"}
+              "propose_ticket", "propose_document", "propose_help_centre_service", "propose_review_decision"}
 
 
 class Refused(ValueError):
@@ -346,7 +365,8 @@ class Proposer:
         handler = {"propose_create_record": self._create, "propose_update_record": self._update,
                    "propose_relation": self._relation, "propose_ioc_pull_request": self._pull_request,
                    "propose_ticket": self._ticket, "propose_document": self._document,
-                   "propose_help_centre_service": self._help_centre_service}[name]
+                   "propose_help_centre_service": self._help_centre_service,
+                   "propose_review_decision": self._review}[name]
         kind, payload, summary = handler(arguments or {})
         number = (self.db.scalar(select(AskAction.number).where(AskAction.conversation_id == self.conversation_id)
                                  .order_by(AskAction.number.desc()).limit(1)) or 0) + 1
@@ -363,6 +383,53 @@ class Proposer:
         if kind == "create":
             out["ref"] = f"new:{number}"
         return {**out, "_action": view(action)}
+
+    def _review(self, a: dict) -> tuple[str, dict, str]:
+        """An item of the review queue, decided as the page decides it — kept until the person applies it."""
+        from app.intake.proposals import AI_METHODS
+        from app.ledger import engine
+        from app.models.ledger import Claim, FactState
+        item = str(a.get("item") or "").strip()
+        decision = str(a.get("decision") or "").strip().lower()
+        reason = str(a.get("reason") or "").strip()
+        if decision not in ("confirm", "correct", "reject"):
+            raise Refused("decision is confirm, correct or reject")
+        if decision == "reject" and not reason:
+            raise Refused("say why it is rejected")
+        claim = self.db.get(Claim, item) if item else None
+        if claim is not None:
+            fact = self.db.scalar(select(FactState).where(FactState.contributor == f"claim:{claim.claim_id}",
+                                                          FactState.status == "proposed").limit(1))
+            asset = self.db.get(Asset, fact.subject_uid) if fact is not None else None
+            if fact is None or asset is None or asset.workspace_id != self.workspace_id or not self._existing(asset.uid):
+                raise Refused(f"{item} is not waiting in this workspace's review queue: read it again with review_queue")
+            ai = claim.method in AI_METHODS
+            field = claim.predicate.removeprefix("attr:")
+            if decision == "correct":
+                if not ai:
+                    raise Refused("only an AI reading is corrected here: reject the inference and propose the right "
+                                  "value with propose_update_record")
+                if a.get("value") in (None, "", []):
+                    raise Refused("give the right value to correct it")
+            value = a.get("value") if decision == "correct" else claim.value
+            payload = {"claim_id": claim.claim_id, "decision": decision, "ai": ai, "uid": asset.uid, "key": asset.key,
+                       "predicate": claim.predicate, **({"value": value} if decision == "correct" else {})}
+            verb = {"confirm": "Confirm", "correct": "Correct", "reject": "Reject"}[decision]
+            shown = _shown(self.db, value) if decision != "reject" else _shown(self.db, claim.value)
+            what = f"{field} = {shown}" if decision != "correct" else f"{field} → {shown} (proposed {_shown(self.db, claim.value)})"
+            return "review_fact", payload, f"{verb} {'the AI reading' if ai else 'the inferred fact'} {what} on {asset.key}"
+        proposed = next((i for i in engine.installations(self.db, status="Proposed") if i["uid"] == item), None)
+        if proposed is None or proposed["workspace_id"] != self.workspace_id:
+            raise Refused(f"no item {item!r} waits in this workspace's review queue: use a claim_id or an "
+                          "installation uid from review_queue")
+        if decision == "correct":
+            raise Refused("an installation is confirmed or rejected; a different unit or position is a new "
+                          "installation, recorded from the position's page")
+        unit = self.db.get(Asset, proposed["asset_uid"]) if proposed["asset_uid"] else None
+        position = self.db.get(Asset, proposed["position_uid"]) if proposed["position_uid"] else None
+        label = f"{unit.key if unit else '?'} installed at {position.key if position else '?'}"
+        return "review_installation", {"uid": item, "decision": decision, "label": label}, \
+            f"{'Confirm' if decision == 'confirm' else 'Reject'} the installation: {label}"
 
     def _create(self, a: dict) -> tuple[str, dict, str]:
         types = _types(self.db, self.workspace_id)
@@ -694,6 +761,26 @@ def _execute(db: Session, identity, workspace_id: str, action: AskAction) -> dic
                 allow_attachments=rt.get("allow_attachments", True)), identity=identity, db=db)
         return {"uid": svc["uid"], "name": svc["name"], "kind": "help_centre_service", "site_id": site,
                 "path": f"/sites/{site}/service-desk"}
+    if action.kind == "review_fact":
+        if p["ai"]:
+            from app.routers import intake
+            intake.decide_proposal(p["claim_id"], intake.DecideIn(
+                action={"correct": "edit"}.get(p["decision"], p["decision"]), value=p.get("value"),
+                reason=p.get("reason")), identity=identity, workspace_id=workspace_id, db=db)
+        else:
+            from app.routers import ledger
+            target = {"claim_id": p["claim_id"], **({"scope": "fingerprint"} if p["decision"] == "reject" else {})}
+            ledger.decide(ledger.DecisionBatch(batch=[{"kind": "accept" if p["decision"] == "confirm" else "reject",
+                                                       "target": target, "reason": p.get("reason") or "from Ask ARGUS"}]),
+                          identity=identity, workspace_id=workspace_id, db=db)
+        return {"uid": p["uid"], "key": p["key"], "name": p["key"], "decision": p["decision"]}
+    if action.kind == "review_installation":
+        from app.routers import ledger
+        if p["decision"] == "confirm":
+            ledger.confirm_installation(p["uid"], ledger.ConfirmIn(), identity=identity, workspace_id=workspace_id, db=db)
+        else:
+            ledger.reject_installation(p["uid"], identity=identity, workspace_id=workspace_id, db=db)
+        return {"installation_uid": p["uid"], "decision": p["decision"]}      # no record page: the queue's
     if action.kind == "ticket":
         from datetime import datetime as _dt
         from app.routers import issues

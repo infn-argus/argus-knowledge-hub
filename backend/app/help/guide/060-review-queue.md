@@ -35,3 +35,11 @@ record's provenance.
 
 Items have an age in working days; overdue ones are escalated to the backup steward, then to the
 governance group.
+
+## With Ask ARGUS
+
+Ask ARGUS reads the queue too: ask it, for example, *"help me with the review queue"* or *"what waits for
+review on the power supplies?"*. It shows each item with its evidence and checks it against the records and
+documents. For proposed facts and installations it can **propose** a decision — confirm, correct (an AI reading)
+or reject, with its reason — which, like any change it proposes, waits for you to **Apply** it; the decision is
+then recorded as yours. Conflicts, held revisions and merges stay on this page: Ask explains them, you decide.
