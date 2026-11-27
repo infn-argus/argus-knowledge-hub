@@ -273,3 +273,72 @@ def test_a_reference_to_a_record_still_to_be_created_says_how_to_set_it_later(wo
     evs = events(client.post("/v1/ai/chat", headers=w["h"], json={"question": "It is in the new room"}))
     refused = [e["error"] for e in evs if e["type"] == "step" and e["error"]]
     assert len(refused) == 1 and "not created yet" in refused[0] and "propose_update_record" in refused[0]
+
+
+def _ai_proposal(ws: str, key: str, field: str, value) -> str:
+    """An AI reading waiting in the review queue, as Complete from a file leaves one (intake/proposals.py)."""
+    from sqlalchemy import select
+    from app.ledger import engine
+    from app.ledger.engine import ParsedClaim
+    from app.models.ledger import Claim
+    db = SessionLocal()
+    asset = db.query(Asset).filter(Asset.key == key).one()
+    stream = engine.register_stream(db, f"ai:{ws}:asset.describe", ws, "ai")
+    engine.add_manual_claims(db, stream, [ParsedClaim(f"uid:{asset.uid}", f"attr:{field}", value, method="ai_extracted",
+                                                      rule_id="test/1", confidence=0.9,
+                                                      evidence={"quote": f"{field}: {value}"})], cause="test")
+    engine.project_subject(db, asset.uid, "test")
+    db.commit()
+    claim_id = db.scalar(select(Claim.claim_id).where(Claim.predicate == f"attr:{field}",
+                                                      Claim.source_ref == f"uid:{asset.uid}"))
+    db.close()
+    return claim_id
+
+
+def test_ask_reads_the_review_queue_and_a_decision_waits_for_the_person(world, monkeypatch):
+    """Help with the review queue: Ask reads it with its evidence, proposes confirming an AI reading and correcting
+    another, refuses what is not in the queue — and nothing is decided until the person applies it."""
+    w = world
+    good = _ai_proposal(w["ws"], w["camera"], "manufacturer", "Basler")
+    wrong = _ai_proposal(w["ws"], w["motor"], "manufacturer", "Bassler")
+
+    from app.db import SessionLocal as S
+    from app.services import mcp_tools
+    db = S()
+    queue = mcp_tools.review_queue(db, w["ws"], kind="proposals")
+    assert {p["claim_id"] for p in queue["proposals"]} == {good, wrong}
+    assert all(p["ai"]["quote"] for p in queue["proposals"])
+    only = mcp_tools.review_queue(db, w["ws"], record=w["camera"])
+    assert [p["claim_id"] for p in only["proposals"]] == [good]
+    db.close()
+
+    sent = scripted(monkeypatch, [
+        call("review_queue", {"kind": "proposals"}),
+        call("propose_review_decision", {"item": good, "decision": "confirm", "reason": "the datasheet says Basler"}),
+        call("propose_review_decision", {"item": wrong, "decision": "correct", "value": "Phytron",
+                                         "reason": "the motor's nameplate says Phytron"}),
+        call("propose_review_decision", {"item": "no-such-item", "decision": "confirm", "reason": "?"}),
+        answer("Proposed: A1 and A2."),
+    ])
+    resp = client.post("/v1/ai/chat", headers=w["h"], json={"question": "Help me with the review queue"})
+    assert resp.status_code == 200, resp.text
+    assert "review_queue" in sent[0]["tools"] and "propose_review_decision" in sent[0]["tools"]
+    cid = next(e["id"] for e in events(resp) if e["type"] == "conversation")
+    refused = [e for e in events(resp) if e["type"] == "step" and e["tool"] == "propose_review_decision" and e.get("error")]
+    assert len(refused) == 1 and "review queue" in refused[0]["error"]
+
+    listed = client.get(f"/v1/ai/conversations/{cid}/actions", headers=w["h"]).json()
+    assert [a["kind"] for a in listed] == ["review_fact", "review_fact"]
+    assert "Confirm the AI reading manufacturer = Basler" in listed[0]["summary"]
+    db = S()
+    assert not (db.query(Asset).filter(Asset.key == w["camera"]).one().attributes or {}).get("manufacturer")
+    db.close()
+
+    applied = client.post(f"/v1/ai/conversations/{cid}/actions/apply", headers=w["h"],
+                          json={"ids": [a["id"] for a in listed]}).json()
+    assert [a["status"] for a in applied] == ["applied", "applied"], applied
+    db = S()
+    assert db.query(Asset).filter(Asset.key == w["camera"]).one().attributes["manufacturer"] == "Basler"
+    assert db.query(Asset).filter(Asset.key == w["motor"]).one().attributes["manufacturer"] == "Phytron"
+    assert mcp_tools.review_queue(db, w["ws"], kind="proposals")["proposals"] == []
+    db.close()

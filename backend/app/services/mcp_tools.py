@@ -814,6 +814,45 @@ def workspace_access(db: Session, workspace_id: str, person: str = "") -> dict:
     return out
 
 
+REVIEW_KINDS = ("proposals", "installation_proposals", "conflicts", "held_revisions", "provisional_records")
+
+
+def review_queue(db: Session, workspace_id: str, kind: Optional[str] = None, record: Optional[str] = None,
+                 limit: int = 20) -> dict:
+    """What waits on a person in this workspace's review queue — the page's own content (routers/ledger.review):
+    proposed and inferred facts with their evidence, proposed installations, conflicts between sources, held
+    revisions and provisional records; narrowed to one kind, or to the items about one record."""
+    from app.routers.ledger import review
+    queue = review(workspace_id=workspace_id, db=db)
+    wanted = str(record or "").strip().lower()
+
+    def about(item: dict) -> bool:
+        if not wanted:
+            return True
+        briefs = [item.get(k) for k in ("record", "asset", "position") if isinstance(item.get(k), dict)]
+        if "key" in item and "name" in item:
+            briefs.append(item)
+        return any(wanted in str(b.get(f) or "").lower() for b in briefs for f in ("key", "name", "uid"))
+
+    limit = max(1, min(int(limit or 20), 50))
+    kinds = [kind] if kind in REVIEW_KINDS else list(REVIEW_KINDS)
+    out: dict = {"counts": queue["counts"] | {"provisional_records": len(queue["provisional_records"])}}
+    for k in kinds:
+        items = [i for i in queue[k] if about(i)]
+        out[k] = items[:limit]
+        if len(items) > limit:
+            out[f"{k}_not_shown"] = len(items) - limit
+    out["how_to_read"] = (
+        "proposals: facts waiting for a decision — claim_id names one; an `ai` block is a value read by the AI "
+        "(its quote, how sure, the value it would replace), a `match` block a catalogue match, otherwise an import "
+        "inferred it (rule_id). installation_proposals: a unit seen at a position (uid names one) — confirm only "
+        "when the physical unit is known to be installed there, a similar name is not enough. conflicts: sources "
+        "disagreeing on a field; held_revisions: a source's revision held back; provisional_records: records made "
+        "only from proposals. Decide proposals and installations with propose_review_decision; conflicts, held "
+        "revisions and merges are decided on the Review queue page (/review).")
+    return out
+
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "search_objects",
@@ -1117,6 +1156,23 @@ TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"topic": {"type": "string", "description": "The topic's slug, e.g. export-import"}},
             "required": ["topic"],
+        },
+    },
+    {
+        "name": "review_queue",
+        "description": "What waits in this workspace's review queue: proposed and inferred facts with their "
+                       "evidence (an AI reading's quote and confidence, a catalogue match, an import's rule), "
+                       "proposed installations, conflicts between sources, held revisions and provisional records. "
+                       "Narrow it to one kind, or to the items about one record (key or name). Use it to help the "
+                       "person go through the queue: look the records and documents up to check each item.",
+        "handler": review_queue,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": list(REVIEW_KINDS)},
+                "record": {"type": "string", "description": "A record's key or name: only the items about it"},
+                "limit": {"type": "integer", "description": "Items per kind; default 20, at most 50"},
+            },
         },
     },
     {
